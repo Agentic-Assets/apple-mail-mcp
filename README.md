@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **249** unit tests, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **266** unit tests, Python **3.10+**.
 
 ## Documentation map
 
@@ -370,6 +370,7 @@ apple-mail inbox --account "Gmail" --limit 10 --json
 apple-mail search --account "Gmail" --query "invoice" --limit 10 --json
 apple-mail show --account "Gmail" --id 12345 --json
 apple-mail mailboxes --account "Gmail" --json
+apple-mail mailboxes --account "Gmail" --counts --json   # slower; explicit counts opt-in
 apple-mail draft --account "Gmail" --to person@example.com --subject "Draft" --body "Draft body" --signature-name "TU"
 apple-mail mcp-config --repo "$(pwd)"
 apple-mail quick-check --account "Gmail" --json

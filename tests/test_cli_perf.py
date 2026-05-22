@@ -111,6 +111,37 @@ class PerfBatteryTests(unittest.TestCase):
         self.assertEqual(cases[-2].name, "bad_account")
         self.assertTrue(cases[-2].expect_error)
 
+    def test_dashboard_metadata_case_scopes_unread_and_recent_to_account(self):
+        captured = {}
+
+        def fake_unread(**kwargs):
+            captured["unread"] = kwargs
+            return {"Work": 3}
+
+        async def fake_recent(**kwargs):
+            captured["recent"] = kwargs
+            return []
+
+        with (
+            patch.object(cli, "_mailbox_count", return_value=9),
+            patch(
+                "apple_mail_mcp.tools.inbox.get_mailbox_unread_counts",
+                side_effect=fake_unread,
+            ),
+            patch(
+                "apple_mail_mcp.tools.analytics._get_recent_emails_structured_async",
+                side_effect=fake_recent,
+            ),
+        ):
+            cases = cli.build_perf_cases("Work", quick=False)
+            dashboard_case = next(case for case in cases if case.name == "dashboard_metadata")
+            result = dashboard_case.runner()
+
+        self.assertEqual(result, {"unread": {"Work": 3}, "recent": []})
+        self.assertEqual(captured["unread"]["account"], "Work")
+        self.assertTrue(captured["unread"]["summary_only"])
+        self.assertEqual(captured["recent"]["account"], "Work")
+
     def test_build_perf_cases_include_analysis(self):
         with patch.object(cli, "_mailbox_count", return_value=9):
             cases = cli.build_perf_cases("Work", quick=False, include_analysis=True)
@@ -139,6 +170,7 @@ class PerfBatteryTests(unittest.TestCase):
     def test_resolve_perf_thresholds_production_overview(self):
         thresholds = cli.resolve_perf_thresholds("production")
         self.assertEqual(thresholds["overview"], 15000)
+        self.assertEqual(thresholds["no_hit_search"], 4500)
 
     def test_resolve_perf_thresholds_light_overview(self):
         thresholds = cli.resolve_perf_thresholds("light")

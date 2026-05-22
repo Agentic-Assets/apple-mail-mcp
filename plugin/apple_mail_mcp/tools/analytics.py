@@ -74,6 +74,7 @@ def list_email_attachments(
             include_content=False,
             offset=0,
             limit=max_results,
+            timeout=timeout,
         )
     except AppleScriptTimeout:
         return (
@@ -815,6 +816,23 @@ def export_emails(
             return "Error: 'subject_keyword' required for single_email scope"
 
         safe_subject_keyword = escape_applescript(subject_keyword)
+        try:
+            records = _search_mail_records(
+                account=account,
+                mailbox=mailbox,
+                subject_terms=[subject_keyword],
+                include_content=False,
+                offset=0,
+                limit=1,
+                timeout=timeout if timeout is not None else 45,
+            )
+        except AppleScriptTimeout:
+            return f"Error: AppleScript timed out while locating email for '{account}'"
+        if not records:
+            return f"⚠ No email found matching: {safe_subject_keyword}"
+        target_message_id = str(records[0].get("message_id", "")).strip()
+        if not target_message_id.isdigit():
+            return f"⚠ No email found matching: {safe_subject_keyword}"
 
         script = f'''
         tell application "Mail"
@@ -833,10 +851,10 @@ def export_emails(
                     end if
                 end try
 
-                -- Use `whose` for app-level filtering and cap to the first match
-                -- so we don't enumerate a 24K-message mailbox just to find one
-                -- subject hit.
-                set matchedMessages to (every message of targetMailbox whose subject contains "{safe_subject_keyword}")
+                -- Resolve the subject through the bounded Python search helper,
+                -- then export by exact Mail id so this path does not broad-scan
+                -- a large remote mailbox by subject.
+                set matchedMessages to (every message of targetMailbox whose id is {target_message_id})
                 set foundMessage to missing value
                 if (count of matchedMessages) > 0 then
                     set foundMessage to item 1 of matchedMessages
@@ -1089,6 +1107,7 @@ def _parse_recent_email_lines(result: str) -> List[Dict[str, Any]]:
 
 
 def _get_recent_emails_structured(
+    account: Optional[str] = None,
     max_total: int = 20,
     max_per_account: int = 10,
     include_preview: bool = False,
@@ -1098,7 +1117,10 @@ def _get_recent_emails_structured(
     Internal helper to get recent emails from all accounts as structured data.
     Runs one AppleScript per account sequentially (use async variant for dashboard).
     """
-    accounts = list_mail_account_names(timeout=30 if timeout is None else min(timeout, 30))
+    if account:
+        accounts = [account]
+    else:
+        accounts = list_mail_account_names(timeout=30 if timeout is None else min(timeout, 30))
     emails: List[Dict[str, Any]] = []
     for account in accounts:
         script = _build_recent_one_account_script(account, max_per_account, include_preview)
@@ -1115,16 +1137,20 @@ def _get_recent_emails_structured(
 
 
 async def _get_recent_emails_structured_async(
+    account: Optional[str] = None,
     max_total: int = 20,
     max_per_account: int = 10,
     include_preview: bool = False,
     timeout: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch recent emails per account in parallel."""
-    try:
-        accounts = await asyncio.to_thread(list_mail_account_names, timeout)
-    except AppleScriptTimeout:
-        return []
+    if account:
+        accounts = [account]
+    else:
+        try:
+            accounts = await asyncio.to_thread(list_mail_account_names, timeout)
+        except AppleScriptTimeout:
+            return []
 
     per_call_timeout = timeout if timeout is not None else 60
 
@@ -1150,6 +1176,7 @@ async def _get_recent_emails_structured_async(
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 async def inbox_dashboard(
+    account: Optional[str] = None,
     include_preview: bool = False,
     max_total: int = 20,
     max_per_account: int = 10,
@@ -1160,7 +1187,8 @@ async def inbox_dashboard(
 
     Returns an interactive UI dashboard resource that displays:
     - Unread email counts by account (visual cards with badges)
-    - Recent emails across all accounts (filterable list)
+    - Recent emails for the selected/default account, or all accounts if no
+      account/default is configured
     - Quick action buttons for common operations (Mark Read, Archive, Delete)
     - Search functionality to filter emails
 
@@ -1169,6 +1197,8 @@ async def inbox_dashboard(
     an interactive dashboard experience.
 
     Args:
+        account: Optional account name. Defaults to ``DEFAULT_MAIL_ACCOUNT``
+            when configured. Omit both only for an explicit all-account view.
         include_preview: Include body previews for recent emails (slower; default False).
         max_total: Maximum recent emails across all accounts (default: 20).
         max_per_account: Maximum recent emails per account (default: 10).
@@ -1188,11 +1218,16 @@ async def inbox_dashboard(
     from ui import create_inbox_dashboard_ui
 
     per_call_timeout = timeout if timeout is not None else 60
+    selected_account = account or _server.DEFAULT_MAIL_ACCOUNT
 
     unread_task = asyncio.to_thread(
-        get_mailbox_unread_counts, summary_only=True
+        get_mailbox_unread_counts,
+        account=selected_account,
+        summary_only=True,
+        timeout=per_call_timeout,
     )
     recent_task = _get_recent_emails_structured_async(
+        account=selected_account,
         max_total=max_total,
         max_per_account=max_per_account,
         include_preview=include_preview,

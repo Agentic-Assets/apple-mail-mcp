@@ -26,7 +26,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 ## Account scoping
 
-`account: Optional[str] = None` → `server.DEFAULT_MAIL_ACCOUNT`; error if unset. Exceptions: `synchronize_account` (None = all accounts, but requires `confirm_sync=True`), `inbox_dashboard` (always cross-account). `all_accounts=True` overrides default scoping.
+`account: Optional[str] = None` → `server.DEFAULT_MAIL_ACCOUNT`; error if unset. Exceptions: `synchronize_account` (None = all accounts, but requires `confirm_sync=True`). `inbox_dashboard` also respects `DEFAULT_MAIL_ACCOUNT` and only fans out across all accounts when no account/default is configured. `all_accounts=True` overrides default scoping.
 
 ## JSON `output_format`
 

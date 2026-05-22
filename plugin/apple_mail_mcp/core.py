@@ -63,12 +63,13 @@ def run_applescript(script: str, timeout: Optional[int] = 120) -> str:
     so callers can isolate slow-account failures without losing siblings'
     partial results.
     """
+    effective_timeout = 120 if timeout is None else timeout
     try:
         result = subprocess.run(
             ["osascript", "-"],
             input=script.encode("utf-8"),
             capture_output=True,
-            timeout=timeout,
+            timeout=effective_timeout,
         )
         if result.returncode != 0:
             stderr = result.stderr.decode("utf-8", errors="replace").strip()

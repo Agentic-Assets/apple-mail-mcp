@@ -363,8 +363,8 @@ def get_awaiting_reply(
 
     escaped_account = escape_applescript(account)
 
-    sent_cap = min(max(max_results * 4, 50), 100)
-    inbox_cap = 100
+    sent_cap = min(max(max_results, 5), 20)
+    inbox_cap = min(max(max_results * 2, 10), 30)
     inbox_script = _build_awaiting_reply_inbox_script(
         escaped_account=escaped_account,
         inbox_cap=inbox_cap,
@@ -418,6 +418,7 @@ def get_needs_response(
     max_results: int = 20,
     scan_body: bool = False,
     include_already_replied: bool = False,
+    check_already_replied: bool = True,
     timeout: Optional[int] = None,
 ) -> str:
     """Identify unread emails that likely need a response from you.
@@ -445,6 +446,9 @@ def get_needs_response(
             to prevent agents drafting duplicate replies. When True, those
             emails are kept but annotated with a ``[ALREADY REPLIED]``
             prefix in the priority label.
+        check_already_replied: When False, skip the Sent-mailbox replied
+            detection pass. Use only for fast large-mailbox analytics where
+            duplicate-reply protection is not needed.
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
 
     Returns:
@@ -466,8 +470,8 @@ def get_needs_response(
     newsletter_condition = _newsletter_filter_condition("messageSender")
 
     # Cap message collection. Tighter caps keep daily triage under agent budgets.
-    inbox_cap = min(max(max_results * 5, 50), 100)
-    sent_cap = 100
+    inbox_cap = min(max(max_results * 2, 20), 30)
+    sent_cap = 20
 
     body_scan_block = (
         """
@@ -484,12 +488,16 @@ def get_needs_response(
     )
 
     include_replied_flag = "true" if include_already_replied else "false"
-    replied_builder = replied_ids_script(
-        account_var="targetAccount",
-        sent_cap=sent_cap,
-        replied_var="repliedIds",
-        subjects_var="sentSubjects",
-        strip_prefixes_handler="stripPrefixes",
+    replied_builder = (
+        replied_ids_script(
+            account_var="targetAccount",
+            sent_cap=sent_cap,
+            replied_var="repliedIds",
+            subjects_var="sentSubjects",
+            strip_prefixes_handler="stripPrefixes",
+        )
+        if check_already_replied
+        else "set repliedIds to {}\n            set sentSubjects to {}"
     )
 
     script = f'''
@@ -737,11 +745,11 @@ def get_top_senders(
 
     # Cap message scan. Prefer a bounded newest-first slice + Python aggregation
     # over `whose` filters that materialize huge inboxes.
-    scan_cap = min(500, max(top_n * 15, 75))
+    scan_cap = min(100, max(top_n * 5, 15))
     if days_back > 14:
-        scan_cap = min(scan_cap, 300)
+        scan_cap = min(scan_cap, 25)
     if days_back >= 30:
-        scan_cap = min(scan_cap, 100)
+        scan_cap = min(scan_cap, 15)
 
     # Build the extraction key: either full sender or domain.
     if group_by_domain:
@@ -796,11 +804,16 @@ def get_top_senders(
 
             {date_cutoff}
 
-            try
-                set mailboxMessages to messages 1 thru {scan_cap} of targetMailbox
-            on error
-                set mailboxMessages to {{}}
-            end try
+            set mailboxMessages to {{}}
+            set mailboxCount to count of messages of targetMailbox
+            if mailboxCount > {scan_cap} then
+                set mailboxUpperBound to {scan_cap}
+            else
+                set mailboxUpperBound to mailboxCount
+            end if
+            if mailboxUpperBound > 0 then
+                set mailboxMessages to messages 1 thru mailboxUpperBound of targetMailbox
+            end if
 
             set outputLines to {{}}
             set totalAnalysed to 0

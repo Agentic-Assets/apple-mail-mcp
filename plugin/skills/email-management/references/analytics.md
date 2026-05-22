@@ -13,7 +13,7 @@ Use analytics tools to understand email patterns before reorganizing or cleaning
 
 ### Understand overall load
 
-Run `get_statistics(scope="account_overview")` once per account. Look at the unread ratio and the top senders list. A read ratio below 50% usually means inbound volume exceeds processing capacity — fix that with filters and unsubscribes before tweaking folders.
+Run `get_statistics(scope="account_overview", days_back=2)` once per account for a quick load sample. Increase the window only when the user explicitly wants a heavier analysis pass. Look at the unread ratio and the top senders list. A read ratio below 50% usually means inbound volume exceeds processing capacity — fix that with filters and unsubscribes before tweaking folders.
 
 ### Diagnose a noisy sender
 
@@ -25,7 +25,7 @@ There is no dedicated newsletter detector. Use `get_top_senders()` to rank by vo
 
 ### Find folders that need cleanup
 
-Iterate over the output of `list_mailboxes(include_counts=True)`, then call `get_statistics(scope="mailbox_breakdown", mailbox="...")` on the top three by message count. Mailboxes with thousands of messages and a high read ratio are good archive candidates.
+Start with `list_mailboxes(include_counts=False)` to map structure. If the user approves a slower count pass, request counts for the short candidate set, then call `get_statistics(scope="mailbox_breakdown", mailbox="...")` on the top three by message count. Mailboxes with thousands of messages and a high read ratio are good archive candidates.
 
 ## Actionable Signals
 

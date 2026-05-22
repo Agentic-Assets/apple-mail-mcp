@@ -387,6 +387,42 @@ def save_email_attachment(
     if not attachment_name or not save_path:
         return "Error: attachment_name and save_path are required."
 
+    if message_ids is None:
+        try:
+            records = _search_mail_records(
+                account=account,
+                mailbox="INBOX",
+                subject_terms=[subject_keyword],
+                include_content=False,
+                offset=0,
+                limit=1,
+                timeout=timeout if timeout is not None else 45,
+            )
+        except AppleScriptTimeout:
+            return (
+                f"Error: AppleScript timed out while locating attachment email "
+                f"on account {account!r}. Try again with a tighter subject or "
+                "larger `timeout`."
+            )
+        if not records:
+            return (
+                "⚠ Attachment not found\n"
+                f"Email keyword: {escape_applescript(subject_keyword)}\n"
+                f"Attachment name: {escape_applescript(attachment_name)}"
+            )
+        resolved_ids = [
+            str(record.get("message_id"))
+            for record in records
+            if record.get("message_id") is not None
+        ]
+        if not resolved_ids:
+            return (
+                "⚠ Attachment not found\n"
+                f"Email keyword: {escape_applescript(subject_keyword)}\n"
+                f"Attachment name: {escape_applescript(attachment_name)}"
+            )
+        message_ids = resolved_ids
+
     if message_ids is not None:
         normalized_ids = normalize_message_ids(message_ids)
         if not normalized_ids:
@@ -396,11 +432,6 @@ def save_email_attachment(
             f"{equals_any_numeric_condition('id', normalized_ids)}"
         )
         not_found_detail = f"Message ids: {', '.join(normalized_ids)}"
-    else:
-        message_filter_script = (
-            f'set inboxMessages to (every message of inboxMailbox whose subject contains "{escape_applescript(subject_keyword)}")'
-        )
-        not_found_detail = f"Email keyword: {escape_applescript(subject_keyword)}"
 
     # Expand tilde in save_path (POSIX file in AppleScript does not expand ~)
     expanded_path = os.path.expanduser(save_path)
@@ -1262,7 +1293,11 @@ def create_mailbox(
 
 @mcp.tool(annotations=IDEMPOTENT_WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
-def synchronize_account(account: Optional[str] = None, confirm_sync: bool = False) -> str:
+def synchronize_account(
+    account: Optional[str] = None,
+    confirm_sync: bool = False,
+    all_accounts: bool = False,
+) -> str:
     """
     Force Mail.app to synchronize an account (or every account) with its
     IMAP / Exchange server right now. Equivalent to clicking the
@@ -1293,11 +1328,13 @@ def synchronize_account(account: Optional[str] = None, confirm_sync: bool = Fals
     semantics callers expect.
 
     Args:
-        account: Account name (e.g., "Gmail", "Work"). Omit to sync every
-                 configured account.
+        account: Account name (e.g., "Gmail", "Work"). Defaults to
+                 DEFAULT_MAIL_ACCOUNT when configured.
         confirm_sync: Required explicit opt-in. Synchronizing can make Mail.app
                  download a large backlog of messages, so agents and test
                  batteries must not trigger it implicitly.
+        all_accounts: Required in addition to confirm_sync=True to sync every
+                 configured account.
 
     Returns:
         Confirmation string with the account(s) synced or queued.
@@ -1307,10 +1344,18 @@ def synchronize_account(account: Optional[str] = None, confirm_sync: bool = Fals
     # timeout we report "queued" — the sync continues asynchronously.
     PER_ACCOUNT_TIMEOUT_S = 8
 
+    if account is None and _server.DEFAULT_MAIL_ACCOUNT and not all_accounts:
+        account = _server.DEFAULT_MAIL_ACCOUNT
+
     if account is None or not account.strip():
+        if not all_accounts:
+            return (
+                "Error: account is required (and no DEFAULT_MAIL_ACCOUNT configured). "
+                "Set all_accounts=True with confirm_sync=True to sync every account."
+            )
         if not confirm_sync:
             return (
-                "Error: synchronize_account requires confirm_sync=True. "
+                "Error: synchronize_account all-account sync requires confirm_sync=True. "
                 "Synchronizing can trigger Mail.app to download a large message backlog; "
                 "do not call it from routine tests."
             )
