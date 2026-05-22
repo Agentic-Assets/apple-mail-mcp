@@ -122,9 +122,9 @@ Inbox
 # 1. Review current structure
 list_mailboxes()
 
-# 2. Create folders in Mail app (MCP doesn't create folders)
-#    - Create "Projects" folder
-#    - Create subfolders for each project
+# 2. Create folders after approval
+create_mailbox(name="Projects")
+create_mailbox(name="Projects/Project Alpha")
 
 # 3. Move project emails
 search_emails(subject_keyword="Project Alpha", mailbox="All")
@@ -262,7 +262,7 @@ list_mailboxes(include_counts=True)
 
 ### Step 3: Create Folders
 
-**Note**: The MCP doesn't create folders. Create them manually in Mail app:
+**Preferred**: create simple folders with `create_mailbox(name="Parent/Child")` after the user approves the structure. If folder creation fails or the user wants manual control, create them in Mail app:
 
 1. Open Mail app
 2. Right-click on account
@@ -301,9 +301,9 @@ search_emails(sender="client@example.com", mailbox="All", max_results=50)
 move_email(
     to_mailbox="Clients/Client Name",
     from_mailbox="INBOX",
-    subject_keyword="",  # Empty = match all
     sender="client@example.com",  # Use search to identify first
-    max_moves=20
+    max_moves=20,
+    dry_run=True
 )
 ```
 

@@ -157,6 +157,26 @@ class MessageIdsTests(unittest.TestCase):
         self.assertIn("MOVING EMAILS TO TRASH BY IDS", captured["script"])
         self.assertIn("move aMessage to trashMailbox", captured["script"])
 
+    def test_manage_trash_permanent_delete_with_message_ids_dry_run_skips_delete(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "preview"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="delete_permanent",
+                message_ids=["555"],
+            )
+
+        self.assertEqual(result, "preview")
+        self.assertIn("id is 555", captured["script"])
+        self.assertIn("DRY RUN - PREVIEW PERMANENT DELETE BY IDS", captured["script"])
+        self.assertIn("Would permanently delete", captured["script"])
+        self.assertNotIn("delete aMessage", captured["script"])
+
     def test_save_email_attachment_with_message_ids_uses_exact_id_condition(self):
         captured = {}
 

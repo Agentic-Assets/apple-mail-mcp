@@ -79,7 +79,7 @@
     },
     {
       "name": "move_email",
-      "description": "Move emails between mailboxes by subject/sender/date filters. Supports nested paths (e.g. 'Projects/Alpha'). Default max 50 moves; runs in dry_run mode unless explicitly disabled."
+      "description": "Move emails between mailboxes by subject/sender/date filters. Supports nested paths (e.g. 'Projects/Alpha'). Default max 50 moves; pass dry_run=true to preview before acting."
     },
     {
       "name": "reply_to_email",

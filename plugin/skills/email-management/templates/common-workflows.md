@@ -204,13 +204,15 @@ move_email(
     max_moves=10
 )
 
-# 3. Archive everything else
+# 3. Preview older read leftovers before archiving
 move_email(
     account="Work",
-    subject_keyword="",  # Match all
     to_mailbox="Archive",
     from_mailbox="INBOX",
-    max_moves=20
+    older_than_days=30,
+    only_read=True,
+    max_moves=20,
+    dry_run=True
 )
 ```
 
@@ -507,7 +509,8 @@ export_emails(
 # 3. Empty trash (CAREFUL - irreversible)
 manage_trash(
     account="Work",
-    action="empty_trash"
+    action="empty_trash",
+    confirm_empty=True
 )
 ```
 
@@ -694,10 +697,11 @@ search_emails(
 # 2. Move in batches (max_moves=10 is safe)
 move_email(
     account="Work",
-    subject_keyword="",  # Use pattern from search
+    sender="project-team@company.com",
     to_mailbox="Projects/Team Project",
     from_mailbox="INBOX",
-    max_moves=10
+    max_moves=10,
+    dry_run=True
 )
 
 # 3. Repeat if more than 10 emails

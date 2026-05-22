@@ -20,7 +20,7 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 **Verifying against real Mail.app** → [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md): setup, permissions, `quick-check` / `perf-test` batteries, safe probes, MCP env vars (`DEFAULT_MAIL_ACCOUNT`, `DEFAULT_MAIL_SIGNATURE`, `USER_EMAIL_PREFERENCES`).
 
-**Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/docs/CLAUDE.md`](../.claude-plugin/docs/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
+**Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
 
 **Planning / backlog** → [`tasks/CLAUDE.md`](../tasks/CLAUDE.md) and [`tasks/todo.md`](../tasks/todo.md).
 
@@ -61,4 +61,4 @@ CI never touches Mail.app. Manifest validation + pytest only ([`tools/CLAUDE.md`
 
 - User-facing install: root [`README.md`](../README.md)
 - Cross-session backlog: [`tasks/todo.md`](../tasks/todo.md)
-- Phase sequencing: [`tasks/phase-plan-3.1.7.md`](../tasks/phase-plan-3.1.7.md) · live baseline: [`tasks/live-test-baseline-2026-05-21.md`](../tasks/live-test-baseline-2026-05-21.md)
+- Active robustness goal: [`tasks/apple-mail-plugin-robustness-goal-2026-05-22.md`](../tasks/apple-mail-plugin-robustness-goal-2026-05-22.md) · historical phase sequencing: [`tasks/phase-plan-3.1.7.md`](../tasks/phase-plan-3.1.7.md) · live baseline: [`tasks/live-test-baseline-2026-05-21.md`](../tasks/live-test-baseline-2026-05-21.md)

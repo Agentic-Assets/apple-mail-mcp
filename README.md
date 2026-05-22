@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **266** unit tests, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **273** unit tests, Python **3.10+**.
 
 ## Documentation map
 
@@ -37,7 +37,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 | [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index + plugin skill map |
 | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) | Phase plans & backlog |
 | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) | Desktop bundle build |
-| [`.claude-plugin/docs/CLAUDE.md`](.claude-plugin/docs/CLAUDE.md) | Marketplace manifest |
+| [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) | Marketplace manifest |
 
 ## Quick Install
 
