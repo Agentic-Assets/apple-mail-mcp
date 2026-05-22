@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **276** unit tests, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **337** unit tests + **30 subtests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -45,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (27 tools), legacy `/email-management` slash command, and **nine** bundled workflow skills under `plugin/skills/` (see table below).
+One install — MCP server (28 tools), legacy `/email-management` slash command, and **nine** bundled workflow skills under `plugin/skills/` (see table below).
 
 ```bash
 claude plugin marketplace add agenticassets/apple-mail-mcp
@@ -462,7 +462,7 @@ apple-mail-mcp/
 │   │   └── plugin.json        # Plugin manifest
 │   ├── commands/              # /email-management slash command
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
-│   ├── apple_mail_mcp/        # Python MCP server package (27 tools)
+│   ├── apple_mail_mcp/        # Python MCP server package (28 tools)
 │   ├── apple_mail_mcp.py      # Entry point
 │   ├── start_mcp.sh           # Startup wrapper (auto-creates venv)
 │   └── requirements.txt

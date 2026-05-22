@@ -16,7 +16,7 @@ Copies `apple_mail_mcp.py`, `start_mcp.sh`, `requirements.txt`, `apple_mail_mcp/
 
 ## tools[] must match code
 
-Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; description must claim correct count (**27**). Validated by [`tools/validate_manifests.sh`](../tools/validate_manifests.sh).
+Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; description must claim correct count (**28**). Validated by [`tools/validate_manifests.sh`](../tools/validate_manifests.sh).
 
 ## vs plugin/
 

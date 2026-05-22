@@ -9,6 +9,8 @@ from urllib.parse import quote
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
+from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
 from apple_mail_mcp.constants import THREAD_PREFIXES
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
@@ -263,9 +265,12 @@ def _build_search_script(
 
     collect_limit = limit + 1  # +1 for has_more probe; offset is decremented separately
     base_cap = collect_limit + offset
+    # Window cap from the shared bounded-scan helper (Phase A of the
+    # whose-elimination refactor — see plugin/apple_mail_mcp/bounded_scan.py).
+    # We floor at base_cap so callers paginating past the helper's cap still
+    # get a slice large enough to honor their offset+limit.
     if recent_days and recent_days > 0:
-        window_cap = min(int(recent_days * 50), 500)
-        scan_cap = max(base_cap, window_cap)
+        scan_cap = max(base_cap, compute_scan_upper_bound(recent_days))
     else:
         scan_cap = base_cap
 
@@ -784,9 +789,8 @@ async def search_emails(
     exclude_replied: bool = False,
     flag_replied: bool = False,
     timeout: Optional[int] = None,
-    allow_full_scan: bool = False,
 ) -> str:
-    """Defaults to the last 48 hours and the configured default account. Pass `recent_days=7` for the past week; `recent_days=0` requires `allow_full_scan=True`.
+    """Defaults to the last 48 hours and the configured default account. Pass `recent_days=7` for the past week; ``recent_days=0`` without ``date_from`` is rejected — use ``full_inbox_export`` for audited full-mailbox sweeps.
 
     Unified search tool with JSON output, pagination, and real date filtering.
 
@@ -795,9 +799,10 @@ async def search_emails(
 
     Smart defaults:
         - When `date_from` is None and `recent_days > 0`, an effective window
-          of `now - recent_days` days is applied. Set `recent_days=0` only with
-          `allow_full_scan=True` for an unbounded sweep. An explicit
-          `date_from` always wins.
+          of `now - recent_days` days is applied. Unbounded scans
+          (``recent_days=0`` without ``date_from``) are refused with an
+          ``UNBOUNDED_SCAN_REQUIRED`` error — call ``full_inbox_export`` for
+          the audited escape hatch. An explicit ``date_from`` always wins.
         - When `account` is None and `all_accounts` is False, the tool falls
           back to the ``DEFAULT_MAIL_ACCOUNT`` env-configured account if one
           is set. Pass `all_accounts=True` to opt back into multi-account
@@ -854,8 +859,6 @@ async def search_emails(
         timeout: Optional per-account AppleScript timeout in seconds. Defaults
             to 180s. Raise this for known-slow accounts (e.g. large Exchange
             inboxes) when the default times out.
-        allow_full_scan: Required explicit opt-in for `recent_days=0` when
-            `date_from` is omitted.
 
     Returns:
         Formatted list of matching emails or JSON payload with stable message
@@ -870,23 +873,26 @@ async def search_emails(
         limit = max_results if max_results is not None else 100
 
     effective_recent_days = float(recent_days) if recent_days else 0.0
-    if date_from is None and effective_recent_days <= 0 and not allow_full_scan:
-        message = (
-            "recent_days=0 requires allow_full_scan=True. "
-            "Unbounded searches can make Mail.app fetch a large message backlog."
+    if date_from is None and effective_recent_days <= 0:
+        tool_error = ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                "search_emails refuses to scan without a date window or "
+                "recent_days; pass recent_days=7 or date_from"
+            ),
+            remediation={
+                "preferred": "Pass recent_days=7 or date_from='YYYY-MM-DD'",
+                "fallback_tool": "full_inbox_export",
+                "fallback_tool_args": {
+                    "account": account or "<your account>",
+                    "filter_subject": subject_keyword
+                    or (subject_keywords[0] if subject_keywords else None),
+                },
+            },
         )
         if output_format == "json":
-            return json.dumps(
-                {
-                    "ok": False,
-                    "error": "full_scan_requires_opt_in",
-                    "message": message,
-                    "results": [],
-                    "total": 0,
-                },
-                indent=2,
-            )
-        return f"Error: {message}"
+            return json.dumps(tool_error.to_dict(), indent=2)
+        return f"Error: {tool_error.message}"
 
     # Smart default: fall back to the configured default account when neither
     # `account` nor `all_accounts` is set. Lazy attribute read so tests can
@@ -1214,14 +1220,13 @@ def get_email_thread(
     max_messages: int = 50,
     recent_days: float = 2.0,
     timeout: Optional[int] = None,
-    allow_full_scan: bool = False,
 ) -> str:
     """
     Get an email conversation thread - all messages with the same or similar subject.
 
-    Defaults to the last 48 hours. ``recent_days=0`` requires
-    ``allow_full_scan=True`` and scans only the capped newest-message head
-    without a date window. Subject matching is case-insensitive.
+    Defaults to the last 48 hours. Unbounded thread scans
+    (``recent_days=0``) are refused — use ``full_inbox_export`` for the
+    audited full-mailbox escape hatch. Subject matching is case-insensitive.
 
     Args:
         account: Account name (e.g., "Gmail", "Work")
@@ -1229,9 +1234,8 @@ def get_email_thread(
         mailbox: Mailbox to search in (default: "INBOX", use "All" for all mailboxes)
         max_messages: Maximum number of thread messages to return (default: 50)
         recent_days: Only scan messages received within this many days (default: 2.0
-            = 48h). Set to 0 only with allow_full_scan=True.
+            = 48h). ``recent_days=0`` is rejected with ``UNBOUNDED_SCAN_REQUIRED``.
         timeout: Optional AppleScript timeout in seconds (default: 120).
-        allow_full_scan: Required explicit opt-in for `recent_days=0`.
 
     Returns:
         Formatted thread view with all related messages sorted by date
@@ -1245,11 +1249,23 @@ def get_email_thread(
         return "Error: max_messages must be > 0"
 
     effective_recent_days = float(recent_days) if recent_days else 0.0
-    if effective_recent_days <= 0 and not allow_full_scan:
-        return (
-            "Error: recent_days=0 requires allow_full_scan=True. "
-            "Unbounded thread scans can make Mail.app fetch a large message backlog."
+    if effective_recent_days <= 0:
+        tool_error = ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                "get_email_thread refuses to scan without a date window; "
+                "pass recent_days=7 or smaller"
+            ),
+            remediation={
+                "preferred": "Pass recent_days=7",
+                "fallback_tool": "full_inbox_export",
+                "fallback_tool_args": {
+                    "account": account,
+                    "filter_subject": subject_keyword,
+                },
+            },
         )
+        return tool_error.to_dict()
     effective_timeout = timeout if timeout is not None else 120
 
     # Escape user inputs for AppleScript

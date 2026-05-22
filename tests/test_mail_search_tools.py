@@ -181,9 +181,10 @@ class SearchToolTests(unittest.TestCase):
             )
 
         self.assertEqual(response["items"], [])
-        # v3.1.10: scan_cap now scales with recent_days (default 2.0 → window_cap=100),
-        # floored at limit+1+offset (=51). max(51, 100) = 100.
-        self.assertIn("set scanUpperBound to 100", captured["script"])
+        # Phase A whose-elimination: scan_cap comes from
+        # bounded_scan.compute_scan_upper_bound(recent_days=2.0) → 300,
+        # floored at limit+1+offset (=51). max(51, 300) = 300.
+        self.assertIn("set scanUpperBound to 300", captured["script"])
         self.assertIn("messages 1 thru scanUpperBound of currentMailbox", captured["script"])
         # The old, unfiltered enumeration must not appear.
         self.assertNotIn(
@@ -194,7 +195,14 @@ class SearchToolTests(unittest.TestCase):
 
     def test_no_filter_caps_via_messages_1_thru_n(self):
         """A1: with no filter conditions, the script should bind
-        `messages 1 thru N` directly instead of `every message`."""
+        `messages 1 thru N` directly instead of `every message`.
+
+        Phase A: ``recent_days=0`` is no longer accepted (the
+        ``allow_full_scan`` escape hatch was retired). Use an explicit
+        ``date_from`` to exercise the no-window branch — the search helper
+        zeros ``effective_recent_days`` internally so ``scan_cap`` falls
+        back to ``base_cap = limit + 1 + offset``.
+        """
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -208,8 +216,7 @@ class SearchToolTests(unittest.TestCase):
                     output_format="json",
                     limit=10,
                     max_results=None,
-                    recent_days=0,
-                    allow_full_scan=True,
+                    date_from="2026-05-01",
                 )
             )
 
@@ -543,9 +550,10 @@ class SearchToolTests(unittest.TestCase):
         self.assertEqual(response["recent_days_applied"], 2.0)
         self.assertIsNotNone(response["searched_from"])
 
-    def test_search_emails_recent_days_zero_disables_window(self):
-        """A0a: recent_days=0 must disable the auto-window — no `fromDate`
-        machinery should appear in the generated script."""
+    def test_search_emails_explicit_date_from_disables_window(self):
+        """A0a: an explicit ``date_from`` disables the recent_days auto-window —
+        ``recent_days_applied`` should report ``0.0`` and ``searched_from``
+        should echo the caller-supplied date."""
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -559,17 +567,21 @@ class SearchToolTests(unittest.TestCase):
                         account="Work",
                         output_format="json",
                         limit=5,
-                        recent_days=0,
-                        allow_full_scan=True,
+                        date_from="2026-05-01",
                     )
                 )
             )
 
-        self.assertNotIn("set year of fromDate to", captured["script"])
+        # An explicit date_from still emits the fromDate machinery, but the
+        # response should report effective_recent_days=0 and echo the date.
+        self.assertIn("set year of fromDate to", captured["script"])
         self.assertEqual(response["recent_days_applied"], 0.0)
-        self.assertIsNone(response["searched_from"])
+        self.assertEqual(response["searched_from"], "2026-05-01")
 
-    def test_search_emails_rejects_full_scan_without_opt_in(self):
+    def test_search_emails_rejects_unbounded_scan(self):
+        """Phase A: ``recent_days=0`` without ``date_from`` returns a
+        structured ``UNBOUNDED_SCAN_REQUIRED`` error pointing at
+        ``full_inbox_export`` (no more ``allow_full_scan`` opt-in)."""
         with patch("apple_mail_mcp.tools.search.run_applescript") as mock_run:
             result = _run(
                 search_tools.search_emails(
@@ -581,9 +593,12 @@ class SearchToolTests(unittest.TestCase):
             )
 
         payload = json.loads(result)
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"], "full_scan_requires_opt_in")
-        self.assertIn("allow_full_scan=True", payload["message"])
+        self.assertTrue(payload["error"])
+        self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("recent_days", payload["message"])
+        self.assertEqual(
+            payload["remediation"]["fallback_tool"], "full_inbox_export"
+        )
         mock_run.assert_not_called()
 
     def test_search_emails_explicit_date_from_overrides_default_window(self):
@@ -935,7 +950,9 @@ class GetEmailThreadTests(unittest.TestCase):
         self.assertIn("Window: last 48h", script)
         self.assertEqual(captured["timeout"], 120)
 
-    def test_get_email_thread_recent_days_zero_uses_messages_cap(self):
+    def test_get_email_thread_recent_days_zero_rejected(self):
+        """Phase A: ``recent_days=0`` is refused. The structured error points
+        callers at ``full_inbox_export`` instead of an opt-in flag."""
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -950,31 +967,14 @@ class GetEmailThreadTests(unittest.TestCase):
                 recent_days=0,
             )
 
-        self.assertIn("allow_full_scan=True", result)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertTrue(result.get("error"))
+        self.assertEqual(
+            result.get("remediation", {}).get("fallback_tool"),
+            "full_inbox_export",
+        )
         self.assertNotIn("script", captured)
-
-    def test_get_email_thread_recent_days_zero_allows_explicit_full_scan(self):
-        captured = {}
-
-        def fake_run(script, timeout=120):
-            captured["script"] = script
-            return "ok"
-
-        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
-            search_tools.get_email_thread(
-                account="Work",
-                subject_keyword="Budget",
-                max_messages=10,
-                recent_days=0,
-                allow_full_scan=True,
-            )
-
-        script = captured["script"]
-        self.assertNotIn("cutoffDate", script)
-        self.assertNotIn("messageDate < cutoffDate", script)
-        self.assertIn("set scanUpperBound to 10", script)
-        self.assertIn("messages 1 thru scanUpperBound of currentMailbox", script)
-        self.assertIn("Window: full inbox", script)
 
     def test_get_email_thread_no_bare_every_message_enumeration(self):
         captured = {}

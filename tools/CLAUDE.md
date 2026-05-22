@@ -12,7 +12,7 @@ Dev-infra guardrails — not MCP tools (`plugin/apple_mail_mcp/tools/` is the se
 Enforces (source of truth: `pyproject.toml` `[project].version`):
 
 1. **Version sync** — `plugin.json`, `marketplace.json plugins[0].version`, `server.json` (×2), `apple-mail-mcpb/manifest.json`
-2. **Tool count claims** — descriptions must match `rg "^@mcp\.tool" … | wc -l` (**27**)
+2. **Tool count claims** — descriptions must match `rg "^@mcp\.tool" … | wc -l` (**28**)
 3. **MCPB name parity** — `@mcp.tool` names ↔ `apple-mail-mcpb/manifest.json` `tools[]`
 4. **Artifact freshness** — when `apple-mail-plugin.zip` or `apple-mail-mcp-v{version}.mcpb` exists locally, selected archive members must match the current plugin source/manifest bytes
 5. **Release artifact presence** — opt in with `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` to require both local distributables before shipping

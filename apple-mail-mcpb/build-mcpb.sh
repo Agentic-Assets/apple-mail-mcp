@@ -113,7 +113,7 @@ Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/
 
 | Path | Role |
 |------|------|
-| `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**27 tools**) |
+| `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**28 tools**) |
 | `start_mcp.sh` | Creates `venv/`, installs `requirements.txt`, execs Python entry |
 | `requirements.txt` | Runtime Python dependencies |
 | `ui/` *(optional)* | MCP Apps dashboard helpers for `inbox_dashboard` |
@@ -205,5 +205,5 @@ echo -e "  ${YELLOW}unzip -q \"${OUTPUT_FILE}\" -d /tmp/am-mcp${NC}"
 echo -e "  ${YELLOW}mkdir -p \"$HOME/.claude/skills\"${NC}"
 echo -e "  ${YELLOW}cp -a /tmp/am-mcp/skills/. \"$HOME/.claude/skills/\"${NC}"
 echo -e "\n${GREEN}What ships:${NC}"
-echo -e "  FastMCP server with ${GREEN}27${NC} tools + mirrored plugin workflow skills/"
+echo -e "  FastMCP server with ${GREEN}28${NC} tools + mirrored plugin workflow skills/"
 echo -e "\nUpstream docs: https://github.com/agenticassets/apple-mail-mcp#readme"

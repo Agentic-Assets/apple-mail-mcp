@@ -9,15 +9,11 @@ Sustained inbox organization for Apple Mail: repeatable processing habits plus I
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-Apple Mail's AppleScript bridge slows non-linearly on large mailboxes (24k+ is common). Before running any discovery or bulk tool:
+See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight checklist.
 
-1. **Size the inbox once per session**: `get_inbox_overview(output_format="compact", include_mailboxes=false, include_recent=false)`. If it returns slowly or partially, treat the inbox as large and apply the rules below.
-2. **Bound every scan.** Pass an explicit `recent_days` (start at 2, widen only on demand). Never call `recent_days=0` / `allow_full_scan=True` without user confirmation.
-3. **Co-filter sender-based actions.** `move_email(sender=...)`, `search_emails(sender=...)`, and `list_email_attachments(subject_keyword=...)` can stall on 24k mail. Pair sender filters with `subject_keyword=` or a tight `recent_days` ceiling, or collect `message_ids` from a bounded search and pass `message_ids=[...]` instead.
-4. **`get_awaiting_reply` is timeout-prone** (it cross-walks Sent mail). Start with `days_back=2, max_results=5`; if it stalls, skip it and check Sent directly with `search_emails(mailbox="Sent", recent_days=2, ...)`.
-5. **Always drill by id, never re-search by subject.** Once `search_emails` / `list_inbox_emails` returns a `message_id`, use `get_email_by_id(message_id=...)` and `get_email_thread(message_id=...)`. Re-searching by subject re-pays the scan cost.
-6. **Param names matter.** `list_inbox_emails` takes `max_emails` (not `limit`) and `include_read` (not `unread_only`). Example: `list_inbox_emails(max_emails=25, include_read=False, include_content=False)`.
-7. **`inbox_dashboard` is the rescue path.** When `get_inbox_overview` times out or returns partial JSON, fall back to `inbox_dashboard()` — it returns a structured snapshot (unread, recent, pinned, suggestions) in a single bounded call.
+### When to reach for `full_inbox_export`
+
+`full_inbox_export` is the only tool that walks the entire inbox. Reserve it for the rare full-inbox case — annual cleanup, complete audit, compliance archive, or pre-migration snapshot. It is slow (minutes on a 24k inbox); never use it inside a habitual triage loop. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
 
 ## Already-replied safeguard (default)
 
@@ -49,8 +45,8 @@ For finding a single specific email, call `search_emails()` directly without inv
 
 Internalize these before constructing any tool call. The defaults exist to keep AppleScript queries fast on large Exchange inboxes.
 
-- `search_emails` defaults to the last 48 hours on the configured default account. Pass `recent_days=7` or `recent_days=30` to widen. `recent_days=0` requires `allow_full_scan=True`; ask before using it.
-- `list_inbox_emails` defaults to the 50 most-recent emails. `max_emails=0` requires `allow_full_scan=True`; do not use it for routine triage.
+- `search_emails` defaults to the last 48 hours on the configured default account. Pass `recent_days=7` or `recent_days=30` to widen. `recent_days=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; if you really need every message, call `full_inbox_export` (slow; documented cost). Otherwise pass a bounded `recent_days`.
+- `list_inbox_emails` defaults to the 50 most-recent emails. `max_emails=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; use a bounded `max_emails` or `full_inbox_export` for the rare full walk.
 - Cross-account scans cost time on large Exchange inboxes. Pass `all_accounts=True` only when truly needed; otherwise let the `DEFAULT_MAIL_ACCOUNT` environment variable keep things scoped.
 
 When in doubt, run a narrow query first and widen only if results are insufficient.
@@ -98,7 +94,7 @@ Pattern: identify candidates with `search_emails()`, preview the count and sampl
 Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 minute scan** only, use the **`inbox-triage`** skill instead.
 
 1. Get overview: `get_inbox_overview()` to see unread counts, recent messages, and suggested actions.
-2. Surface priorities: `get_needs_response(days_back=2, max_results=10)` for likely replies; optionally `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
+2. Surface priorities: `get_needs_response(days_back=2, max_results=20)` for likely replies (20 is the tool default); optionally `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
 3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(message_id=...)` for full content — do not re-search by subject.
 4. Decide per message using the four-option rule: respond, defer, file, or delete.
    - For responses, defer to **`email-drafting`** (compose MCP stack).
@@ -186,11 +182,11 @@ Mindset:
 ### "I can't find an important email"
 
 1. Start with `search_emails(subject_keyword="...")` on the default account and default 48-hour window.
-2. Widen the time window: add `recent_days=30`; use `recent_days=0, allow_full_scan=True` only after asking.
+2. Widen the time window: add `recent_days=30`. If the tool returns `code: UNBOUNDED_SCAN_REQUIRED`, follow the `remediation.fallback_tool` field — usually a wider `recent_days` covers it; only escalate to `full_inbox_export` after confirming with the user.
 3. Widen the scope: add `all_accounts=True` to search every configured account.
 4. Search the body: `search_emails(body_text="...", include_content=True, recent_days=30)` before asking to run a full scan.
 5. Filter by attachment if relevant: `search_emails(has_attachments=True, ...)`.
-6. Check Trash explicitly: `search_emails(mailbox="Trash", recent_days=30, ...)`; full-scan only with `allow_full_scan=True`.
+6. Check Trash explicitly: `search_emails(mailbox="Trash", recent_days=30, ...)`. For a true full Trash walk, escalate to `full_inbox_export` (slow); never call it unprompted.
 
 ### "I want to organize emails by project"
 
@@ -210,7 +206,7 @@ Mindset:
 ### "Too many emails from one sender"
 
 1. Confirm volume: `get_statistics(scope="sender_stats", sender="...")`.
-2. Find the messages: `search_emails(sender="...", recent_days=30)`; ask before any full-scan opt-in.
+2. Find the messages: `search_emails(sender="...", recent_days=30)`. If the user wants every message from this sender across all time, call `full_inbox_export` (slow) rather than ratcheting `recent_days` indefinitely.
 3. If unwanted, run the cleanup sequence from `references/bulk-cleanup.md`.
 4. If wanted but noisy, create a dedicated folder and bulk-move with `move_email(sender="...", to_mailbox="...", max_moves=N)`. Co-filter with `subject_keyword=` or `recent_days≤30`, or pass `message_ids=[...]` from the prior `search_emails` call — a bare `sender=` filter can stall on a 24k inbox.
 5. If the sender is a newsletter, surface it via `get_top_senders()` and unsubscribe in Apple Mail.

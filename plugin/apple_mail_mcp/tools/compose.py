@@ -13,6 +13,8 @@ from typing import Optional, List, Tuple
 from apple_mail_mcp import server as _server
 from apple_mail_mcp import server  # public alias used by tests
 from apple_mail_mcp.server import mcp, WRITE_TOOL_ANNOTATIONS, DESTRUCTIVE_TOOL_ANNOTATIONS
+from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     inject_preferences,
@@ -24,8 +26,12 @@ from apple_mail_mcp.core import (
     normalize_message_ids,
 )
 
-DRAFT_LIST_CAP = 100
-MESSAGE_LOOKUP_CAP = 100
+# Backwards-compat aliases; centralized in constants.SCAN_BOUNDS so a single
+# edit retunes every tool. Tests assert literal "items 1 thru 100" /
+# "messages 1 thru 100" so changing the cap value here would require coordinated
+# updates in tests/test_phase_2_scan_hardening.py.
+DRAFT_LIST_CAP = SCAN_BOUNDS["DRAFT_LOOKUP"]
+MESSAGE_LOOKUP_CAP = SCAN_BOUNDS["MESSAGE_LOOKUP"]
 _THREADED_SUBJECT_RE = re.compile(r"^\s*((re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
 _QUOTED_THREAD_MARKERS_RE = re.compile(
     r"(?im)(^on .+ wrote:\s*$|^-{2,}\s*original message\s*-{2,}|^from:\s*.+$|^> .+)"
@@ -40,14 +46,16 @@ def _build_found_message_lookup(
     recent_days: float,
     found_var: str = "foundMessage",
     messages_var: str = "mailboxMessages",
-    allow_full_scan: bool = False,
-) -> Tuple[str, Optional[str]]:
+    tool_name: str = "compose",
+) -> Tuple[str, Optional[object]]:
     """Build AppleScript to resolve one message by id or bounded subject search.
 
-    Subject-keyword fallback **requires** a date window unless
-    ``allow_full_scan=True``. Without a date bound, Mail.app evaluates
-    ``every message of mailbox whose subject contains "..."`` across the
-    whole remote mailbox before slicing, which times out on 24K+ inboxes.
+    Subject-keyword fallback **requires** a positive date window. Without
+    a date bound, Mail.app evaluates ``every message of mailbox whose
+    subject contains "..."`` across the whole remote mailbox before
+    slicing, which times out on 24K+ inboxes. When ``recent_days <= 0``
+    the helper returns a ``ToolError`` envelope steering callers toward
+    ``message_id`` or the explicit ``full_inbox_export`` escape hatch.
     """
     if message_id:
         normalized = normalize_message_ids([message_id])
@@ -65,11 +73,18 @@ def _build_found_message_lookup(
             None,
         )
 
-    if recent_days <= 0 and not allow_full_scan:
-        return "", (
-            "Error: subject-keyword lookup requires recent_days > 0 (default 2.0 / 48h) "
-            "or allow_full_scan=True. Pass message_id when available — that path is "
-            "constant-cost. Unbounded subject scans can stall on large mailboxes."
+    if recent_days <= 0:
+        return "", ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                f"{tool_name} refuses to scan without recent_days; "
+                "pass recent_days=2 or message_id."
+            ),
+            remediation={
+                "preferred": "Pass recent_days=2 (default) or message_id directly",
+                "fallback_tool": "full_inbox_export",
+                "fallback_tool_args": {"mailbox": mailbox_var},
+            },
         )
 
     safe_keyword = escape_applescript(subject_keyword or "")
@@ -869,7 +884,6 @@ def reply_to_email(
     timeout: Optional[int] = None,
     include_signature: bool = True,
     signature_name: Optional[str] = None,
-    allow_full_scan: bool = False,
 ) -> str:
     """
     Reply to an email by message_id (preferred) or subject keyword.
@@ -887,11 +901,10 @@ def reply_to_email(
         body_html: Optional HTML body for rich formatting (bold, headings, links, colors). When provided, the reply is pasted as HTML. The plain 'reply_body' field is still required as fallback text.
         from_address: Optional sender address to use for this reply. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         message_id: Exact numeric Apple Mail message id from search/list tools. Required preference over subject_keyword whenever an id is available.
-        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). 0 requires allow_full_scan=True on large inboxes.
+        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). Must be > 0 — full-mailbox subject scans are refused; pass `message_id` for constant-cost lookups or fall back to `full_inbox_export`.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to 120s for the main reply script and up to 30s for alias validation.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
-        allow_full_scan: Required opt-in for subject-keyword lookups with recent_days=0. Ignored when message_id is set.
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
@@ -909,9 +922,11 @@ def reply_to_email(
         subject_keyword=subject_keyword or None,
         recent_days=recent_days,
         messages_var="inboxMessages",
-        allow_full_scan=allow_full_scan,
+        tool_name="reply_to_email",
     )
     if lookup_error:
+        if isinstance(lookup_error, ToolError):
+            return lookup_error.to_dict()
         return lookup_error
 
     reply_body = _strip_cdata_wrappers(reply_body) or ""
@@ -1444,7 +1459,6 @@ def forward_email(
     timeout: Optional[int] = None,
     include_signature: bool = True,
     signature_name: Optional[str] = None,
-    allow_full_scan: bool = False,
 ) -> str:
     """
     Forward an email to one or more recipients.
@@ -1460,11 +1474,10 @@ def forward_email(
         from_address: Optional sender address to use when forwarding. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         mode: Delivery mode — "draft" (default, save quietly to Drafts), "open" (save first, then leave compose window open for review), or "send" (send immediately)
         message_id: Exact numeric Apple Mail message id from search/list tools. Required preference over subject_keyword whenever an id is available.
-        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). 0 requires allow_full_scan=True on large inboxes.
+        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). Must be > 0 — full-mailbox subject scans are refused; pass `message_id` for constant-cost lookups or fall back to `full_inbox_export`.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
-        allow_full_scan: Required opt-in for subject-keyword lookups with recent_days=0. Ignored when message_id is set.
 
     Returns:
         Confirmation message with details of forwarded email
@@ -1483,9 +1496,11 @@ def forward_email(
         message_id=message_id,
         subject_keyword=subject_keyword or None,
         recent_days=recent_days,
-        allow_full_scan=allow_full_scan,
+        tool_name="forward_email",
     )
     if lookup_error:
+        if isinstance(lookup_error, ToolError):
+            return lookup_error.to_dict()
         return lookup_error
 
     message = _strip_cdata_wrappers(message)

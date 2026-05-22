@@ -1,8 +1,8 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.1.10",
-  "description": "Natural language interface for Apple Mail with 27 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
+  "version": "3.2.0",
+  "description": "Natural language interface for Apple Mail with 28 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, full-inbox export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
   },
@@ -156,6 +156,10 @@
     {
       "name": "export_emails",
       "description": "Export emails to txt or html. Single email by subject, or up to max_emails messages from a mailbox (default 1000)."
+    },
+    {
+      "name": "full_inbox_export",
+      "description": "Walk every message in a mailbox (default INBOX) and stream metadata in batches. EXPENSIVE — on a 24K-message inbox this can take 2–5 minutes. Use only for true full-mailbox audits; prefer list_inbox_emails or search_emails for normal queries. Supports JSON or NDJSON output and progress notifications."
     },
     {
       "name": "inbox_dashboard",

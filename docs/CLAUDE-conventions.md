@@ -12,7 +12,7 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ### Performance defaults
 
-- **Recent-window default**: any tool that searches or lists takes `recent_days: float = 2.0` (48h). `recent_days=0` or `list_inbox_emails(max_emails=0)` must require `allow_full_scan=True` and must not be used by routine tests or skills.
+- **Recent-window default**: any tool that searches or lists takes `recent_days: float = 2.0` (48h). Tools must refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED` plus a `remediation.fallback_tool` field. The only tool that walks the entire inbox is `full_inbox_export` (slow; documented cost). Routine tests and skills must pass bounded `recent_days` / `max_emails`.
 - **AppleScript-side caps, not Python-side slicing.** Avoid broad `every message of mailbox whose …` scans on remote mailboxes; Mail may materialize/fetch before filtering. Prefer direct newest-first slices (`messages 1 thru N of mailbox`) and filter inside the bounded loop.
 - **`ignoring case … end ignoring`** for case-insensitive comparisons. Never call out to `do shell script "echo … | tr '[:upper:]' '[:lower:]'"` per message — the deprecated `LOWERCASE_HANDLER` was removed in 3.1.5 for that exact reason.
 - **Push date filters unconditionally** into the `whose` clause when the caller provides `date_from`/`date_to`. Don't gate them on the presence of other filters.
