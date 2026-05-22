@@ -11,6 +11,20 @@
 
 ---
 
+## Decision Record (locked 2026-05-22 by user)
+
+| # | Decision | Choice | Notes |
+|---|---|---|---|
+| 1 | Branch strategy | **Stack on `feat/apple-mail-plugin-robustness`** (current branch) | User override. Phase A commits land on top of the v3.1.10 work already on this branch. |
+| 2 | Phase A version target | **v3.2.0** (minor bump) | Retiring `allow_full_scan=True` is a breaking change to any script that passes it; minor bump signals that. |
+| 3 | Phase B kickoff timing | **Wait 1-2 weeks after Phase A merges** | Lets the structured-error UX get real-agent exercise before layering Envelope Index on top. |
+| 4 | `full_inbox_export` tool | **Ship in Phase A** | The structured `UNBOUNDED_SCAN_REQUIRED` error must point at a real `fallback_tool` — without it, the `remediation` field is aspirational. |
+| 5 | Workstream pipeline | **Update `tasks/INDEX.md` + `tasks/todo.md`** | Points at this synthesis as the active workstream; keeps the project's `todo.md` → workstream folder → archive pipeline clean. |
+
+After this commit and push, work pauses pending user kickoff of Phase A. No code changes will be made by Claude until the user explicitly says "start Phase A" or equivalent.
+
+---
+
 ## TL;DR
 
 **The codebase is in much better shape than the v3.1.10 commit message implied** — 36/36 direct mailbox enumerations are already bounded, 12/15 `whose` clauses are id-filtered or pre-sliced, and only **one** genuinely unbounded `whose` remains (`manage.py:431`, `manage_trash` older-than branch). The real problem isn't fixing live bugs — it's that **the safety pattern lives in the heads of contributors**, copy-pasted across five files. Next regression is one PR away.

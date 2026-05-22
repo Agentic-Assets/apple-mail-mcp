@@ -5,7 +5,8 @@
 | File | Purpose | Status |
 |------|---------|--------|
 | [`todo.md`](todo.md) | Tiny active pointer for the current branch/workstream | Active |
-| [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) | Whole-plugin robustness goal and completion contract | Active |
+| [`whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`](whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md) | **Current workstream** — capability-token refactor (Phase A v3.2.0) + Envelope Index SQLite migration (Phase B v4.0.0); 5 research reports + locked decision record | Active workstream |
+| [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) | Whole-plugin robustness goal and completion contract | Active (parent goal) |
 | [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md) | Detailed backlog sidecar moved out of `todo.md` | Active sidecar |
 | [`robustness-completion-audit-2026-05-22.md`](robustness-completion-audit-2026-05-22.md) | Command evidence, improvements, residual risks | Active report |
 | [`robustness-next-steps-2026-05-22.md`](robustness-next-steps-2026-05-22.md) | Handoff checklist with goal info and PR-prep steps | Active handoff |
