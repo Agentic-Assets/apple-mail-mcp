@@ -334,5 +334,111 @@ def test_get_email_thread_returns_structured_unbounded_error():
     assert remediation.get("fallback_tool") == "full_inbox_export"
 
 
+# ---------------------------------------------------------------------------
+# Envelope shape: every -> str tool must return a JSON string (not a raw dict)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label,module_path,fn_name,kwargs,is_async",
+    RETIRED_UNBOUNDED_CASES,
+    ids=[case[0] for case in RETIRED_UNBOUNDED_CASES],
+)
+def test_retired_tool_unbounded_envelope_is_json_string(
+    label, module_path, fn_name, kwargs, is_async
+):
+    """Every retired tool's `-> str` signature requires a JSON-encoded string."""
+    import importlib
+
+    module = importlib.import_module(module_path)
+    fn = getattr(module, fn_name)
+
+    with patch("subprocess.run"):
+        result = _run(fn(**kwargs))
+
+    assert isinstance(result, str), (
+        f"{label} returned {type(result).__name__}; the tool signature is "
+        f"`-> str` and the unbounded-scan envelope must be JSON-encoded."
+    )
+    parsed = json.loads(result)
+    assert isinstance(parsed, dict), (
+        f"{label} JSON did not decode to a dict: {parsed!r}"
+    )
+    assert parsed.get("code") == "UNBOUNDED_SCAN_REQUIRED"
+
+
+def test_get_email_thread_unbounded_envelope_is_json_string():
+    """get_email_thread's `-> str` signature requires a JSON-encoded envelope."""
+    from apple_mail_mcp.tools import search as search_tools
+
+    with patch("subprocess.run"):
+        result = search_tools.get_email_thread(
+            account="Work",
+            subject_keyword="anything",
+            recent_days=0,
+        )
+
+    assert isinstance(result, str)
+    parsed = json.loads(result)
+    assert isinstance(parsed, dict)
+    assert parsed.get("code") == "UNBOUNDED_SCAN_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# AppleScriptBackend BACKEND_NOT_IMPLEMENTED contract for Phase B stubs
+# ---------------------------------------------------------------------------
+
+
+class AppleScriptBackendNotImplementedTests(unittest.TestCase):
+    """Phase B stubs must raise structured ToolError, not NotImplementedError."""
+
+    def setUp(self):
+        self.backend = AppleScriptBackend()
+        # A valid ScanWindow so the capability check passes and we hit the
+        # method body's intentional refusal.
+        self.window = bounded_inbox_scan(mailbox="INBOX", limit=10)
+
+    def _assert_backend_not_implemented(self, callable_):
+        with self.assertRaises(ToolError) as ctx:
+            callable_()
+        # Must NOT be NotImplementedError — the contract is a structured
+        # ToolError envelope so callers can surface remediation.
+        self.assertEqual(ctx.exception.code, "BACKEND_NOT_IMPLEMENTED")
+        self.assertIsNotNone(ctx.exception.remediation)
+
+    def test_count_messages_raises_backend_not_implemented(self):
+        self._assert_backend_not_implemented(
+            lambda: self.backend.count_messages(self.window)
+        )
+
+    def test_search_messages_raises_backend_not_implemented(self):
+        self._assert_backend_not_implemented(
+            lambda: self.backend.search_messages(self.window)
+        )
+
+    def test_move_messages_raises_backend_not_implemented(self):
+        self._assert_backend_not_implemented(
+            lambda: self.backend.move_messages(
+                source_mailbox="INBOX",
+                target_mailbox="Archive",
+                message_ids=["1"],
+            )
+        )
+
+    def test_update_status_raises_backend_not_implemented(self):
+        self._assert_backend_not_implemented(
+            lambda: self.backend.update_status(
+                mailbox="INBOX",
+                message_ids=["1"],
+                read=True,
+            )
+        )
+
+    def test_empty_trash_raises_backend_not_implemented(self):
+        self._assert_backend_not_implemented(
+            lambda: self.backend.empty_trash(account="Work")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

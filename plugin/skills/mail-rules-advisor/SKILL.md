@@ -15,7 +15,7 @@ Produce **implementable**, human-applied Mail rules derived from MCP analytics. 
 get_top_senders(limit=30, days_back=30, group_by_domain=true)
 ```
 
-Focus on recurring automated domains versus human counterparts. Note (v3.2.0): `get_top_senders(days_back=0)` is refused with `code: UNBOUNDED_SCAN_REQUIRED` — default to `days_back=14` first and widen only if signal is thin. If you really need every sender across all time, call `full_inbox_export` and bucket senders offline.
+Focus on recurring automated domains versus human counterparts. See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical bounded-scan rules — `get_top_senders(days_back=0)` returns `UNBOUNDED_SCAN_REQUIRED`; start at `days_back=14` and only escalate to `full_inbox_export` after the user confirms.
 
 ### 2. Drill Candidates
 

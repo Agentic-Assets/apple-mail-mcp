@@ -9,13 +9,12 @@ from urllib.parse import quote
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
-from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
 from apple_mail_mcp.constants import THREAD_PREFIXES
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     build_mailbox_ref,
-    contains_any_condition,
     inject_preferences,
     escape_applescript,
     fetch_replied_ids as _core_fetch_replied_ids,
@@ -890,9 +889,10 @@ async def search_emails(
                 },
             },
         )
-        if output_format == "json":
-            return json.dumps(tool_error.to_dict(), indent=2)
-        return f"Error: {tool_error.message}"
+        # Always emit the structured JSON envelope (with remediation) for
+        # UNBOUNDED_SCAN_REQUIRED, even when output_format != "json".
+        # Dropping the remediation would lose the caller's recovery path.
+        return serialize_tool_error(tool_error)
 
     # Smart default: fall back to the configured default account when neither
     # `account` nor `all_accounts` is set. Lazy attribute read so tests can
@@ -1265,7 +1265,7 @@ def get_email_thread(
                 },
             },
         )
-        return tool_error.to_dict()
+        return serialize_tool_error(tool_error)
     effective_timeout = timeout if timeout is not None else 120
 
     # Escape user inputs for AppleScript

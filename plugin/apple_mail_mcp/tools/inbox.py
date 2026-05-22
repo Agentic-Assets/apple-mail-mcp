@@ -102,6 +102,36 @@ def _parse_pipe_delimited_emails(
 # list_inbox_emails — async, per-account dispatch
 # ---------------------------------------------------------------------------
 
+def _build_inbox_collection_block(max_emails: int, include_read: bool) -> str:
+    """Build the AppleScript that sets ``inboxMessages`` to a bounded slice.
+
+    When ``include_read=False`` we bind a bounded newest-first window BEFORE
+    applying ``whose read status is false`` so Mail never materializes the
+    whole mailbox to evaluate the filter on a 24K-message inbox.
+    """
+    if not include_read:
+        scan_cap = min(
+            max(max_emails * 10, SCAN_BOUNDS["INBOX_DEFAULT_CAP"] // 2),
+            SCAN_BOUNDS["INBOX_MAX_CAP"],
+        )
+        bounded = build_bounded_message_scan(
+            "inboxMailbox",
+            scan_cap,
+            whose_condition="read status is false",
+        )
+        return (
+            f'{bounded}\n'
+            f'            set inboxMessages to candidateMessages\n'
+            f'            if (count of inboxMessages) > {max_emails} then '
+            f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
+        )
+    bounded = build_bounded_message_scan("inboxMailbox", max_emails)
+    return (
+        f'{bounded}\n'
+        f'            set inboxMessages to candidateMessages'
+    )
+
+
 def _build_list_inbox_text_script(
     account: str,
     max_emails: int,
@@ -117,6 +147,7 @@ def _build_list_inbox_text_script(
     *before* applying `whose read status is false`, so Mail never materializes
     a 24K-message Exchange inbox to evaluate the filter.
     """
+    assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
     message_id_text_block = ""
     if include_message_id:
@@ -128,43 +159,7 @@ def _build_list_inbox_text_script(
             '                        set outputText to outputText & "__MSG_ID__|||" & internetMessageId & return'
         )
 
-    if max_emails > 0:
-        if not include_read:
-            # Bind a bounded newest-first slice BEFORE applying
-            # `whose read status is false` so Mail never materializes the
-            # whole mailbox to evaluate the filter on a 24K-message inbox.
-            scan_cap = min(
-                max(max_emails * 10, SCAN_BOUNDS["INBOX_DEFAULT_CAP"] // 2),
-                SCAN_BOUNDS["INBOX_MAX_CAP"],
-            )
-            bounded = build_bounded_message_scan(
-                "inboxMailbox",
-                scan_cap,
-                whose_condition="read status is false",
-            )
-            collection = (
-                f'{bounded}\n'
-                f'            set inboxMessages to candidateMessages\n'
-                f'            if (count of inboxMessages) > {max_emails} then '
-                f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
-            )
-        else:
-            bounded = build_bounded_message_scan("inboxMailbox", max_emails)
-            collection = (
-                f'{bounded}\n'
-                f'            set inboxMessages to candidateMessages'
-            )
-    else:
-        # max_emails == 0 path is unreachable from the tool entry point
-        # (UNBOUNDED_SCAN_REQUIRED is raised first) but kept for internal
-        # callers and backward compatibility.
-        if not include_read:
-            collection = (
-                'set inboxMessages to (messages of inboxMailbox '
-                'whose read status is false)'
-            )
-        else:
-            collection = 'set inboxMessages to messages of inboxMailbox'
+    collection = _build_inbox_collection_block(max_emails, include_read)
 
     return f"""
     tell application "Mail"
@@ -185,7 +180,7 @@ def _build_list_inbox_text_script(
                 set sentCount to 0
                 repeat with aMessage in inboxMessages
                     set currentIndex to currentIndex + 1
-                    if {max_emails} > 0 and currentIndex > {max_emails} then exit repeat
+                    if currentIndex > {max_emails} then exit repeat
 
                     try
                         set messageSubject to subject of aMessage
@@ -234,42 +229,10 @@ def _build_list_inbox_json_script(
     ``|||<internet-message-id>`` field between the account name and the
     optional content preview. Callers use this for replied-detection.
     """
+    assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
 
-    if max_emails > 0:
-        if not include_read:
-            scan_cap = min(
-                max(max_emails * 10, SCAN_BOUNDS["INBOX_DEFAULT_CAP"] // 2),
-                SCAN_BOUNDS["INBOX_MAX_CAP"],
-            )
-            bounded = build_bounded_message_scan(
-                "inboxMailbox",
-                scan_cap,
-                whose_condition="read status is false",
-            )
-            collection = (
-                f'{bounded}\n'
-                f'            set inboxMessages to candidateMessages\n'
-                f'            if (count of inboxMessages) > {max_emails} then '
-                f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
-            )
-        else:
-            bounded = build_bounded_message_scan("inboxMailbox", max_emails)
-            collection = (
-                f'{bounded}\n'
-                f'            set inboxMessages to candidateMessages'
-            )
-    else:
-        # max_emails == 0 path is unreachable from the tool entry point
-        # (UNBOUNDED_SCAN_REQUIRED is raised first) but kept for internal
-        # callers and backward compatibility.
-        if not include_read:
-            collection = (
-                'set inboxMessages to (messages of inboxMailbox '
-                'whose read status is false)'
-            )
-        else:
-            collection = 'set inboxMessages to messages of inboxMailbox'
+    collection = _build_inbox_collection_block(max_emails, include_read)
 
     if include_content:
         content_field = (
@@ -314,7 +277,7 @@ def _build_list_inbox_json_script(
             set currentIndex to 0
             repeat with aMessage in inboxMessages
                 set currentIndex to currentIndex + 1
-                if {max_emails} > 0 and currentIndex > {max_emails} then exit repeat
+                if currentIndex > {max_emails} then exit repeat
                 try
                     set messageSubject to subject of aMessage
                     set messageSender to sender of aMessage

@@ -47,13 +47,27 @@ TOOLS_DIR = ROOT / "plugin" / "apple_mail_mcp" / "tools"
 #                                      line; we validate the continuation
 #                                      separately via the multi-line check)
 DANGEROUS_WHOSE = re.compile(
-    r"\bevery message of \w+\s+whose\s+(?!id is\b|read status is\b|\{id_condition\}|\")"
+    r"\bevery message of (?:\w+|__VAR__)\s+whose\s+(?!id is\b|read status is\b|\{id_condition\}|\")"
 )
 
 # Bans `every message of <mailbox>` with NO `whose` at all — that is a raw
 # full-mailbox enumeration. Mailbox identifiers may end with ``Mailbox`` or
 # be bare; in either case the next token must be ``whose``.
-RAW_ENUMERATION = re.compile(r"\bevery message of \w+\b(?!\s+whose)")
+RAW_ENUMERATION = re.compile(r"\bevery message of (?:\w+|__VAR__)\b(?!\s+whose)")
+
+# Normalize Python f-string placeholders so the static scan also catches
+# `every message of {mailbox_var} whose ...` patterns — the original
+# `\w+` token class never matched the curly-brace prefix. Only normalize
+# the mailbox-position placeholder (i.e. an f-string brace immediately
+# preceded by "every message of "). Other `{...}` substitutions (notably
+# `{id_condition}` after `whose`) must remain so the allowlist regex
+# negative lookahead still matches.
+_MAILBOX_FSTRING = re.compile(r"(?<=every message of )\{[^}]+\}")
+
+
+def _normalize_line(line: str) -> str:
+    """Replace mailbox-position `{...}` placeholders with `__VAR__`."""
+    return _MAILBOX_FSTRING.sub("__VAR__", line)
 
 # Known offenders that pre-date this enforcement and whose fix lives in a
 # follow-on PR. Each entry is (path_relative_to_tools, line_number,
@@ -66,7 +80,7 @@ KNOWN_DANGEROUS_WHOSE: set[Tuple[str, int]] = {
     # mailbox is local and typically small, so the regression window is
     # narrow — but the pattern is the exact one Phase A is meant to ban.
     # Tracked for Phase B follow-up.
-    ("compose.py", 122),
+    ("compose.py", 142),
 }
 
 
@@ -117,7 +131,7 @@ class NoDangerousWhoseTests(unittest.TestCase):
                 for lineno, line in enumerate(fh, 1):
                     if _is_docstring_or_comment_line(line):
                         continue
-                    if DANGEROUS_WHOSE.search(line):
+                    if DANGEROUS_WHOSE.search(_normalize_line(line)):
                         key = (rel, lineno)
                         found.add(key)
                         details.append(f"{rel}:{lineno}: {line.rstrip()}")
@@ -151,7 +165,7 @@ class NoDangerousWhoseTests(unittest.TestCase):
                 for lineno, line in enumerate(fh, 1):
                     if _is_docstring_or_comment_line(line):
                         continue
-                    if RAW_ENUMERATION.search(line):
+                    if RAW_ENUMERATION.search(_normalize_line(line)):
                         offenders.append(f"{rel}:{lineno}: {line.rstrip()}")
 
         self.assertEqual(

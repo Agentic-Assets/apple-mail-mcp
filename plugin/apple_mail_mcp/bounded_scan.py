@@ -8,15 +8,9 @@ bounded-slice-before-``whose`` pattern these helpers encode.
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from apple_mail_mcp.backend.base import ScanWindow, ToolError
 from apple_mail_mcp.core import normalize_message_ids
 
-
-# ---------------------------------------------------------------------------
-# Module constants
-# ---------------------------------------------------------------------------
 
 MAX_SCAN_DAYS = 365
 MAX_SCAN_LIMIT = 10_000
@@ -24,9 +18,12 @@ MAX_SCAN_LIMIT = 10_000
 _ISSUER = "core.bounded_inbox_scan"
 
 
-# ---------------------------------------------------------------------------
-# ScanWindow factory (the only place that may issue a valid token)
-# ---------------------------------------------------------------------------
+def _unbounded_remediation(mailbox: str) -> dict:
+    return {
+        "preferred": "Pass recent_days=7 or limit=200",
+        "fallback_tool": "full_inbox_export",
+        "fallback_tool_args": {"mailbox": mailbox},
+    }
 
 
 def bounded_inbox_scan(
@@ -60,11 +57,7 @@ def bounded_inbox_scan(
                     f"recent_days must be in (0, {MAX_SCAN_DAYS}]; got "
                     f"{recent_days!r}."
                 ),
-                remediation={
-                    "preferred": "Pass recent_days=7 or limit=200",
-                    "fallback_tool": "full_inbox_export",
-                    "fallback_tool_args": {"mailbox": mailbox},
-                },
+                remediation=_unbounded_remediation(mailbox),
             )
         bounded = True
 
@@ -75,11 +68,7 @@ def bounded_inbox_scan(
                 message=(
                     f"limit must be in (0, {MAX_SCAN_LIMIT}]; got {limit!r}."
                 ),
-                remediation={
-                    "preferred": "Pass recent_days=7 or limit=200",
-                    "fallback_tool": "full_inbox_export",
-                    "fallback_tool_args": {"mailbox": mailbox},
-                },
+                remediation=_unbounded_remediation(mailbox),
             )
         bounded = True
 
@@ -88,11 +77,7 @@ def bounded_inbox_scan(
             raise ToolError(
                 code="UNBOUNDED_SCAN_REQUIRED",
                 message=f"since must be a positive epoch timestamp; got {since!r}.",
-                remediation={
-                    "preferred": "Pass recent_days=7 or limit=200",
-                    "fallback_tool": "full_inbox_export",
-                    "fallback_tool_args": {"mailbox": mailbox},
-                },
+                remediation=_unbounded_remediation(mailbox),
             )
         bounded = True
 
@@ -103,11 +88,7 @@ def bounded_inbox_scan(
                 "bounded_inbox_scan requires at least one of recent_days, "
                 "limit, or since."
             ),
-            remediation={
-                "preferred": "Pass recent_days=7 or limit=200",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {"mailbox": mailbox},
-            },
+            remediation=_unbounded_remediation(mailbox),
         )
 
     return ScanWindow(
@@ -117,11 +98,6 @@ def bounded_inbox_scan(
         since=since,
         _issued_by=_ISSUER,
     )
-
-
-# ---------------------------------------------------------------------------
-# AppleScript snippet builders
-# ---------------------------------------------------------------------------
 
 
 def build_bounded_message_scan(
@@ -175,7 +151,6 @@ def compute_scan_upper_bound(
     """
     if recent_days is None or recent_days <= 0:
         return base_cap
-    # Roughly: 50 messages per day, clamped between base_cap and window_cap.
     scaled = int(base_cap + (recent_days * 50))
     if scaled < base_cap:
         return base_cap
@@ -184,7 +159,7 @@ def compute_scan_upper_bound(
     return scaled
 
 
-def build_whose_id_list(message_ids: List[str]) -> str:
+def build_whose_id_list(message_ids: list[str]) -> str:
     """Return an AppleScript ``id is X or id is Y`` snippet for targeted ops.
 
     Input is validated through ``core.normalize_message_ids`` so only
@@ -192,7 +167,7 @@ def build_whose_id_list(message_ids: List[str]) -> str:
     write-path use of ``whose`` (small, in-process id list, no remote
     materialization).
     """
-    clean: List[str] = normalize_message_ids(message_ids)
+    clean = normalize_message_ids(message_ids)
     if not clean:
         raise ToolError(
             code="INVALID_SCAN_WINDOW",
@@ -209,7 +184,3 @@ __all__ = [
     "compute_scan_upper_bound",
     "build_whose_id_list",
 ]
-
-
-# Silence unused-import warnings for re-exported helpers used in docstrings.
-_ = Optional

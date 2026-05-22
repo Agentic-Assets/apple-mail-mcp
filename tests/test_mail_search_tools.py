@@ -967,11 +967,16 @@ class GetEmailThreadTests(unittest.TestCase):
                 recent_days=0,
             )
 
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result.get("code"), "UNBOUNDED_SCAN_REQUIRED")
-        self.assertTrue(result.get("error"))
+        # get_email_thread is `-> str`; the unbounded-scan envelope is
+        # JSON-encoded so callers always get the structured remediation.
+        self.assertIsInstance(result, str)
+        import json as _json
+        parsed = _json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertTrue(parsed.get("error"))
         self.assertEqual(
-            result.get("remediation", {}).get("fallback_tool"),
+            parsed.get("remediation", {}).get("fallback_tool"),
             "full_inbox_export",
         )
         self.assertNotIn("script", captured)

@@ -8,16 +8,20 @@ edge of every Mail.app call.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from apple_mail_mcp import core
-from apple_mail_mcp.bounded_scan import build_bounded_message_scan
 from apple_mail_mcp.backend.base import (
     InvalidationScope,
     MailBackend,
     ScanWindow,
     ToolError,
     WriteResult,
+)
+from apple_mail_mcp.bounded_scan import (
+    MAX_SCAN_LIMIT,
+    build_bounded_message_scan,
+    compute_scan_upper_bound,
 )
 
 
@@ -42,6 +46,34 @@ def _check_window(window: ScanWindow) -> None:
         )
 
 
+def _raise_not_implemented(method: str) -> NoReturn:
+    raise ToolError(
+        code="BACKEND_NOT_IMPLEMENTED",
+        message=(
+            f"{method} is reserved for the Phase B SQLite backend "
+            "and is not implemented in the AppleScriptBackend yet"
+        ),
+        remediation={
+            "preferred": (
+                "Call the legacy tool function directly until Phase B lands"
+            ),
+        },
+    )
+
+
+def _parse_message_row(line: str) -> dict[str, Any] | None:
+    parts = line.split("\t")
+    if len(parts) < 5:
+        return None
+    return {
+        "id": parts[0],
+        "subject": parts[1],
+        "sender": parts[2],
+        "date": parts[3],
+        "read": parts[4].lower() == "true",
+    }
+
+
 class AppleScriptBackend(MailBackend):
     """Thin wrapper that builds AppleScript snippets and runs them via core."""
 
@@ -62,29 +94,16 @@ class AppleScriptBackend(MailBackend):
     ) -> list[dict[str, Any]]:
         _check_window(window)
 
-        # Resolve a numeric upper bound from the ScanWindow. We prefer
-        # explicit ``limit``, otherwise fall back to a conservative cap
-        # derived from ``recent_days`` (callers should use
-        # ``compute_scan_upper_bound`` for finer control).
-        from apple_mail_mcp.bounded_scan import (
-            MAX_SCAN_LIMIT,
-            compute_scan_upper_bound,
-        )
-
         if window.limit is not None:
             limit = min(int(window.limit), MAX_SCAN_LIMIT)
         elif window.recent_days is not None:
             limit = compute_scan_upper_bound(window.recent_days)
         else:
-            # Defensive: bounded_inbox_scan should have rejected this,
-            # but keep a sane upper bound just in case.
+            # Defensive: bounded_inbox_scan should have rejected this.
             limit = 200
 
         whose_condition = None if include_read else "read status is false"
         escaped_mailbox = core.escape_applescript(window.mailbox)
-
-        # Build a self-contained script that resolves the mailbox by
-        # iterating every account, then runs the bounded slice helper.
         slice_snippet = build_bounded_message_scan(
             "targetMailbox", limit, whose_condition
         )
@@ -119,18 +138,9 @@ class AppleScriptBackend(MailBackend):
         raw = core.run_applescript(script)
         results: list[dict[str, Any]] = []
         for line in raw.splitlines():
-            parts = line.split("\t")
-            if len(parts) < 5:
-                continue
-            results.append(
-                {
-                    "id": parts[0],
-                    "subject": parts[1],
-                    "sender": parts[2],
-                    "date": parts[3],
-                    "read": parts[4].lower() == "true",
-                }
-            )
+            row = _parse_message_row(line)
+            if row is not None:
+                results.append(row)
         return results
 
     def count_messages(
@@ -140,10 +150,7 @@ class AppleScriptBackend(MailBackend):
         include_read: bool = True,
     ) -> int:
         _check_window(window)
-        # TODO(wave-2): implement with bounded slice + count.
-        raise NotImplementedError(
-            "AppleScriptBackend.count_messages — wave-2 migration."
-        )
+        _raise_not_implemented("count_messages")
 
     def search_messages(
         self,
@@ -154,10 +161,7 @@ class AppleScriptBackend(MailBackend):
         subject: str | None = None,
     ) -> list[dict[str, Any]]:
         _check_window(window)
-        # TODO(wave-2): implement using build_bounded_message_scan + filter snippet.
-        raise NotImplementedError(
-            "AppleScriptBackend.search_messages — wave-2 migration."
-        )
+        _raise_not_implemented("search_messages")
 
     def get_message_by_id(
         self,
@@ -198,16 +202,7 @@ class AppleScriptBackend(MailBackend):
         raw = core.run_applescript(script).strip()
         if not raw:
             return None
-        parts = raw.split("\t")
-        if len(parts) < 5:
-            return None
-        return {
-            "id": parts[0],
-            "subject": parts[1],
-            "sender": parts[2],
-            "date": parts[3],
-            "read": parts[4].lower() == "true",
-        }
+        return _parse_message_row(raw)
 
     def list_mailboxes(
         self,
@@ -256,8 +251,7 @@ class AppleScriptBackend(MailBackend):
         return results
 
     def list_accounts(self) -> list[dict[str, Any]]:
-        names = core.list_mail_account_names()
-        return [{"name": n} for n in names]
+        return [{"name": n} for n in core.list_mail_account_names()]
 
     # ----------------------------------------------------------------- write
 
@@ -268,10 +262,7 @@ class AppleScriptBackend(MailBackend):
         target_mailbox: str,
         message_ids: list[str],
     ) -> WriteResult:
-        # TODO(wave-2): migrate manage.py:move_email through this seam.
-        raise NotImplementedError(
-            "AppleScriptBackend.move_messages — wave-2 migration."
-        )
+        _raise_not_implemented("move_messages")
 
     def update_status(
         self,
@@ -281,10 +272,7 @@ class AppleScriptBackend(MailBackend):
         read: bool | None = None,
         flagged: bool | None = None,
     ) -> WriteResult:
-        # TODO(wave-2): migrate manage.py:update_email_status through this seam.
-        raise NotImplementedError(
-            "AppleScriptBackend.update_status — wave-2 migration."
-        )
+        _raise_not_implemented("update_status")
 
     def empty_trash(
         self,
@@ -292,10 +280,7 @@ class AppleScriptBackend(MailBackend):
         account: str,
         older_than_days: int | None = None,
     ) -> WriteResult:
-        # TODO(wave-2): migrate manage.py:manage_trash through this seam.
-        raise NotImplementedError(
-            "AppleScriptBackend.empty_trash — wave-2 migration."
-        )
+        _raise_not_implemented("empty_trash")
 
     def invalidate(self, scope: InvalidationScope) -> None:
         # Dormant: no in-process cache yet. Wave-2 will wire this to the

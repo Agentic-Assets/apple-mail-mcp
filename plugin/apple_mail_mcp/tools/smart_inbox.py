@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Union
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
-from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     inject_preferences,
@@ -735,21 +735,23 @@ def get_top_senders(
         Ranked list of senders (or domains) with email counts
     """
     if days_back <= 0:
-        return ToolError(
-            code="UNBOUNDED_SCAN_REQUIRED",
-            message=(
-                "get_top_senders refuses to scan without days_back; "
-                "pass days_back=7 or 30"
-            ),
-            remediation={
-                "preferred": "Pass days_back=7 or 30",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {
-                    "account": account,
-                    "mailbox": mailbox,
+        return serialize_tool_error(
+            ToolError(
+                code="UNBOUNDED_SCAN_REQUIRED",
+                message=(
+                    "get_top_senders refuses to scan without days_back; "
+                    "pass days_back=7 or 30"
+                ),
+                remediation={
+                    "preferred": "Pass days_back=7 or 30",
+                    "fallback_tool": "full_inbox_export",
+                    "fallback_tool_args": {
+                        "account": account,
+                        "mailbox": mailbox,
+                    },
                 },
-            },
-        ).to_dict()
+            )
+        )
 
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT

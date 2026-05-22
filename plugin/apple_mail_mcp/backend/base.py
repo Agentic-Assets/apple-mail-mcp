@@ -9,6 +9,7 @@ directly. See ``tasks/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md``
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -88,6 +89,17 @@ class ToolError(Exception):
             "message": self.message,
             "remediation": self.remediation or {},
         }
+
+
+def serialize_tool_error(error: ToolError) -> str:
+    """Serialize a ``ToolError`` to the standard MCP-boundary JSON envelope.
+
+    All tools wrap structured errors as ``json.dumps(err.to_dict(), indent=2)``
+    so agents receive identical, parseable envelopes regardless of which tool
+    emitted them. Centralizing the shape here keeps the envelope consistent
+    if it ever needs to grow (e.g. trace ids).
+    """
+    return json.dumps(error.to_dict(), indent=2)
 
 
 # ---------------------------------------------------------------------------

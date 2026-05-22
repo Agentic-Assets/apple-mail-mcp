@@ -27,6 +27,7 @@ Otherwise:
 search_emails(subject_keyword="...", has_attachments=true, recent_days=7, limit=20)
 ```
 
+For genuine full-inbox attachment audits (rare), escalate to `full_inbox_export` instead of unbounded `recent_days`.
 Widen timeframe only after checking performance.
 
 ### 2. Inspect Attachments Cheaply
@@ -34,6 +35,8 @@ Widen timeframe only after checking performance.
 ```
 list_email_attachments(subject_keyword="...", max_results=10)
 ```
+
+See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight.
 
 **Large-inbox caveat:** `list_email_attachments(subject_keyword=...)` widens into a full scan if `recent_days` is loose or omitted on a 24k inbox — always co-filter with a tight `recent_days` ceiling (≤7 if possible) or pass `message_ids=[...]` from a prior bounded `search_emails`.
 

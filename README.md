@@ -164,7 +164,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 
 </details>
 
-## Tools (27)
+## Tools (28)
 
 ### Reading & Search
 | Tool | Description |
@@ -216,6 +216,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 100 messages, longer windows 20 × 500 |
 | `export_emails` | Export single emails or full mailboxes to TXT/HTML (default cap 1000) |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
+| `full_inbox_export` | Audited full-inbox walk; only tool that scans every message. Slow (minutes on 24K mailboxes). Named in `UNBOUNDED_SCAN_REQUIRED` remediation as the legitimate fallback. |
 
 ## Configuration
 
@@ -329,6 +330,7 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 | 50 emails max | `list_inbox_emails`, `list_email_attachments` | Pass `max_emails` / `max_results` |
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
+| Unbounded scans refused | All scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; remediation names `full_inbox_export` as the audited full-walk fallback |
 
 When a per-account call fails in a multi-account fan-out, you get partial results plus an `errors` field naming the account. JSON responses also include `error_details` when the tool can distinguish a timeout from another Mail/App permission error.
 

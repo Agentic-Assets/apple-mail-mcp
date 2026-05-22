@@ -13,7 +13,8 @@ from typing import Optional, List, Tuple
 from apple_mail_mcp import server as _server
 from apple_mail_mcp import server  # public alias used by tests
 from apple_mail_mcp.server import mcp, WRITE_TOOL_ANNOTATIONS, DESTRUCTIVE_TOOL_ANNOTATIONS
-from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+from apple_mail_mcp.bounded_scan import build_bounded_message_scan
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
@@ -60,7 +61,18 @@ def _build_found_message_lookup(
     if message_id:
         normalized = normalize_message_ids([message_id])
         if not normalized:
-            return "", "Error: message_id must be a numeric Apple Mail message id"
+            return "", ToolError(
+                code="INVALID_MESSAGE_ID",
+                message=(
+                    "message_id must be a numeric Apple Mail message id."
+                ),
+                remediation={
+                    "preferred": (
+                        "Pass a numeric Apple Mail message id from "
+                        "search_emails or list_inbox_emails"
+                    ),
+                },
+            )
         numeric_id = normalized[0]
         return (
             f"""
@@ -88,17 +100,25 @@ def _build_found_message_lookup(
         )
 
     safe_keyword = escape_applescript(subject_keyword or "")
-    date_setup = ""
+    # Safe bounded-slice-then-filter: slice newest-first window FIRST
+    # (build_bounded_message_scan), THEN apply the subject/date filter
+    # against that small in-memory list. Never ask Mail to materialize an
+    # entire remote mailbox just to evaluate a whose clause.
     whose_parts = [f'subject contains "{safe_keyword}"']
-    if recent_days > 0:
-        date_setup = (
-            f"set recentCutoffDate to (current date) - ({float(recent_days)} * days)\n        "
-        )
-        whose_parts.append("date received >= recentCutoffDate")
+    date_setup = (
+        f"set recentCutoffDate to (current date) - ({float(recent_days)} * days)\n        "
+    )
+    whose_parts.append("date received >= recentCutoffDate")
+    bounded_snippet = build_bounded_message_scan(
+        mailbox_var,
+        MESSAGE_LOOKUP_CAP,
+        whose_condition=" and ".join(whose_parts),
+    )
 
     return (
         f"""
-        {date_setup}set {messages_var} to items 1 thru {MESSAGE_LOOKUP_CAP} of (every message of {mailbox_var} whose {" and ".join(whose_parts)})
+        {date_setup}{bounded_snippet}
+        set {messages_var} to candidateMessages
         set {found_var} to missing value
 
         repeat with aMessage in {messages_var}
@@ -926,7 +946,7 @@ def reply_to_email(
     )
     if lookup_error:
         if isinstance(lookup_error, ToolError):
-            return lookup_error.to_dict()
+            return serialize_tool_error(lookup_error)
         return lookup_error
 
     reply_body = _strip_cdata_wrappers(reply_body) or ""
@@ -1500,7 +1520,7 @@ def forward_email(
     )
     if lookup_error:
         if isinstance(lookup_error, ToolError):
-            return lookup_error.to_dict()
+            return serialize_tool_error(lookup_error)
         return lookup_error
 
     message = _strip_cdata_wrappers(message)

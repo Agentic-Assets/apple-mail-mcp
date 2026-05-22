@@ -38,15 +38,18 @@ class ComposeFullScanGateTests(unittest.TestCase):
                 reply_body="Hi",
                 recent_days=0,
             )
-        # Post-allow_full_scan-retirement: tools return a structured
-        # ToolError envelope steering callers toward message_id or
-        # full_inbox_export instead of a string error.
-        self.assertIsInstance(result, dict)
-        self.assertTrue(result.get("error"))
-        self.assertEqual(result.get("code"), "UNBOUNDED_SCAN_REQUIRED")
-        self.assertIn("recent_days", result.get("message", ""))
+        # Post-allow_full_scan-retirement: tools return a JSON-encoded
+        # ToolError envelope (string) steering callers toward message_id
+        # or full_inbox_export. The tool signature is `-> str`, so the
+        # response must be a string whose JSON body carries the envelope.
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("recent_days", parsed.get("message", ""))
         self.assertEqual(
-            result.get("remediation", {}).get("fallback_tool"),
+            parsed.get("remediation", {}).get("fallback_tool"),
             "full_inbox_export",
         )
         runner.assert_not_called()
@@ -59,11 +62,13 @@ class ComposeFullScanGateTests(unittest.TestCase):
                 to="x@example.com",
                 recent_days=0,
             )
-        self.assertIsInstance(result, dict)
-        self.assertTrue(result.get("error"))
-        self.assertEqual(result.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
         self.assertEqual(
-            result.get("remediation", {}).get("fallback_tool"),
+            parsed.get("remediation", {}).get("fallback_tool"),
             "full_inbox_export",
         )
         runner.assert_not_called()
@@ -92,18 +97,21 @@ class ComposeFullScanGateTests(unittest.TestCase):
 
 class StatisticsFullScanGateTests(unittest.TestCase):
     def test_statistics_blocks_days_back_zero_text(self):
-        # v3.1.11: ``allow_full_scan`` retired — days_back<=0 always returns
-        # a structured ``UNBOUNDED_SCAN_REQUIRED`` ToolError dict.
+        # v3.1.11+: ``allow_full_scan`` retired — days_back<=0 returns a
+        # JSON-encoded ``UNBOUNDED_SCAN_REQUIRED`` ToolError envelope as a
+        # string (consistent with the `-> str` tool signature).
         result = analytics_tools.get_statistics(
             account="Work",
             scope="account_overview",
             days_back=0,
         )
-        self.assertIsInstance(result, dict)
-        self.assertTrue(result.get("error"))
-        self.assertEqual(result.get("code"), "UNBOUNDED_SCAN_REQUIRED")
-        self.assertIn("days_back", result.get("message", ""))
-        remediation = result.get("remediation") or {}
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("days_back", parsed.get("message", ""))
+        remediation = parsed.get("remediation") or {}
         self.assertEqual(remediation.get("fallback_tool"), "full_inbox_export")
 
     def test_statistics_blocks_days_back_zero_json(self):
@@ -113,9 +121,10 @@ class StatisticsFullScanGateTests(unittest.TestCase):
             days_back=0,
             output_format="json",
         )
-        # JSON-mode error returns the same ToolError dict shape.
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        # JSON-mode error returns the same ToolError envelope as a string.
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
 
     def test_statistics_no_longer_accepts_allow_full_scan(self):
         # v3.1.11: allow_full_scan removed from the signature.
@@ -130,16 +139,19 @@ class StatisticsFullScanGateTests(unittest.TestCase):
 
 class TopSendersFullScanGateTests(unittest.TestCase):
     def test_top_senders_blocks_days_back_zero(self):
-        # v3.1.11: ``allow_full_scan`` retired — days_back<=0 returns a
-        # structured ``UNBOUNDED_SCAN_REQUIRED`` ToolError dict.
+        # v3.1.11+: ``allow_full_scan`` retired — days_back<=0 returns a
+        # JSON-encoded ``UNBOUNDED_SCAN_REQUIRED`` ToolError envelope as a
+        # string (consistent with the `-> str` tool signature).
         result = smart_inbox_tools.get_top_senders(
             account="Work",
             days_back=0,
         )
-        self.assertIsInstance(result, dict)
-        self.assertTrue(result.get("error"))
-        self.assertEqual(result.get("code"), "UNBOUNDED_SCAN_REQUIRED")
-        remediation = result.get("remediation") or {}
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        remediation = parsed.get("remediation") or {}
         self.assertEqual(remediation.get("fallback_tool"), "full_inbox_export")
 
     def test_top_senders_no_longer_accepts_allow_full_scan(self):

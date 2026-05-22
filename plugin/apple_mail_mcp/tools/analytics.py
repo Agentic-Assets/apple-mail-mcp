@@ -12,10 +12,6 @@ from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_AN
 
 logger = logging.getLogger(__name__)
 
-try:  # pragma: no cover - import guard
-    from mcp.server.fastmcp import Context as _MCPContext
-except Exception:  # pragma: no cover - defensive
-    _MCPContext = None  # type: ignore[assignment]
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     inject_preferences,
@@ -408,21 +404,24 @@ def get_statistics(
         return "Error: Invalid output_format. Use: text, json"
 
     if days_back <= 0:
-        return ToolError(
-            code="UNBOUNDED_SCAN_REQUIRED",
-            message=(
-                "get_statistics refuses to scan without days_back; "
-                "pass days_back=7 or 30"
-            ),
-            remediation={
-                "preferred": "Pass days_back=7 or 30",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {
-                    "account": account,
-                    "scope": scope,
+        return json.dumps(
+            ToolError(
+                code="UNBOUNDED_SCAN_REQUIRED",
+                message=(
+                    "get_statistics refuses to scan without days_back; "
+                    "pass days_back=7 or 30"
+                ),
+                remediation={
+                    "preferred": "Pass days_back=7 or 30",
+                    "fallback_tool": "full_inbox_export",
+                    "fallback_tool_args": {
+                        "account": account,
+                        "scope": scope,
+                    },
                 },
-            },
-        ).to_dict()
+            ).to_dict(),
+            indent=2,
+        )
 
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT
@@ -1131,25 +1130,24 @@ _FULL_EXPORT_ROW_SEP = "\x1e"  # ASCII record separator — safe vs newlines
 _FULL_EXPORT_ERROR_PREFIX = "__APPLE_MAIL_MCP_FULL_EXPORT_ERROR__|||"
 
 
+_FULL_EXPORT_FIELD_EXPRS: Dict[str, str] = {
+    "subject": "(subject of aMessage)",
+    "sender": "(sender of aMessage)",
+    "date_received": "((date received of aMessage) as string)",
+    "date_sent": "((date sent of aMessage) as string)",
+    "read_status": "((read status of aMessage) as string)",
+    "flagged_status": "((flagged status of aMessage) as string)",
+    "message_id": "((id of aMessage) as string)",
+    "mailbox": '"INBOX"',
+}
+
+
 def _full_export_field_script(field: str) -> str:
     """Return AppleScript expression that yields *field* for ``aMessage``."""
-    if field == "subject":
-        return "(subject of aMessage)"
-    if field == "sender":
-        return "(sender of aMessage)"
-    if field == "date_received":
-        return "((date received of aMessage) as string)"
-    if field == "date_sent":
-        return "((date sent of aMessage) as string)"
-    if field == "read_status":
-        return '(if (read status of aMessage) then "true" else "false")'
-    if field == "flagged_status":
-        return '(if (flagged status of aMessage) then "true" else "false")'
-    if field == "message_id":
-        return "((id of aMessage) as string)"
-    if field == "mailbox":
-        return '"INBOX"'
-    raise ValueError(f"Unsupported field: {field}")
+    try:
+        return _FULL_EXPORT_FIELD_EXPRS[field]
+    except KeyError:
+        raise ValueError(f"Unsupported field: {field}") from None
 
 
 def _full_export_batch_script(
@@ -1172,20 +1170,19 @@ def _full_export_batch_script(
     safe_account = escape_applescript(account)
     safe_mailbox = escape_applescript(mailbox)
 
-    # Concatenate per-field expressions inline. Wrap each field in a `try`
-    # so a single bad message doesn't abort the entire batch.
-    pieces: List[str] = []
-    for idx, field in enumerate(fields):
-        if idx > 0:
-            pieces.append(f'"{_FULL_EXPORT_FIELD_SEP}"')
-        pieces.append(
+    # Wrap each field expression in a `try` so a single bad message doesn't
+    # abort the entire batch, then concatenate them with the field separator.
+    field_exprs = [
+        (
             "(try\n"
             f"        {_full_export_field_script(field)}\n"
             "    on error\n"
             '        ""\n'
             "    end try)"
         )
-    row_expr = " & ".join(pieces)
+        for field in fields
+    ]
+    row_expr = f' & "{_FULL_EXPORT_FIELD_SEP}" & '.join(field_exprs)
 
     return f'''
     tell application "Mail"

@@ -56,9 +56,15 @@ class ComposeScanCapTests(unittest.TestCase):
                 reply_body="Thanks",
             )
 
-        self.assertIn("items 1 thru 100", captured[0])
+        # Bounded-slice-then-filter: bind a capped newest-first window
+        # FIRST (messages 1 thru 100), THEN apply the in-memory whose
+        # filter against `candidateMessages`.
+        self.assertIn("messages 1 thru 100 of inboxMailbox", captured[0])
+        self.assertIn(
+            "candidateMessages whose subject contains \"Invoice\"",
+            captured[0],
+        )
         self.assertIn("date received >= recentCutoffDate", captured[0])
-        self.assertIn('subject contains "Invoice"', captured[0])
 
     def test_reply_to_email_message_id_skips_subject_scan(self):
         captured = []
@@ -78,7 +84,7 @@ class ComposeScanCapTests(unittest.TestCase):
             )
 
         self.assertIn("whose id is 12345", captured[0])
-        self.assertNotIn("items 1 thru 100", captured[0])
+        self.assertNotIn("messages 1 thru 100 of inboxMailbox", captured[0])
 
     def test_forward_email_subject_lookup_uses_whose_and_cap(self):
         captured = []
@@ -94,7 +100,11 @@ class ComposeScanCapTests(unittest.TestCase):
                 to="other@example.com",
             )
 
-        self.assertIn("items 1 thru 100", captured[0])
+        self.assertIn("messages 1 thru 100 of targetMailbox", captured[0])
+        self.assertIn(
+            "candidateMessages whose subject contains \"Invoice\"",
+            captured[0],
+        )
         self.assertIn("date received >= recentCutoffDate", captured[0])
 
     def test_forward_email_forwards_timeout_to_run_applescript(self):

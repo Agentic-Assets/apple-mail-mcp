@@ -165,5 +165,35 @@ class FullInboxExportTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class FullExportFieldScriptTests(unittest.TestCase):
+    """The per-field AppleScript snippets must avoid inline if-then-else."""
+
+    def test_read_status_uses_as_string_not_inline_if(self):
+        snippet = analytics_tools._full_export_field_script("read_status")
+        self.assertNotIn("if (", snippet)
+        self.assertIn("as string", snippet)
+        self.assertIn("read status of aMessage", snippet)
+
+    def test_flagged_status_uses_as_string_not_inline_if(self):
+        snippet = analytics_tools._full_export_field_script("flagged_status")
+        self.assertNotIn("if (", snippet)
+        self.assertIn("as string", snippet)
+        self.assertIn("flagged status of aMessage", snippet)
+
+    def test_batch_script_has_no_inline_if_for_default_fields(self):
+        script = analytics_tools._full_export_batch_script(
+            account="Work",
+            mailbox="INBOX",
+            start_index=1,
+            end_index=10,
+            fields=list(_FULL_EXPORT_DEFAULT_FIELDS) + ["flagged_status"],
+        )
+        # No inline `if ( ... ) then "..." else "..."` should remain for
+        # the bool-typed field branches.
+        self.assertNotIn('then "true" else "false"', script)
+        self.assertIn("(read status of aMessage) as string", script)
+        self.assertIn("(flagged status of aMessage) as string", script)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
