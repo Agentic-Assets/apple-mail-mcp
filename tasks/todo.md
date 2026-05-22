@@ -85,7 +85,7 @@ Cross-session source of truth. In-conversation tasks are ephemeral; **this file 
 
 ## Maintenance
 
-- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (249 tests).
+- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (266 tests).
 - After manifests/skills: `bash tools/validate_manifests.sh` + `plugin-dev:plugin-validator` (+ `plugin-dev:skill-reviewer` for skill body/frontmatter).
 - Routine live gate: `export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"` then `quick-check --json` or `perf-test --json`.
 - Heavy analysis gate requires explicit opt-in: `perf-test --include-analysis --allow-heavy-mail-scan --json`. Do not run this during routine agent testing because it can make Mail.app fetch remote message state on large accounts.
@@ -96,7 +96,7 @@ Cross-session source of truth. In-conversation tasks are ephemeral; **this file 
 
 See [`archive/2026-05-21/README.md`](archive/2026-05-21/README.md). Highlights:
 
-- [x] 27 tools, 206 tests at 3.1.6 archive *(249 tests now)*, manifest CI guards, ToolAnnotations on all tools.
+- [x] 27 tools, 206 tests at 3.1.6 archive *(266 tests now)*, manifest CI guards, ToolAnnotations on all tools.
 - [x] `quick-check` / `perf-test` / `smoke-test` CLI + `docs/AGENT_LIVE_TESTING.md`.
 - [x] `inbox_dashboard` async fix, account validation, scan caps (Phase 2).
 - [x] Compose → `run_applescript()`, address dedup, `SENSITIVE_DIRS` in core.
