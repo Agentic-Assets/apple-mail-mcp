@@ -41,7 +41,7 @@ Deliver a concise artifact (bullet list acceptable) containing:
 
 ### 4. Wire Into Draft Flow
 
-Always cross-link to **`email-drafting`** for actual compose operations. Mention when **draft-safe** mode means output must stop at drafts pending human send.
+Always cross-link to **`email-drafting`** for actual compose operations. Mention when **draft-safe** mode means output must stop at drafts pending human send. Reply-style examples must be authored via `reply_to_email`, not `compose_email` or `create_rich_email_draft`; the latter now refuse `Re:`/`Fwd:` drafts unless `standalone_confirmed=True`.
 
 ### 5. Maintain And Refresh
 

@@ -110,6 +110,7 @@ If step 4 edited any `plugin/skills/*/SKILL.md`, delegate to `plugin-dev:skill-r
 - [ ] plugin-validator PASS after fixes
 - [ ] Behavior described in docs matches `compose.py` / other tool defaults
 - [ ] No stale "open by default" or subject-matching guidance where `message_id` is preferred
+- [ ] No skill suggests `compose_email` / `create_rich_email_draft` / `manage_drafts(action="create")` for replies; `standalone_confirmed=True` is documented where standalone-with-Re: is legitimate
 - [ ] `email-drafting` and `apple-mail-operator` skills agree with README draft-safe section
 - [ ] No secrets or local paths committed
 - [ ] Unrelated dirty files left unstaged

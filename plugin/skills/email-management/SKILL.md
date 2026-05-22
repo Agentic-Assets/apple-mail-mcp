@@ -138,7 +138,7 @@ Goal: drain the inbox by processing every message exactly once.
    - Delete: spam, expired notifications — `manage_trash(action="move_to_trash")`.
    - Delegate: forward — use **`email-drafting`** (`forward_email` tool) after user confirms recipients.
    - Defer: flag and move to a "Follow Up" mailbox.
-   - Do: respond now if under two minutes — use **`email-drafting`** (compose stack); never auto-send under `--draft-safe`.
+   - Do: respond now if under two minutes — use **`email-drafting`** (compose stack); never auto-send under `--draft-safe`. Always route replies through `reply_to_email(message_id=...)`; `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
    - File: `move_email(to_mailbox="...")` for reference material.
 3. Keep folders sparing: an "Action Required", "Waiting For", and "Reference" trio handles most cases.
 4. Maintain daily — Inbox Zero is a habit, not a one-time event.
