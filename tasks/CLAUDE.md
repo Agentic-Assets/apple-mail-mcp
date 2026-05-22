@@ -13,8 +13,10 @@ When executing [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-pl
 
 | File | Role |
 |------|------|
-| [`todo.md`](todo.md) | **Rolling backlog** — checkboxes, paths, what's next. Prune done items. |
+| [`INDEX.md`](INDEX.md) | **Navigation index** — active files, reference files, archives. |
+| [`todo.md`](todo.md) | **Tiny active pointer** — branch, active workstream, next action, blockers, latest verification. |
 | [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) | **Active robustness goal** — whole-plugin audit, packaging, live gates, artifacts. |
+| [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md) | **Backlog sidecar** — detailed robustness tasks that no longer belong in `todo.md`. |
 | [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) | **Historical release sequencing** — phases 1→4 after 3.1.6 hardening. Keep useful items but verify against current 3.1.8 state. |
 | [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) | **Live perf numbers** — production vs light account; root-cause notes. |
 | [`id-first-refactor-spec.md`](id-first-refactor-spec.md) | Future spec (3.1.8+) — not in current phase plan. |
@@ -38,7 +40,7 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
 
 ## Maintenance
 
-- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (273 tests)
+- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (276 tests)
 - After manifests: `bash tools/validate_manifests.sh` + `plugin-dev:plugin-validator`
 - After skills: `plugin-dev:skill-reviewer` (+ manifest validator if marketing copy changed)
 - Live workflow: [`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import glob
 import json
+import os
 import re
 import sys
 import zipfile
@@ -98,9 +99,13 @@ def _compare_zip_members(
     expected: list[tuple[Path, str]],
     label: str,
     errors: list[str],
+    *,
+    require_present: bool = False,
 ) -> None:
     """Compare selected repo files to their distributable archive members."""
     if not archive.exists():
+        if require_present:
+            errors.append(f"{label}: missing archive; rebuild {archive.name}")
         return
 
     try:
@@ -177,7 +182,16 @@ Support & source: https://github.com/agenticassets/apple-mail-mcp
 """.encode()
 
 
-def _check_artifact_freshness(expected_version: str, errors: list[str]) -> None:
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _check_artifact_freshness(
+    expected_version: str,
+    errors: list[str],
+    *,
+    require_artifacts: bool = False,
+) -> None:
     plugin_expected = [
         (ROOT / "plugin" / rel, f"plugin/{rel.as_posix()}")
         for rel in _iter_plugin_payload_files()
@@ -187,6 +201,7 @@ def _check_artifact_freshness(expected_version: str, errors: list[str]) -> None:
         plugin_expected,
         "apple-mail-plugin.zip",
         errors,
+        require_present=require_artifacts,
     )
 
     mcpb = ROOT / f"apple-mail-mcp-v{expected_version}.mcpb"
@@ -207,7 +222,13 @@ def _check_artifact_freshness(expected_version: str, errors: list[str]) -> None:
             if "__pycache__" in rel.parts or path.suffix == ".pyc":
                 continue
             mcpb_expected.append((path, f"{subdir}/{rel.as_posix()}"))
-    _compare_zip_members(mcpb, mcpb_expected, mcpb.name, errors)
+    _compare_zip_members(
+        mcpb,
+        mcpb_expected,
+        mcpb.name,
+        errors,
+        require_present=require_artifacts,
+    )
     if mcpb.exists():
         try:
             with zipfile.ZipFile(mcpb) as zf:
@@ -275,7 +296,11 @@ def main() -> None:
     if only_mcpb:
         errors.append("present in mcpb tools[], missing from code: " + ", ".join(only_mcpb))
 
-    _check_artifact_freshness(expected_version, errors)
+    _check_artifact_freshness(
+        expected_version,
+        errors,
+        require_artifacts=_env_truthy("APPLE_MAIL_REQUIRE_DIST_ARTIFACTS"),
+    )
 
     if errors:
         print("validate_manifests: FAILED", file=sys.stderr)

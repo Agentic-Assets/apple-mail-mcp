@@ -69,6 +69,40 @@ class ValidateManifestsTests(unittest.TestCase):
 
         self.assertEqual(errors, ["artifact.zip: missing payload/source.txt"])
 
+    def test_compare_zip_members_skips_absent_archive_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.txt"
+            source.write_text("current", encoding="utf-8")
+            errors = []
+
+            validate_manifests._compare_zip_members(
+                Path(tmp) / "missing.zip",
+                [(source, "payload/source.txt")],
+                "missing.zip",
+                errors,
+            )
+
+        self.assertEqual(errors, [])
+
+    def test_compare_zip_members_can_require_absent_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.txt"
+            source.write_text("current", encoding="utf-8")
+            errors = []
+
+            validate_manifests._compare_zip_members(
+                Path(tmp) / "missing.zip",
+                [(source, "payload/source.txt")],
+                "missing.zip",
+                errors,
+                require_present=True,
+            )
+
+        self.assertEqual(
+            errors,
+            ["missing.zip: missing archive; rebuild missing.zip"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

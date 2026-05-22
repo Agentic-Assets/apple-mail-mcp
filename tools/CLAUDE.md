@@ -15,9 +15,11 @@ Enforces (source of truth: `pyproject.toml` `[project].version`):
 2. **Tool count claims** — descriptions must match `rg "^@mcp\.tool" … | wc -l` (**27**)
 3. **MCPB name parity** — `@mcp.tool` names ↔ `apple-mail-mcpb/manifest.json` `tools[]`
 4. **Artifact freshness** — when `apple-mail-plugin.zip` or `apple-mail-mcp-v{version}.mcpb` exists locally, selected archive members must match the current plugin source/manifest bytes
+5. **Release artifact presence** — opt in with `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` to require both local distributables before shipping
 
 ```bash
 bash tools/validate_manifests.sh
+APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh
 ```
 
 Skips marketplace `metadata.version` (1.0.0) — see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).

@@ -451,8 +451,47 @@ class SearchToolTests(unittest.TestCase):
 
         self.assertIn("errors", response)
         self.assertEqual(response["errors"], ["TU"])
+        self.assertEqual(
+            response["error_details"],
+            [{"account": "TU", "type": "timeout", "message": "TU"}],
+        )
         self.assertEqual(len(response["items"]), 1)
         self.assertEqual(response["items"][0]["account"], "Work")
+
+    def test_search_emails_per_account_error_includes_error_details(self):
+        def fake_run(script, timeout=120):
+            if "set acctNames to" in script:
+                return "Work\nBroken"
+            if 'account "Broken"' in script:
+                raise RuntimeError("Mail permission denied")
+            return _record_line(701, "Work email", account="Work")
+
+        with _clear_default_mail_account(), patch(
+            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
+        ):
+            response = json.loads(
+                _run(
+                    search_tools.search_emails(
+                        account=None,
+                        subject_keyword="Anything",
+                        output_format="json",
+                        limit=5,
+                    )
+                )
+            )
+
+        self.assertEqual(response["errors"], ["Broken"])
+        self.assertEqual(
+            response["error_details"],
+            [
+                {
+                    "account": "Broken",
+                    "type": "RuntimeError",
+                    "message": "Mail permission denied",
+                }
+            ],
+        )
+        self.assertEqual(len(response["items"]), 1)
 
     def test_search_emails_single_account_skips_account_listing(self):
         """A4b: when an explicit account is passed, the tool must NOT run the

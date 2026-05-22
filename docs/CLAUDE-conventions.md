@@ -25,7 +25,7 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 ### Async + per-account isolation
 
 - Tools that fan out across accounts should be `async def` and dispatch each account via `asyncio.to_thread(run_applescript, …)` + `asyncio.gather(..., return_exceptions=True)`. Wall time ≈ slowest single account, not sum.
-- Pair with per-account `AppleScriptTimeout` catch; append failing accounts to an `errors: list[str]` field. Partial results > total failure.
+- Pair with per-account `AppleScriptTimeout` catch; append failing accounts to an `errors: list[str]` field and include structured error details when a tool can distinguish timeout from another Mail/App failure. Partial results > total failure.
 - Single-account tools (`compose_email`, `move_email`, `manage_drafts`, `get_top_senders`, etc.) stay sync.
 
 ### Timeout exposure

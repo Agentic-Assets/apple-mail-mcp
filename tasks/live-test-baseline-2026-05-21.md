@@ -1,6 +1,6 @@
 # Live test baseline — 2026-05-21
 
-Consolidated results from repo CLI (`.venv/bin/apple-mail`) and generated MCP wrapper (`apple-mail`) on branch `improve-speed-and-tools` after 3.1.6 hardening. **Historical snapshot** — unit test count was 206 at capture time; suite is now **273 tests**. **Use `cayman@agenticassets.ai` as the production perf gate** — it reflects real mailbox depth (194 mailboxes, heavy Exchange/Gmail-style layout). Use `ai.openclaw` only as a light smoke/regression account.
+Consolidated results from repo CLI (`.venv/bin/apple-mail`) and generated MCP wrapper (`apple-mail`) on branch `improve-speed-and-tools` after 3.1.6 hardening. **Historical snapshot** — unit test count was 206 at capture time; suite is now **276 tests**. **Use `cayman@agenticassets.ai` as the production perf gate** — it reflects real mailbox depth (194 mailboxes, heavy Exchange/Gmail-style layout). Use `ai.openclaw` only as a light smoke/regression account.
 
 ## Accounts
 
@@ -19,7 +19,7 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
 
 | Check | Result |
 |-------|--------|
-| `pytest tests/ -q` | **206 passed**, 27 subtests *(273 tests as of the 3.1.8 robustness pass)* |
+| `pytest tests/ -q` | **206 passed**, 27 subtests *(276 tests as of the 3.1.8 robustness pass)* |
 | `tools/validate_manifests.py` | OK (version=3.1.5, tools=27) |
 
 Latest safe wrapper/CLI sweep: root [`LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md).
@@ -69,7 +69,7 @@ The latest generated-wrapper sweep saw the same pattern:
 ## Wrapper / agent ergonomics
 
 - Generated mcporter wrapper: `get-inbox-overview` help only shows `--raw`; repo CLI exposes full flags. Raw JSON path works (~2.7s).
-- Generated wrapper currently **does not expose `get-email-by-id`** even though the Python `@mcp.tool`, MCPB `tools[]`, README, and tests include `get_email_by_id`. Manifest validation is necessary but not sufficient for wrapper parity.
+- Historical note: this baseline originally found the generated wrapper missing `get-email-by-id`; the current robustness pass repaired it and `tools/check_wrapper_surface.py` now guards the command. Manifest validation remains necessary but not sufficient for wrapper parity.
 - The wrapper is generated at `/Users/cayman-mac-mini/.local/bin/apple-mail` by `mcporter@0.11.3`; `apple-mail --help` is the command-surface source of truth for wrapper availability.
 - Some wrapper tools still wrap JSON under `content`/`structuredContent.result` vs direct dict — automation inconsistency.
 

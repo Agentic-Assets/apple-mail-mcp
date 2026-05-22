@@ -9,6 +9,7 @@ Build files for the **`.mcpb`** distributable. Same Python server as [`plugin/`]
 
 ```bash
 cd apple-mail-mcpb && ./build-mcpb.sh
+APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash ../tools/validate_manifests.sh
 ```
 
 Copies `apple_mail_mcp.py`, `start_mcp.sh`, `requirements.txt`, `apple_mail_mcp/`, mirrored `plugin/skills` → **`skills/`** in build output, optional `ui/`. No venv in bundle — user machine creates it via `start_mcp.sh`. Keep embedded README Python 3.10+ claim in sync.
@@ -24,7 +25,7 @@ Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; desc
 | Manifest | `plugin/.claude-plugin/plugin.json` | `manifest.json` |
 | Discovery | `.claude-plugin/marketplace.json` | Direct `.mcpb` install |
 
-Version sync: five files per [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md). Open: `dxt_version` bump in [`tasks/todo.md`](../tasks/todo.md).
+Version sync: five files per [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md). Deferred release/backlog items live in [`tasks/robustness-backlog-2026-05-22.md`](../tasks/robustness-backlog-2026-05-22.md).
 
 ## Related
 
