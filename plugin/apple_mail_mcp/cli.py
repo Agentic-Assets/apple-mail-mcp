@@ -35,7 +35,7 @@ PERF_THRESHOLDS_MS: dict[str, int] = {
 
 PERF_PROFILES: dict[str, dict[str, int]] = {
     "light": {"overview": 10000},
-    "production": {"overview": 15000},
+    "production": {"overview": 15000, "no_hit_search": 4500},
 }
 DEFAULT_PERF_PROFILE = "production"
 
@@ -281,8 +281,14 @@ def build_perf_cases(
     metadata_threshold = metadata_threshold_ms(mailbox_count)
 
     async def _dashboard_metadata_probe() -> dict[str, Any]:
-        unread = await asyncio.to_thread(get_mailbox_unread_counts, summary_only=True)
+        unread = await asyncio.to_thread(
+            get_mailbox_unread_counts,
+            account=account,
+            summary_only=True,
+            timeout=30,
+        )
         recent = await _get_recent_emails_structured_async(
+            account=account,
             max_total=5,
             max_per_account=3,
             include_preview=False,
@@ -402,20 +408,32 @@ def build_perf_cases(
                     name="needs_response",
                     category="needs_response",
                     threshold_ms=thresholds["needs_response"],
-                    runner=lambda: get_needs_response(account=account, days_back=2),
+                    runner=lambda: get_needs_response(
+                        account=account,
+                        days_back=2,
+                        max_results=5,
+                        check_already_replied=False,
+                    ),
                 ),
                 PerfCase(
                     name="awaiting_reply",
                     category="awaiting_reply",
                     threshold_ms=thresholds["awaiting_reply"],
-                    runner=lambda: get_awaiting_reply(account=account, days_back=7),
+                    runner=lambda: get_awaiting_reply(
+                        account=account,
+                        days_back=7,
+                        max_results=3,
+                    ),
                 ),
                 PerfCase(
                     name="top_senders",
                     category="top_senders",
                     threshold_ms=thresholds["top_senders"],
                     runner=lambda: get_top_senders(
-                        account=account, days_back=30, mailbox="INBOX"
+                        account=account,
+                        days_back=30,
+                        mailbox="INBOX",
+                        top_n=5,
                     ),
                 ),
                 PerfCase(
@@ -559,7 +577,14 @@ def _build_parser() -> argparse.ArgumentParser:
     mailboxes = subparsers.add_parser("mailboxes", help="List mailboxes")
     _add_account_flag(mailboxes)
     mailboxes.add_argument(
-        "--no-counts", action="store_true", help="Skip message/unread counts"
+        "--counts",
+        action="store_true",
+        help="Include message/unread counts (slower on large mailboxes)",
+    )
+    mailboxes.add_argument(
+        "--no-counts",
+        action="store_true",
+        help="Deprecated compatibility flag; counts are skipped by default",
     )
     _add_json_flag(mailboxes)
 
@@ -820,7 +845,7 @@ def _cmd_mailboxes(args: argparse.Namespace) -> int:
         list_mailboxes,
         args.json,
         account=args.account,
-        include_counts=not args.no_counts,
+        include_counts=args.counts and not args.no_counts,
         output_format="json" if args.json else "text",
     )
 

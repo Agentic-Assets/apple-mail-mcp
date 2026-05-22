@@ -1,6 +1,8 @@
 """Phase 2 scan-path hardening: compose caps, timeouts."""
 
+import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from apple_mail_mcp.core import AppleScriptTimeout
@@ -209,14 +211,21 @@ class TimeoutForwardingTests(unittest.TestCase):
     def test_save_email_attachment_forwards_timeout(self):
         captured = {}
 
+        def fake_search(**kwargs):
+            captured["search_timeout"] = kwargs["timeout"]
+            return [{"message_id": "777"}]
+
         def fake_run(script, timeout=120):
-            captured["timeout"] = timeout
+            captured["run_timeout"] = timeout
             return "saved"
 
         home = __import__("os").path.expanduser("~")
         save_path = f"{home}/Downloads/test-file.bin"
 
-        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+        with (
+            patch("apple_mail_mcp.tools.manage._search_mail_records", side_effect=fake_search),
+            patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run),
+        ):
             manage_tools.save_email_attachment(
                 account="Work",
                 subject_keyword="Invoice",
@@ -225,14 +234,15 @@ class TimeoutForwardingTests(unittest.TestCase):
                 timeout=90,
             )
 
-        self.assertEqual(captured["timeout"], 90)
+        self.assertEqual(captured["search_timeout"], 90)
+        self.assertEqual(captured["run_timeout"], 90)
 
     def test_save_email_attachment_handles_timeout(self):
         home = __import__("os").path.expanduser("~")
         save_path = f"{home}/Downloads/test-file.bin"
 
         with patch(
-            "apple_mail_mcp.tools.manage.run_applescript",
+            "apple_mail_mcp.tools.manage._search_mail_records",
             side_effect=AppleScriptTimeout("slow"),
         ):
             result = manage_tools.save_email_attachment(
@@ -256,6 +266,24 @@ class TimeoutForwardingTests(unittest.TestCase):
 
         self.assertEqual(captured["timeout"], 60)
 
+    def test_get_mailbox_unread_counts_summary_only_scopes_to_account(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "Work:3"
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            result = inbox_tools.get_mailbox_unread_counts(
+                account="Work",
+                summary_only=True,
+            )
+
+        self.assertEqual(result, {"Work": 3})
+        self.assertIn('if accountName is not "Work" then', captured["script"])
+        self.assertIn("set shouldIncludeAccount to false", captured["script"])
+        self.assertIn("if shouldIncludeAccount then", captured["script"])
+
     def test_get_mailbox_unread_counts_handles_timeout(self):
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
@@ -266,7 +294,67 @@ class TimeoutForwardingTests(unittest.TestCase):
         self.assertEqual(result.get("error"), "timed_out")
 
 
+class DashboardAccountScopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_inbox_dashboard_passes_selected_account_to_unread_and_recent(self):
+        captured = {}
+
+        def fake_unread(**kwargs):
+            captured["unread"] = kwargs
+            return {"Work": 4}
+
+        async def fake_recent(**kwargs):
+            captured["recent"] = kwargs
+            return []
+
+        def fake_ui(**kwargs):
+            captured["ui"] = kwargs
+            return {"ok": True}
+
+        fake_ui_module = SimpleNamespace(create_inbox_dashboard_ui=fake_ui)
+
+        with (
+            patch("apple_mail_mcp.UI_AVAILABLE", True),
+            patch.dict(sys.modules, {"ui": fake_ui_module}),
+            patch(
+                "apple_mail_mcp.tools.inbox.get_mailbox_unread_counts",
+                side_effect=fake_unread,
+            ),
+            patch(
+                "apple_mail_mcp.tools.analytics._get_recent_emails_structured_async",
+                side_effect=fake_recent,
+            ),
+        ):
+            result = await analytics_tools.inbox_dashboard(
+                account="Work",
+                max_total=5,
+                max_per_account=3,
+                timeout=45,
+            )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(captured["unread"]["account"], "Work")
+        self.assertTrue(captured["unread"]["summary_only"])
+        self.assertEqual(captured["unread"]["timeout"], 45)
+        self.assertEqual(captured["recent"]["account"], "Work")
+        self.assertEqual(captured["recent"]["max_total"], 5)
+        self.assertEqual(captured["recent"]["max_per_account"], 3)
+        self.assertEqual(captured["recent"]["timeout"], 45)
+
+
 class HeavyScanGuardTests(unittest.TestCase):
+    def test_overview_flags_skip_mailbox_and_recent_applescript_loops(self):
+        script = inbox_tools._build_overview_one_account_script(
+            "Work",
+            include_mailboxes=False,
+            include_recent=False,
+        )
+
+        self.assertNotIn("set accountMailboxes to every mailbox", script)
+        self.assertNotIn("set recentMessages to", script)
+        self.assertNotIn("RECENT|||", script)
+        self.assertNotIn("MAILBOX|||", script)
+        self.assertIn("HEADER|||", script)
+
     def test_needs_response_uses_bounded_slice_not_unbounded_whose(self):
         captured = {}
 
@@ -277,7 +365,7 @@ class HeavyScanGuardTests(unittest.TestCase):
         with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
             smart_inbox_tools.get_needs_response(account="Work", days_back=7)
 
-        self.assertIn("set mailboxUpperBound to 100", captured["script"])
+        self.assertIn("set mailboxUpperBound to 30", captured["script"])
         self.assertIn("messages 1 thru mailboxUpperBound of targetMailbox", captured["script"])
         self.assertNotIn("every message of targetMailbox whose", captured["script"])
         self.assertNotIn("set mailboxMessages to messages of targetMailbox", captured["script"])
@@ -294,9 +382,9 @@ class HeavyScanGuardTests(unittest.TestCase):
 
         self.assertEqual(len(captured["scripts"]), 2)
         inbox_script, sent_script = captured["scripts"]
-        self.assertIn("set inboxUpperBound to 100", inbox_script)
+        self.assertIn("set inboxUpperBound to 30", inbox_script)
         self.assertIn("messages 1 thru inboxUpperBound of inboxMailbox", inbox_script)
-        self.assertIn("set sentUpperBound to 80", sent_script)
+        self.assertIn("set sentUpperBound to 20", sent_script)
         self.assertIn("messages 1 thru sentUpperBound of sentMailbox", sent_script)
         self.assertNotIn("every message of inboxMailbox whose", inbox_script)
         self.assertNotIn("every message of sentMailbox whose", sent_script)
@@ -320,6 +408,77 @@ class HeavyScanGuardTests(unittest.TestCase):
         self.assertIn("messages 1 thru mailboxUpperBound of aMailbox", captured["script"])
         self.assertNotIn("every message of aMailbox whose date received", captured["script"])
         self.assertNotIn("set mailboxMessages to messages of aMailbox", captured["script"])
+
+    def test_save_email_attachment_subject_lookup_avoids_unbounded_whose(self):
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured["search"] = kwargs
+            return [{"message_id": "777"}]
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "saved"
+
+        home = __import__("os").path.expanduser("~")
+        save_path = f"{home}/Downloads/test-file.bin"
+
+        with (
+            patch("apple_mail_mcp.tools.manage._search_mail_records", side_effect=fake_search),
+            patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run),
+        ):
+            manage_tools.save_email_attachment(
+                account="Work",
+                subject_keyword="Invoice",
+                attachment_name="file.bin",
+                save_path=save_path,
+            )
+
+        self.assertEqual(captured["search"]["account"], "Work")
+        self.assertEqual(captured["search"]["mailbox"], "INBOX")
+        self.assertEqual(captured["search"]["subject_terms"], ["Invoice"])
+        self.assertEqual(captured["search"]["limit"], 1)
+        self.assertEqual(captured["search"]["timeout"], 45)
+        self.assertNotIn(
+            'every message of inboxMailbox whose subject contains "Invoice"',
+            captured["script"],
+        )
+        self.assertIn("id is 777", captured["script"])
+
+    def test_export_single_email_subject_lookup_avoids_unbounded_whose(self):
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured["search"] = kwargs
+            return [{"message_id": "888"}]
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "exported"
+
+        home = __import__("os").path.expanduser("~")
+
+        with (
+            patch("apple_mail_mcp.tools.analytics._search_mail_records", side_effect=fake_search),
+            patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run),
+        ):
+            analytics_tools.export_emails(
+                account="Work",
+                scope="single_email",
+                subject_keyword="Invoice",
+                save_directory=f"{home}/Downloads",
+            )
+
+        self.assertEqual(captured["search"]["account"], "Work")
+        self.assertEqual(captured["search"]["mailbox"], "INBOX")
+        self.assertEqual(captured["search"]["subject_terms"], ["Invoice"])
+        self.assertEqual(captured["search"]["limit"], 1)
+        self.assertEqual(captured["search"]["timeout"], 45)
+        self.assertNotIn(
+            'every message of targetMailbox whose subject contains "Invoice"',
+            captured["script"],
+        )
+        self.assertIn("id is 888", captured["script"])
 
 
 if __name__ == "__main__":

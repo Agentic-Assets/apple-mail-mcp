@@ -19,7 +19,7 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ### Account scoping
 
-- **`DEFAULT_MAIL_ACCOUNT`**: every tool that takes an `account` parameter must (a) default it to `Optional[str] = None`, (b) at the top fall back to `_server.DEFAULT_MAIL_ACCOUNT` if `account is None`, (c) return a structured error if neither is set. Exceptions: `synchronize_account` requires `confirm_sync=True` before any account/all-account sync; `inbox_dashboard` is always cross-account.
+- **`DEFAULT_MAIL_ACCOUNT`**: every tool that takes an `account` parameter must (a) default it to `Optional[str] = None`, (b) at the top fall back to `_server.DEFAULT_MAIL_ACCOUNT` if `account is None`, (c) return a structured error if neither is set. Exception: `synchronize_account` requires `confirm_sync=True` and additionally requires `all_accounts=True` for all-account sync.
 - **`all_accounts: bool = False`** is the explicit override for tools that need every configured account even when `DEFAULT_MAIL_ACCOUNT` is set.
 
 ### Async + per-account isolation

@@ -816,6 +816,9 @@ def get_mailbox_unread_counts(
         If summary_only=False: nested dict keyed by account name then mailbox path
         If summary_only=True: flat dict mapping account names to inbox unread counts
     """
+    if account is None and _server.DEFAULT_MAIL_ACCOUNT:
+        account = _server.DEFAULT_MAIL_ACCOUNT
+
     if account:
         account_err = validate_account_name(
             account, timeout=30 if timeout is None else min(timeout, 30)
@@ -828,6 +831,15 @@ def get_mailbox_unread_counts(
 
     # Fast path: summary_only returns just per-account inbox unread totals
     if summary_only:
+        summary_account_filter = (
+            f'''
+                if accountName is not "{escaped_account}" then
+                    set shouldIncludeAccount to false
+                end if
+        '''
+            if account
+            else ""
+        )
         script = f"""
         tell application "Mail"
             set resultList to {{}}
@@ -835,14 +847,18 @@ def get_mailbox_unread_counts(
 
             repeat with anAccount in allAccounts
                 set accountName to name of anAccount
+                set shouldIncludeAccount to true
+                {summary_account_filter}
 
-                try
-                    {inbox_mailbox_script("inboxMailbox", "anAccount")}
-                    set unreadCount to unread count of inboxMailbox
-                    set end of resultList to accountName & ":" & unreadCount
-                on error
-                    set end of resultList to accountName & ":ERROR"
-                end try
+                if shouldIncludeAccount then
+                    try
+                        {inbox_mailbox_script("inboxMailbox", "anAccount")}
+                        set unreadCount to unread count of inboxMailbox
+                        set end of resultList to accountName & ":" & unreadCount
+                    on error
+                        set end of resultList to accountName & ":ERROR"
+                    end try
+                end if
             end repeat
 
             set AppleScript's text item delimiters to "|"
@@ -1044,6 +1060,7 @@ def list_mailboxes(
     include_counts: bool = False,
     output_format: str = "text",
     max_mailboxes: Optional[int] = None,
+    timeout: Optional[int] = None,
 ) -> str:
     """
     List all mailboxes (folders) for a specific account or all accounts.
@@ -1055,13 +1072,14 @@ def list_mailboxes(
         output_format: "text" (default, human-readable) or "json" (structured list of mailbox dicts)
         max_mailboxes: Optional cap on mailboxes returned per account in JSON mode. When set,
             the JSON payload includes ``total``, ``returned``, and ``truncated`` fields.
+        timeout: Optional AppleScript timeout in seconds (default: 120s).
 
     Returns:
         Formatted list of mailboxes with optional message counts.
         For nested mailboxes, shows both indented format and path format (e.g., "Projects/Amplify Impact")
     """
     if account:
-        validation_timeout = 30
+        validation_timeout = 30 if timeout is None else min(timeout, 30)
         account_err = validate_account_name(account, timeout=validation_timeout)
         if account_err:
             if output_format == "json":
@@ -1069,7 +1087,12 @@ def list_mailboxes(
             return account_err
 
     if output_format == "json":
-        return _list_mailboxes_json(account, include_counts, max_mailboxes=max_mailboxes)
+        return _list_mailboxes_json(
+            account,
+            include_counts,
+            max_mailboxes=max_mailboxes,
+            timeout=timeout,
+        )
 
     count_script = (
         """
@@ -1147,7 +1170,13 @@ def list_mailboxes(
     end tell
     """
 
-    result = run_applescript(script)
+    try:
+        result = run_applescript(script, timeout=timeout if timeout is not None else 120)
+    except AppleScriptTimeout:
+        return (
+            "Error: list_mailboxes timed out while enumerating mailboxes. "
+            "Retry with a specific account, include_counts=False, or a larger `timeout`."
+        )
     return result
 
 
@@ -1156,6 +1185,7 @@ def _list_mailboxes_json(
     include_counts: bool = True,
     *,
     max_mailboxes: Optional[int] = None,
+    timeout: Optional[int] = None,
 ) -> str:
     """Return mailboxes as JSON."""
     escaped_account = escape_applescript(account) if account else None
@@ -1219,7 +1249,21 @@ def _list_mailboxes_json(
         return resultLines as string
     end tell
     """
-    raw = run_applescript(script)
+    try:
+        raw = run_applescript(script, timeout=timeout if timeout is not None else 120)
+    except AppleScriptTimeout:
+        return json.dumps(
+            {
+                "error": "timed_out",
+                "mailboxes": [],
+                "message": (
+                    "list_mailboxes timed out while enumerating mailboxes. "
+                    "Retry with a specific account, include_counts=false, "
+                    "or a larger timeout."
+                ),
+            },
+            indent=2,
+        )
     mailboxes = []
     for line in raw.splitlines():
         parts = line.split("|||")
@@ -1255,7 +1299,13 @@ def _list_mailboxes_json(
 # get_inbox_overview — async, per-account parallel
 # ---------------------------------------------------------------------------
 
-def _build_overview_one_account_script(account: str) -> str:
+def _build_overview_one_account_script(
+    account: str,
+    *,
+    include_mailboxes: bool = True,
+    include_recent: bool = True,
+    max_recent: int = 10,
+) -> str:
     """Build a script that returns one account's unread/total/recent slice.
 
     Returns a structured payload:
@@ -1269,22 +1319,12 @@ def _build_overview_one_account_script(account: str) -> str:
     `messages 1 thru 10 of inboxMailbox`.
     """
     escaped_account = escape_applescript(account)
-    return f"""
-    tell application "Mail"
-        set resultLines to {{}}
-        try
-            set anAccount to account "{escaped_account}"
-            set accountName to name of anAccount
-
-            try
-                {inbox_mailbox_script("inboxMailbox", "anAccount")}
-                set unreadCount to unread count of inboxMailbox
-                set totalMessages to count of messages of inboxMailbox
-                set end of resultLines to "HEADER|||" & accountName & "|||" & unreadCount & "|||" & totalMessages
-
-                -- Recent messages (cap at 10)
-                if (count of messages of inboxMailbox) > 10 then
-                    set recentMessages to messages 1 thru 10 of inboxMailbox
+    recent_block = ""
+    if include_recent and max_recent > 0:
+        recent_block = f"""
+                -- Recent messages (cap at {max_recent})
+                if (count of messages of inboxMailbox) > {max_recent} then
+                    set recentMessages to messages 1 thru {max_recent} of inboxMailbox
                 else
                     set recentMessages to messages of inboxMailbox
                 end if
@@ -1298,10 +1338,10 @@ def _build_overview_one_account_script(account: str) -> str:
                         set end of resultLines to "RECENT|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead
                     end try
                 end repeat
-            on error errMsg
-                set end of resultLines to "HEADER|||" & accountName & "|||ERROR|||" & errMsg
-            end try
-
+        """
+    mailbox_block = ""
+    if include_mailboxes:
+        mailbox_block = """
             -- Mailbox structure with unread counts
             try
                 set accountMailboxes to every mailbox of anAccount
@@ -1321,6 +1361,26 @@ def _build_overview_one_account_script(account: str) -> str:
                     end try
                 end repeat
             end try
+        """
+    return f"""
+    tell application "Mail"
+        set resultLines to {{}}
+        try
+            set anAccount to account "{escaped_account}"
+            set accountName to name of anAccount
+
+            try
+                {inbox_mailbox_script("inboxMailbox", "anAccount")}
+                set unreadCount to unread count of inboxMailbox
+                set totalMessages to count of messages of inboxMailbox
+                set end of resultLines to "HEADER|||" & accountName & "|||" & unreadCount & "|||" & totalMessages
+
+                {recent_block}
+            on error errMsg
+                set end of resultLines to "HEADER|||" & accountName & "|||ERROR|||" & errMsg
+            end try
+
+            {mailbox_block}
         on error errMsg
             set end of resultLines to "FATAL|||" & errMsg
         end try
@@ -1331,9 +1391,20 @@ def _build_overview_one_account_script(account: str) -> str:
     """
 
 
-def _run_overview_one(account: str, timeout: Optional[int]) -> str:
+def _run_overview_one(
+    account: str,
+    timeout: Optional[int],
+    include_mailboxes: bool = True,
+    include_recent: bool = True,
+    max_recent: int = 10,
+) -> str:
     return run_applescript(
-        _build_overview_one_account_script(account),
+        _build_overview_one_account_script(
+            account,
+            include_mailboxes=include_mailboxes,
+            include_recent=include_recent,
+            max_recent=max_recent,
+        ),
         timeout=timeout if timeout is not None else 180,
     )
 
@@ -1676,7 +1747,14 @@ async def get_inbox_overview(
 
     async def run_one(acct: str):
         try:
-            return acct, await asyncio.to_thread(_run_overview_one, acct, timeout)
+            return acct, await asyncio.to_thread(
+                _run_overview_one,
+                acct,
+                timeout,
+                include_mailboxes,
+                include_recent,
+                max_recent,
+            )
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
 

@@ -116,9 +116,10 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         ):
             smart_inbox_tools.get_top_senders(
                 account=self.ACCOUNT, days_back=30, top_n=10
-            )
+        )
         script = cap.last_script
-        self.assertIn("messages 1 thru 100 of targetMailbox", script)
+        self.assertIn("messages 1 thru mailboxUpperBound of targetMailbox", script)
+        self.assertIn("if mailboxCount > 15 then", script)
         self.assertNotIn("whose date received", script)
 
     # --- manage ---
@@ -273,9 +274,9 @@ class WhoseAndCapTests(unittest.TestCase):
         self.assertEqual(mock_run.call_count, 2)
         scripts = [call.args[0] for call in mock_run.call_args_list]
         inbox_script, sent_script = scripts
-        self.assertIn("set inboxUpperBound to 100", inbox_script)
+        self.assertIn("set inboxUpperBound to 10", inbox_script)
         self.assertIn("messages 1 thru inboxUpperBound of inboxMailbox", inbox_script)
-        self.assertIn("set sentUpperBound to 50", sent_script)
+        self.assertIn("set sentUpperBound to 5", sent_script)
         self.assertIn("messages 1 thru sentUpperBound of sentMailbox", sent_script)
         self.assertNotIn("every message of inboxMailbox whose", inbox_script)
         self.assertNotIn("every message of sentMailbox whose", sent_script)

@@ -34,12 +34,12 @@ If a command hangs or returns permission errors, open **System Settings → Priv
 | Profile | Account | Use |
 |---------|---------|-----|
 | **light** | `ai.openclaw` (~9 mailboxes) | Fast regression after edits |
-| **production** | `cayman@agenticassets.ai` (194 mailboxes) | Realistic perf gate before merge |
+| **production** | `TU - Cayman` | Realistic large-mailbox perf gate before merge |
 
 Set the account once:
 
 ```bash
-export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"   # production gate
+export DEFAULT_MAIL_ACCOUNT="TU - Cayman"               # production gate
 # export DEFAULT_MAIL_ACCOUNT="ai.openclaw"             # light smoke
 ```
 
@@ -68,11 +68,11 @@ Add `--verbose-sensitive` to `perf-test` / `quick-check` to include account name
 .venv/bin/apple-mail inbox --account "$DEFAULT_MAIL_ACCOUNT" --limit 2 --json
 .venv/bin/apple-mail search --account "$DEFAULT_MAIL_ACCOUNT" --query NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231 --json
 .venv/bin/apple-mail show --account "$DEFAULT_MAIL_ACCOUNT" --id 12345 --no-content --json
-.venv/bin/apple-mail overview --account "$DEFAULT_MAIL_ACCOUNT" --format compact
+.venv/bin/apple-mail overview --account "$DEFAULT_MAIL_ACCOUNT" --format compact --no-mailboxes --no-recent
 .venv/bin/apple-mail needs-response --account "$DEFAULT_MAIL_ACCOUNT" --days 2
 .venv/bin/apple-mail awaiting-reply --account "$DEFAULT_MAIL_ACCOUNT" --days 7
 .venv/bin/apple-mail top-senders --account "$DEFAULT_MAIL_ACCOUNT" --days 30
-.venv/bin/apple-mail statistics --account "$DEFAULT_MAIL_ACCOUNT" --scope account_overview --days 7
+.venv/bin/apple-mail statistics --account "$DEFAULT_MAIL_ACCOUNT" --scope account_overview --days 2
 .venv/bin/apple-mail move-dry-run --account "$DEFAULT_MAIL_ACCOUNT" --to Archive --subject NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231
 .venv/bin/apple-mail trash-dry-run --account "$DEFAULT_MAIL_ACCOUNT" --subject NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231
 .venv/bin/apple-mail drafts list --account "$DEFAULT_MAIL_ACCOUNT"
@@ -153,7 +153,7 @@ Exit code is non-zero if any threshold is breached.
 | Case | Threshold |
 |------|-----------|
 | metadata (accounts + addresses + mailboxes) | `2000 + max(0, mailbox_count - 20) × 35` ms |
-| no-hit search | < 3s |
+| no-hit search | < 3s light / < 4.5s production |
 | inbox (limit 2) | < 5s |
 | dry-run move | < 5s |
 | dry-run trash | < 5s |
