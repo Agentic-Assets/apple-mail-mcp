@@ -16,7 +16,7 @@ Collect explicit bullets (or ingest existing notes from the user) covering:
 - Formality ladder (investor memo vs teammate ping).
 - Default greeting/sign-off patterns (including language toggles).
 - Paragraph length norms, bullets vs prose, emoji policy.
-- Red lines (topics not to autop-generate).
+- Red lines (topics not to auto-generate).
 
 Encode durable preferences inside **`USER_EMAIL_PREFERENCES`** so every preference-aware MCP tool inherits the context.
 

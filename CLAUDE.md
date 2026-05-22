@@ -19,8 +19,8 @@ Navigation hub for **apple-mail-mcp**: one Python MCP server (**27 tools**, **27
 | Expert | Use for |
 |--------|---------|
 | **`plugin-dev:plugin-validator`** | Manifest drift, tool counts, marketplace readiness |
-| **`plugin-dev:plugin-architect`** | Plugin structure, MCP wiring, agent workflow gaps |
-| Skills: **`mcp-integration`**, **`plugin-structure`**, **`mcp-builder`** | MCP server design, `.mcp.json` / `plugin.json`, tool quality |
+| **`plugin-dev:skill-reviewer`** | Bundled skill descriptions, trigger overlap, safety language |
+| Skills: **`plugin-dev:mcp-integration`**, **`plugin-dev:plugin-structure`**, **`mcp-builder`** | MCP server design, `.mcp.json` / `plugin.json`, tool quality |
 
 Do not solo large plugin or perf workstreams without at least one plugin-dev expert pass.
 

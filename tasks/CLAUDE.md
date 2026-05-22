@@ -7,7 +7,7 @@ Cross-session planning artifacts. In-conversation work uses ephemeral task lists
 When executing [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md), [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md), or [`todo.md`](todo.md):
 
 - **Subagents for research and implementation** — delegate coding, tests, docs, and live runs; parallelize independent modules, sequence dependent phases.
-- **Plugin-dev experts always** — `plugin-dev:plugin-validator`, `plugin-dev:plugin-architect`, `plugin-dev:skill-reviewer`, plus `mcp-integration` / `plugin-structure` / `mcp-builder` skills per phase plan.
+- **Plugin-dev experts always** — `plugin-dev:plugin-validator` and `plugin-dev:skill-reviewer` agents; plus `plugin-dev:mcp-integration`, `plugin-dev:plugin-structure`, and `mcp-builder` skills per phase plan.
 
 ## Active files
 

@@ -10,10 +10,9 @@
 
 ## Next Action
 
-Prepare the branch for PR/merge review using [`robustness-completion-audit-2026-05-22.md`](robustness-completion-audit-2026-05-22.md), decide whether the unavailable `plugin-dev:*` agent caveat is acceptable, then commit/push only when explicitly requested.
+Branch shipped: robustness commits pushed; v3.1.8 release candidate validated with `plugin-dev:plugin-validator` and `plugin-dev:skill-reviewer`. Open PR when ready, or schedule the v3.1.9 backlog from [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md).
 
 ## Blockers / Caveats
 
-- Named `plugin-dev:plugin-validator`, `plugin-dev:plugin-architect`, and `plugin-dev:skill-reviewer` agents are not callable in this environment; local validators and plugin skills were used instead.
-- `apple-mail-mcp-v3.1.8.mcpb` is rebuilt and validated locally but ignored by git via `*.mcpb`.
-- No commit or push has been made in this continuation pass.
+- `plugin-dev:plugin-architect` was referenced by historical repo guidance but is not in the current agent registry; structure work uses `plugin-dev:plugin-structure` and `plugin-dev:mcp-integration` skills instead.
+- `apple-mail-mcp-v3.1.8.mcpb` is rebuilt and validated locally but ignored by git via `*.mcpb` — keep it alongside the branch for Claude Desktop handoff.

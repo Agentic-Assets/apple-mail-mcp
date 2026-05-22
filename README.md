@@ -342,6 +342,8 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 | `manage_trash` | 5 | `max_deletes` |
 | `export_emails` | 1000 | `max_emails` |
 
+**Dry-run defaults:** `manage_trash` defaults to `dry_run=True` (safe preview — explicit override needed to act, especially for `action="delete_permanent"`). `move_email` and `update_email_status` default to `dry_run=False` (live) because their effects are reversible; pass `dry_run=True` to preview matches first.
+
 ## Usage Examples
 
 ```

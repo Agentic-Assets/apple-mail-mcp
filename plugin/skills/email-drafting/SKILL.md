@@ -41,6 +41,18 @@ Run this **before** any `reply_to_email` or compose-as-reply call:
 2. For replies/forwards, use the Mail **`message_id`** returned by `search_emails`, `list_inbox_emails`, `get_email_by_id`, or thread tools whenever available. Do not switch to `subject_keyword` just because the subject is visible; subject lookup is only for cases where no message id is available.
 3. Load **`USER_EMAIL_PREFERENCES`** plus any capture from **`email-style-profile`** before writing content.
 
+## Pre-call Checklist (every mutate call)
+
+Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `forward_email`, `create_rich_email_draft`, or `manage_drafts(action="send")`:
+
+1. **Recipients** — explicit `to`, `cc`, `bcc`. Confirm spelling and that no replies stay private.
+2. **Subject line** — exact text. For replies/forwards, confirm the inherited subject if Mail will prepend `Re:` / `Fwd:`.
+3. **Mode** — `draft` (quiet save, default) vs `open` (saved + window stays open for review) vs `send` (blocked under `--draft-safe`). `mode="send"` requires explicit user confirmation and a non-draft-safe configuration.
+4. **Signature intent** — `include_signature=True` applies `DEFAULT_MAIL_SIGNATURE` if set; pass `signature_name` to override, `include_signature=False` to suppress. `create_rich_email_draft` does not accept signature params — switch to a plain compose tool when a named signature is required.
+5. **Source message id** (replies/forwards only) — pass the `message_id` returned by search/list. Fall back to `subject_keyword` only when no id is available.
+
+`mode="open"` saves first then leaves the compose window open, so closing it should not trigger Mail's Save/Don't Save prompt.
+
 ## Tool Selection Pattern
 
 | Situation | Tool | Notes |
@@ -50,8 +62,6 @@ Run this **before** any `reply_to_email` or compose-as-reply call:
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Marketing / HTML layout | `create_rich_email_draft` | Produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params — use plain compose tools when a named signature is required |
 | Low-level draft listing / CRUD | `manage_drafts` | Respect cap defaults; never batch-delete without confirming folder scope |
-
-Always restate recipients, subject line, **Draft vs Review vs Send**, and signature intent (named signature or no signature) before running a mutate call. Use `mode="open"` only when the user explicitly wants the saved-open review mode; open-for-review paths save first so closing immediately should not trigger Mail's Save/Don't Save prompt.
 
 ## Safety And Compliance
 

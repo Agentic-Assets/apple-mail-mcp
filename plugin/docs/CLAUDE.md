@@ -4,7 +4,7 @@
 
 ## Agent orchestration
 
-Plugin/MCP/skill changes: delegate implementation to subagents; run **`plugin-dev:plugin-validator`** and **`plugin-dev:plugin-architect`** (and `mcp-integration` / `plugin-structure` skills) before merge. See root [`CLAUDE.md`](../../CLAUDE.md) § Agent orchestration.
+Plugin/MCP/skill changes: delegate implementation to subagents; run **`plugin-dev:plugin-validator`** and **`plugin-dev:skill-reviewer`** (and `plugin-dev:mcp-integration` / `plugin-dev:plugin-structure` skills) before merge. See root [`CLAUDE.md`](../../CLAUDE.md) § Agent orchestration.
 
 ## Key files
 

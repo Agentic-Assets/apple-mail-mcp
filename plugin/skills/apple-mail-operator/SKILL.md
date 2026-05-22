@@ -68,9 +68,7 @@ See **[[email-drafting]]** for the required pre-draft verification step.
 | Read-only auditing | Mention `--read-only` server flag — removes send-facing compose registrations |
 | Destructive moves/deletes | Defer to `email-archive-cleanup` or `email-management`; never bury trash/delete actions inside troubleshooting |
 
-## Optional Dashboards And UI
-
-Use `inbox_dashboard()` only when the client supports MCP UI hosting and the session needs a richer explorer view; it is heavier than `get_inbox_overview()` for routine operator tasks.
+**Note:** `inbox_dashboard()` is available for MCP UI–hosting clients that want a richer explorer view, but it is heavier than `get_inbox_overview()` and should not be the default for routine operator tasks. Triage and daily scans belong in `inbox-triage`.
 
 ## Additional Resources
 
