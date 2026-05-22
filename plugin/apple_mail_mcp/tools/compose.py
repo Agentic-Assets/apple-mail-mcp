@@ -10,14 +10,33 @@ from html import escape as html_escape
 from pathlib import Path
 from typing import Optional, List, Tuple
 
-import apple_mail_mcp.server as server
+from apple_mail_mcp import server as _server
+from apple_mail_mcp import server  # public alias used by tests
 from apple_mail_mcp.server import mcp
 from apple_mail_mcp.core import (
+    AppleScriptTimeout,
     inject_preferences,
     escape_applescript,
     run_applescript,
     inbox_mailbox_script,
 )
+
+
+def _resolve_account(account: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve an account argument against ``DEFAULT_MAIL_ACCOUNT``.
+
+    Returns ``(resolved_account, error_message)``. Tools call this at the top
+    of their body so callers can omit ``account`` when a default is configured
+    via the ``DEFAULT_MAIL_ACCOUNT`` env var. The attribute is read lazily off
+    ``apple_mail_mcp.server`` so tests can monkeypatch it after import.
+    """
+    if account is None or account == "":
+        account = _server.DEFAULT_MAIL_ACCOUNT
+    if not account:
+        return None, (
+            "ERROR: No account specified and no DEFAULT_MAIL_ACCOUNT env var set."
+        )
+    return account, None
 
 
 def _split_addresses(value):
@@ -41,7 +60,7 @@ def _default_rich_draft_path(subject):
     return drafts_dir / (_safe_eml_name(subject) + ".eml")
 
 
-def _account_default_alias_if_single(account):
+def _account_default_alias_if_single(account, timeout=None):
     """Return the sole alias of `account` when it has exactly one configured
     email address, else None. Used when no explicit sender is requested so
     that single-address accounts still send from their own alias rather than
@@ -62,7 +81,10 @@ def _account_default_alias_if_single(account):
         end try
     end tell
     '''
-    result = (run_applescript(script) or "").strip()
+    if timeout is None:
+        result = (run_applescript(script) or "").strip()
+    else:
+        result = (run_applescript(script, timeout=timeout) or "").strip()
     return result or None
 
 
@@ -87,7 +109,7 @@ def _compose_sender_script(variable, account_ref, sender_override):
     )
 
 
-def _validate_from_address(account, from_address):
+def _validate_from_address(account, from_address, timeout=None):
     """Return (validated_address, error_message) for a sender override.
 
     When `from_address` is blank the override is skipped and both values
@@ -115,7 +137,10 @@ def _validate_from_address(account, from_address):
         end try
     end tell
     '''
-    raw = run_applescript(script) or ""
+    if timeout is None:
+        raw = run_applescript(script) or ""
+    else:
+        raw = run_applescript(script, timeout=timeout) or ""
     aliases = [line.strip() for line in raw.splitlines() if line.strip()]
     if not aliases:
         return None, (
@@ -192,14 +217,14 @@ def _send_blocked(mode: Optional[str]) -> Optional[str]:
     """Return an error when the active server mode disallows sending."""
     if mode != "send":
         return None
-    if server.READ_ONLY:
+    if _server.READ_ONLY:
         return "Error: Sending is disabled in read-only mode."
-    if server.DRAFT_SAFE:
+    if _server.DRAFT_SAFE:
         return "Error: Sending is disabled in draft-safe mode. Use mode='draft' or mode='open'."
     return None
 
 
-def _save_open_message_as_draft(subject, retries=10, delay_seconds=0.5):
+def _save_open_message_as_draft(subject, retries=10, delay_seconds=0.5, timeout=None):
     """Ask Mail to save the matching open outgoing message as a draft."""
     if not subject:
         return False
@@ -221,7 +246,10 @@ def _save_open_message_as_draft(subject, retries=10, delay_seconds=0.5):
     '''
 
     for _ in range(retries):
-        result = run_applescript(script).strip().lower()
+        if timeout is None:
+            result = run_applescript(script).strip().lower()
+        else:
+            result = run_applescript(script, timeout=timeout).strip().lower()
         if result == "saved":
             return True
         if result.startswith("error:"):
@@ -233,7 +261,7 @@ def _save_open_message_as_draft(subject, retries=10, delay_seconds=0.5):
 @mcp.tool()
 @inject_preferences
 def create_rich_email_draft(
-    account: str,
+    account: Optional[str] = None,
     subject: str = "",
     to: Optional[str] = None,
     text_body: Optional[str] = None,
@@ -244,6 +272,7 @@ def create_rich_email_draft(
     open_in_mail: bool = True,
     save_as_draft: bool = False,
     from_address: Optional[str] = None,
+    timeout: Optional[int] = None,
 ) -> str:
     """
     Create a rich-text email draft by generating an unsent `.eml` message and optionally opening it in Mail.
@@ -252,7 +281,7 @@ def create_rich_email_draft(
     content, while setting raw HTML through AppleScript often stores the literal markup instead.
 
     Args:
-        account: Account name to use for the sender identity (e.g., "Work", "Oracle")
+        account: Account name to use for the sender identity (e.g., "Work", "Oracle"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
         subject: Subject line for the draft (optional; defaults to empty)
         to: Optional recipient email address(es), comma-separated for multiple
         text_body: Optional plain-text body. If omitted but html_body is provided, a fallback plain body is generated.
@@ -263,21 +292,35 @@ def create_rich_email_draft(
         open_in_mail: If True, open the generated `.eml` in Mail (default: True)
         save_as_draft: If True, ask Mail to save the opened compose window into Drafts (default: False)
         from_address: Optional sender address to stamp into the `.eml` `From:` header. Must be one of the account's configured email addresses. When omitted, Mail fills the account's default "Send new messages from" address on open.
+        timeout: Optional per-AppleScript timeout in seconds for the helper calls (sender alias lookup and draft save). Defaults to the standard 120s.
 
     Returns:
         Confirmation with the generated `.eml` path, missing details, and Mail-open/save status
     """
-    if not account or not account.strip():
+    account, account_error = _resolve_account(account)
+    if account_error:
+        return account_error
+    if not account.strip():
         return "Error: 'account' is required"
 
     text_body = _strip_cdata_wrappers(text_body)
     html_body = _strip_cdata_wrappers(html_body)
 
-    sender_override, sender_error = _validate_from_address(account, from_address)
-    if sender_error:
-        return sender_error
+    try:
+        sender_override, sender_error = _validate_from_address(
+            account, from_address, timeout=timeout
+        )
+        if sender_error:
+            return sender_error
 
-    sender_address = sender_override or _account_default_alias_if_single(account)
+        sender_address = sender_override or _account_default_alias_if_single(
+            account, timeout=timeout
+        )
+    except AppleScriptTimeout:
+        return (
+            "ERROR: AppleScript timed out while resolving sender for account "
+            f"{account!r}. Try again or pass a larger `timeout`."
+        )
 
     recipients_to = _split_addresses(to)
     recipients_cc = _split_addresses(cc)
@@ -322,7 +365,10 @@ def create_rich_email_draft(
         subprocess.run(["open", "-a", "Mail", str(draft_path)], check=True)
         opened = True
         if save_as_draft:
-            saved = _save_open_message_as_draft(subject)
+            try:
+                saved = _save_open_message_as_draft(subject, timeout=timeout)
+            except AppleScriptTimeout:
+                saved = False
 
     output_lines = ["RICH EMAIL DRAFT", "", "✓ Rich draft prepared successfully!", ""]
     output_lines.append("Account: " + account)
@@ -578,9 +624,9 @@ def _validate_attachment_paths(attachments: str) -> Tuple[List[str], Optional[st
 @mcp.tool()
 @inject_preferences
 def reply_to_email(
-    account: str,
-    subject_keyword: str,
-    reply_body: str,
+    account: Optional[str] = None,
+    subject_keyword: str = "",
+    reply_body: str = "",
     reply_to_all: bool = False,
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
@@ -589,12 +635,13 @@ def reply_to_email(
     attachments: Optional[str] = None,
     body_html: Optional[str] = None,
     from_address: Optional[str] = None,
+    timeout: Optional[int] = None,
 ) -> str:
     """
     Reply to an email matching a subject keyword.
 
     Args:
-        account: Account name (e.g., "Gmail", "Work")
+        account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
         subject_keyword: Keyword to search for in email subjects
         reply_body: The body text of the reply
         reply_to_all: If True, reply to all recipients; if False, reply only to sender (default: False)
@@ -605,15 +652,30 @@ def reply_to_email(
         attachments: Optional file paths to attach, comma-separated for multiple (e.g., "/path/to/file1.png,/path/to/file2.pdf")
         body_html: Optional HTML body for rich formatting (bold, headings, links, colors). When provided, the reply is pasted as HTML. The plain 'reply_body' field is still required as fallback text.
         from_address: Optional sender address to use for this reply. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
+        timeout: Optional per-AppleScript timeout in seconds for the sender alias lookup. Defaults to the standard 120s.
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
     """
 
+    account, account_error = _resolve_account(account)
+    if account_error:
+        return account_error
+    if not subject_keyword:
+        return "Error: 'subject_keyword' is required"
+
     reply_body = _strip_cdata_wrappers(reply_body) or ""
     body_html = _strip_cdata_wrappers(body_html)
 
-    sender_override, sender_error = _validate_from_address(account, from_address)
+    try:
+        sender_override, sender_error = _validate_from_address(
+            account, from_address, timeout=timeout
+        )
+    except AppleScriptTimeout:
+        return (
+            "ERROR: AppleScript timed out while validating sender for account "
+            f"{account!r}. Try again or pass a larger `timeout`."
+        )
     if sender_error:
         return sender_error
 
@@ -899,22 +961,23 @@ tell application "Mail"
 @mcp.tool()
 @inject_preferences
 def compose_email(
-    account: str,
-    to: str,
-    subject: str,
-    body: str,
+    account: Optional[str] = None,
+    to: str = "",
+    subject: str = "",
+    body: str = "",
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
     attachments: Optional[str] = None,
     mode: str = "draft",
     body_html: Optional[str] = None,
     from_address: Optional[str] = None,
+    timeout: Optional[int] = None,
 ) -> str:
     """
     Compose a new email from a specific account.
 
     Args:
-        account: Account name to send from (e.g., "Gmail", "Work", "Personal")
+        account: Account name to send from (e.g., "Gmail", "Work", "Personal"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
         to: Recipient email address(es), comma-separated for multiple
         subject: Email subject line
         body: Email body text (used as plain-text fallback when body_html is provided)
@@ -924,6 +987,7 @@ def compose_email(
         mode: Delivery mode — "draft" (default, save silently to Drafts), "open" (open compose window for review), or "send" (send immediately)
         body_html: Optional HTML body for rich formatting (bold, headings, links, colors). When provided, the email is sent as HTML. The plain 'body' field is still required as fallback text.
         from_address: Optional sender address to use for this message. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
+        timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
 
     Returns:
         Confirmation message with details of the email
@@ -936,11 +1000,25 @@ def compose_email(
     if blocked:
         return blocked
 
+    account, account_error = _resolve_account(account)
+    if account_error:
+        return account_error
+    if not to:
+        return "Error: 'to' is required"
+
     body = _strip_cdata_wrappers(body) or ""
     body_html = _strip_cdata_wrappers(body_html)
 
     # Validate optional sender override
-    sender_override, sender_error = _validate_from_address(account, from_address)
+    try:
+        sender_override, sender_error = _validate_from_address(
+            account, from_address, timeout=timeout
+        )
+    except AppleScriptTimeout:
+        return (
+            "ERROR: AppleScript timed out while validating sender for account "
+            f"{account!r}. Try again or pass a larger `timeout`."
+        )
     if sender_error:
         return sender_error
 
@@ -1094,28 +1172,38 @@ def compose_email(
     end tell
     '''
 
-    result = run_applescript(script)
+    try:
+        if timeout is None:
+            result = run_applescript(script)
+        else:
+            result = run_applescript(script, timeout=timeout)
+    except AppleScriptTimeout:
+        return (
+            f"ERROR: AppleScript timed out while composing email for account "
+            f"{account!r}. Try again or pass a larger `timeout`."
+        )
     return result
 
 
 @mcp.tool()
 @inject_preferences
 def forward_email(
-    account: str,
-    subject_keyword: str,
-    to: str,
+    account: Optional[str] = None,
+    subject_keyword: str = "",
+    to: str = "",
     message: Optional[str] = None,
     mailbox: str = "INBOX",
     cc: Optional[str] = None,
     bcc: Optional[str] = None,
     from_address: Optional[str] = None,
     mode: str = "draft",
+    timeout: Optional[int] = None,
 ) -> str:
     """
     Forward an email to one or more recipients.
 
     Args:
-        account: Account name (e.g., "Gmail", "Work")
+        account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
         subject_keyword: Keyword to search for in email subjects
         to: Recipient email address(es), comma-separated for multiple
         message: Optional message to add before forwarded content
@@ -1124,20 +1212,38 @@ def forward_email(
         bcc: Optional BCC recipients, comma-separated for multiple
         from_address: Optional sender address to use when forwarding. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         mode: Delivery mode — "draft" (default, save silently), "open" (open compose window for review), or "send" (send immediately)
+        timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
 
     Returns:
         Confirmation message with details of forwarded email
     """
 
+    account, account_error = _resolve_account(account)
+    if account_error:
+        return account_error
+    if not subject_keyword:
+        return "Error: 'subject_keyword' is required"
+    if not to:
+        return "Error: 'to' is required"
+
     message = _strip_cdata_wrappers(message)
 
+    # Validate mode
     if mode not in ("send", "draft", "open"):
         return f"Error: Invalid mode '{mode}'. Use: send, draft, open"
     blocked = _send_blocked(mode)
     if blocked:
         return blocked
 
-    sender_override, sender_error = _validate_from_address(account, from_address)
+    try:
+        sender_override, sender_error = _validate_from_address(
+            account, from_address, timeout=timeout
+        )
+    except AppleScriptTimeout:
+        return (
+            "ERROR: AppleScript timed out while validating sender for account "
+            f"{account!r}. Try again or pass a larger `timeout`."
+        )
     if sender_error:
         return sender_error
 
@@ -1352,9 +1458,16 @@ tell application "Mail"
                 return f"Error forwarding email: {stderr}"
             return result.stdout.decode("utf-8", errors="replace").strip()
         else:
-            return run_applescript(script)
+            if timeout is None:
+                return run_applescript(script)
+            return run_applescript(script, timeout=timeout)
     except subprocess.TimeoutExpired:
         return "Error: Forward script timed out"
+    except AppleScriptTimeout:
+        return (
+            f"ERROR: AppleScript timed out while forwarding email for account "
+            f"{account!r}. Try again or pass a larger `timeout`."
+        )
     finally:
         if fwd_html_temp_path and os.path.exists(fwd_html_temp_path):
             os.unlink(fwd_html_temp_path)
@@ -1363,8 +1476,8 @@ tell application "Mail"
 @mcp.tool()
 @inject_preferences
 def manage_drafts(
-    account: str,
-    action: str,
+    account: Optional[str] = None,
+    action: str = "list",
     subject: Optional[str] = None,
     to: Optional[str] = None,
     body: Optional[str] = None,
@@ -1372,12 +1485,13 @@ def manage_drafts(
     bcc: Optional[str] = None,
     draft_subject: Optional[str] = None,
     from_address: Optional[str] = None,
+    timeout: Optional[int] = None,
 ) -> str:
     """
     Manage draft emails - list, create, send, open, or delete drafts.
 
     Args:
-        account: Account name (e.g., "Gmail", "Work")
+        account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
         action: Action to perform: "list", "create", "send", "open", "delete". Use "open" to open a draft in a visible compose window for review before sending.
         subject: Email subject (required for create)
         to: Recipient email(s) for create (comma-separated)
@@ -1386,10 +1500,15 @@ def manage_drafts(
         bcc: Optional BCC recipients for create
         draft_subject: Subject keyword to find draft (required for send/open/delete)
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
+        timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
 
     Returns:
         Formatted output based on action
     """
+
+    account, account_error = _resolve_account(account)
+    if account_error:
+        return account_error
 
     body = _strip_cdata_wrappers(body)
 
@@ -1431,7 +1550,15 @@ def manage_drafts(
         if not subject or not to or not body:
             return "Error: 'subject', 'to', and 'body' are required for creating drafts"
 
-        sender_override, sender_error = _validate_from_address(account, from_address)
+        try:
+            sender_override, sender_error = _validate_from_address(
+                account, from_address, timeout=timeout
+            )
+        except AppleScriptTimeout:
+            return (
+                "ERROR: AppleScript timed out while validating sender for account "
+                f"{account!r}. Try again or pass a larger `timeout`."
+            )
         if sender_error:
             return sender_error
 
@@ -1507,9 +1634,9 @@ def manage_drafts(
         '''
 
     elif action == "send":
-        if server.READ_ONLY:
+        if _server.READ_ONLY:
             return "Error: Sending drafts is disabled in read-only mode."
-        if server.DRAFT_SAFE:
+        if _server.DRAFT_SAFE:
             return "Error: Sending drafts is disabled in draft-safe mode."
         if not draft_subject:
             return "Error: 'draft_subject' is required for sending drafts"
@@ -1664,5 +1791,14 @@ def manage_drafts(
             f"Error: Invalid action '{action}'. Use: list, create, send, open, delete"
         )
 
-    result = run_applescript(script)
+    try:
+        if timeout is None:
+            result = run_applescript(script)
+        else:
+            result = run_applescript(script, timeout=timeout)
+    except AppleScriptTimeout:
+        return (
+            f"ERROR: AppleScript timed out for manage_drafts action {action!r} on "
+            f"account {account!r}. Try again or pass a larger `timeout`."
+        )
     return result
