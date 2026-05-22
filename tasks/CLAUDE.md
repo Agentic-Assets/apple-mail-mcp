@@ -4,7 +4,7 @@ Cross-session planning artifacts. In-conversation work uses ephemeral task lists
 
 ## Agent orchestration
 
-When executing [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) or [`todo.md`](todo.md):
+When executing [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md), [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md), or [`todo.md`](todo.md):
 
 - **Subagents for research and implementation** — delegate coding, tests, docs, and live runs; parallelize independent modules, sequence dependent phases.
 - **Plugin-dev experts always** — `plugin-dev:plugin-validator`, `plugin-dev:plugin-architect`, `plugin-dev:skill-reviewer`, plus `mcp-integration` / `plugin-structure` / `mcp-builder` skills per phase plan.
@@ -14,7 +14,8 @@ When executing [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) or [`todo.md`](todo.
 | File | Role |
 |------|------|
 | [`todo.md`](todo.md) | **Rolling backlog** — checkboxes, paths, what's next. Prune done items. |
-| [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) | **Current release sequencing** — phases 1→4 after 3.1.6 hardening. |
+| [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) | **Active robustness goal** — whole-plugin audit, packaging, live gates, artifacts. |
+| [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) | **Historical release sequencing** — phases 1→4 after 3.1.6 hardening. Keep useful items but verify against current 3.1.8 state. |
 | [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) | **Live perf numbers** — production vs light account; root-cause notes. |
 | [`id-first-refactor-spec.md`](id-first-refactor-spec.md) | Future spec (3.1.8+) — not in current phase plan. |
 
@@ -37,7 +38,7 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
 
 ## Maintenance
 
-- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (266 tests)
+- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (273 tests)
 - After manifests: `bash tools/validate_manifests.sh` + `plugin-dev:plugin-validator`
 - After skills: `plugin-dev:skill-reviewer` (+ manifest validator if marketing copy changed)
 - Live workflow: [`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)

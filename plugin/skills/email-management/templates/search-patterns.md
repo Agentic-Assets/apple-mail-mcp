@@ -621,12 +621,7 @@ manage_drafts(
     action="list"
 )
 
-# Search specific draft
-manage_drafts(
-    account="Work",
-    action="send",
-    draft_subject="keyword"
-)
+# Inspect the returned subjects manually; use action="open" only after choosing one.
 ```
 
 ### Fuzzy Matching

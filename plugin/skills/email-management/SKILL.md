@@ -66,7 +66,7 @@ The MCP server enforces conservative defaults. Confirm with the user before rais
 | `manage_trash(action="move_to_trash")` | 5 messages | Any time `max_deletes` exceeds 20 |
 | `manage_trash(action="delete_permanent")` | 5 messages | Always — this is irreversible |
 | `manage_trash(action="empty_trash")` | hard confirm via `confirm_empty=True` | Always |
-| `move_email` | 1 message | Any bulk move (`max_moves` > 10) |
+| `move_email` | 50 messages | Any bulk move (`max_moves` > 10); use explicit `max_moves=1` for single-message filing |
 | `update_email_status` | 10 messages | Any bulk update (`max_updates` > 50) |
 
 Pattern: identify candidates with `search_emails()`, preview the count and sample, confirm the user's intent, then run the destructive call with an explicit cap.
@@ -153,7 +153,7 @@ Mindset:
 | Cross-account search | `search_emails(account=None, all_accounts=True)` | Costly on Exchange; use sparingly |
 | Recent inbox listing | `list_inbox_emails(max_emails=50)` | Default cap is 50 |
 | View a conversation | `get_email_thread(account="...", subject_keyword="...", mailbox="INBOX", recent_days=2)` — `account` required; widen `mailbox`/`recent_days` only when needed |
-| Move messages | `move_email(..., max_moves=N)` | Default cap is 1 |
+| Move messages | `move_email(..., max_moves=N)` | Default cap is 50; set `max_moves=1` for precise single-message filing |
 | Flag / mark read | `update_email_status(action="...", max_updates=N)` | Default cap is 10 |
 | Move to trash / delete | `manage_trash(action="...", max_deletes=N)` | See `references/bulk-cleanup.md` |
 | Analytics | `get_statistics()` and `get_top_senders()` | See `references/analytics.md` |

@@ -839,8 +839,8 @@ def manage_trash(
     """
     Manage trash operations - delete emails or empty trash.
 
-    When dry_run=True (default) and action is "move_to_trash", previews what
-    would be deleted without acting. Set dry_run=False to actually move to trash.
+    When dry_run=True (default), previews what would be moved to trash or
+    permanently deleted without acting. Set dry_run=False to execute.
 
     When ``message_ids`` is provided for ``move_to_trash`` or ``delete_permanent``,
     targets exact IDs and ignores keyword/sender filters.
@@ -906,9 +906,15 @@ def manage_trash(
                     set trashMailbox to mailbox "Trash" of targetAccount"""
             mailbox_ref = build_mailbox_ref(mailbox, var_name="sourceMailbox")
         elif action == "delete_permanent":
-            mode_label = "PERMANENTLY DELETING EMAILS BY IDS"
-            move_script = "delete aMessage"
-            result_verb = "Permanently deleted"
+            mode_label = (
+                "DRY RUN - PREVIEW PERMANENT DELETE BY IDS"
+                if dry_run
+                else "PERMANENTLY DELETING EMAILS BY IDS"
+            )
+            move_script = "" if dry_run else "delete aMessage"
+            result_verb = (
+                "Would permanently delete" if dry_run else "Permanently deleted"
+            )
             trash_setup = ""
             mailbox_ref = 'set sourceMailbox to mailbox "Trash" of targetAccount'
         else:
@@ -1050,6 +1056,7 @@ def manage_trash(
                 action="delete_permanent",
                 message_ids=resolved_ids,
                 max_deletes=max_deletes,
+                dry_run=dry_run,
                 timeout=timeout,
             )
 
@@ -1061,10 +1068,19 @@ def manage_trash(
             f"                    end if"
         )
 
+        mode_label = (
+            "DRY RUN - PREVIEW PERMANENT DELETE"
+            if dry_run
+            else "PERMANENTLY DELETING EMAILS"
+        )
+        delete_script = "" if dry_run else "delete aMessage"
+        result_verb = "Would permanently delete" if dry_run else "Permanently deleted"
+        total_label = "TOTAL WOULD DELETE" if dry_run else "TOTAL DELETED"
+
         script = f'''
         tell application "Mail"
             with timeout of {effective_timeout} seconds
-                set outputText to "PERMANENTLY DELETING EMAILS" & return & return
+                set outputText to "{mode_label}" & return & return
                 set deleteCount to 0
 
                 try
@@ -1086,16 +1102,16 @@ def manage_trash(
                             set messageSubject to subject of aMessage
                             set messageSender to sender of aMessage
 
-                            set outputText to outputText & "✓ Permanently deleted: " & messageSubject & return
+                            set outputText to outputText & "✓ {result_verb}: " & messageSubject & return
                             set outputText to outputText & "   From: " & messageSender & return & return
 
-                            delete aMessage
+                            {delete_script}
                             set deleteCount to deleteCount + 1
                         end try
                     end repeat
 
                     set outputText to outputText & "========================================" & return
-                    set outputText to outputText & "TOTAL DELETED: " & deleteCount & " email(s)" & return
+                    set outputText to outputText & "{total_label}: " & deleteCount & " email(s)" & return
                     set outputText to outputText & "========================================" & return
 
                 on error errMsg

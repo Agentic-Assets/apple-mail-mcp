@@ -805,6 +805,47 @@ class ManageToolTests(unittest.TestCase):
         self.assertIn("DRY RUN - PREVIEW TRASH", result)
         self.assertIn("TOTAL: 0", result)
 
+    def test_manage_trash_permanent_delete_dry_run_preserves_preview(self):
+        with patch(
+            "apple_mail_mcp.tools.manage._search_message_ids",
+            return_value=["101"],
+        ) as mock_search, patch(
+            "apple_mail_mcp.tools.manage.run_applescript",
+            return_value="preview",
+        ) as mock_run:
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="delete_permanent",
+                subject_keyword="Ticket",
+            )
+
+        mock_search.assert_called_once()
+        self.assertEqual(result, "preview")
+        script = mock_run.call_args.args[0]
+        self.assertIn("DRY RUN - PREVIEW PERMANENT DELETE BY IDS", script)
+        self.assertIn("Would permanently delete", script)
+        self.assertNotIn("delete aMessage", script)
+
+    def test_manage_trash_permanent_delete_apply_to_all_dry_run_does_not_delete(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "preview"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="delete_permanent",
+                apply_to_all=True,
+            )
+
+        self.assertEqual(result, "preview")
+        self.assertIn("DRY RUN - PREVIEW PERMANENT DELETE", captured["script"])
+        self.assertIn("Would permanently delete", captured["script"])
+        self.assertIn("TOTAL WOULD DELETE", captured["script"])
+        self.assertNotIn("delete aMessage", captured["script"])
+
     def test_update_email_status_with_message_ids_uses_exact_id_condition(self):
         captured = {}
 

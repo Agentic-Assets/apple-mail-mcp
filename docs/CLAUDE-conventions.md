@@ -74,7 +74,7 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ## Versioning
 
-Version is duplicated across **five** files — bump all together when releasing. Top-level marketplace `metadata.version` (1.0.0) describes the marketplace manifest itself; don't touch it. See [`.claude-plugin/docs/CLAUDE.md`](../.claude-plugin/docs/CLAUDE.md).
+Version is duplicated across **five** files — bump all together when releasing. Top-level marketplace `metadata.version` (1.0.0) describes the marketplace manifest itself; don't touch it. See [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).
 
 | File | Field |
 |------|-------|

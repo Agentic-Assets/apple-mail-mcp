@@ -2,9 +2,11 @@
 
 Cross-session source of truth. In-conversation tasks are ephemeral; **this file survives**.
 
-**Phase plan:** [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) · **Live baseline:** [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) · **Latest wrapper report:** [`../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md) · **Archive:** [`archive/2026-05-21/`](archive/2026-05-21/)
+**Active goal:** [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) · **Historical phase plan:** [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) · **Live baseline:** [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) · **Latest wrapper report:** [`../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md) · **Archive:** [`archive/2026-05-21/`](archive/2026-05-21/)
 
 **Production test account:** `cayman@agenticassets.ai` (194 mailboxes). Light regression: `ai.openclaw`.
+
+**Latest verification (2026-05-22):** `validate_manifests.sh` OK (3.1.8, 27 tools); `pytest tests/ -q` 273 passed + 29 subtests; wrapper surface OK; `claude plugin validate ./plugin` and `claude plugin validate .` passed; rebuilt `apple-mail-plugin.zip` and local `apple-mail-mcp-v3.1.8.mcpb`; live production quick/perf/heavy gates passed against `cayman@agenticassets.ai`.
 
 ---
 
@@ -65,10 +67,10 @@ Cross-session source of truth. In-conversation tasks are ephemeral; **this file 
 
 ## Ship — Phase 4
 
-- [x] Version bump (five files) → **3.1.7** (pyproject, plugin.json, marketplace, server.json, mcpb manifest).
+- [x] Version bump (five files) → **3.1.8** (pyproject, plugin.json, marketplace, server.json, mcpb manifest).
 - [ ] mcpb rebuild; **`dxt_version` 0.2** if validator accepts.
 - [ ] Marketplace **`metadata.version`** — document or remove.
-- [x] **`plugin-dev:plugin-validator`** before merge *(this pass — 3.1.7 finalize)*.
+- [x] **Local manifest validator** before merge *(this pass — 3.1.8 finalize)*.
 
 ---
 
@@ -85,7 +87,7 @@ Cross-session source of truth. In-conversation tasks are ephemeral; **this file 
 
 ## Maintenance
 
-- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (266 tests).
+- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (273 tests).
 - After manifests/skills: `bash tools/validate_manifests.sh` + `plugin-dev:plugin-validator` (+ `plugin-dev:skill-reviewer` for skill body/frontmatter).
 - Routine live gate: `export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"` then `quick-check --json` or `perf-test --json`.
 - Heavy analysis gate requires explicit opt-in: `perf-test --include-analysis --allow-heavy-mail-scan --json`. Do not run this during routine agent testing because it can make Mail.app fetch remote message state on large accounts.
@@ -96,7 +98,7 @@ Cross-session source of truth. In-conversation tasks are ephemeral; **this file 
 
 See [`archive/2026-05-21/README.md`](archive/2026-05-21/README.md). Highlights:
 
-- [x] 27 tools, 206 tests at 3.1.6 archive *(266 tests now)*, manifest CI guards, ToolAnnotations on all tools.
+- [x] 27 tools, 206 tests at 3.1.6 archive *(273 tests now)*, manifest CI guards, ToolAnnotations on all tools.
 - [x] `quick-check` / `perf-test` / `smoke-test` CLI + `docs/AGENT_LIVE_TESTING.md`.
 - [x] `inbox_dashboard` async fix, account validation, scan caps (Phase 2).
 - [x] Compose → `run_applescript()`, address dedup, `SENSITIVE_DIRS` in core.
