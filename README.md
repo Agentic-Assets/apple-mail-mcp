@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **273** unit tests, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **276** unit tests, Python **3.10+**.
 
 ## Documentation map
 
@@ -191,11 +191,11 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Composition
 | Tool | Description |
 |------|-------------|
-| `compose_email` | Create a quiet draft by default; `mode="open"` saves then leaves Mail open for review; sends only with explicit `mode="send"` and send-capable server config |
-| `reply_to_email` | Reply or reply-all with optional HTML body; prefer `message_id` from search/list results |
+| `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
+| `reply_to_email` | Reply or reply-all with optional HTML body and original thread context; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
-| `manage_drafts` | Create, list, send, and delete drafts (`send` blocked in `--read-only` and `--draft-safe`) |
-| `create_rich_email_draft` | Build a multipart HTML `.eml` draft and save it to Drafts by default |
+| `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
+| `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
 | Tool | Description |
@@ -254,6 +254,7 @@ In draft-safe mode:
 - `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows)
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
+- use `reply_to_email(message_id=...)` for replies; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
 - pass `message_id` from search/list tools for reply/forward when available; `subject_keyword` is fallback only
 - explicit `mode="send"` calls return an error
 - `manage_drafts action="send"` returns an error
@@ -329,7 +330,7 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
 
-When a per-account call times out in a multi-account fan-out, you get partial results plus an `errors` field naming the slow account.
+When a per-account call fails in a multi-account fan-out, you get partial results plus an `errors` field naming the account. JSON responses also include `error_details` when the tool can distinguish a timeout from another Mail/App permission error.
 
 ### Safety Limits (destructive ops)
 
@@ -341,6 +342,8 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 | `update_email_status` | 10 | `max_updates` |
 | `manage_trash` | 5 | `max_deletes` |
 | `export_emails` | 1000 | `max_emails` |
+
+**Dry-run defaults:** `manage_trash` defaults to `dry_run=True` (safe preview — explicit override needed to act, especially for `action="delete_permanent"`). `move_email` and `update_email_status` default to `dry_run=False` (live) because their effects are reversible; pass `dry_run=True` to preview matches first.
 
 ## Usage Examples
 
@@ -442,7 +445,7 @@ The plugin MCP server starts with **`--draft-safe`** by default (see `plugin/.cl
 |-------|-----|
 | Mail.app not responding | Ensure Mail.app is running; check Automation permissions in System Settings |
 | Slow searches on a large account | Set `DEFAULT_MAIL_ACCOUNT` to the account you actually work in. Pair `account=` with `recent_days=` (default 48h) for tight scopes. Pass `include_content=False` if you don't need bodies |
-| One account times out across a fan-out | Returned JSON includes an `errors` array naming the slow account. The other accounts' results are still returned. Bump the call's `timeout=` parameter if you need to wait longer for the slow one |
+| One account fails across a fan-out | Returned JSON includes an `errors` array naming the account plus `error_details` when available. The other accounts' results are still returned. Bump `timeout=` for timeout entries; fix Mail permissions or account config for non-timeout entries |
 | Mailbox not found | Use exact folder names; nested folders use `/` separator (e.g., `Projects/Alpha`) |
 | Permission errors | Grant access in **System Settings > Privacy & Security > Automation** |
 | Rich draft shows raw HTML | Use `create_rich_email_draft` instead of pasting HTML into `manage_drafts` or AppleScript `content` |

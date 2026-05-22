@@ -26,6 +26,10 @@ from apple_mail_mcp.core import (
 
 DRAFT_LIST_CAP = 100
 MESSAGE_LOOKUP_CAP = 100
+_THREADED_SUBJECT_RE = re.compile(r"^\s*((re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
+_QUOTED_THREAD_MARKERS_RE = re.compile(
+    r"(?im)(^on .+ wrote:\s*$|^-{2,}\s*original message\s*-{2,}|^from:\s*.+$|^> .+)"
+)
 
 
 def _build_found_message_lookup(
@@ -36,8 +40,15 @@ def _build_found_message_lookup(
     recent_days: float,
     found_var: str = "foundMessage",
     messages_var: str = "mailboxMessages",
+    allow_full_scan: bool = False,
 ) -> Tuple[str, Optional[str]]:
-    """Build AppleScript to resolve one message by id or capped subject search."""
+    """Build AppleScript to resolve one message by id or bounded subject search.
+
+    Subject-keyword fallback **requires** a date window unless
+    ``allow_full_scan=True``. Without a date bound, Mail.app evaluates
+    ``every message of mailbox whose subject contains "..."`` across the
+    whole remote mailbox before slicing, which times out on 24K+ inboxes.
+    """
     if message_id:
         normalized = normalize_message_ids([message_id])
         if not normalized:
@@ -52,6 +63,13 @@ def _build_found_message_lookup(
         end if
         """,
             None,
+        )
+
+    if recent_days <= 0 and not allow_full_scan:
+        return "", (
+            "Error: subject-keyword lookup requires recent_days > 0 (default 2.0 / 48h) "
+            "or allow_full_scan=True. Pass message_id when available — that path is "
+            "constant-cost. Unbounded subject scans can stall on large mailboxes."
         )
 
     safe_keyword = escape_applescript(subject_keyword or "")
@@ -321,6 +339,39 @@ def _strip_cdata_wrappers(text):
     return text.replace("<![CDATA[", "").replace("]]>", "")
 
 
+def _standalone_compose_thread_warning(
+    subject: str,
+    body: Optional[str],
+    body_html: Optional[str],
+    standalone_confirmed: bool,
+) -> Optional[str]:
+    """Return an error when a new compose looks like an accidental reply."""
+    if standalone_confirmed:
+        return None
+
+    signals = []
+    if _THREADED_SUBJECT_RE.search(subject or ""):
+        signals.append("threaded subject prefix")
+
+    combined_body = "\n".join(
+        part for part in ((body or ""), (body_html or "")) if part
+    )
+    if _QUOTED_THREAD_MARKERS_RE.search(combined_body):
+        signals.append("quoted-thread markers")
+
+    if not signals:
+        return None
+
+    return (
+        "Error: compose_email creates a standalone new message and will not "
+        "include the original email thread. This draft looks like a reply or "
+        f"forward ({', '.join(signals)}). Use reply_to_email(message_id=...) "
+        "or forward_email(message_id=...) after locating the source message. "
+        "If you intentionally want a brand-new standalone message, pass "
+        "standalone_confirmed=True."
+    )
+
+
 def _build_html_from_text(text_body):
     """Return a simple HTML wrapper for plain text content."""
     safe_body = html_escape(text_body or "")
@@ -447,6 +498,7 @@ def create_rich_email_draft(
     review_in_mail: bool = False,
     from_address: Optional[str] = None,
     timeout: Optional[int] = None,
+    standalone_confirmed: bool = False,
 ) -> str:
     """
     Create a rich-text email draft by generating an unsent `.eml` message and optionally opening it in Mail.
@@ -468,6 +520,7 @@ def create_rich_email_draft(
         review_in_mail: If True, leave the saved compose window open for review. Defaults to closing the saved window after creating the draft.
         from_address: Optional sender address to stamp into the `.eml` `From:` header. Must be one of the account's configured email addresses. When omitted, Mail fills the account's default "Send new messages from" address on open.
         timeout: Optional per-AppleScript timeout in seconds for the helper calls (sender alias lookup and draft save). Defaults to the standard 120s.
+        standalone_confirmed: Required explicit override when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
 
     Returns:
         Confirmation with the generated `.eml` path, missing details, and Mail-open/save status
@@ -480,6 +533,12 @@ def create_rich_email_draft(
 
     text_body = _strip_cdata_wrappers(text_body)
     html_body = _strip_cdata_wrappers(html_body)
+
+    thread_warning = _standalone_compose_thread_warning(
+        subject, text_body, html_body, standalone_confirmed
+    )
+    if thread_warning:
+        return thread_warning
 
     try:
         sender_override, sender_error = _validate_from_address(
@@ -810,6 +869,7 @@ def reply_to_email(
     timeout: Optional[int] = None,
     include_signature: bool = True,
     signature_name: Optional[str] = None,
+    allow_full_scan: bool = False,
 ) -> str:
     """
     Reply to an email by message_id (preferred) or subject keyword.
@@ -827,10 +887,11 @@ def reply_to_email(
         body_html: Optional HTML body for rich formatting (bold, headings, links, colors). When provided, the reply is pasted as HTML. The plain 'reply_body' field is still required as fallback text.
         from_address: Optional sender address to use for this reply. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         message_id: Exact numeric Apple Mail message id from search/list tools. Required preference over subject_keyword whenever an id is available.
-        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). Pass 0 to disable the date window.
+        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). 0 requires allow_full_scan=True on large inboxes.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to 120s for the main reply script and up to 30s for alias validation.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
+        allow_full_scan: Required opt-in for subject-keyword lookups with recent_days=0. Ignored when message_id is set.
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
@@ -848,6 +909,7 @@ def reply_to_email(
         subject_keyword=subject_keyword or None,
         recent_days=recent_days,
         messages_var="inboxMessages",
+        allow_full_scan=allow_full_scan,
     )
     if lookup_error:
         return lookup_error
@@ -1148,9 +1210,13 @@ def compose_email(
     timeout: Optional[int] = None,
     include_signature: bool = True,
     signature_name: Optional[str] = None,
+    standalone_confirmed: bool = False,
 ) -> str:
     """
-    Compose a new email from a specific account.
+    Compose a new standalone email from a specific account.
+
+    This tool never includes the original email thread. Use ``reply_to_email``
+    or ``forward_email`` with ``message_id`` when responding to existing mail.
 
     Args:
         account: Account name to send from (e.g., "Gmail", "Work", "Personal"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
@@ -1166,6 +1232,7 @@ def compose_email(
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
+        standalone_confirmed: Required explicit override when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone message.
 
     Returns:
         Confirmation message with details of the email
@@ -1186,6 +1253,12 @@ def compose_email(
 
     body = _strip_cdata_wrappers(body) or ""
     body_html = _strip_cdata_wrappers(body_html)
+
+    thread_warning = _standalone_compose_thread_warning(
+        subject, body, body_html, standalone_confirmed
+    )
+    if thread_warning:
+        return thread_warning
 
     # Validate optional sender override
     try:
@@ -1371,6 +1444,7 @@ def forward_email(
     timeout: Optional[int] = None,
     include_signature: bool = True,
     signature_name: Optional[str] = None,
+    allow_full_scan: bool = False,
 ) -> str:
     """
     Forward an email to one or more recipients.
@@ -1386,10 +1460,11 @@ def forward_email(
         from_address: Optional sender address to use when forwarding. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         mode: Delivery mode — "draft" (default, save quietly to Drafts), "open" (save first, then leave compose window open for review), or "send" (send immediately)
         message_id: Exact numeric Apple Mail message id from search/list tools. Required preference over subject_keyword whenever an id is available.
-        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). Pass 0 to disable the date window.
+        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). 0 requires allow_full_scan=True on large inboxes.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
+        allow_full_scan: Required opt-in for subject-keyword lookups with recent_days=0. Ignored when message_id is set.
 
     Returns:
         Confirmation message with details of forwarded email
@@ -1408,6 +1483,7 @@ def forward_email(
         message_id=message_id,
         subject_keyword=subject_keyword or None,
         recent_days=recent_days,
+        allow_full_scan=allow_full_scan,
     )
     if lookup_error:
         return lookup_error
@@ -1644,6 +1720,7 @@ def manage_drafts(
     draft_subject: Optional[str] = None,
     from_address: Optional[str] = None,
     timeout: Optional[int] = None,
+    standalone_confirmed: bool = False,
 ) -> str:
     """
     Manage draft emails - list, create, send, open, or delete drafts.
@@ -1659,6 +1736,7 @@ def manage_drafts(
         draft_subject: Subject keyword to find draft (required for send/open/delete)
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
+        standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
 
     Returns:
         Formatted output based on action
@@ -1707,6 +1785,12 @@ def manage_drafts(
     elif action == "create":
         if not subject or not to or not body:
             return "Error: 'subject', 'to', and 'body' are required for creating drafts"
+
+        thread_warning = _standalone_compose_thread_warning(
+            subject, body, None, standalone_confirmed
+        )
+        if thread_warning:
+            return thread_warning
 
         try:
             sender_override, sender_error = _validate_from_address(

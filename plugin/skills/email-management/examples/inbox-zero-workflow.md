@@ -37,8 +37,8 @@ For every email in your inbox, choose ONE action:
 ### 3. Respond (or Reply)
 **When**: You can respond in under 2 minutes
 **Tools**:
-- Quick reply: `reply_to_email(reply_body="...", subject_keyword="...")`
-- Reply to all: `reply_to_email(reply_body="...", subject_keyword="...", reply_to_all=True)`
+- Quick reply: `get_email_thread(message_id="...")` to verify no sent reply, then `reply_to_email(reply_body="...", message_id="...")`
+- Reply to all: `get_email_thread(message_id="...")` to verify no sent reply, then `reply_to_email(reply_body="...", message_id="...", reply_to_all=True)`
 **Examples**:
 - Quick confirmations ("Yes, I'll be there")
 - Simple answers to straightforward questions
@@ -48,7 +48,7 @@ For every email in your inbox, choose ONE action:
 
 ### 4. Defer (or Draft)
 **When**: Email needs a thoughtful response but isn't urgent
-**Tool**: `manage_drafts(action="create", subject="Re: ...", to="...", body="[your draft]")`
+**Tool**: `get_email_thread(message_id="...")` to verify no sent reply, then `reply_to_email(message_id="...", mode="draft", reply_body="[your draft]")`
 **Examples**:
 - Complex questions requiring research
 - Emotional emails needing careful wording
@@ -273,7 +273,7 @@ Track these to measure success:
 |--------|---------|
 | Get overview | `get_inbox_overview()` |
 | Check urgent | `search_emails(subject_keyword="urgent")` |
-| Quick reply | `reply_to_email(reply_body="...", subject_keyword="...")` |
+| Quick reply | `get_email_thread(message_id="...")` then `reply_to_email(reply_body="...", message_id="...")` |
 | Create draft | `manage_drafts(action="create", ...)` |
 | Move to trash | `manage_trash(action="move_to_trash", ...)` |
 | Archive | `move_email(to_mailbox="Archive", ...)` |

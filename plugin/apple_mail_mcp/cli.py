@@ -705,6 +705,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not apply the configured/default Mail signature",
     )
     draft.add_argument("--open", action="store_true", help="Open compose window")
+    draft.add_argument(
+        "--standalone-confirmed",
+        action="store_true",
+        help="Confirm this is a standalone new message (bypasses Re:/Fwd: safeguard)",
+    )
     _add_json_flag(draft)
 
     config = subparsers.add_parser(
@@ -1009,6 +1014,7 @@ def _cmd_draft(args: argparse.Namespace) -> int:
         from_address=args.from_address,
         include_signature=not args.no_signature,
         signature_name=args.signature_name,
+        standalone_confirmed=args.standalone_confirmed,
     )
 
 

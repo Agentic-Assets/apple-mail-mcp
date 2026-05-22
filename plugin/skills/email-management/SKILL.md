@@ -1,11 +1,23 @@
 ---
 name: email-management
-description: This skill should be used when the user asks to "help me get to inbox zero", "clean up my inbox", "daily email habits", "build a repeatable triage program", or "I'm drowning in email" and needs sustained inbox-zero coaching plus cross-cutting workflows across this MCP using get_inbox_overview, search_emails, move_email, update_email_status, manage_trash, and get_statistics. Do NOT use for tooling-only onboarding (see apple-mail-operator), focused folder-architecture redesign without execution (mailbox-taxonomy), Mail filter prose only (mail-rules-advisor), a 5-minute read-first scan only (inbox-triage), or drafting voice capture (email-style-profile before email-drafting).
+description: This skill should be used when the user asks to "help me get to inbox zero", "build a repeatable triage program", "coordinate a multi-week cleanup across mailboxes", "set up sustained email habits", or "I'm drowning in email" and needs a multi-week umbrella program coordinating triage, taxonomy, cleanup, drafting, and analytics — not a single pass. Uses get_inbox_overview, search_emails, move_email, update_email_status, manage_trash, and get_statistics; routes single-purpose work to the narrow sibling skill instead. Do NOT use for tooling-only onboarding (see apple-mail-operator), a single 5–10 minute read-first scan (inbox-triage), a one-shot bulk move/archive/delete campaign (email-archive-cleanup), folder-architecture redesign without execution (mailbox-taxonomy), Mail filter prose only (mail-rules-advisor), or drafting voice capture (email-style-profile before email-drafting).
 ---
 
 # Email Management
 
 Sustained inbox organization for Apple Mail: repeatable processing habits plus Inbox Zero programs that combine reading, queues, guarded moves/trash, and analytics. Prefer narrow sibling skills (`mailbox-taxonomy`, `email-archive-cleanup`, `mail-rules-advisor`, `email-drafting`, `apple-mail-operator`) when the user intent is clearly one-shot or specialized — use this umbrella when they want coordinated multi-week cleanup or habitual discipline.
+
+## Large-inbox pre-flight (required when inbox > ~5,000 messages)
+
+Apple Mail's AppleScript bridge slows non-linearly on large mailboxes (24k+ is common). Before running any discovery or bulk tool:
+
+1. **Size the inbox once per session**: `get_inbox_overview(output_format="compact", include_mailboxes=false, include_recent=false)`. If it returns slowly or partially, treat the inbox as large and apply the rules below.
+2. **Bound every scan.** Pass an explicit `recent_days` (start at 2, widen only on demand). Never call `recent_days=0` / `allow_full_scan=True` without user confirmation.
+3. **Co-filter sender-based actions.** `move_email(sender=...)`, `search_emails(sender=...)`, and `list_email_attachments(subject_keyword=...)` can stall on 24k mail. Pair sender filters with `subject_keyword=` or a tight `recent_days` ceiling, or collect `message_ids` from a bounded search and pass `message_ids=[...]` instead.
+4. **`get_awaiting_reply` is timeout-prone** (it cross-walks Sent mail). Start with `days_back=2, max_results=5`; if it stalls, skip it and check Sent directly with `search_emails(mailbox="Sent", recent_days=2, ...)`.
+5. **Always drill by id, never re-search by subject.** Once `search_emails` / `list_inbox_emails` returns a `message_id`, use `get_email_by_id(message_id=...)` and `get_email_thread(message_id=...)`. Re-searching by subject re-pays the scan cost.
+6. **Param names matter.** `list_inbox_emails` takes `max_emails` (not `limit`) and `include_read` (not `unread_only`). Example: `list_inbox_emails(max_emails=25, include_read=False, include_content=False)`.
+7. **`inbox_dashboard` is the rescue path.** When `get_inbox_overview` times out or returns partial JSON, fall back to `inbox_dashboard()` — it returns a structured snapshot (unread, recent, pinned, suggestions) in a single bounded call.
 
 ## Already-replied safeguard (default)
 
@@ -111,7 +123,7 @@ Goal: keep folder structure healthy and archive aging messages.
 3. Analyze patterns: `get_statistics(scope="account_overview")` plus `get_top_senders()`. For per-folder volume, prefer `list_mailboxes(include_counts=True)`; when calling `get_statistics(scope="mailbox_breakdown")`, pass explicit `mailbox=` — omitting it scopes to the default Inbox in code. Full guidance lives in `references/analytics.md`.
 4. Adjust folders: collaborate with **`mailbox-taxonomy`** for naming; create net-new folders with `create_mailbox` after explicit confirmation (rename/delete heavy work still occurs in Mail UI when needed).
 5. Bulk-organize by sender or date:
-   - `search_emails(sender="...", recent_days=30)` then `move_email(sender="...", to_mailbox="...", max_moves=N)`.
+   - `search_emails(sender="...", recent_days=30)` then `move_email(sender="...", to_mailbox="...", max_moves=N)`. **Always co-filter** `move_email(sender=...)` with `subject_keyword=` or a tight `recent_days` ceiling (≤30), OR pass `message_ids=[...]` collected from the prior bounded search — a bare `sender=` filter can stall on a 24k inbox.
    - `search_emails(date_to="YYYY-MM-DD", date_from="YYYY-MM-DD")` then move to an archive folder.
 6. Archive read mail older than 30 days into `Archive/<year>`.
 
@@ -126,7 +138,7 @@ Goal: drain the inbox by processing every message exactly once.
    - Delete: spam, expired notifications — `manage_trash(action="move_to_trash")`.
    - Delegate: forward — use **`email-drafting`** (`forward_email` tool) after user confirms recipients.
    - Defer: flag and move to a "Follow Up" mailbox.
-   - Do: respond now if under two minutes — use **`email-drafting`** (compose stack); never auto-send under `--draft-safe`.
+   - Do: respond now if under two minutes — use **`email-drafting`** (compose stack); never auto-send under `--draft-safe`. Always route replies through `reply_to_email(message_id=...)`; `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
    - File: `move_email(to_mailbox="...")` for reference material.
 3. Keep folders sparing: an "Action Required", "Waiting For", and "Reference" trio handles most cases.
 4. Maintain daily — Inbox Zero is a habit, not a one-time event.
@@ -151,9 +163,9 @@ Mindset:
 | Search by sender | `search_emails(sender="...")` | Same defaults apply |
 | Search email bodies | `search_emails(body_text="...", include_content=True)` | Slower; use when subject is unknown |
 | Cross-account search | `search_emails(account=None, all_accounts=True)` | Costly on Exchange; use sparingly |
-| Recent inbox listing | `list_inbox_emails(max_emails=50)` | Default cap is 50 |
+| Recent inbox listing | `list_inbox_emails(max_emails=50, include_read=False, include_content=False)` | Default cap is 50; `include_read=False` is the cheapest pass on a large inbox |
 | View a conversation | `get_email_thread(account="...", subject_keyword="...", mailbox="INBOX", recent_days=2)` — `account` required; widen `mailbox`/`recent_days` only when needed |
-| Move messages | `move_email(..., max_moves=N)` | Default cap is 50; set `max_moves=1` for precise single-message filing |
+| Move messages | `move_email(..., max_moves=N)` | Default cap is 50; set `max_moves=1` for precise single-message filing. When using `sender=`, always co-filter with `subject_keyword=` or a tight `recent_days` ceiling (≤30), OR pass `message_ids=[...]` from a prior bounded search. |
 | Flag / mark read | `update_email_status(action="...", max_updates=N)` | Default cap is 10 |
 | Move to trash / delete | `manage_trash(action="...", max_deletes=N)` | See `references/bulk-cleanup.md` |
 | Analytics | `get_statistics()` and `get_top_senders()` | See `references/analytics.md` |
@@ -200,7 +212,7 @@ Mindset:
 1. Confirm volume: `get_statistics(scope="sender_stats", sender="...")`.
 2. Find the messages: `search_emails(sender="...", recent_days=30)`; ask before any full-scan opt-in.
 3. If unwanted, run the cleanup sequence from `references/bulk-cleanup.md`.
-4. If wanted but noisy, create a dedicated folder and bulk-move with `move_email(sender="...", to_mailbox="...", max_moves=N)`.
+4. If wanted but noisy, create a dedicated folder and bulk-move with `move_email(sender="...", to_mailbox="...", max_moves=N)`. Co-filter with `subject_keyword=` or `recent_days≤30`, or pass `message_ids=[...]` from the prior `search_emails` call — a bare `sender=` filter can stall on a 24k inbox.
 5. If the sender is a newsletter, surface it via `get_top_senders()` and unsubscribe in Apple Mail.
 
 ## Additional Resources

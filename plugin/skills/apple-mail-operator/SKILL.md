@@ -7,6 +7,18 @@ description: This skill should be used when the user asks "how does this Mail MC
 
 Operational guide for using the Apple Mail MCP safely and quickly. Focus on bootstrap, selecting the correct tool per intent, avoiding slow cross-account scans, and understanding draft-safe versus send-capable setups.
 
+## Large-inbox pre-flight (required when inbox > ~5,000 messages)
+
+Apple Mail's AppleScript bridge slows non-linearly on large mailboxes (24k+ is common). Before running any discovery or bulk tool:
+
+1. **Size the inbox once per session**: `get_inbox_overview(output_format="compact", include_mailboxes=false, include_recent=false)`. If it returns slowly or partially, treat the inbox as large and apply the rules below.
+2. **Bound every scan.** Pass an explicit `recent_days` (start at 2, widen only on demand). Never call `recent_days=0` / `allow_full_scan=True` without user confirmation.
+3. **Co-filter sender-based actions.** `move_email(sender=...)`, `search_emails(sender=...)`, and `list_email_attachments(subject_keyword=...)` can stall on 24k mail. Pair sender filters with `subject_keyword=` or a tight `recent_days` ceiling, or collect `message_ids` from a bounded search and pass `message_ids=[...]` instead.
+4. **`get_awaiting_reply` is timeout-prone** (it cross-walks Sent mail). Start with `days_back=2, max_results=5`; if it stalls, skip it and check Sent directly with `search_emails(mailbox="Sent", recent_days=2, ...)`.
+5. **Always drill by id, never re-search by subject.** Once `search_emails` / `list_inbox_emails` returns a `message_id`, use `get_email_by_id(message_id=...)` and `get_email_thread(message_id=...)`. Re-searching by subject re-pays the scan cost.
+6. **Param names matter.** `list_inbox_emails` takes `max_emails` (not `limit`) and `include_read` (not `unread_only`). Example: `list_inbox_emails(max_emails=25, include_read=False, include_content=False)`.
+7. **`inbox_dashboard` is the rescue path.** When `get_inbox_overview` times out or returns partial JSON, fall back to `inbox_dashboard()` — it returns a structured snapshot (unread, recent, pinned, suggestions) in a single bounded call.
+
 ## Already-replied safeguard (default)
 
 Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. The discovery tools enforce this by default:
@@ -64,13 +76,19 @@ See **[[email-drafting]]** for the required pre-draft verification step.
 | No accidental sends | Keep `--draft-safe`; require explicit user confirmation before any send attempt |
 | Quiet bulk drafts | Default `mode="draft"` on compose tools; do not leave unsaved compose windows |
 | Review each draft in Mail | Use `mode="open"` (saves first, then leaves window open); for rich `.eml`, `review_in_mail=True` |
-| Reply to a known message | Pass `message_id` from search/list; avoid `subject_keyword` when an id is already known |
+| Reply to a known message | Use `reply_to_email(message_id=...)`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and **error out** on `Re:`/`Fwd:` subjects or quoted-thread bodies unless you explicitly pass `standalone_confirmed=True` (use that override only for a genuinely new message that happens to start with `Re:`) |
 | Read-only auditing | Mention `--read-only` server flag — removes send-facing compose registrations |
 | Destructive moves/deletes | Defer to `email-archive-cleanup` or `email-management`; never bury trash/delete actions inside troubleshooting |
 
-## Optional Dashboards And UI
+### When to reach for `inbox_dashboard`
 
-Use `inbox_dashboard()` only when the client supports MCP UI hosting and the session needs a richer explorer view; it is heavier than `get_inbox_overview()` for routine operator tasks.
+`inbox_dashboard()` returns a structured snapshot (unread, recent, pinned, suggestions) in a single call. Prefer it over chained `get_inbox_overview` + `list_inbox_emails` + `get_needs_response` calls when:
+
+- `get_inbox_overview` is timing out or returning partial JSON with `errors` on a large inbox.
+- The user asks for a visual or one-glance summary ("show me what my inbox looks like", "give me the dashboard").
+- You need consolidated unread + recent + suggested-action data without paying three separate AppleScript round-trips.
+
+It is heavier than a compact `get_inbox_overview` on small inboxes, so keep `get_inbox_overview(output_format="compact", ...)` as the daily-loop default. Escalate to `inbox_dashboard()` as the rescue path.
 
 ## Additional Resources
 

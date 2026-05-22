@@ -24,7 +24,7 @@ New or edited skills: delegate drafting to subagents; run **`plugin-dev:plugin-v
 
 Already-replied safeguard — honored by:
 
-- `email-drafting/` — honors already-replied safeguard (pre-draft thread verification required before `reply_to_email`).
+- `email-drafting/` — honors already-replied safeguard (pre-draft thread verification required before `reply_to_email`; never compose-as-reply).
 - `inbox-triage/` — honors already-replied safeguard (default `include_already_replied=False`; pass `exclude_replied=True` on list/search).
 - `email-management/` — honors already-replied safeguard (cross-references email-drafting for verification).
 - `apple-mail-operator/` — honors already-replied safeguard (operator guidance for the new params and overrides).

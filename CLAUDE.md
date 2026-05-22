@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**27 tools**, **273 tests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Claude Code plugin (`plugin/`), and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.claude-plugin/marketplace.json`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**27 tools**, **276 tests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Claude Code plugin (`plugin/`), and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.claude-plugin/marketplace.json`.
 
 ## Agent orchestration (required)
 
@@ -19,8 +19,8 @@ Navigation hub for **apple-mail-mcp**: one Python MCP server (**27 tools**, **27
 | Expert | Use for |
 |--------|---------|
 | **`plugin-dev:plugin-validator`** | Manifest drift, tool counts, marketplace readiness |
-| **`plugin-dev:plugin-architect`** | Plugin structure, MCP wiring, agent workflow gaps |
-| Skills: **`mcp-integration`**, **`plugin-structure`**, **`mcp-builder`** | MCP server design, `.mcp.json` / `plugin.json`, tool quality |
+| **`plugin-dev:skill-reviewer`** | Bundled skill descriptions, trigger overlap, safety language |
+| Skills: **`plugin-dev:mcp-integration`**, **`plugin-dev:plugin-structure`**, **`mcp-builder`** | MCP server design, `.mcp.json` / `plugin.json`, tool quality |
 
 Do not solo large plugin or perf workstreams without at least one plugin-dev expert pass.
 
@@ -49,7 +49,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/pytest tests/                    # 273 tests
+.venv/bin/pytest tests/                    # 276 tests
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```

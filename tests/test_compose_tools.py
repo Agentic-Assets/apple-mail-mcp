@@ -150,6 +150,45 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
 
 
 class ComposeToolTests(unittest.TestCase):
+    def test_create_rich_email_draft_blocks_reply_like_subject_without_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "blocked.eml"
+
+            with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+                result = compose_tools.create_rich_email_draft(
+                    account="Work",
+                    subject="Re: Complex Request",
+                    to="sender@example.com",
+                    text_body="Thread-like draft",
+                    output_path=str(output_path),
+                    open_in_mail=False,
+                )
+
+        mock_run.assert_not_called()
+        self.assertIn("standalone new message", result)
+        self.assertFalse(output_path.exists())
+
+    def test_create_rich_email_draft_allows_reply_like_subject_when_confirmed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "confirmed.eml"
+
+            with patch(
+                "apple_mail_mcp.tools.compose.run_applescript",
+                return_value="sender@example.com",
+            ):
+                result = compose_tools.create_rich_email_draft(
+                    account="Work",
+                    subject="Re: standalone project name",
+                    to="team@example.com",
+                    text_body="This is a new standalone draft.",
+                    output_path=str(output_path),
+                    open_in_mail=False,
+                    standalone_confirmed=True,
+                )
+
+            self.assertTrue(output_path.exists())
+            self.assertIn("Rich draft prepared successfully", result)
+
     def test_create_rich_email_draft_writes_multipart_eml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "weekly-update.eml"
@@ -475,6 +514,42 @@ class ValidateFromAddressTests(unittest.TestCase):
 
 
 class ComposeEmailSenderOverrideTests(unittest.TestCase):
+    def test_compose_blocks_reply_like_subject_without_standalone_confirmation(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.compose_email(
+                account="Work",
+                to="norman@example.com",
+                subject="Re: Forwarded notes",
+                body="Thanks, I will take a look.",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("compose_email creates a standalone new message", result)
+        self.assertIn("Use reply_to_email(message_id=...)", result)
+
+    def test_compose_allows_reply_like_subject_when_standalone_is_confirmed(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "✓ Email saved as draft!"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.compose_email(
+                account="Work",
+                to="norman@example.com",
+                subject="Re: standalone project name",
+                body="This is not a reply to an existing email.",
+                standalone_confirmed=True,
+            )
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn("SAVING EMAIL AS DRAFT", captured[0])
+        self.assertIn("saved as draft", result)
+
     def test_compose_defaults_to_draft_mode(self):
         captured = []
 
@@ -982,6 +1057,44 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
 
 
 class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
+    def test_create_draft_blocks_reply_like_subject_without_confirmation(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="create",
+                subject="Re: Complex Request",
+                to="sender@example.com",
+                body="Thread-like draft",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("standalone new message", result)
+        self.assertIn("Use reply_to_email(message_id=...)", result)
+
+    def test_create_draft_allows_reply_like_subject_when_confirmed(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "✓ Draft created"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="create",
+                subject="Re: standalone project name",
+                to="team@example.com",
+                body="This is a new standalone draft.",
+                standalone_confirmed=True,
+            )
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn("CREATING DRAFT", captured[0])
+        self.assertIn("Draft created", result)
+
     def test_default_emits_single_alias_fallback_for_new_draft(self):
         captured = []
 

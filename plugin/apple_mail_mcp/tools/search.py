@@ -124,6 +124,7 @@ def _format_search_records_text(
     records: List[Dict[str, Any]],
     subject_only: bool = False,
     errors: Optional[List[str]] = None,
+    error_details: Optional[List[Dict[str, str]]] = None,
     recent_days_applied: Optional[float] = None,
 ) -> str:
     """Format search records as human-readable text."""
@@ -160,7 +161,14 @@ def _format_search_records_text(
     lines.append("========================================")
     lines.append(f"FOUND: {len(records)} matching email(s)")
     if errors:
-        lines.append(f"PARTIAL: {len(errors)} account(s) timed out: {', '.join(errors)}")
+        if error_details:
+            detail_text = "; ".join(
+                f"{item['account']} ({item['type']}: {item['message']})"
+                for item in error_details
+            )
+            lines.append(f"PARTIAL: {len(errors)} account issue(s): {detail_text}")
+        else:
+            lines.append(f"PARTIAL: {len(errors)} account issue(s): {', '.join(errors)}")
     lines.append("========================================")
     return "\n".join(lines)
 
@@ -173,6 +181,7 @@ def _build_search_response(
     output_format: str,
     subject_only: bool = False,
     errors: Optional[List[str]] = None,
+    error_details: Optional[List[Dict[str, str]]] = None,
     recent_days_applied: Optional[float] = None,
     searched_from: Optional[str] = None,
 ) -> str:
@@ -196,14 +205,27 @@ def _build_search_response(
         }
         if errors:
             payload["errors"] = errors
+        if error_details:
+            payload["error_details"] = error_details
         return json.dumps(payload)
 
     return _format_search_records_text(
         items,
         subject_only=subject_only,
         errors=errors,
+        error_details=error_details,
         recent_days_applied=recent_days_applied,
     )
+
+
+def _search_error_detail(account: str, exc: Exception) -> Dict[str, str]:
+    if isinstance(exc, AppleScriptTimeout):
+        return {"account": account, "type": "timeout", "message": str(exc)}
+    return {
+        "account": account,
+        "type": exc.__class__.__name__,
+        "message": str(exc),
+    }
 
 
 def _build_search_script(
@@ -220,6 +242,7 @@ def _build_search_script(
     offset: int,
     limit: int,
     body_text: Optional[str],
+    recent_days: float = 0.0,
 ) -> str:
     """Build the AppleScript for a single account's search.
 
@@ -227,13 +250,24 @@ def _build_search_script(
     ``whose`` clause sliced down to ``items 1 thru collectLimit`` or a
     ``messages 1 thru collectLimit`` bound directly, so we never materialize
     the full message list of a large (10K+) mailbox.
+
+    Scan-cap scales with ``recent_days`` so that narrow filters (sender,
+    subject_terms) over a wider date window actually inspect a meaningful
+    portion of that window — otherwise a 7-day query with default limit=20
+    would only inspect the 21 newest messages and silently miss matches
+    further back. Floor stays at ``collect_limit + offset`` and ceiling
+    caps at 500 to keep Mail bounded on remote IMAP/Exchange mailboxes.
     """
     escaped_sender = escape_applescript(sender) if sender else None
     use_body_search = body_text is not None
 
     collect_limit = limit + 1  # +1 for has_more probe; offset is decremented separately
-    # A1 cap includes offset because matching messages are skipped *after* binding.
-    scan_cap = collect_limit + offset
+    base_cap = collect_limit + offset
+    if recent_days and recent_days > 0:
+        window_cap = min(int(recent_days * 50), 500)
+        scan_cap = max(base_cap, window_cap)
+    else:
+        scan_cap = base_cap
 
     bounded_candidate_script = f'''
                             set matchingMessages to {{}}
@@ -542,6 +576,7 @@ def _search_one_account(
     limit: int,
     body_text: Optional[str],
     timeout: Optional[int],
+    recent_days: float = 0.0,
 ) -> List[Dict[str, Any]]:
     """Run the search AppleScript for a single account synchronously."""
     script = _build_search_script(
@@ -558,6 +593,7 @@ def _search_one_account(
         offset=offset,
         limit=limit,
         body_text=body_text,
+        recent_days=recent_days,
     )
     result = run_applescript(script, timeout=timeout if timeout is not None else 180)
     if result.startswith("ERROR|||"):
@@ -581,8 +617,9 @@ async def _search_mail_records(
     sort: str = "date_desc",
     body_text: Optional[str] = None,
     timeout: Optional[int] = None,
-) -> tuple[List[Dict[str, Any]], List[str]]:
-    """Return (records, error_account_names) from Apple Mail.
+    recent_days: float = 0.0,
+) -> tuple[List[Dict[str, Any]], List[str], List[Dict[str, str]]]:
+    """Return (records, error_account_names, error_details) from Apple Mail.
 
     When account is None, dispatches one AppleScript per account in parallel
     via ``asyncio.to_thread`` so wall time is bounded by the slowest single
@@ -593,7 +630,7 @@ async def _search_mail_records(
     if offset < 0:
         raise ValueError("offset must be >= 0")
     if limit <= 0:
-        return [], []
+        return [], [], []
     if sort not in {"date_desc", "date_asc"}:
         raise ValueError("Invalid sort. Use: date_desc, date_asc")
     if read_status not in {"all", "read", "unread"}:
@@ -618,10 +655,11 @@ async def _search_mail_records(
                 limit,
                 body_text,
                 timeout,
+                recent_days,
             )
-            return records, []
-        except AppleScriptTimeout:
-            return [], [account]
+            return records, [], []
+        except AppleScriptTimeout as exc:
+            return [], [account], [_search_error_detail(account, exc)]
 
     # Multi-account: fetch account list cheaply, then dispatch in parallel.
     try:
@@ -630,7 +668,7 @@ async def _search_mail_records(
         raise ValueError("Mail account listing timed out")
 
     if not accounts:
-        return [], []
+        return [], [], []
 
     async def run_one(acct: str) -> tuple[str, Any]:
         try:
@@ -650,6 +688,7 @@ async def _search_mail_records(
                 limit,
                 body_text,
                 timeout,
+                recent_days,
             )
             return acct, recs
         except AppleScriptTimeout:
@@ -661,17 +700,15 @@ async def _search_mail_records(
 
     combined: List[Dict[str, Any]] = []
     errors: List[str] = []
+    error_details: List[Dict[str, str]] = []
     for acct, outcome in results:
-        if isinstance(outcome, AppleScriptTimeout):
+        if isinstance(outcome, Exception):
             errors.append(acct)
-        elif isinstance(outcome, Exception):
-            # Treat unexpected per-account errors as soft failures too — caller
-            # still gets partial data plus the account name in errors.
-            errors.append(acct)
+            error_details.append(_search_error_detail(acct, outcome))
         else:
             combined.extend(outcome)
 
-    return combined, errors
+    return combined, errors, error_details
 
 
 def _search_mail_records_sync(**kwargs) -> List[Dict[str, Any]]:
@@ -705,8 +742,17 @@ def _search_mail_records_sync(**kwargs) -> List[Dict[str, Any]]:
         except AppleScriptTimeout:
             raise
 
-    records, errors = asyncio.run(_search_mail_records(**kwargs))
+    records, errors, error_details = asyncio.run(_search_mail_records(**kwargs))
     if errors and not records:
+        non_timeout = [
+            item for item in error_details if item.get("type") != "timeout"
+        ]
+        if non_timeout:
+            detail = "; ".join(
+                f"{item['account']}: {item['type']}: {item['message']}"
+                for item in non_timeout
+            )
+            raise RuntimeError(f"AppleScript failed for account(s): {detail}")
         raise AppleScriptTimeout(
             f"AppleScript timed out for account(s): {', '.join(errors)}"
         )
@@ -768,8 +814,8 @@ async def search_emails(
           predictable on Exchange / Gmail accounts with deep history.
         - When account is None each account runs in parallel; one slow
           account no longer blocks the others, but its name will appear in
-          the response's `errors` field (JSON) or partial banner (text) so
-          you can retry it alone with a longer `timeout`.
+          the response's `errors` field (JSON) or partial banner (text).
+          JSON also includes `error_details` when the failure reason is known.
 
     Args:
         account: Account name to search in (e.g., "Gmail", "Work").
@@ -813,9 +859,9 @@ async def search_emails(
 
     Returns:
         Formatted list of matching emails or JSON payload with stable message
-        metadata. When one or more accounts time out during a multi-account
-        call, the response includes the slow account names so the caller can
-        retry them individually with a larger `timeout`.
+        metadata. When one or more accounts fail during a multi-account call,
+        the response includes account names plus error details so the caller can
+        retry timeout accounts or fix non-timeout failures.
     """
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
@@ -881,7 +927,7 @@ async def search_emails(
     subject_terms = normalize_search_terms(subject_keyword, subject_keywords)
 
     try:
-        records, errors = await _search_mail_records(
+        records, errors, error_details = await _search_mail_records(
             account=account,
             mailbox=mailbox,
             subject_terms=subject_terms,
@@ -897,6 +943,7 @@ async def search_emails(
             sort=sort,
             body_text=body_text,
             timeout=timeout,
+            recent_days=effective_recent_days,
         )
 
         # Replied-detection: build the replied-Message-ID set once and
@@ -947,6 +994,7 @@ async def search_emails(
             output_format=output_format,
             subject_only=False,
             errors=errors or None,
+            error_details=error_details or None,
             recent_days_applied=effective_recent_days,
             searched_from=searched_from,
         )

@@ -16,7 +16,7 @@ Collect explicit bullets (or ingest existing notes from the user) covering:
 - Formality ladder (investor memo vs teammate ping).
 - Default greeting/sign-off patterns (including language toggles).
 - Paragraph length norms, bullets vs prose, emoji policy.
-- Red lines (topics not to autop-generate).
+- Red lines (topics not to auto-generate).
 
 Encode durable preferences inside **`USER_EMAIL_PREFERENCES`** so every preference-aware MCP tool inherits the context.
 
@@ -24,7 +24,7 @@ Encode durable preferences inside **`USER_EMAIL_PREFERENCES`** so every preferen
 
 | Step | Tool call |
 |------|-----------|
-| Pull recent Sends | `search_emails(mailbox="Sent", include_content=true, recent_days=30, limit=15)` — tighten `recent_days` if timeouts |
+| Pull recent Sends | `search_emails(mailbox="Sent", include_content=true, recent_days=30, limit=15)` — on large mailboxes, follow this ladder: try `recent_days=7` first; if timeouts, drop to `3`; if still slow, anchor on a specific `message_id` from a known recent Send |
 | Deepen hallmark threads | `get_email_thread(account="...", subject_keyword="...")` or `get_email_by_id(...)` when the user cites concrete threads |
 | Check alternate aliases | Cross-check `list_account_addresses` outputs if tone shifts per persona |
 
@@ -41,7 +41,7 @@ Deliver a concise artifact (bullet list acceptable) containing:
 
 ### 4. Wire Into Draft Flow
 
-Always cross-link to **`email-drafting`** for actual compose operations. Mention when **draft-safe** mode means output must stop at drafts pending human send.
+Always cross-link to **`email-drafting`** for actual compose operations. Mention when **draft-safe** mode means output must stop at drafts pending human send. Reply-style examples must be authored via `reply_to_email`, not `compose_email` or `create_rich_email_draft`; the latter now refuse `Re:`/`Fwd:` drafts unless `standalone_confirmed=True`.
 
 ### 5. Maintain And Refresh
 
