@@ -440,10 +440,26 @@ def run_perf_battery(
     *,
     quick: bool = False,
     include_analysis: bool = False,
+    allow_heavy_mail_scan: bool = False,
     profile: str = DEFAULT_PERF_PROFILE,
     verbose_sensitive: bool = False,
 ) -> dict[str, Any]:
     thresholds = resolve_perf_thresholds(profile)
+    if include_analysis and not allow_heavy_mail_scan:
+        return {
+            "ok": False,
+            "account": account,
+            "quick": quick,
+            "include_analysis": include_analysis,
+            "profile": profile,
+            "thresholds_ms": thresholds,
+            "cases": [],
+            "error": (
+                "--include-analysis requires --allow-heavy-mail-scan. "
+                "Analysis probes can touch many message headers and may cause "
+                "Mail.app to fetch remote messages on large accounts."
+            ),
+        }
     selected_account, account_error = _resolve_test_account(account)
     if not selected_account:
         return {
@@ -657,6 +673,12 @@ def _build_parser() -> argparse.ArgumentParser:
     draft.add_argument("--cc", help="CC address(es)")
     draft.add_argument("--bcc", help="BCC address(es)")
     draft.add_argument("--from-address", help="Sender alias on the account")
+    draft.add_argument("--signature-name", help="Mail signature name to apply")
+    draft.add_argument(
+        "--no-signature",
+        action="store_true",
+        help="Do not apply the configured/default Mail signature",
+    )
     draft.add_argument("--open", action="store_true", help="Open compose window")
     _add_json_flag(draft)
 
@@ -698,6 +720,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--include-analysis",
         action="store_true",
         help="Add analysis cases (needs-response, awaiting-reply, top-senders, statistics)",
+    )
+    perf.add_argument(
+        "--allow-heavy-mail-scan",
+        action="store_true",
+        help=(
+            "Required with --include-analysis. This opt-in acknowledges the "
+            "analysis probes may touch many message headers on large accounts."
+        ),
     )
     perf.add_argument(
         "--profile",
@@ -952,6 +982,8 @@ def _cmd_draft(args: argparse.Namespace) -> int:
         mode="open" if args.open else "draft",
         body_html=body_html,
         from_address=args.from_address,
+        include_signature=not args.no_signature,
+        signature_name=args.signature_name,
     )
 
 
@@ -1109,6 +1141,7 @@ def _cmd_perf_test(args: argparse.Namespace) -> int:
         args.account,
         quick=args.quick,
         include_analysis=args.include_analysis,
+        allow_heavy_mail_scan=args.allow_heavy_mail_scan,
         profile=args.profile,
         verbose_sensitive=args.verbose_sensitive,
     )
@@ -1121,6 +1154,7 @@ def _cmd_quick_check(args: argparse.Namespace) -> int:
         args.account,
         quick=True,
         include_analysis=False,
+        allow_heavy_mail_scan=False,
         profile=DEFAULT_PERF_PROFILE,
         verbose_sensitive=args.verbose_sensitive,
     )

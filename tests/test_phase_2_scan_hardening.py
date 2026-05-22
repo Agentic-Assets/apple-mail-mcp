@@ -8,6 +8,8 @@ from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools import inbox as inbox_tools
 from apple_mail_mcp.tools import manage as manage_tools
 from apple_mail_mcp.tools import search as search_tools
+from apple_mail_mcp.tools import smart_inbox as smart_inbox_tools
+from apple_mail_mcp.tools import analytics as analytics_tools
 
 
 def _make_subprocess_result(returncode=0, stdout=b"ok", stderr=b""):
@@ -262,6 +264,62 @@ class TimeoutForwardingTests(unittest.TestCase):
             result = inbox_tools.get_mailbox_unread_counts(summary_only=True)
 
         self.assertEqual(result.get("error"), "timed_out")
+
+
+class HeavyScanGuardTests(unittest.TestCase):
+    def test_needs_response_uses_bounded_slice_not_unbounded_whose(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
+            smart_inbox_tools.get_needs_response(account="Work", days_back=7)
+
+        self.assertIn("set mailboxUpperBound to 100", captured["script"])
+        self.assertIn("messages 1 thru mailboxUpperBound of targetMailbox", captured["script"])
+        self.assertNotIn("every message of targetMailbox whose", captured["script"])
+        self.assertNotIn("set mailboxMessages to messages of targetMailbox", captured["script"])
+
+    def test_awaiting_reply_uses_bounded_slices_not_unbounded_whose(self):
+        captured: dict[str, list[str]] = {"scripts": []}
+
+        def fake_run(script, timeout=120):
+            captured["scripts"].append(script)
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
+            smart_inbox_tools.get_awaiting_reply(account="Work", days_back=7)
+
+        self.assertEqual(len(captured["scripts"]), 2)
+        inbox_script, sent_script = captured["scripts"]
+        self.assertIn("set inboxUpperBound to 100", inbox_script)
+        self.assertIn("messages 1 thru inboxUpperBound of inboxMailbox", inbox_script)
+        self.assertIn("set sentUpperBound to 80", sent_script)
+        self.assertIn("messages 1 thru sentUpperBound of sentMailbox", sent_script)
+        self.assertNotIn("every message of inboxMailbox whose", inbox_script)
+        self.assertNotIn("every message of sentMailbox whose", sent_script)
+
+    def test_statistics_uses_bounded_slices_not_unbounded_date_whose(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            analytics_tools.get_statistics(
+                account="Work",
+                scope="account_overview",
+                days_back=2,
+            )
+
+        self.assertIn("set mailboxUpperBound to 100", captured["script"])
+        self.assertIn("1 thru 10", captured["script"])
+        self.assertIn("messages 1 thru mailboxUpperBound of aMailbox", captured["script"])
+        self.assertNotIn("every message of aMailbox whose date received", captured["script"])
+        self.assertNotIn("set mailboxMessages to messages of aMailbox", captured["script"])
 
 
 if __name__ == "__main__":

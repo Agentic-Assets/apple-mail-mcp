@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.1.5",
+  "version": "3.1.7",
   "description": "Natural language interface for Apple Mail with 27 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Patrick Freyer"
@@ -27,6 +27,13 @@
       "description": "When set, email tools default to this account instead of scanning all configured Mail accounts. Use the exact account name as it appears in Apple Mail (e.g. 'Gmail', 'Work', 'iCloud'). Leave blank to query all accounts by default.",
       "required": false,
       "default": ""
+    },
+    "default_signature": {
+      "type": "string",
+      "title": "Default Mail Signature",
+      "description": "Optional Apple Mail signature name to apply by default to compose, reply, and forward drafts (e.g. 'TU'). Leave blank to use Mail's existing behavior.",
+      "required": false,
+      "default": ""
     }
   },
   "server": {
@@ -35,11 +42,13 @@
     "mcp_config": {
       "command": "/bin/bash",
       "args": [
-        "${__dirname}/start_mcp.sh"
+        "${__dirname}/start_mcp.sh",
+        "--draft-safe"
       ],
       "env": {
         "USER_EMAIL_PREFERENCES": "${user_config.user_preferences}",
-        "DEFAULT_MAIL_ACCOUNT": "${user_config.default_account}"
+        "DEFAULT_MAIL_ACCOUNT": "${user_config.default_account}",
+        "DEFAULT_MAIL_SIGNATURE": "${user_config.default_signature}"
       }
     }
   },
@@ -50,7 +59,7 @@
     },
     {
       "name": "list_inbox_emails",
-      "description": "List inbox emails across all accounts or a single account. Defaults to 50 most-recent. Async parallel per-account dispatch; returns {emails, errors} JSON."
+      "description": "List inbox emails across all accounts or a single account. Defaults to 50 most-recent; max_emails=0 requires allow_full_scan=True. Async parallel per-account dispatch; returns {emails, errors} JSON."
     },
     {
       "name": "get_mailbox_unread_counts",
@@ -74,19 +83,19 @@
     },
     {
       "name": "reply_to_email",
-      "description": "Reply to emails matching a subject keyword. Send or save as draft, optional reply-all, supports CC/BCC."
+      "description": "Reply to an email by message_id (preferred) or subject keyword. Default mode saves quietly to Drafts; mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, CC/BCC, and HTML body."
     },
     {
       "name": "compose_email",
-      "description": "Compose and send a new email from a specific account (or DEFAULT_MAIL_ACCOUNT). Supports TO/CC/BCC, optional HTML body via the rich-draft path."
+      "description": "Compose a new email from a specific account. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, TO/CC/BCC, and optional HTML body."
     },
     {
       "name": "forward_email",
-      "description": "Forward emails matching a subject keyword to specified recipients. Optional prepended message, CC/BCC."
+      "description": "Forward an email by message_id (preferred) or subject keyword. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, optional prepended message, and CC/BCC."
     },
     {
       "name": "create_rich_email_draft",
-      "description": "Build a rich HTML multipart .eml draft, open it in Mail, and optionally save into Drafts. Use this instead of injecting raw HTML into AppleScript content."
+      "description": "Build a rich HTML multipart .eml draft and save it to Drafts by default (closes the compose window). Use review_in_mail for saved-open review. Prefer over injecting raw HTML into AppleScript content."
     },
     {
       "name": "manage_drafts",
@@ -102,7 +111,7 @@
     },
     {
       "name": "search_emails",
-      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). Pass recent_days=0 for full-inbox sweeps, all_accounts=True to override default account."
+      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 requires allow_full_scan=True; all_accounts=True overrides default account."
     },
     {
       "name": "get_email_by_id",
@@ -110,7 +119,7 @@
     },
     {
       "name": "get_email_thread",
-      "description": "Return the full conversation thread for an email, grouped by subject across Inbox + Sent."
+      "description": "Return the full conversation thread for an email, grouped by subject across Inbox + Sent. Defaults to last 48 hours; recent_days=0 requires allow_full_scan=True."
     },
     {
       "name": "update_email_status",
@@ -126,7 +135,7 @@
     },
     {
       "name": "synchronize_account",
-      "description": "Trigger Mail.app to fetch new messages for a single account or all accounts. Useful before time-sensitive searches."
+      "description": "Explicitly confirmed Mail.app sync for a single account or all accounts. Requires confirm_sync=True because syncing may fetch a large remote backlog."
     },
     {
       "name": "get_awaiting_reply",

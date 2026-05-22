@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **221** unit tests, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **27 tools**, **249** unit tests, Python **3.10+**.
 
 ## Documentation map
 
@@ -34,7 +34,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 | [`plugin/commands/CLAUDE.md`](plugin/commands/CLAUDE.md) | Legacy slash commands |
 | [`tests/CLAUDE.md`](tests/CLAUDE.md) | Test layout & AppleScript mocks |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | Manifest validation scripts |
-| [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index |
+| [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index + plugin skill map |
 | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) | Phase plans & backlog |
 | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) | Desktop bundle build |
 | [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) | Marketplace manifest |
@@ -72,10 +72,10 @@ python3 -m venv .venv
 .venv/bin/apple-mail accounts --json
 .venv/bin/apple-mail search --account "Gmail" --query "invoice" --limit 10 --json
 .venv/bin/apple-mail show --account "Gmail" --id 12345 --json
-.venv/bin/apple-mail draft --account "Gmail" --to person@example.com --subject "Draft" --body "Draft body"
+.venv/bin/apple-mail draft --account "Gmail" --to person@example.com --subject "Draft" --body "Draft body" --signature-name "TU"
 .venv/bin/apple-mail quick-check --account "Gmail" --json
 .venv/bin/apple-mail perf-test --account "Gmail" --json
-.venv/bin/apple-mail perf-test --include-analysis --account "Gmail" --json
+.venv/bin/apple-mail perf-test --include-analysis --allow-heavy-mail-scan --account "Gmail" --json
 .venv/bin/apple-mail smoke-test --account "Gmail" --json
 ```
 
@@ -166,7 +166,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `move_email` | Move emails with filters (subject, sender, date, read status, dry-run). Default max 50 |
 | `update_email_status` | Mark read/unread, flag/unflag — by filters or message IDs. Default max 10 |
 | `manage_trash` | Soft delete, permanent delete, empty trash. Default max 5 |
-| `synchronize_account` | Trigger Mail.app to fetch new messages for an account (or all) |
+| `synchronize_account` | Explicitly confirmed Mail.app sync for an account (can fetch large backlogs) |
 
 ### Composition
 | Tool | Description |
@@ -175,7 +175,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `reply_to_email` | Reply or reply-all with optional HTML body |
 | `forward_email` | Forward with optional message, CC/BCC |
 | `manage_drafts` | Create, list, send, and delete drafts (`send` blocked in `--read-only`) |
-| `create_rich_email_draft` | Build a multipart HTML `.eml` draft, open in Mail, optionally save to Drafts |
+| `create_rich_email_draft` | Build a multipart HTML `.eml` draft and save it to Drafts by default |
 
 ### Attachments
 | Tool | Description |
@@ -231,7 +231,10 @@ Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows a
 
 In draft-safe mode:
 
-- `compose_email`, `reply_to_email`, and `forward_email` default to draft behavior
+- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows)
+- they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
+- use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
+- pass `message_id` from search/list tools for reply/forward when available; `subject_keyword` is fallback only
 - explicit `mode="send"` calls return an error
 - `manage_drafts action="send"` returns an error
 
@@ -276,13 +279,32 @@ Set `USER_EMAIL_PREFERENCES` to give the assistant context about your workflow. 
 
 For `.mcpb` installs, configure both under Claude Desktop → **Developer > MCP Servers > Apple Mail MCP** (the bundle exposes them via `user_config`).
 
+### Default Mail Signature
+
+Set `DEFAULT_MAIL_SIGNATURE` to the exact Apple Mail signature name you want applied to new compose, reply, and forward drafts. Per-call `signature_name` overrides the default; `include_signature=False` disables it for one call. The CLI exposes this as `apple-mail draft --signature-name "TU"` and `--no-signature`.
+
+```json
+{
+  "mcpServers": {
+    "apple-mail": {
+      "command": "/path/to/plugin/start_mcp.sh",
+      "args": ["--draft-safe"],
+      "env": {
+        "DEFAULT_MAIL_ACCOUNT": "Work",
+        "DEFAULT_MAIL_SIGNATURE": "TU"
+      }
+    }
+  }
+}
+```
+
 ### Performance Defaults
 
 To stay fast on large mailboxes (24K+ messages), the server applies conservative defaults you can opt out of per-call:
 
 | Default | Tools | Override |
 |---------|-------|----------|
-| Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week, `0` for unlimited) |
+| Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week); full scans require explicit opt-in |
 | 50 emails max | `list_inbox_emails`, `list_email_attachments` | Pass `max_emails` / `max_results` |
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
@@ -308,7 +330,7 @@ Search for emails about "project update" in my Gmail
 Reply to the email about "Domain name" with "Thanks for the update!"
 Move emails with "invoice" in the subject to my Archive folder
 Show me email statistics for the last 30 days
-Create a rich HTML draft for a weekly update and open it in Mail
+Draft replies to unread messages with mode=open for review, or create a rich HTML weekly-update draft
 ```
 
 ## CLI
@@ -329,17 +351,17 @@ apple-mail inbox --account "Gmail" --limit 10 --json
 apple-mail search --account "Gmail" --query "invoice" --limit 10 --json
 apple-mail show --account "Gmail" --id 12345 --json
 apple-mail mailboxes --account "Gmail" --json
-apple-mail draft --account "Gmail" --to person@example.com --subject "Draft" --body "Draft body"
+apple-mail draft --account "Gmail" --to person@example.com --subject "Draft" --body "Draft body" --signature-name "TU"
 apple-mail mcp-config --repo "$(pwd)"
 apple-mail quick-check --account "Gmail" --json
 apple-mail perf-test --account "Gmail" --json
-apple-mail perf-test --include-analysis --account "Gmail" --json
+apple-mail perf-test --include-analysis --allow-heavy-mail-scan --account "Gmail" --json
 apple-mail smoke-test --account "Gmail" --json
 ```
 
 Live verification guide: [`docs/AGENT_LIVE_TESTING.md`](docs/AGENT_LIVE_TESTING.md).
 
-Use `perf-test --include-analysis` to gate triage tools (`needs-response`, `awaiting-reply`, `top-senders`, `statistics`) in addition to the core battery.
+Use `perf-test --include-analysis --allow-heavy-mail-scan` only when you explicitly want the heavy analysis gate (`needs-response`, `awaiting-reply`, `top-senders`, `statistics`). Routine validation should use `quick-check`, `smoke-test`, or `perf-test` without analysis.
 
 The CLI keeps write operations draft-first. It intentionally does not expose
 send/delete shortcuts; use the MCP tools with `--draft-safe` for shared agents.
@@ -349,8 +371,10 @@ send/delete shortcuts; use the MCP tools with `--draft-safe` for shared agents.
 Use `create_rich_email_draft` when you need a visually formatted email, newsletter, or leadership update.
 
 - It generates an unsent `.eml` file with multipart plain-text + HTML bodies
-- It can open the draft directly in Mail for editing
-- It can optionally ask Mail to save the opened compose window into Drafts
+- It saves the opened Mail compose window to Drafts by default, then closes the fresh window
+- It can leave the saved draft open for explicit human review (`review_in_mail=True`)
+- It can write only the `.eml` artifact with `open_in_mail=False`
+- Blank subjects stay `.eml`-only until there is a subject to save safely through Mail
 - It accepts partial details, so you can start with just an account and subject and fill in the rest later
 
 This is more reliable than injecting raw HTML into AppleScript `content`, which Mail often stores as literal markup.
@@ -401,6 +425,7 @@ The plugin MCP server starts with **`--draft-safe`** by default (see `plugin/.cl
 | Mailbox not found | Use exact folder names; nested folders use `/` separator (e.g., `Projects/Alpha`) |
 | Permission errors | Grant access in **System Settings > Privacy & Security > Automation** |
 | Rich draft shows raw HTML | Use `create_rich_email_draft` instead of pasting HTML into `manage_drafts` or AppleScript `content` |
+| Save / Don't Save when closing drafts | Use default `mode="draft"` or `mode="open"` (saves first). Avoid leaving unsaved compose windows from bulk agent runs |
 
 ## Project Structure
 

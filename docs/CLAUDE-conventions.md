@@ -12,14 +12,14 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ### Performance defaults
 
-- **Recent-window default**: any tool that searches or lists takes `recent_days: float = 2.0` (48h). Translate to a `date received >= cutoffDate` clause inside the `whose` filter. Pass `recent_days=0` to disable. `list_inbox_emails` uses `max_emails: int = 50` instead of `0` (unbounded).
-- **AppleScript-side caps, not Python-side slicing.** Never write `every message of mailbox` and then `items startIndex thru endIndex` in Python. Either build a `whose` clause and `items 1 thru N of (every message of mailbox whose …)`, or use `messages 1 thru N of mailbox` directly. Mail returns inbox messages newest-first.
+- **Recent-window default**: any tool that searches or lists takes `recent_days: float = 2.0` (48h). `recent_days=0` or `list_inbox_emails(max_emails=0)` must require `allow_full_scan=True` and must not be used by routine tests or skills.
+- **AppleScript-side caps, not Python-side slicing.** Avoid broad `every message of mailbox whose …` scans on remote mailboxes; Mail may materialize/fetch before filtering. Prefer direct newest-first slices (`messages 1 thru N of mailbox`) and filter inside the bounded loop.
 - **`ignoring case … end ignoring`** for case-insensitive comparisons. Never call out to `do shell script "echo … | tr '[:upper:]' '[:lower:]'"` per message — the deprecated `LOWERCASE_HANDLER` was removed in 3.1.5 for that exact reason.
 - **Push date filters unconditionally** into the `whose` clause when the caller provides `date_from`/`date_to`. Don't gate them on the presence of other filters.
 
 ### Account scoping
 
-- **`DEFAULT_MAIL_ACCOUNT`**: every tool that takes an `account` parameter must (a) default it to `Optional[str] = None`, (b) at the top fall back to `_server.DEFAULT_MAIL_ACCOUNT` if `account is None`, (c) return a structured error if neither is set. Exceptions: `synchronize_account` (`account=None` means all accounts); `inbox_dashboard` (always cross-account).
+- **`DEFAULT_MAIL_ACCOUNT`**: every tool that takes an `account` parameter must (a) default it to `Optional[str] = None`, (b) at the top fall back to `_server.DEFAULT_MAIL_ACCOUNT` if `account is None`, (c) return a structured error if neither is set. Exceptions: `synchronize_account` requires `confirm_sync=True` before any account/all-account sync; `inbox_dashboard` is always cross-account.
 - **`all_accounts: bool = False`** is the explicit override for tools that need every configured account even when `DEFAULT_MAIL_ACCOUNT` is set.
 
 ### Async + per-account isolation
@@ -52,7 +52,23 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ### Rich HTML drafts
 
-`create_rich_email_draft` generates a multipart `.eml` on disk and opens it with Mail.app, rather than injecting HTML into AppleScript's `content` property (Mail stores literal markup). Prefer this for anything HTML.
+`create_rich_email_draft` generates a multipart `.eml` on disk and saves it through Mail.app by default, rather than injecting HTML into AppleScript's `content` property (Mail stores literal markup). Prefer this for anything HTML. Use explicit review mode only when the operator wants Mail left open; saved defaults should not leave fresh compose windows behind.
+
+### Compose and draft modes
+
+`compose_email`, `reply_to_email`, and `forward_email` share a `mode` parameter:
+
+| Mode | Behavior | When agents should use it |
+|------|----------|---------------------------|
+| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open | Bulk drafting, background agent work, default under `--draft-safe` |
+| `open` | Save first, then leave the compose window open for human review | User wants each draft to pop up in Mail (e.g. review 10 replies in sequence) |
+| `send` | Send immediately | Explicit user authorization only; blocked when `DRAFT_SAFE` or `READ_ONLY` |
+
+**Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id` whenever available. `subject_keyword` is a fallback when no id is known — never prefer subject matching when an id is already in context.
+
+**Rich `.eml` drafts:** `create_rich_email_draft` saves the front Mail compose window after opening the file (no subject-based outgoing-message lookup). Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
+
+**Agent guidance:** skills under `plugin/skills/email-drafting/` and `plugin/skills/apple-mail-operator/` document the quiet-default vs saved-open review split. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
 
 ---
 
@@ -101,7 +117,23 @@ Every skill under `plugin/skills/` follows the same shape so siblings trigger cr
 
 ### Skills only — no new slash commands
 
-New entry points ship as skills only. `plugin/commands/email-management.md` stays (legacy `/email-management`); all companion workflows (`apple-mail-operator`, `inbox-triage`, `email-management`, `mailbox-taxonomy`, `email-archive-cleanup`, `mail-rules-advisor`, `email-drafting`, `email-style-profile`, `email-attachments`) ship as skills only.
+New entry points ship as skills only. `plugin/commands/email-management.md` stays (legacy `/email-management`); all companion workflows ship as skills only:
+
+| Skill directory | Primary intent |
+|-----------------|----------------|
+| `apple-mail-operator` | MCP bootstrap, navigation, troubleshooting |
+| `inbox-triage` | Fast read-first daily scan |
+| `email-management` | Umbrella Inbox Zero / sustained habits |
+| `mailbox-taxonomy` | Folder design + noise diagnosis |
+| `email-archive-cleanup` | Staged moves, exports, capped trash |
+| `mail-rules-advisor` | Filter/rule prose only (no MCP rule API) |
+| `email-drafting` | Compose / reply / forward / rich drafts |
+| `email-style-profile` | Voice contract before drafting |
+| `email-attachments` | List + save attachments |
+
+**Routing cheat sheet:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). **Narrow skills** may stay shorter than the umbrella template if they include triggers, sibling matrix, performance notes, and destructive red lines. **Umbrella template:** `plugin/skills/email-management/SKILL.md` (also has `references/`, `examples/`, `templates/`).
+
+After adding or editing any skill: run **`plugin-dev:skill-reviewer`**. After manifest or skill-count marketing copy changes: **`plugin-dev:plugin-validator`** + `bash tools/validate_manifests.sh`.
 
 ---
 

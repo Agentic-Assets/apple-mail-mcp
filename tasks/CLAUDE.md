@@ -7,7 +7,7 @@ Cross-session planning artifacts. In-conversation work uses ephemeral task lists
 When executing [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) or [`todo.md`](todo.md):
 
 - **Subagents for research and implementation** — delegate coding, tests, docs, and live runs; parallelize independent modules, sequence dependent phases.
-- **Plugin-dev experts always** — `plugin-dev:plugin-validator`, `plugin-dev:plugin-architect`, plus `mcp-integration` / `plugin-structure` / `mcp-builder` skills per phase plan.
+- **Plugin-dev experts always** — `plugin-dev:plugin-validator`, `plugin-dev:plugin-architect`, `plugin-dev:skill-reviewer`, plus `mcp-integration` / `plugin-structure` / `mcp-builder` skills per phase plan.
 
 ## Active files
 
@@ -30,13 +30,16 @@ Use **`cayman@agenticassets.ai`** for perf gates (194 mailboxes). **`ai.openclaw
 
 ```bash
 export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
-.venv/bin/apple-mail perf-test --json   # add --include-analysis after Phase 1
+.venv/bin/apple-mail perf-test --json   # routine core battery
+# Heavy analysis only with explicit opt-in:
+.venv/bin/apple-mail perf-test --include-analysis --allow-heavy-mail-scan --json
 ```
 
 ## Maintenance
 
-- After `tools/*.py`: `.venv/bin/pytest tests/ -q`
-- After manifests/skills: `tools/validate_manifests.py` + `plugin-dev:plugin-validator`
+- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (249 tests)
+- After manifests: `bash tools/validate_manifests.sh` + `plugin-dev:plugin-validator`
+- After skills: `plugin-dev:skill-reviewer` (+ manifest validator if marketing copy changed)
 - Live workflow: [`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)
 - Engineering rules: [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md)
 

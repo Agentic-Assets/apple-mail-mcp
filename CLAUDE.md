@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**27 tools**, **221 tests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Claude Code plugin (`plugin/`), and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.claude-plugin/marketplace.json`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**27 tools**, **249 tests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Claude Code plugin (`plugin/`), and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.claude-plugin/marketplace.json`.
 
 ## Agent orchestration (required)
 
@@ -31,7 +31,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 | Plugin wrapper, `start_mcp.sh`, manifests | [`plugin/CLAUDE.md`](plugin/CLAUDE.md) |
 | Package entry, `core.py`, `server.py`, CLI | [`plugin/apple_mail_mcp/CLAUDE.md`](plugin/apple_mail_mcp/CLAUDE.md) |
 | Individual MCP tools | [`plugin/apple_mail_mcp/tools/CLAUDE.md`](plugin/apple_mail_mcp/tools/CLAUDE.md) |
-| Skills (`email-management`, …) | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) |
+| Skills (9 workflow skills) | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) |
 | Legacy slash commands | [`plugin/commands/CLAUDE.md`](plugin/commands/CLAUDE.md) |
 | Tests & mocking AppleScript | [`tests/CLAUDE.md`](tests/CLAUDE.md) |
 | Manifest validation, pre-commit | [`tools/CLAUDE.md`](tools/CLAUDE.md) |
@@ -49,7 +49,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/pytest tests/                    # 221 tests
+.venv/bin/pytest tests/                    # 249 tests
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```
@@ -67,3 +67,6 @@ Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail
 ## Related folders
 
 `plugin/apple_mail_mcp/` (source of truth) · `plugin/` (Claude plugin) · `apple-mail-mcpb/` · `.claude-plugin/` · `tests/` · `tools/` · `docs/` · `tasks/`
+
+**Repo agent skills:** Add under `.agents/skills/<name>/`; symlink `.claude/skills/<name>` → `../../.agents/skills/<name>` (not `.cursor/skills/`). Commit and push after adding or moving skills.
+**Post-change ship:** Invoke `finalize-apple-mail-mcp` to sync docs, CLAUDE.md, manifests, then commit and push when the user asks.

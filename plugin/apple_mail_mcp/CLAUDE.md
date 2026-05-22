@@ -28,6 +28,7 @@ Tool/CLI work: delegate to subagents for implementation; use **`plugin-dev:plugi
 ## Shared state (`server.py`)
 
 - `DEFAULT_MAIL_ACCOUNT` — from env; tools read lazily via `server.DEFAULT_MAIL_ACCOUNT`
+- `DEFAULT_MAIL_SIGNATURE` — from env; compose/reply/forward apply this Apple Mail signature by default unless `include_signature=False`
 - `USER_PREFERENCES` — from `USER_EMAIL_PREFERENCES` env; `@inject_preferences` appends to tool docstrings
 - `READ_ONLY` / `DRAFT_SAFE` — set by CLI flags in `__main__.py`
 - Annotation presets: `READ_ONLY_TOOL_ANNOTATIONS`, `WRITE_TOOL_ANNOTATIONS`, `IDEMPOTENT_WRITE_TOOL_ANNOTATIONS`, `DESTRUCTIVE_TOOL_ANNOTATIONS`
@@ -39,5 +40,7 @@ All Mail.app I/O via `core.run_applescript()`. User strings through `core.escape
 
 ## Related & dev
 
-- `../start_mcp.sh` — plugin launcher; `../../tests/` mocks `subprocess.run`; `../../tools/validate_manifests.py` — manifest parity
+[`tools/CLAUDE.md`](tools/CLAUDE.md) · [`docs/CLAUDE-conventions.md`](../../docs/CLAUDE-conventions.md) · [`plugin/skills/CLAUDE.md`](../skills/CLAUDE.md) (agent workflow skills) · root [`CLAUDE.md`](../../CLAUDE.md)
+
+- `../start_mcp.sh` — plugin launcher; `../../tests/` mocks `subprocess.run`; `../../tools/validate_manifests.py` — manifest parity · [`plugin/skills/CLAUDE.md`](../skills/CLAUDE.md) — which skills reference which tools
 - `.venv/bin/pytest tests/` · `.venv/bin/apple-mail quick-check --account "…"` · `.venv/bin/python -m apple_mail_mcp --read-only`

@@ -50,11 +50,13 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"   # production gate
 | `quick-check` | metadata + no-hit search + inbox (~30s target) |
 | `perf-test --quick` | same as `quick-check` |
 | `perf-test` | full battery: dry-run move/trash, overview, bad-account fast-fail, dashboard metadata |
-| `perf-test --include-analysis` | full battery + needs-response, awaiting-reply, top-senders, statistics |
+| `perf-test --include-analysis --allow-heavy-mail-scan` | heavy opt-in battery + needs-response, awaiting-reply, top-senders, statistics |
 | `perf-test --profile production` | production overview threshold (15s); metadata scales with mailbox count |
 | `smoke-test` | accounts, inbox, no-hit search, invalid-account error, draft-safe send block |
 
 Add `--verbose-sensitive` to `perf-test` / `quick-check` to include account names in perf samples (default output redacts them).
+
+`--include-analysis` is intentionally blocked unless paired with `--allow-heavy-mail-scan`. Those probes are bounded in code, but they still touch enough Mail.app message headers that a large account may fetch remote state. Routine agent testing should use `quick-check`, `smoke-test`, or individual probes with small limits.
 
 ### Individual safe probes
 
@@ -141,7 +143,7 @@ python /path/to/apple-mail-mcp/tools/check_wrapper_surface.py
 **Honest analysis gate (expect failures until Phase 2 speed work):**
 
 ```bash
-.venv/bin/apple-mail perf-test --include-analysis --account "$DEFAULT_MAIL_ACCOUNT" --profile production --json
+.venv/bin/apple-mail perf-test --include-analysis --allow-heavy-mail-scan --account "$DEFAULT_MAIL_ACCOUNT" --profile production --json
 ```
 
 Exit code is non-zero if any threshold is breached.
@@ -159,7 +161,7 @@ Exit code is non-zero if any threshold is breached.
 | bad_account (invalid name fast-fail) | < 2s |
 | dashboard_metadata (unread + recent, no preview) | < 5s |
 
-**With `--include-analysis`:**
+**With `--include-analysis --allow-heavy-mail-scan`:**
 
 | Case | Threshold |
 |------|-----------|
@@ -179,11 +181,12 @@ bash tools/validate_manifests.sh
 .venv/bin/pytest tests/ -q
 ```
 
-Optional local hook (manifest drift + pytest, no live Mail):
+Optional local hook (manifest drift + pytest; wrapper check when staged MCP tool files change):
 
 ```bash
-bash tools/pre-commit-validate.sh
-# or: ln -sf ../../tools/pre-commit-validate.sh .git/hooks/pre-commit
+bash tools/install-git-hooks.sh   # once per clone
+bash tools/dev-check.sh             # manual equivalent
+bash tools/dev-check.sh surface     # always include wrapper check
 ```
 
 Live Mail verification is manual on macOS with Mail.app running.
@@ -197,6 +200,7 @@ The Claude plugin starts the server via `mcpServers.apple-mail` → `${CLAUDE_PL
 | Variable | Purpose |
 |----------|---------|
 | `DEFAULT_MAIL_ACCOUNT` | Exact Mail account name (e.g. `Work`, `Gmail`). When set, most tools default to this account instead of fanning out across every account — largest perf win on multi-account mailboxes. |
+| `DEFAULT_MAIL_SIGNATURE` | Exact Apple Mail signature name to apply by default to compose, reply, and forward drafts (e.g. `TU`). |
 | `USER_EMAIL_PREFERENCES` | Free-text workflow hints injected into preference-aware tool docstrings (e.g. "Prefer Archive over Trash, cap lists at 25"). |
 
 Example `env` block for a manual MCP config (also emitted by `apple-mail mcp-config` if you add `env` yourself):
@@ -204,6 +208,7 @@ Example `env` block for a manual MCP config (also emitted by `apple-mail mcp-con
 ```json
 "env": {
   "DEFAULT_MAIL_ACCOUNT": "Work",
+  "DEFAULT_MAIL_SIGNATURE": "TU",
   "USER_EMAIL_PREFERENCES": "Prefer Archive over Trash; default triage window 7 days"
 }
 ```
@@ -217,3 +222,19 @@ Generate draft-safe MCP wiring from the repo checkout:
 ```
 
 This adds `--draft-safe` so send tools stay blocked during agent testing.
+
+## Plugin workflow skills (agent UX)
+
+The Claude Code plugin bundles **nine** workflow skills under `plugin/skills/`. They complement live CLI testing: skills guide **tool selection and safety**; this doc guides **verification**.
+
+| Agent task | Start with skill | Live CLI probes (examples) |
+|------------|------------------|----------------------------|
+| Daily “what needs reply?” | `inbox-triage` | `needs-response`, `awaiting-reply`, `overview --format compact` |
+| Folder mess / taxonomy | `mailbox-taxonomy` | `mailboxes --json`, `top-senders`, `statistics --scope account_overview` |
+| Bulk archive / cleanup | `email-archive-cleanup` | `move-dry-run`, `trash-dry-run`, `search` previews before writes |
+| Draft / reply | `email-drafting` | `draft` (quiet default), `draft --open` (saved-open review); reply/forward should use `message_id` when known; send blocked in draft-safe |
+| MCP misbehaving / slow | `apple-mail-operator` | `quick-check`, `accounts`, narrow `search` with `recent_days` |
+
+Full skill map: [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). User install copy: [`README`](../README.md) § Claude Code Skills.
+
+When editing skills, run **`plugin-dev:skill-reviewer`**. When editing manifests or bundled skill marketing copy, run **`bash tools/validate_manifests.sh`** and **`plugin-dev:plugin-validator`**.

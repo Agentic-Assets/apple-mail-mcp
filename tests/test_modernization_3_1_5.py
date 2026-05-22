@@ -259,24 +259,28 @@ class DefaultAccountFallbackTests(unittest.TestCase):
 
 
 class WhoseAndCapTests(unittest.TestCase):
-    """Group B: spot-check that whose+cap pattern reaches AppleScript in
+    """Group B: spot-check that bounded scan patterns reach AppleScript in
     each modernized module."""
 
-    def test_smart_inbox_get_awaiting_reply_emits_whose_and_cap(self):
+    def test_smart_inbox_get_awaiting_reply_emits_bounded_slices(self):
         cap = _ScriptCapture(return_value="ok")
         with patch(
             "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
+        ) as mock_run:
             smart_inbox_tools.get_awaiting_reply(
                 account="X", days_back=7, max_results=5
             )
-        script = cap.last_script
-        self.assertIn("whose", script)
-        self.assertIn("items 1 thru", script)
+        self.assertEqual(mock_run.call_count, 2)
+        scripts = [call.args[0] for call in mock_run.call_args_list]
+        inbox_script, sent_script = scripts
+        self.assertIn("set inboxUpperBound to 100", inbox_script)
+        self.assertIn("messages 1 thru inboxUpperBound of inboxMailbox", inbox_script)
+        self.assertIn("set sentUpperBound to 50", sent_script)
+        self.assertIn("messages 1 thru sentUpperBound of sentMailbox", sent_script)
+        self.assertNotIn("every message of inboxMailbox whose", inbox_script)
+        self.assertNotIn("every message of sentMailbox whose", sent_script)
 
-    def test_manage_move_email_emits_whose_and_cap(self):
-        # Dry-run move_email delegates to the search helper; capture the
-        # script there. The search helper builds the same whose+cap shape.
+    def test_manage_move_email_dry_run_uses_bounded_search(self):
         cap = _ScriptCapture(return_value="ok")
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=cap):
             manage_tools.move_email(
@@ -287,11 +291,8 @@ class WhoseAndCapTests(unittest.TestCase):
                 dry_run=True,
             )
         script = cap.last_script
-        self.assertIn("whose", script)
-        # Search helper applies a script-side cap derived from
-        # limit=max_moves+1=6 (plus its own offset/collectLimit overhead).
-        # Just verify a cap appears.
-        self.assertRegex(script, r"items 1 thru \d+")
+        self.assertIn("messages 1 thru scanUpperBound of currentMailbox", script)
+        self.assertNotIn("every message of currentMailbox whose", script)
 
     def test_analytics_get_statistics_uses_documented_caps(self):
         cap = _ScriptCapture(return_value="ok")
@@ -302,10 +303,20 @@ class WhoseAndCapTests(unittest.TestCase):
                 account="X", scope="account_overview", days_back=30
             )
         script = cap.last_script
-        # 20-mailbox cap and 500-message-per-mailbox cap are the documented
-        # ceilings; both must appear verbatim in the generated AppleScript.
         self.assertIn("1 thru 20", script)
-        self.assertIn("1 thru 500", script)
+        self.assertIn("set mailboxUpperBound to 500", script)
+
+    def test_analytics_get_statistics_short_window_uses_tighter_caps(self):
+        cap = _ScriptCapture(return_value="ok")
+        with patch(
+            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
+        ):
+            analytics_tools.get_statistics(
+                account="X", scope="account_overview", days_back=2
+            )
+        script = cap.last_script
+        self.assertIn("1 thru 10", script)
+        self.assertIn("set mailboxUpperBound to 100", script)
 
 
 class NoAccountErrorTests(unittest.TestCase):
@@ -356,6 +367,33 @@ class SmartInboxPerfTests(unittest.TestCase):
                 scan_body=True,
             )
         self.assertIn("content of aMessage", cap.last_script)
+
+    def test_get_awaiting_reply_formats_from_parallel_row_payloads(self):
+        inbox_raw = "INBOX|||Re: Need update|||alice@example.com"
+        sent_raw = (
+            "SENT|||Project Alpha|||bob@example.com|||Bob|||<date>\n"
+            "SENT|||Need update|||alice@example.com|||Alice|||<date>"
+        )
+
+        def fake_run(script, timeout=120):
+            if "inboxMailbox" in script:
+                return inbox_raw
+            return sent_raw
+
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
+        ) as mock_run:
+            result = smart_inbox_tools.get_awaiting_reply(
+                account=self.ACCOUNT,
+                days_back=7,
+                max_results=5,
+                exclude_noreply=False,
+            )
+
+        self.assertEqual(mock_run.call_count, 2)
+        self.assertIn("Project Alpha", result)
+        self.assertIn("bob@example.com", result)
+        self.assertNotIn("1. Need update", result)
 
     def test_get_top_senders_parses_row_lines_and_aggregates(self):
         raw = (

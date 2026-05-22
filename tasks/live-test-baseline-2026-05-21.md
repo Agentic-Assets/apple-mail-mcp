@@ -1,6 +1,6 @@
 # Live test baseline — 2026-05-21
 
-Consolidated results from repo CLI (`.venv/bin/apple-mail`) and generated MCP wrapper (`apple-mail`) on branch `improve-speed-and-tools` after 3.1.6 hardening. **Historical snapshot** — unit test count was 206 at capture time; suite is now **217 tests**. **Use `cayman@agenticassets.ai` as the production perf gate** — it reflects real mailbox depth (194 mailboxes, heavy Exchange/Gmail-style layout). Use `ai.openclaw` only as a light smoke/regression account.
+Consolidated results from repo CLI (`.venv/bin/apple-mail`) and generated MCP wrapper (`apple-mail`) on branch `improve-speed-and-tools` after 3.1.6 hardening. **Historical snapshot** — unit test count was 206 at capture time; suite is now **249 tests**. **Use `cayman@agenticassets.ai` as the production perf gate** — it reflects real mailbox depth (194 mailboxes, heavy Exchange/Gmail-style layout). Use `ai.openclaw` only as a light smoke/regression account.
 
 ## Accounts
 
@@ -19,7 +19,7 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
 
 | Check | Result |
 |-------|--------|
-| `pytest tests/ -q` | **206 passed**, 27 subtests *(217 tests as of Phase 3.1.7 work)* |
+| `pytest tests/ -q` | **206 passed**, 27 subtests *(249 tests as of signature and safety guard work)* |
 | `tools/validate_manifests.py` | OK (version=3.1.5, tools=27) |
 
 Latest safe wrapper/CLI sweep: root [`LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md).
@@ -79,7 +79,7 @@ The latest generated-wrapper sweep saw the same pattern:
 |------|---------|---------|
 | Fast post-edit | `quick-check --json` | `cayman@agenticassets.ai` (after threshold fix) |
 | Core perf | `perf-test --json` | `cayman@agenticassets.ai` |
-| Analysis perf | `perf-test --include-analysis --json` *(to build)* | `cayman@agenticassets.ai` |
+| Analysis perf | `perf-test --include-analysis --allow-heavy-mail-scan --json` *(heavy opt-in)* | `cayman@agenticassets.ai` |
 | Wrapper parity | `apple-mail --help` includes `get-email-by-id` *(to automate)* | n/a |
 | Functional smoke | `smoke-test --json` | either account |
 

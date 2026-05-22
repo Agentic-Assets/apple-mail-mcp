@@ -37,7 +37,7 @@ Operational guide for using the Apple Mail MCP safely and quickly. Focus on boot
 | Locate a needle | Narrow `search_emails(...)` (`recent_days=2` unless user insists on widening) → `get_email_by_id(message_id=...)` |
 | Conversation context | `get_email_thread(...)` instead of chained subject guesses |
 | Mailbox map | `list_mailboxes(include_counts=true)` |
-| Idle mail fetch | `synchronize_account()` when results look stale |
+| Idle mail fetch | `synchronize_account(account="...", confirm_sync=True)` only after the user accepts that Mail may download a large backlog |
 
 ## Performance Rules
 
@@ -50,6 +50,9 @@ Operational guide for using the Apple Mail MCP safely and quickly. Focus on boot
 | Need | Guidance |
 |------|----------|
 | No accidental sends | Keep `--draft-safe`; require explicit user confirmation before any send attempt |
+| Quiet bulk drafts | Default `mode="draft"` on compose tools; do not leave unsaved compose windows |
+| Review each draft in Mail | Use `mode="open"` (saves first, then leaves window open); for rich `.eml`, `review_in_mail=True` |
+| Reply to a known message | Pass `message_id` from search/list; avoid `subject_keyword` when an id is already known |
 | Read-only auditing | Mention `--read-only` server flag — removes send-facing compose registrations |
 | Destructive moves/deletes | Defer to `email-archive-cleanup` or `email-management`; never bury trash/delete actions inside troubleshooting |
 

@@ -20,17 +20,32 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 ## Performance (summary)
 
-- Default `recent_days=2.0` (48h); `0` disables. Cap in AppleScript (`whose` + `items 1 thru N`), not Python slicing.
+- Default `recent_days=2.0` (48h); `recent_days=0` now requires `allow_full_scan=True`. `list_inbox_emails(max_emails=0)` also requires `allow_full_scan=True`. Prefer bounded newest-message slices (`messages 1 thru N`) over broad `whose` clauses on large remote mailboxes.
 - Pass `timeout` through to `run_applescript`; catch `AppleScriptTimeout` → structured error with account name.
 - Mutations: `normalize_message_ids` / `message_ids` for targeted ops. Detail: `docs/CLAUDE-conventions.md`.
 
 ## Account scoping
 
-`account: Optional[str] = None` → `server.DEFAULT_MAIL_ACCOUNT`; error if unset. Exceptions: `synchronize_account` (None = all accounts), `inbox_dashboard` (always cross-account). `all_accounts=True` overrides default scoping.
+`account: Optional[str] = None` → `server.DEFAULT_MAIL_ACCOUNT`; error if unset. Exceptions: `synchronize_account` (None = all accounts, but requires `confirm_sync=True`), `inbox_dashboard` (always cross-account). `all_accounts=True` overrides default scoping.
 
 ## JSON `output_format`
 
 Normalized: `get_statistics`, `get_inbox_overview`; also `list_inbox_emails`, `list_mailboxes` (`output_format="json"`).
+
+## Agent-facing selection
+
+Workflow skills under [`../../skills/`](../../skills/) document **when** to call each tool (triage vs archive vs compose). After adding/removing tools, update relevant `plugin/skills/*/SKILL.md` frontmatter tool lists and run **`plugin-dev:skill-reviewer`**.
+
+## Compose defaults (`compose.py`)
+
+| Tool | Default | Notes |
+|------|---------|-------|
+| `compose_email` | `mode="draft"` | Quiet save; `mode="open"` saves then leaves window open |
+| `reply_to_email` | `mode="draft"` (via `send=False`) | Prefer `message_id=` from search/list; `subject_keyword` is fallback |
+| `forward_email` | `mode="draft"` | Same id-first rule as reply |
+| `create_rich_email_draft` | saves + closes | `review_in_mail=True` for saved-open review; blank subject → `.eml` only |
+
+Do not match outgoing rich drafts by subject — `_save_front_compose_window_as_draft()` saves Mail's front compose window. Detail: [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Compose and draft modes.
 
 ## Related
 
