@@ -113,6 +113,15 @@ def _build_list_inbox_text_script(
     so we never enumerate a 24K-message Exchange inbox.
     """
     escaped_account = escape_applescript(account)
+    message_id_text_block = ""
+    if include_message_id:
+        message_id_text_block = (
+            'set internetMessageId to ""\n'
+            "                        try\n"
+            "                            set internetMessageId to message id of aMessage\n"
+            "                        end try\n"
+            '                        set outputText to outputText & "__MSG_ID__|||" & internetMessageId & return'
+        )
 
     if max_emails > 0:
         if not include_read:
@@ -165,12 +174,7 @@ def _build_list_inbox_text_script(
                         set messageSender to sender of aMessage
                         set messageDate to date received of aMessage
                         set messageRead to read status of aMessage
-                        {("set internetMessageId to \"\"\n" +
-                          "                        try\n" +
-                          "                            set internetMessageId to message id of aMessage\n" +
-                          "                        end try\n" +
-                          "                        set outputText to outputText & \"__MSG_ID__|||\" & internetMessageId & return")
-                          if include_message_id else ""}
+                        {message_id_text_block}
 
                         if messageRead then
                             set readIndicator to "✓"
