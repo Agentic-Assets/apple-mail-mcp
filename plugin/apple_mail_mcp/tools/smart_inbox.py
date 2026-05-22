@@ -15,6 +15,7 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     date_cutoff_script,
     validate_account_name,
+    replied_ids_script,
 )
 from apple_mail_mcp.constants import (
     NEWSLETTER_PLATFORM_PATTERNS,
@@ -416,6 +417,7 @@ def get_needs_response(
     days_back: int = 7,
     max_results: int = 20,
     scan_body: bool = False,
+    include_already_replied: bool = False,
     timeout: Optional[int] = None,
 ) -> str:
     """Identify unread emails that likely need a response from you.
@@ -423,6 +425,12 @@ def get_needs_response(
     Filters out newsletters, automated emails, and noreply senders.
     Prioritises direct emails (To: you) with question marks as likely
     needing a reply.
+
+    Replied-detection: scans the Sent mailbox for ``In-Reply-To:`` and
+    ``References:`` headers to build a set of Message-IDs the user has
+    replied to. This is far more reliable than the legacy subject-substring
+    match, which dropped short or drift-prone subjects. The subject match
+    is kept as a fallback only.
 
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal").
@@ -432,6 +440,11 @@ def get_needs_response(
         max_results: Maximum results to return (default: 20)
         scan_body: When True, scan message body for question marks (slower).
             Subject-only detection is usually enough for daily triage (default: False).
+        include_already_replied: When False (default), emails the user has
+            already replied to are filtered out — this is the safe default
+            to prevent agents drafting duplicate replies. When True, those
+            emails are kept but annotated with a ``[ALREADY REPLIED]``
+            prefix in the priority label.
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
 
     Returns:
@@ -470,6 +483,15 @@ def get_needs_response(
         else ""
     )
 
+    include_replied_flag = "true" if include_already_replied else "false"
+    replied_builder = replied_ids_script(
+        account_var="targetAccount",
+        sent_cap=sent_cap,
+        replied_var="repliedIds",
+        subjects_var="sentSubjects",
+        strip_prefixes_handler="stripPrefixes",
+    )
+
     script = f'''
     tell application "Mail"
         set outputText to "EMAILS NEEDING RESPONSE" & return
@@ -492,41 +514,10 @@ def get_needs_response(
                 end if
             end try
 
-            -- Collect sent subjects for "already replied" detection. A1: cap
-            -- at {sent_cap} so we don't drag the whole Sent mailbox in.
-            set sentSubjects to {{}}
-            set sentMailbox to missing value
-            try
-                set sentMailbox to mailbox "Sent Messages" of targetAccount
-            on error
-                try
-                    set sentMailbox to mailbox "Sent" of targetAccount
-                on error
-                    try
-                        set sentMailbox to mailbox "Sent Items" of targetAccount
-                    end try
-                end try
-            end try
-
-            if sentMailbox is not missing value then
-                set sentMessages to {{}}
-                set sentCount to count of messages of sentMailbox
-                if sentCount > {sent_cap} then
-                    set sentUpperBound to {sent_cap}
-                else
-                    set sentUpperBound to sentCount
-                end if
-                if sentUpperBound > 0 then
-                    set sentMessages to messages 1 thru sentUpperBound of sentMailbox
-                end if
-                repeat with aMessage in sentMessages
-                    try
-                        set sentSubj to subject of aMessage
-                        set baseSent to my stripPrefixes(sentSubj)
-                        set end of sentSubjects to baseSent
-                    end try
-                end repeat
-            end if
+            -- Build Message-ID + subject reply lookups from Sent. The primary
+            -- check uses In-Reply-To: / References: header parsing so we
+            -- don't depend on fragile subject substring matching.
+            {replied_builder}
 
             -- Scan a bounded newest-first slice. Do not use a broad `whose`
             -- filter here; Mail.app can materialize deep remote mailboxes
@@ -545,6 +536,7 @@ def get_needs_response(
             set highPriority to {{}}
             set normalPriority to {{}}
             set totalChecked to 0
+            set skippedRepliedCount to 0
 
             repeat with aMessage in mailboxMessages
                 if (count of highPriority) + (count of normalPriority) >= {max_results} then exit repeat
@@ -570,20 +562,50 @@ def get_needs_response(
                         end ignoring
 
                         if not isNewsletter and not isAutomated then
-                            -- Check if user already replied
-                            set baseSubject to my stripPrefixes(messageSubject)
+                            -- Primary check: Internet Message-ID match against
+                            -- replies in Sent. Wrapped in try because not every
+                            -- Mail.app message exposes `message id` reliably.
                             set alreadyReplied to false
-                            ignoring case
-                                repeat with sentSubj in sentSubjects
-                                    set sentSubjText to sentSubj as string
-                                    if sentSubjText contains baseSubject or baseSubject contains sentSubjText then
-                                        set alreadyReplied to true
-                                        exit repeat
+                            try
+                                set inboxMessageId to message id of aMessage
+                                if inboxMessageId is not missing value and inboxMessageId is not "" then
+                                    set normalizedInboxId to inboxMessageId as string
+                                    if normalizedInboxId does not start with "<" then
+                                        set normalizedInboxId to "<" & normalizedInboxId & ">"
                                     end if
-                                end repeat
-                            end ignoring
+                                    repeat with repliedRef in repliedIds
+                                        if (repliedRef as string) is normalizedInboxId then
+                                            set alreadyReplied to true
+                                            exit repeat
+                                        end if
+                                    end repeat
+                                end if
+                            end try
 
+                            -- Fallback subject-substring check (kept for
+                            -- resilience when headers are unavailable).
                             if not alreadyReplied then
+                                set baseSubject to my stripPrefixes(messageSubject)
+                                ignoring case
+                                    repeat with sentSubj in sentSubjects
+                                        set sentSubjText to sentSubj as string
+                                        if sentSubjText is not "" and baseSubject is not "" then
+                                            if sentSubjText contains baseSubject or baseSubject contains sentSubjText then
+                                                set alreadyReplied to true
+                                                exit repeat
+                                            end if
+                                        end if
+                                    end repeat
+                                end ignoring
+                            end if
+
+                            set keepThisEmail to true
+                            if alreadyReplied and not {include_replied_flag} then
+                                set keepThisEmail to false
+                                set skippedRepliedCount to skippedRepliedCount + 1
+                            end if
+
+                            if keepThisEmail then
                                 -- Determine priority
                                 set hasQuestion to (messageSubject contains "?")
                                 {body_scan_block}
@@ -593,18 +615,27 @@ def get_needs_response(
                                     set isFlagged to flagged status of aMessage
                                 end try
 
-                                set emailEntry to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||"
+                                set priorityLabel to ""
                                 if hasQuestion or isFlagged then
                                     if hasQuestion and isFlagged then
-                                        set emailEntry to emailEntry & "HIGH (flagged + question)"
+                                        set priorityLabel to "HIGH (flagged + question)"
                                     else if isFlagged then
-                                        set emailEntry to emailEntry & "HIGH (flagged)"
+                                        set priorityLabel to "HIGH (flagged)"
                                     else
-                                        set emailEntry to emailEntry & "MEDIUM (contains question)"
+                                        set priorityLabel to "MEDIUM (contains question)"
                                     end if
+                                else
+                                    set priorityLabel to "NORMAL"
+                                end if
+
+                                if alreadyReplied then
+                                    set priorityLabel to "[ALREADY REPLIED] " & priorityLabel
+                                end if
+
+                                set emailEntry to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & priorityLabel
+                                if hasQuestion or isFlagged then
                                     set end of highPriority to emailEntry
                                 else
-                                    set emailEntry to emailEntry & "NORMAL"
                                     set end of normalPriority to emailEntry
                                 end if
                             end if
@@ -637,6 +668,9 @@ def get_needs_response(
 
             set outputText to outputText & "========================================" & return
             set outputText to outputText & "Found " & resultCount & " email(s) needing response." & return
+            if not {include_replied_flag} and skippedRepliedCount > 0 then
+                set outputText to outputText & "Filtered " & skippedRepliedCount & " already-replied email(s). Re-run with include_already_replied=True to see them." & return
+            end if
 
         on error errMsg
             return "Error: " & errMsg

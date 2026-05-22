@@ -7,6 +7,24 @@ description: This skill should be used when the user asks to "draft an email", "
 
 Compose-first workflows against Apple Mail. Default plugin installs run **`--draft-safe`**: compose tools default to quiet `mode="draft"` (no leftover compose windows), and `mode="send"` returns a structured error until the server is reconfigured. When send is allowed, still confirm intent with the user before calling `mode="send"` or `manage_drafts(action="send")`.
 
+## Already-replied safeguard (default)
+
+Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. The discovery tools enforce this by default:
+
+- `get_needs_response()` filters out already-replied emails (Message-ID matched against the Sent mailbox). Pass `include_already_replied=True` only if the user explicitly asks to see them.
+- `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
+- As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
+
+Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` (on `get_needs_response`) or `exclude_replied=False` (elsewhere).
+
+## Pre-draft verification (required before reply_to_email / compose_email reply)
+
+Run this **before** any `reply_to_email` or compose-as-reply call:
+
+1. Fetch the conversation: `get_email_thread(message_id=...)` (or the equivalent account + subject signature when no id is available).
+2. Cross-check senders in the thread against `list_account_addresses(account=...)`. If any message in the thread was sent by one of the user's own addresses, **abort the draft** and report which message already replied (date, subject snippet) — unless the user explicitly said "redraft" or "include already-replied".
+3. Only after the thread shows no user-sent message do you proceed to `reply_to_email` / `compose_email`.
+
 ## When To Use This Skill
 
 | Request signal | Use this skill |

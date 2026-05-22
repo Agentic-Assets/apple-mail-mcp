@@ -22,3 +22,16 @@ def _pass_through_known_test_accounts(monkeypatch):
     monkeypatch.setattr("apple_mail_mcp.tools.analytics.validate_account_name", _validate)
     monkeypatch.setattr("apple_mail_mcp.tools.smart_inbox.validate_account_name", _validate)
     monkeypatch.setattr("apple_mail_mcp.tools.compose.validate_account_name", _validate)
+
+    # account_not_found_json (used by JSON error paths in inbox/search) and
+    # cli._mailbox_count both shell out to osascript. Stub them so the suite
+    # is robust to a hung or absent Mail.app — CI runs on Ubuntu with no
+    # osascript, and locally Mail can hang for unrelated reasons.
+    monkeypatch.setattr(
+        "apple_mail_mcp.core.list_mail_account_names",
+        lambda timeout=30: ["Work"],
+    )
+    monkeypatch.setattr(
+        "apple_mail_mcp.cli._mailbox_count",
+        lambda account: 0,
+    )

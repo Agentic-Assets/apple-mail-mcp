@@ -16,6 +16,7 @@ from apple_mail_mcp.core import (
     contains_any_condition,
     inject_preferences,
     escape_applescript,
+    fetch_replied_ids as _core_fetch_replied_ids,
     normalize_message_ids,
     normalize_search_terms,
     run_applescript,
@@ -23,6 +24,16 @@ from apple_mail_mcp.core import (
     account_not_found_json,
     list_mail_account_names,
 )
+
+
+def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: Optional[int] = 60) -> set:
+    """Fetch replied Message-ID set using this module's ``run_applescript``.
+
+    Wraps the core helper so tests that patch
+    ``apple_mail_mcp.tools.search.run_applescript`` also cover the
+    Sent-mailbox probe.
+    """
+    return _core_fetch_replied_ids(account, sent_cap=sent_cap, timeout=timeout, runner=run_applescript)
 
 
 MONTH_NAMES = [
@@ -135,7 +146,8 @@ def _format_search_records_text(
         lines.append("")
         for item in records:
             indicator = "✓" if item["is_read"] else "✉"
-            lines.append(f"{indicator} {item['subject']}")
+            replied_prefix = "[REPLIED] " if item.get("already_replied") else ""
+            lines.append(f"{indicator} {replied_prefix}{item['subject']}")
             lines.append(f"   From: {item['sender']}")
             lines.append(f"   Date: {item['received_date']}")
             lines.append(f"   Mailbox: {item['mailbox']}")
@@ -723,6 +735,8 @@ async def search_emails(
     offset: int = 0,
     limit: Optional[int] = None,
     sort: str = "date_desc",
+    exclude_replied: bool = False,
+    flag_replied: bool = False,
     timeout: Optional[int] = None,
     allow_full_scan: bool = False,
 ) -> str:
@@ -779,6 +793,18 @@ async def search_emails(
         offset: Number of matching results to skip before returning data
         limit: Maximum number of results to return per page
         sort: Result sort order: "date_desc" or "date_asc"
+        exclude_replied: When True, filter out emails the user has already
+            replied to (detected via Message-ID matching against Sent
+            mailbox). Default False keeps backward-compatible behavior.
+            When True, replied emails are removed before formatting, so
+            ``flag_replied`` has no visible effect.
+        flag_replied: When True (opt-in; default False) AND
+            ``exclude_replied=False``, annotate already-replied emails —
+            text mode prefixes the subject with ``[REPLIED] `` and JSON
+            mode adds an ``already_replied: true`` field. Default False
+            keeps the per-call cost low (no extra Sent-mailbox AppleScript
+            probe); set True for safer agent workflows. Only matters when
+            ``exclude_replied=False``.
         timeout: Optional per-account AppleScript timeout in seconds. Defaults
             to 180s. Raise this for known-slow accounts (e.g. large Exchange
             inboxes) when the default times out.
@@ -872,6 +898,47 @@ async def search_emails(
             body_text=body_text,
             timeout=timeout,
         )
+
+        # Replied-detection: build the replied-Message-ID set once and
+        # apply it to records. Detection is best-effort per account; if
+        # the Sent mailbox is unreachable we get an empty set and no
+        # records are flagged or filtered.
+        if exclude_replied or flag_replied:
+            replied_set: set = set()
+            if account:
+                replied_set = await asyncio.to_thread(
+                    fetch_replied_ids, account, 200, timeout
+                )
+            else:
+                # Multi-account: union per-account replied sets so a record
+                # is flagged when ANY account's Sent mailbox shows a reply
+                # for its Message-ID.
+                accounts_seen = sorted({r.get("account", "") for r in records if r.get("account")})
+                if accounts_seen:
+                    sets = await asyncio.gather(
+                        *(asyncio.to_thread(fetch_replied_ids, acct, 200, timeout) for acct in accounts_seen)
+                    )
+                    for s in sets:
+                        replied_set |= s
+
+            def _is_replied(rec: Dict[str, Any]) -> bool:
+                raw_id = rec.get("internet_message_id", "")
+                if not raw_id:
+                    return False
+                token = raw_id.strip()
+                if not token.startswith("<"):
+                    token = "<" + token
+                if not token.endswith(">"):
+                    token = token + ">"
+                return token in replied_set
+
+            if exclude_replied:
+                records = [r for r in records if not _is_replied(r)]
+            elif flag_replied:
+                for rec in records:
+                    if _is_replied(rec):
+                        rec["already_replied"] = True
+
         return _build_search_response(
             records,
             offset=offset,

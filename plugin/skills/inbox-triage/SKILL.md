@@ -7,6 +7,16 @@ description: This skill should be used when the user asks to "check my email", "
 
 Fast, read-first email check for Apple Mail — what arrived, what needs a reply, what you're still waiting on. Target **5–10 minutes**, not inbox zero.
 
+## Already-replied safeguard (default)
+
+Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. The discovery tools enforce this by default:
+
+- `get_needs_response()` filters out already-replied emails (Message-ID matched against the Sent mailbox). Pass `include_already_replied=True` only if the user explicitly asks to see them.
+- `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
+- As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
+
+Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` (on `get_needs_response`) or `exclude_replied=False` (elsewhere).
+
 ## When To Use
 
 | User says | Use this skill |
@@ -49,6 +59,8 @@ Note unread totals and recent subjects. Do not open every message yet.
 get_needs_response(days_back=2, max_results=10)
 ```
 
+Default `include_already_replied=False` filters out emails the user has already replied to (Message-ID matched against Sent). Only pass `include_already_replied=True` if the user explicitly wants the full set (e.g. "show everything, even the ones I answered").
+
 Subject-only detection is the default (fast). Use `scan_body=True` only when the user asks to hunt question marks in bodies.
 
 Present as a short prioritized list: subject, sender, age, priority hint.
@@ -64,10 +76,12 @@ Use when the user cares about follow-ups they already sent.
 ### 4. Scan recent inbox (1–2 min)
 
 ```
-list_inbox_emails(max_emails=25, include_content=false, output_format="json")
+list_inbox_emails(max_emails=25, include_content=false, output_format="json", exclude_replied=True, flag_replied=True)
 ```
 
-Skim subjects. Flag obvious P0 keywords (urgent, deadline, outage) with `search_emails` only if overview/needs-response missed them.
+When the scan is feeding a drafting candidate list, keep `exclude_replied=True` so the agent does not propose replies to messages already answered. `flag_replied=True` prefixes any retained items with `[REPLIED]` in text output and adds `already_replied` to JSON.
+
+Skim subjects. Flag obvious P0 keywords (urgent, deadline, outage) with `search_emails(..., exclude_replied=True)` only if overview/needs-response missed them.
 
 ### 5. Drill-down by exact id (when needed)
 

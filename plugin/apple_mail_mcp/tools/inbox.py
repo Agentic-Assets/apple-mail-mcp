@@ -10,12 +10,23 @@ from apple_mail_mcp.core import (
     AppleScriptTimeout,
     inject_preferences,
     escape_applescript,
+    fetch_replied_ids as _core_fetch_replied_ids,
     run_applescript,
     inbox_mailbox_script,
     content_preview_script,
     validate_account_name,
     account_not_found_json,
 )
+
+
+def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: Optional[int] = 60) -> set:
+    """Fetch replied Message-ID set using this module's ``run_applescript``.
+
+    Wraps the core helper so tests that patch
+    ``apple_mail_mcp.tools.inbox.run_applescript`` also cover the
+    Sent-mailbox probe.
+    """
+    return _core_fetch_replied_ids(account, sent_cap=sent_cap, timeout=timeout, runner=run_applescript)
 
 
 # ---------------------------------------------------------------------------
@@ -42,26 +53,45 @@ def _list_mail_accounts(timeout: Optional[int] = 30) -> List[str]:
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
-def _parse_pipe_delimited_emails(raw: str) -> List[Dict[str, Any]]:
-    """Parse '|||'-delimited AppleScript output into a list of email dicts."""
-    emails = []
+def _parse_pipe_delimited_emails(
+    raw: str, *, has_message_id: bool = False
+) -> List[Dict[str, Any]]:
+    """Parse '|||'-delimited AppleScript output into a list of email dicts.
+
+    Legacy schema (5 or 6 fields):
+        subject|||sender|||date|||read|||account[|||content_preview]
+
+    Extended schema when *has_message_id* is True (6 or 7 fields):
+        subject|||sender|||date|||read|||account|||internet_message_id[|||content_preview]
+    """
+    emails: List[Dict[str, Any]] = []
     if not raw:
         return emails
+    # Allow enough splits to capture both an Internet Message-ID field AND
+    # a free-form content preview that itself may contain "|||".
+    maxsplit = 6 if has_message_id else 5
     for line in raw.split("\n"):
         if "|||" not in line:
             continue
-        parts = line.split("|||", 5)
-        if len(parts) >= 5:
-            item = {
-                "subject": parts[0].strip(),
-                "sender": parts[1].strip(),
-                "date": parts[2].strip(),
-                "is_read": parts[3].strip().lower() == "true",
-                "account": parts[4].strip(),
-            }
-            if len(parts) > 5 and parts[5].strip():
+        parts = line.split("|||", maxsplit)
+        if len(parts) < 5:
+            continue
+        item: Dict[str, Any] = {
+            "subject": parts[0].strip(),
+            "sender": parts[1].strip(),
+            "date": parts[2].strip(),
+            "is_read": parts[3].strip().lower() == "true",
+            "account": parts[4].strip(),
+        }
+        if has_message_id:
+            if len(parts) >= 6 and parts[5].strip():
+                item["internet_message_id"] = parts[5].strip()
+            if len(parts) >= 7 and parts[6].strip():
+                item["content_preview"] = parts[6].strip()
+        else:
+            if len(parts) >= 6 and parts[5].strip():
                 item["content_preview"] = parts[5].strip()
-            emails.append(item)
+        emails.append(item)
     return emails
 
 
@@ -74,6 +104,7 @@ def _build_list_inbox_text_script(
     max_emails: int,
     include_read: bool,
     include_content: bool,
+    include_message_id: bool = False,
 ) -> str:
     """Build a text-format inbox script for one account.
 
@@ -134,6 +165,12 @@ def _build_list_inbox_text_script(
                         set messageSender to sender of aMessage
                         set messageDate to date received of aMessage
                         set messageRead to read status of aMessage
+                        {("set internetMessageId to \"\"\n" +
+                          "                        try\n" +
+                          "                            set internetMessageId to message id of aMessage\n" +
+                          "                        end try\n" +
+                          "                        set outputText to outputText & \"__MSG_ID__|||\" & internetMessageId & return")
+                          if include_message_id else ""}
 
                         if messageRead then
                             set readIndicator to "✓"
@@ -163,9 +200,18 @@ def _build_list_inbox_text_script(
 
 
 def _build_list_inbox_json_script(
-    account: str, max_emails: int, include_read: bool, include_content: bool = False
+    account: str,
+    max_emails: int,
+    include_read: bool,
+    include_content: bool = False,
+    include_message_id: bool = False,
 ) -> str:
-    """Build a JSON-format inbox script for one account."""
+    """Build a JSON-format inbox script for one account.
+
+    When *include_message_id* is True, each emitted line gains an extra
+    ``|||<internet-message-id>`` field between the account name and the
+    optional content preview. Callers use this for replied-detection.
+    """
     escaped_account = escape_applescript(account)
 
     if max_emails > 0:
@@ -213,6 +259,18 @@ def _build_list_inbox_json_script(
         content_field = ""
         content_suffix = ""
 
+    if include_message_id:
+        message_id_field = (
+            "set internetMessageId to \"\"\n"
+            "                    try\n"
+            "                        set internetMessageId to message id of aMessage\n"
+            "                    end try"
+        )
+        message_id_suffix = ' & "|||" & internetMessageId'
+    else:
+        message_id_field = ""
+        message_id_suffix = ""
+
     return f"""
     tell application "Mail"
         set resultLines to {{}}
@@ -231,7 +289,8 @@ def _build_list_inbox_json_script(
                     set messageDate to date received of aMessage
                     set messageRead to read status of aMessage
                     {content_field}
-                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName{content_suffix}
+                    {message_id_field}
+                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName{message_id_suffix}{content_suffix}
                 end try
             end repeat
         end try
@@ -272,6 +331,8 @@ async def list_inbox_emails(
     include_read: bool = True,
     include_content: bool = False,
     output_format: str = "text",
+    exclude_replied: bool = False,
+    flag_replied: bool = False,
     timeout: Optional[int] = None,
     allow_full_scan: bool = False,
 ) -> str:
@@ -308,6 +369,18 @@ async def list_inbox_emails(
         include_read: Whether to include read emails (default: True)
         include_content: Whether to include a content preview for each email (slower, default: False)
         output_format: "text" (default, human-readable) or "json" (structured list of email dicts)
+        exclude_replied: When True, filter out emails the user has already
+            replied to (detected via Message-ID matching against the Sent
+            mailbox). Default False keeps the legacy unfiltered behavior.
+            When True, ``flag_replied`` has no visible effect because
+            replied emails are removed before formatting.
+        flag_replied: When True (opt-in; default False) AND
+            ``exclude_replied=False``, already-replied emails are
+            annotated — text mode prefixes the subject with ``[REPLIED] ``;
+            JSON mode adds an ``already_replied: true`` field per email
+            entry. Default False keeps the per-call cost low (no extra
+            Sent-mailbox AppleScript probe); set True for safer agent
+            workflows. Only matters when ``exclude_replied=False``.
         timeout: Optional per-account AppleScript timeout in seconds (default: 120s).
             Raise this for known-slow accounts (large Exchange inboxes) when
             the default budget is too tight.
@@ -343,13 +416,30 @@ async def list_inbox_emails(
                 return account_not_found_json(account, timeout=validation_timeout)
             return account_err
 
+    # When replied-detection is requested we need the Message-ID per row.
+    want_message_id = bool(exclude_replied or flag_replied)
+
     if output_format == "json":
         return await _list_inbox_emails_json(
-            account, max_emails, include_read, include_content, timeout
+            account,
+            max_emails,
+            include_read,
+            include_content,
+            timeout,
+            exclude_replied=exclude_replied,
+            flag_replied=flag_replied,
+            include_message_id=want_message_id,
         )
 
     return await _list_inbox_emails_text(
-        account, max_emails, include_read, include_content, timeout
+        account,
+        max_emails,
+        include_read,
+        include_content,
+        timeout,
+        exclude_replied=exclude_replied,
+        flag_replied=flag_replied,
+        include_message_id=want_message_id,
     )
 
 
@@ -359,12 +449,95 @@ def _run_text_one(
     include_read: bool,
     include_content: bool,
     timeout: Optional[int],
+    include_message_id: bool = False,
 ) -> str:
     """Synchronously run one account's text inbox script."""
     script = _build_list_inbox_text_script(
-        account, max_emails, include_read, include_content
+        account, max_emails, include_read, include_content, include_message_id
     )
     return run_applescript(script, timeout=timeout if timeout is not None else 120)
+
+
+def _normalize_message_id_token(raw: str) -> str:
+    """Return a Message-ID wrapped in angle brackets for set lookups."""
+    token = (raw or "").strip()
+    if not token:
+        return ""
+    if not token.startswith("<"):
+        token = "<" + token
+    if not token.endswith(">"):
+        token = token + ">"
+    return token
+
+
+def _filter_text_body_by_replied(
+    body: str,
+    replied_ids: set,
+    *,
+    exclude_replied: bool,
+    flag_replied: bool,
+) -> tuple[str, int]:
+    """Apply replied detection to a text-format inbox body.
+
+    Each email block starts with a ``__MSG_ID__|||<id>`` marker line emitted
+    by the text script when message-id capture is enabled. The marker line
+    is stripped on the way out; when *exclude_replied* is True replied
+    emails (subject + From/Date lines through the next blank line) are
+    dropped; when *flag_replied* is True the ✓/✉ line is prefixed with
+    ``[REPLIED] ``.
+    """
+    lines = body.splitlines()
+    out: List[str] = []
+    skipped = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("__MSG_ID__|||"):
+            raw_id = line.split("|||", 1)[1].strip()
+            token = _normalize_message_id_token(raw_id)
+            is_replied = bool(token) and token in replied_ids
+            # Look ahead for the next non-empty line — the rendered email block.
+            j = i + 1
+            # First non-empty content line is the indicator + subject.
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j >= len(lines):
+                i = j
+                continue
+            indicator_line = lines[j]
+            # Find the trailing blank that ends this email block, so we can
+            # cleanly skip it when exclude_replied is True.
+            k = j + 1
+            while k < len(lines) and lines[k].strip() != "":
+                k += 1
+            block_end = k  # 'k' points at the first blank or end-of-list.
+
+            if is_replied and exclude_replied:
+                skipped += 1
+                # Advance past block; also drop the trailing blank if present.
+                i = block_end + 1 if block_end < len(lines) else block_end
+                continue
+
+            if is_replied and flag_replied:
+                # Inject [REPLIED] after the indicator and single space.
+                # Indicator line shape: "<sym> <subject>"
+                if " " in indicator_line:
+                    sym, rest = indicator_line.split(" ", 1)
+                    indicator_line = f"{sym} [REPLIED] {rest}"
+                else:
+                    indicator_line = f"{indicator_line} [REPLIED]"
+
+            # Emit any blank lines between marker and indicator, then block.
+            out.extend(lines[i + 1 : j])
+            out.append(indicator_line)
+            out.extend(lines[j + 1 : block_end])
+            if block_end < len(lines):
+                out.append(lines[block_end])
+            i = block_end + 1 if block_end < len(lines) else block_end
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out), skipped
 
 
 async def _list_inbox_emails_text(
@@ -373,6 +546,10 @@ async def _list_inbox_emails_text(
     include_read: bool,
     include_content: bool,
     timeout: Optional[int],
+    *,
+    exclude_replied: bool = False,
+    flag_replied: bool = False,
+    include_message_id: bool = False,
 ) -> str:
     """Async text-format implementation, dispatching one script per account."""
     header = "INBOX EMAILS - ALL ACCOUNTS\n\n"
@@ -385,7 +562,13 @@ async def _list_inbox_emails_text(
     if account:
         try:
             body = await asyncio.to_thread(
-                _run_text_one, account, max_emails, include_read, include_content, timeout
+                _run_text_one,
+                account,
+                max_emails,
+                include_read,
+                include_content,
+                timeout,
+                include_message_id,
             )
         except AppleScriptTimeout:
             return (
@@ -394,6 +577,14 @@ async def _list_inbox_emails_text(
                 + f"\nPARTIAL: 1 account(s) timed out: {account}\n"
             )
         clean, count = _strip_count_marker(body)
+        if include_message_id and (exclude_replied or flag_replied):
+            replied = await asyncio.to_thread(fetch_replied_ids, account, 200, timeout)
+            clean, _skipped = _filter_text_body_by_replied(
+                clean,
+                replied,
+                exclude_replied=exclude_replied,
+                flag_replied=flag_replied,
+            )
         return header + clean + "\n" + footer_template.format(total=count)
 
     # Multi-account: probe account list, then dispatch in parallel.
@@ -408,12 +599,26 @@ async def _list_inbox_emails_text(
     async def run_one(acct: str):
         try:
             return acct, await asyncio.to_thread(
-                _run_text_one, acct, max_emails, include_read, include_content, timeout
+                _run_text_one,
+                acct,
+                max_emails,
+                include_read,
+                include_content,
+                timeout,
+                include_message_id,
             )
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
 
     results = await asyncio.gather(*(run_one(a) for a in accounts))
+
+    # Pre-fetch per-account replied sets in parallel when needed.
+    replied_sets: Dict[str, set] = {}
+    if include_message_id and (exclude_replied or flag_replied):
+        replied_results = await asyncio.gather(
+            *(asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts)
+        )
+        replied_sets = dict(zip(accounts, replied_results))
 
     pieces: List[str] = [header]
     total = 0
@@ -423,6 +628,13 @@ async def _list_inbox_emails_text(
             errors.append(acct)
             continue
         clean, count = _strip_count_marker(outcome)
+        if include_message_id and (exclude_replied or flag_replied):
+            clean, _skipped = _filter_text_body_by_replied(
+                clean,
+                replied_sets.get(acct, set()),
+                exclude_replied=exclude_replied,
+                flag_replied=flag_replied,
+            )
         if clean:
             pieces.append(clean)
             pieces.append("\n")
@@ -439,6 +651,7 @@ def _run_json_one(
     include_read: bool,
     include_content: bool | int | None = False,
     timeout: Optional[int] = None,
+    include_message_id: bool = False,
 ) -> str:
     """Synchronously run one account's JSON inbox script."""
     # Backward compatibility for older call sites that passed
@@ -448,9 +661,36 @@ def _run_json_one(
         timeout = include_content
         include_content = False
     script = _build_list_inbox_json_script(
-        account, max_emails, include_read, bool(include_content)
+        account,
+        max_emails,
+        include_read,
+        bool(include_content),
+        include_message_id=include_message_id,
     )
     return run_applescript(script, timeout=timeout if timeout is not None else 120)
+
+
+def _apply_replied_to_emails(
+    emails: List[Dict[str, Any]],
+    replied_set: set,
+    *,
+    exclude_replied: bool,
+    flag_replied: bool,
+) -> List[Dict[str, Any]]:
+    """Filter or flag email dicts based on a replied Message-ID set."""
+    if not (exclude_replied or flag_replied):
+        return emails
+    out: List[Dict[str, Any]] = []
+    for em in emails:
+        token = _normalize_message_id_token(em.get("internet_message_id", ""))
+        is_replied = bool(token) and token in replied_set
+        if is_replied and exclude_replied:
+            continue
+        if is_replied and flag_replied and not exclude_replied:
+            em = dict(em)
+            em["already_replied"] = True
+        out.append(em)
+    return out
 
 
 async def _list_inbox_emails_json(
@@ -459,6 +699,10 @@ async def _list_inbox_emails_json(
     include_read: bool,
     include_content: bool,
     timeout: Optional[int],
+    *,
+    exclude_replied: bool = False,
+    flag_replied: bool = False,
+    include_message_id: bool = False,
 ) -> str:
     """Return inbox emails as a JSON string. When include_content is True,
     each record gains a `content_preview` field. Always returns an object
@@ -474,8 +718,17 @@ async def _list_inbox_emails_json(
                 include_read,
                 include_content,
                 timeout,
+                include_message_id,
             )
-            emails = _parse_pipe_delimited_emails(raw)
+            emails = _parse_pipe_delimited_emails(raw, has_message_id=include_message_id)
+            if include_message_id and (exclude_replied or flag_replied):
+                replied = await asyncio.to_thread(fetch_replied_ids, account, 200, timeout)
+                emails = _apply_replied_to_emails(
+                    emails,
+                    replied,
+                    exclude_replied=exclude_replied,
+                    flag_replied=flag_replied,
+                )
             return json.dumps(emails, indent=2)
         except AppleScriptTimeout:
             return json.dumps({"emails": [], "errors": [account]}, indent=2)
@@ -497,18 +750,36 @@ async def _list_inbox_emails_json(
                 include_read,
                 include_content,
                 timeout,
+                include_message_id,
             )
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
 
     results = await asyncio.gather(*(run_one(a) for a in accounts))
+
+    # Pre-fetch per-account replied sets in parallel when needed.
+    replied_sets: Dict[str, set] = {}
+    if include_message_id and (exclude_replied or flag_replied):
+        replied_results = await asyncio.gather(
+            *(asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts)
+        )
+        replied_sets = dict(zip(accounts, replied_results))
+
     combined: List[Dict[str, Any]] = []
     errors: List[str] = []
     for acct, outcome in results:
         if isinstance(outcome, AppleScriptTimeout):
             errors.append(acct)
             continue
-        combined.extend(_parse_pipe_delimited_emails(outcome))
+        parsed = _parse_pipe_delimited_emails(outcome, has_message_id=include_message_id)
+        if include_message_id and (exclude_replied or flag_replied):
+            parsed = _apply_replied_to_emails(
+                parsed,
+                replied_sets.get(acct, set()),
+                exclude_replied=exclude_replied,
+                flag_replied=flag_replied,
+            )
+        combined.extend(parsed)
 
     payload: Dict[str, Any] = {"emails": combined}
     if errors:
