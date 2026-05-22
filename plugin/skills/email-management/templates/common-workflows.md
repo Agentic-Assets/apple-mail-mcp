@@ -290,7 +290,7 @@ move_email(
 ### Quick Reply
 
 ```
-# 1. Find the email
+# 1. Find the email and keep its message_id
 search_emails(
     account="Work",
     subject_keyword="Quick Question",
@@ -299,18 +299,24 @@ search_emails(
     max_content_length=300
 )
 
-# 2. Reply immediately
+# 2. Verify the thread has not already been answered by the user
+get_email_thread(
+    account="Work",
+    message_id="<message_id from search>"
+)
+
+# 3. Reply immediately by exact id so Mail includes the original thread
 reply_to_email(
     account="Work",
-    subject_keyword="Quick Question",
+    message_id="<message_id from search>",
     reply_body="Yes, that works for me. Thanks!",
     reply_to_all=False
 )
 
-# 3. Archive the thread
+# 4. Archive the thread
 move_email(
     account="Work",
-    subject_keyword="Quick Question",
+    message_ids=["<message_id from search>"],
     to_mailbox="Archive",
     from_mailbox="INBOX",
     max_moves=1
@@ -320,7 +326,7 @@ move_email(
 ### Deferred Response (Draft)
 
 ```
-# 1. Review email content
+# 1. Review email content and keep its message_id
 search_emails(
     account="Work",
     subject_keyword="Complex Request",
@@ -329,20 +335,25 @@ search_emails(
     max_content_length=500
 )
 
-# 2. Create draft for later
-manage_drafts(
+# 2. Verify the thread has not already been answered by the user
+get_email_thread(
     account="Work",
-    action="create",
-    subject="Re: Complex Request",
-    to="sender@example.com",
-    body="Thank you for your email. I'm reviewing your request and will provide a detailed response by [date].\n\n[Draft notes: Need to check with team, review budget, etc.]"
+    message_id="<message_id from search>"
 )
 
-# 3. Flag original email
+# 3. Create a threaded draft for later
+reply_to_email(
+    account="Work",
+    message_id="<message_id from search>",
+    mode="draft",
+    reply_body="Thank you for your email. I'm reviewing your request and will provide a detailed response by [date].\n\n[Draft notes: Need to check with team, review budget, etc.]"
+)
+
+# 4. Flag original email
 update_email_status(
     account="Work",
     action="flag",
-    subject_keyword="Complex Request",
+    message_ids=["<message_id from search>"],
     mailbox="INBOX",
     max_updates=1
 )
@@ -354,15 +365,15 @@ update_email_status(
 # 1. View full thread context
 get_email_thread(
     account="Work",
-    subject_keyword="Team Discussion",
+    message_id="<message_id from search/list>",
     mailbox="All",
     max_messages=20
 )
 
-# 2. Reply to all
+# 2. Reply to all by exact id so Mail includes the original thread
 reply_to_email(
     account="Work",
-    subject_keyword="Team Discussion",
+    message_id="<message_id from search/list>",
     reply_body="Based on the discussion, I agree with the proposal. Let's move forward.",
     reply_to_all=True
 )
@@ -828,7 +839,8 @@ get_statistics(scope="account_overview", days_back=7)
 get_inbox_overview()
 list_inbox_emails(max_emails=20)
 search_emails(subject_keyword="...", mailbox="All")
-reply_to_email(subject_keyword="...", reply_body="...")
+get_email_thread(message_id="<message_id from search>")
+reply_to_email(message_id="<message_id from search>", reply_body="...")
 move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=10)
 
 # Weekly maintenance

@@ -76,7 +76,7 @@ See **[[email-drafting]]** for the required pre-draft verification step.
 | No accidental sends | Keep `--draft-safe`; require explicit user confirmation before any send attempt |
 | Quiet bulk drafts | Default `mode="draft"` on compose tools; do not leave unsaved compose windows |
 | Review each draft in Mail | Use `mode="open"` (saves first, then leaves window open); for rich `.eml`, `review_in_mail=True` |
-| Reply to a known message | Pass `message_id` from search/list; avoid `subject_keyword` when an id is already known |
+| Reply to a known message | Use `reply_to_email(message_id=...)`; `compose_email` is standalone and does not include the original thread |
 | Read-only auditing | Mention `--read-only` server flag — removes send-facing compose registrations |
 | Destructive moves/deletes | Defer to `email-archive-cleanup` or `email-management`; never bury trash/delete actions inside troubleshooting |
 

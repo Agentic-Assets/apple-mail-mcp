@@ -1,10 +1,16 @@
-"""Scalability hardening for 24K-mailbox safety (v3.1.9).
+"""Scalability hardening for 24K-mailbox safety (v3.1.9 + v3.1.10).
 
 Covers:
 - Subject-keyword fallback in reply/forward requires date bound or allow_full_scan.
 - get_statistics and get_top_senders require allow_full_scan when days_back=0.
 - list_inbox_emails accepts deprecated aliases `limit` / `unread_only` and
   surfaces a warning.
+- v3.1.10: list_inbox_emails(include_read=False) binds a bounded newest-first
+  slice BEFORE applying `whose read status is false`, so a 24K Exchange inbox
+  is not materialized to evaluate the filter.
+- v3.1.10: _build_search_script scan_cap scales with recent_days so narrow
+  filters (sender, subject_terms) over a wider date window actually inspect
+  enough messages to find matches.
 """
 
 import asyncio
@@ -15,6 +21,7 @@ from unittest.mock import patch
 from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools import analytics as analytics_tools
 from apple_mail_mcp.tools import inbox as inbox_tools
+from apple_mail_mcp.tools import search as search_tools
 from apple_mail_mcp.tools import smart_inbox as smart_inbox_tools
 
 
@@ -211,6 +218,114 @@ class ListInboxAliasTests(unittest.TestCase):
         ):
             result = self._run(account="Work", max_emails=5, include_read=False)
         self.assertNotIn("WARNING", result)
+
+
+class ListInboxUnreadFilterBoundedTests(unittest.TestCase):
+    """v3.1.10: unread filter must bind a bounded slice before `whose`."""
+
+    def _text_script(self, max_emails: int) -> str:
+        return inbox_tools._build_list_inbox_text_script(
+            account="Work",
+            max_emails=max_emails,
+            include_read=False,
+            include_content=False,
+        )
+
+    def _json_script(self, max_emails: int) -> str:
+        return inbox_tools._build_list_inbox_json_script(
+            account="Work",
+            max_emails=max_emails,
+            include_read=False,
+        )
+
+    def test_text_script_binds_slice_before_whose(self):
+        script = self._text_script(max_emails=50)
+        idx_slice = script.find("messages 1 thru ")
+        idx_whose = script.find("whose read status is false")
+        self.assertGreater(idx_slice, 0, "expected bounded slice in script")
+        self.assertGreater(idx_whose, 0, "expected `whose read status is false` clause")
+        self.assertLess(
+            idx_slice,
+            idx_whose,
+            "bounded slice must appear BEFORE the `whose` filter, "
+            "otherwise Mail materializes the entire 24K mailbox",
+        )
+
+    def test_json_script_binds_slice_before_whose(self):
+        script = self._json_script(max_emails=50)
+        idx_slice = script.find("messages 1 thru ")
+        idx_whose = script.find("whose read status is false")
+        self.assertGreater(idx_slice, 0)
+        self.assertGreater(idx_whose, 0)
+        self.assertLess(idx_slice, idx_whose)
+
+    def test_scan_cap_scales_with_max_emails(self):
+        # max_emails=50 → scan_cap = max(50*10, 100) = 500
+        script = self._text_script(max_emails=50)
+        self.assertIn("messages 1 thru 500", script)
+
+    def test_scan_cap_has_floor_of_100(self):
+        # max_emails=5 → scan_cap = max(5*10, 100) = 100
+        script = self._text_script(max_emails=5)
+        self.assertIn("messages 1 thru 100", script)
+
+    def test_scan_cap_ceiling_at_1000(self):
+        # max_emails=500 → scan_cap = min(max(500*10, 100), 1000) = 1000
+        script = self._text_script(max_emails=500)
+        self.assertIn("messages 1 thru 1000", script)
+
+    def test_candidate_messages_variable_present(self):
+        # The fix binds `candidateMessages` and then filters from it.
+        for builder in (self._text_script, self._json_script):
+            script = builder(max_emails=50)
+            self.assertIn("set candidateMessages to", script)
+            self.assertIn("candidateMessages whose read status is false", script)
+
+
+class SearchScanCapScalingTests(unittest.TestCase):
+    """v3.1.10: scan_cap scales with recent_days so narrow filters find matches."""
+
+    def _script(self, recent_days: float, limit: int = 20, offset: int = 0) -> str:
+        return search_tools._build_search_script(
+            account="Work",
+            mailbox="INBOX",
+            subject_terms=None,
+            sender="boss@example.com",
+            has_attachments=None,
+            read_status="all",
+            date_from=None,
+            date_to=None,
+            include_content=False,
+            content_length=300,
+            offset=offset,
+            limit=limit,
+            body_text=None,
+            recent_days=recent_days,
+        )
+
+    def test_default_recent_days_2_scales_to_100(self):
+        # recent_days=2 → window_cap=100, floor=21 → scan_cap=100
+        script = self._script(recent_days=2.0)
+        self.assertIn("> 100", script)
+
+    def test_recent_days_7_scales_to_350(self):
+        script = self._script(recent_days=7.0)
+        self.assertIn("> 350", script)
+
+    def test_recent_days_30_caps_at_500(self):
+        # recent_days=30 → 30*50=1500 capped at 500
+        script = self._script(recent_days=30.0)
+        self.assertIn("> 500", script)
+
+    def test_recent_days_zero_uses_floor(self):
+        # recent_days=0 (full scan) keeps base scan_cap = limit + 1 + offset = 21
+        script = self._script(recent_days=0.0)
+        self.assertIn("> 21", script)
+
+    def test_floor_dominates_when_limit_is_huge(self):
+        # limit=600 → base_cap=601 > window_cap=100, scan_cap=601
+        script = self._script(recent_days=2.0, limit=600)
+        self.assertIn("> 601", script)
 
 
 if __name__ == "__main__":

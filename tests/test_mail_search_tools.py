@@ -181,8 +181,9 @@ class SearchToolTests(unittest.TestCase):
             )
 
         self.assertEqual(response["items"], [])
-        # A1 cap: limit+1 = 51 (offset=0)
-        self.assertIn("set scanUpperBound to 51", captured["script"])
+        # v3.1.10: scan_cap now scales with recent_days (default 2.0 → window_cap=100),
+        # floored at limit+1+offset (=51). max(51, 100) = 100.
+        self.assertIn("set scanUpperBound to 100", captured["script"])
         self.assertIn("messages 1 thru scanUpperBound of currentMailbox", captured["script"])
         # The old, unfiltered enumeration must not appear.
         self.assertNotIn(

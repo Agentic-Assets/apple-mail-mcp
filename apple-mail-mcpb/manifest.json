@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.1.9",
+  "version": "3.1.10",
   "description": "Natural language interface for Apple Mail with 27 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
@@ -59,7 +59,7 @@
     },
     {
       "name": "list_inbox_emails",
-      "description": "List inbox emails across all accounts or a single account. Defaults to 50 most-recent; max_emails=0 requires allow_full_scan=True. Canonical params are max_emails and include_read — legacy aliases `limit` / `unread_only` are accepted with a warning. Async parallel per-account dispatch; returns {emails, errors, warnings} JSON."
+      "description": "List inbox emails across all accounts or a single account. Defaults to 50 most-recent; max_emails=0 requires allow_full_scan=True. Canonical params are max_emails and include_read — legacy aliases `limit` / `unread_only` are accepted with a warning. include_read=False binds a bounded newest-first slice (scan_cap = min(max(max_emails*10, 100), 1000)) before filtering, so Mail never materializes a 24K-message Exchange inbox. Async parallel per-account dispatch; returns {emails, errors, warnings} JSON."
     },
     {
       "name": "get_mailbox_unread_counts",
@@ -87,7 +87,7 @@
     },
     {
       "name": "compose_email",
-      "description": "Compose a new email from a specific account. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, TO/CC/BCC, and optional HTML body."
+      "description": "Compose a new standalone email from a specific account. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Does not include original thread context and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, TO/CC/BCC, and optional HTML body."
     },
     {
       "name": "forward_email",
@@ -95,11 +95,11 @@
     },
     {
       "name": "create_rich_email_draft",
-      "description": "Build a rich HTML multipart .eml draft and save it to Drafts by default (closes the compose window). Use review_in_mail for saved-open review. Prefer over injecting raw HTML into AppleScript content."
+      "description": "Build a standalone rich HTML multipart .eml draft and save it to Drafts by default (closes the compose window). Does not include original thread context and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Use review_in_mail for saved-open review. Prefer over injecting raw HTML into AppleScript content."
     },
     {
       "name": "manage_drafts",
-      "description": "Complete draft lifecycle: list, create, send, delete. Send action is blocked in --read-only and --draft-safe mode."
+      "description": "Complete draft lifecycle: list, create, send, delete. action=create makes a standalone draft and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Send action is blocked in --read-only and --draft-safe mode."
     },
     {
       "name": "list_email_attachments",
@@ -111,7 +111,7 @@
     },
     {
       "name": "search_emails",
-      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 requires allow_full_scan=True; all_accounts=True overrides default account."
+      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 requires allow_full_scan=True; all_accounts=True overrides default account. AppleScript scan_cap scales with recent_days (floor=limit+offset+1, ceiling=500) so narrow filters over a wider window actually inspect a meaningful portion of that window."
     },
     {
       "name": "get_email_by_id",

@@ -17,13 +17,15 @@ Before creating a draft reply, the agent **must** verify the user hasn't already
 
 Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` (on `get_needs_response`) or `exclude_replied=False` (elsewhere).
 
-## Pre-draft verification (required before reply_to_email / compose_email reply)
+## Pre-draft verification (required before replying)
 
-Run this **before** any `reply_to_email` or compose-as-reply call:
+Run this **before** any `reply_to_email` call:
 
 1. Fetch the conversation: `get_email_thread(message_id=...)` (or the equivalent account + subject signature when no id is available).
 2. Cross-check senders in the thread against `list_account_addresses(account=...)`. If any message in the thread was sent by one of the user's own addresses, **abort the draft** and report which message already replied (date, subject snippet) — unless the user explicitly said "redraft" or "include already-replied".
-3. Only after the thread shows no user-sent message do you proceed to `reply_to_email` / `compose_email`.
+3. Only after the thread shows no user-sent message do you proceed to `reply_to_email(message_id=...)`.
+
+Never use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer an existing message. They create standalone new messages, so the original chain is not included. If a standalone draft has a `Re:` / `Fwd:` subject or quoted-thread body, the tool returns an error unless `standalone_confirmed=True`; use that override only for a genuinely new message whose subject happens to look threaded.
 
 ## When To Use This Skill
 
@@ -59,11 +61,11 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 
 | Situation | Tool | Notes |
 |-----------|------|-------|
-| New outbound mail | `compose_email` | Default `mode="draft"`; use `mode="open"` only for explicit saved-open review; `mode="send"` blocked under `--draft-safe` |
+| New outbound mail | `compose_email` | Standalone only; default `mode="draft"`; use `mode="open"` only for explicit saved-open review; `mode="send"` blocked under `--draft-safe` |
 | Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is fallback only |
-| Marketing / HTML layout | `create_rich_email_draft` | Produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params — use plain compose tools when a named signature is required |
-| Low-level draft listing / CRUD | `manage_drafts` | Respect cap defaults; never batch-delete without confirming folder scope |
+| Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params — use plain compose tools when a named signature is required |
+| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope |
 
 ## Safety And Compliance
 

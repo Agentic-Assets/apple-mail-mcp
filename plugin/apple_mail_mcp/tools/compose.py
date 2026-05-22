@@ -26,6 +26,10 @@ from apple_mail_mcp.core import (
 
 DRAFT_LIST_CAP = 100
 MESSAGE_LOOKUP_CAP = 100
+_THREADED_SUBJECT_RE = re.compile(r"^\s*((re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
+_QUOTED_THREAD_MARKERS_RE = re.compile(
+    r"(?im)(^on .+ wrote:\s*$|^-{2,}\s*original message\s*-{2,}|^from:\s*.+$|^> .+)"
+)
 
 
 def _build_found_message_lookup(
@@ -335,6 +339,39 @@ def _strip_cdata_wrappers(text):
     return text.replace("<![CDATA[", "").replace("]]>", "")
 
 
+def _standalone_compose_thread_warning(
+    subject: str,
+    body: Optional[str],
+    body_html: Optional[str],
+    standalone_confirmed: bool,
+) -> Optional[str]:
+    """Return an error when a new compose looks like an accidental reply."""
+    if standalone_confirmed:
+        return None
+
+    signals = []
+    if _THREADED_SUBJECT_RE.search(subject or ""):
+        signals.append("threaded subject prefix")
+
+    combined_body = "\n".join(
+        part for part in ((body or ""), (body_html or "")) if part
+    )
+    if _QUOTED_THREAD_MARKERS_RE.search(combined_body):
+        signals.append("quoted-thread markers")
+
+    if not signals:
+        return None
+
+    return (
+        "Error: compose_email creates a standalone new message and will not "
+        "include the original email thread. This draft looks like a reply or "
+        f"forward ({', '.join(signals)}). Use reply_to_email(message_id=...) "
+        "or forward_email(message_id=...) after locating the source message. "
+        "If you intentionally want a brand-new standalone message, pass "
+        "standalone_confirmed=True."
+    )
+
+
 def _build_html_from_text(text_body):
     """Return a simple HTML wrapper for plain text content."""
     safe_body = html_escape(text_body or "")
@@ -461,6 +498,7 @@ def create_rich_email_draft(
     review_in_mail: bool = False,
     from_address: Optional[str] = None,
     timeout: Optional[int] = None,
+    standalone_confirmed: bool = False,
 ) -> str:
     """
     Create a rich-text email draft by generating an unsent `.eml` message and optionally opening it in Mail.
@@ -482,6 +520,7 @@ def create_rich_email_draft(
         review_in_mail: If True, leave the saved compose window open for review. Defaults to closing the saved window after creating the draft.
         from_address: Optional sender address to stamp into the `.eml` `From:` header. Must be one of the account's configured email addresses. When omitted, Mail fills the account's default "Send new messages from" address on open.
         timeout: Optional per-AppleScript timeout in seconds for the helper calls (sender alias lookup and draft save). Defaults to the standard 120s.
+        standalone_confirmed: Required explicit override when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
 
     Returns:
         Confirmation with the generated `.eml` path, missing details, and Mail-open/save status
@@ -494,6 +533,12 @@ def create_rich_email_draft(
 
     text_body = _strip_cdata_wrappers(text_body)
     html_body = _strip_cdata_wrappers(html_body)
+
+    thread_warning = _standalone_compose_thread_warning(
+        subject, text_body, html_body, standalone_confirmed
+    )
+    if thread_warning:
+        return thread_warning
 
     try:
         sender_override, sender_error = _validate_from_address(
@@ -1165,9 +1210,13 @@ def compose_email(
     timeout: Optional[int] = None,
     include_signature: bool = True,
     signature_name: Optional[str] = None,
+    standalone_confirmed: bool = False,
 ) -> str:
     """
-    Compose a new email from a specific account.
+    Compose a new standalone email from a specific account.
+
+    This tool never includes the original email thread. Use ``reply_to_email``
+    or ``forward_email`` with ``message_id`` when responding to existing mail.
 
     Args:
         account: Account name to send from (e.g., "Gmail", "Work", "Personal"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
@@ -1183,6 +1232,7 @@ def compose_email(
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
+        standalone_confirmed: Required explicit override when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone message.
 
     Returns:
         Confirmation message with details of the email
@@ -1203,6 +1253,12 @@ def compose_email(
 
     body = _strip_cdata_wrappers(body) or ""
     body_html = _strip_cdata_wrappers(body_html)
+
+    thread_warning = _standalone_compose_thread_warning(
+        subject, body, body_html, standalone_confirmed
+    )
+    if thread_warning:
+        return thread_warning
 
     # Validate optional sender override
     try:
@@ -1664,6 +1720,7 @@ def manage_drafts(
     draft_subject: Optional[str] = None,
     from_address: Optional[str] = None,
     timeout: Optional[int] = None,
+    standalone_confirmed: bool = False,
 ) -> str:
     """
     Manage draft emails - list, create, send, open, or delete drafts.
@@ -1679,6 +1736,7 @@ def manage_drafts(
         draft_subject: Subject keyword to find draft (required for send/open/delete)
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
+        standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
 
     Returns:
         Formatted output based on action
@@ -1727,6 +1785,12 @@ def manage_drafts(
     elif action == "create":
         if not subject or not to or not body:
             return "Error: 'subject', 'to', and 'body' are required for creating drafts"
+
+        thread_warning = _standalone_compose_thread_warning(
+            subject, body, None, standalone_confirmed
+        )
+        if thread_warning:
+            return thread_warning
 
         try:
             sender_override, sender_error = _validate_from_address(

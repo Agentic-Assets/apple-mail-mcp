@@ -242,6 +242,7 @@ def _build_search_script(
     offset: int,
     limit: int,
     body_text: Optional[str],
+    recent_days: float = 0.0,
 ) -> str:
     """Build the AppleScript for a single account's search.
 
@@ -249,13 +250,24 @@ def _build_search_script(
     ``whose`` clause sliced down to ``items 1 thru collectLimit`` or a
     ``messages 1 thru collectLimit`` bound directly, so we never materialize
     the full message list of a large (10K+) mailbox.
+
+    Scan-cap scales with ``recent_days`` so that narrow filters (sender,
+    subject_terms) over a wider date window actually inspect a meaningful
+    portion of that window — otherwise a 7-day query with default limit=20
+    would only inspect the 21 newest messages and silently miss matches
+    further back. Floor stays at ``collect_limit + offset`` and ceiling
+    caps at 500 to keep Mail bounded on remote IMAP/Exchange mailboxes.
     """
     escaped_sender = escape_applescript(sender) if sender else None
     use_body_search = body_text is not None
 
     collect_limit = limit + 1  # +1 for has_more probe; offset is decremented separately
-    # A1 cap includes offset because matching messages are skipped *after* binding.
-    scan_cap = collect_limit + offset
+    base_cap = collect_limit + offset
+    if recent_days and recent_days > 0:
+        window_cap = min(int(recent_days * 50), 500)
+        scan_cap = max(base_cap, window_cap)
+    else:
+        scan_cap = base_cap
 
     bounded_candidate_script = f'''
                             set matchingMessages to {{}}
@@ -564,6 +576,7 @@ def _search_one_account(
     limit: int,
     body_text: Optional[str],
     timeout: Optional[int],
+    recent_days: float = 0.0,
 ) -> List[Dict[str, Any]]:
     """Run the search AppleScript for a single account synchronously."""
     script = _build_search_script(
@@ -580,6 +593,7 @@ def _search_one_account(
         offset=offset,
         limit=limit,
         body_text=body_text,
+        recent_days=recent_days,
     )
     result = run_applescript(script, timeout=timeout if timeout is not None else 180)
     if result.startswith("ERROR|||"):
@@ -603,6 +617,7 @@ async def _search_mail_records(
     sort: str = "date_desc",
     body_text: Optional[str] = None,
     timeout: Optional[int] = None,
+    recent_days: float = 0.0,
 ) -> tuple[List[Dict[str, Any]], List[str], List[Dict[str, str]]]:
     """Return (records, error_account_names, error_details) from Apple Mail.
 
@@ -640,6 +655,7 @@ async def _search_mail_records(
                 limit,
                 body_text,
                 timeout,
+                recent_days,
             )
             return records, [], []
         except AppleScriptTimeout as exc:
@@ -672,6 +688,7 @@ async def _search_mail_records(
                 limit,
                 body_text,
                 timeout,
+                recent_days,
             )
             return acct, recs
         except AppleScriptTimeout:
@@ -926,6 +943,7 @@ async def search_emails(
             sort=sort,
             body_text=body_text,
             timeout=timeout,
+            recent_days=effective_recent_days,
         )
 
         # Replied-detection: build the replied-Message-ID set once and

@@ -177,6 +177,35 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertFalse(captured["include_signature"])
         self.assertIsNone(captured["signature_name"])
 
+    def test_draft_forwards_standalone_confirmed_to_compose_email(self):
+        captured = {}
+
+        def fake_compose(**kwargs):
+            captured.update(kwargs)
+            return "drafted"
+
+        with (
+            patch("apple_mail_mcp.tools.compose.compose_email", side_effect=fake_compose),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "draft",
+                    "--account",
+                    "Work",
+                    "--to",
+                    "person@example.com",
+                    "--subject",
+                    "Re: standalone project name",
+                    "--body",
+                    "Hello",
+                    "--standalone-confirmed",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(captured["standalone_confirmed"])
+
     def test_mcp_config_defaults_to_draft_safe(self):
         with patch("builtins.print") as mock_print:
             code = cli.main(["mcp-config", "--repo", "/tmp/apple-mail-mcp"])
@@ -262,4 +291,3 @@ class AppleMailCliTests(unittest.TestCase):
             code = cli.main(["smoke-test", "--account", "Work", "--json"])
 
         self.assertEqual(code, 0)
-

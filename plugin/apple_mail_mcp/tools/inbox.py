@@ -108,9 +108,11 @@ def _build_list_inbox_text_script(
 ) -> str:
     """Build a text-format inbox script for one account.
 
-    A1: caps the message scan via `messages 1 thru max_emails` (when
-    max_emails > 0) and `whose read status is false` when include_read=False,
-    so we never enumerate a 24K-message Exchange inbox.
+    Caps the message scan via `messages 1 thru max_emails` (when
+    `max_emails > 0` and `include_read=True`). When `include_read=False`,
+    binds a bounded newest-first window (`scan_cap = min(max(max_emails*10, 100), 1000)`)
+    *before* applying `whose read status is false`, so Mail never materializes
+    a 24K-message Exchange inbox to evaluate the filter.
     """
     escaped_account = escape_applescript(account)
     message_id_text_block = ""
@@ -125,9 +127,20 @@ def _build_list_inbox_text_script(
 
     if max_emails > 0:
         if not include_read:
+            # Bind a bounded newest-first slice BEFORE applying
+            # `whose read status is false` so Mail never materializes the
+            # whole mailbox to evaluate the filter on a 24K-message inbox.
+            scan_cap = max(max_emails * 10, 100)
+            if scan_cap > 1000:
+                scan_cap = 1000
             collection = (
-                f'set inboxMessages to (messages of inboxMailbox '
-                f'whose read status is false)\n'
+                f'set inboxCount to count of messages of inboxMailbox\n'
+                f'                if inboxCount > {scan_cap} then\n'
+                f'                    set candidateMessages to messages 1 thru {scan_cap} of inboxMailbox\n'
+                f'                else\n'
+                f'                    set candidateMessages to messages of inboxMailbox\n'
+                f'                end if\n'
+                f'                set inboxMessages to (candidateMessages whose read status is false)\n'
                 f'                if (count of inboxMessages) > {max_emails} then '
                 f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
             )
@@ -220,9 +233,17 @@ def _build_list_inbox_json_script(
 
     if max_emails > 0:
         if not include_read:
+            scan_cap = max(max_emails * 10, 100)
+            if scan_cap > 1000:
+                scan_cap = 1000
             collection = (
-                f'set inboxMessages to (messages of inboxMailbox '
-                f'whose read status is false)\n'
+                f'set inboxCount to count of messages of inboxMailbox\n'
+                f'                if inboxCount > {scan_cap} then\n'
+                f'                    set candidateMessages to messages 1 thru {scan_cap} of inboxMailbox\n'
+                f'                else\n'
+                f'                    set candidateMessages to messages of inboxMailbox\n'
+                f'                end if\n'
+                f'                set inboxMessages to (candidateMessages whose read status is false)\n'
                 f'                if (count of inboxMessages) > {max_emails} then '
                 f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
             )

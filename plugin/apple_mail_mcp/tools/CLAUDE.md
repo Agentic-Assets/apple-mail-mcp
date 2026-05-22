@@ -40,10 +40,10 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 
 | Tool | Default | Notes |
 |------|---------|-------|
-| `compose_email` | `mode="draft"` | Quiet save; `mode="open"` saves then leaves window open |
+| `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True` |
 | `reply_to_email` | `mode="draft"` (via `send=False`) | Prefer `message_id=` from search/list; `subject_keyword` is fallback |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
-| `create_rich_email_draft` | saves + closes | `review_in_mail=True` for saved-open review; blank subject → `.eml` only |
+| `create_rich_email_draft` | saves + closes | Standalone only; same reply-like guard; `review_in_mail=True` for saved-open review |
 
 Do not match outgoing rich drafts by subject — `_save_front_compose_window_as_draft()` saves Mail's front compose window. Detail: [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Compose and draft modes.
 

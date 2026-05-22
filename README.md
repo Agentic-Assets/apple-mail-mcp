@@ -191,11 +191,11 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Composition
 | Tool | Description |
 |------|-------------|
-| `compose_email` | Create a quiet draft by default; `mode="open"` saves then leaves Mail open for review; sends only with explicit `mode="send"` and send-capable server config |
-| `reply_to_email` | Reply or reply-all with optional HTML body; prefer `message_id` from search/list results |
+| `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
+| `reply_to_email` | Reply or reply-all with optional HTML body and original thread context; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
-| `manage_drafts` | Create, list, send, and delete drafts (`send` blocked in `--read-only` and `--draft-safe`) |
-| `create_rich_email_draft` | Build a multipart HTML `.eml` draft and save it to Drafts by default |
+| `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
+| `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
 | Tool | Description |
@@ -254,6 +254,7 @@ In draft-safe mode:
 - `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows)
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
+- use `reply_to_email(message_id=...)` for replies; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
 - pass `message_id` from search/list tools for reply/forward when available; `subject_keyword` is fallback only
 - explicit `mode="send"` calls return an error
 - `manage_drafts action="send"` returns an error
