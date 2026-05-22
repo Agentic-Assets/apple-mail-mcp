@@ -20,7 +20,7 @@ Read: 8 (80%)
 Flagged: 1
 With Attachments: 3 (30%)
 
-👥 TOP SENDERS
+👥 SAMPLE SENDERS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 alice@example.com: 5 emails
 bob@example.com: 3 emails

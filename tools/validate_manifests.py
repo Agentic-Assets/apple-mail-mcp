@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate version sync, tool counts, and mcpb tool name parity."""
+"""Validate version sync, tool counts, mcpb parity, and local artifacts."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import glob
 import json
 import re
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +76,151 @@ def _check_tool_count_claim(text: str | None, source: str, actual: int, errors: 
         )
 
 
+def _iter_plugin_payload_files() -> list[Path]:
+    """Return plugin files expected to be byte-identical in apple-mail-plugin.zip."""
+    plugin_root = ROOT / "plugin"
+    excluded_parts = {"venv", "__pycache__"}
+    files: list[Path] = []
+    for path in plugin_root.rglob("*"):
+        rel = path.relative_to(plugin_root)
+        if path.is_dir():
+            continue
+        if any(part in excluded_parts for part in rel.parts):
+            continue
+        if path.name in {".DS_Store"} or path.suffix == ".pyc":
+            continue
+        files.append(rel)
+    return sorted(files)
+
+
+def _compare_zip_members(
+    archive: Path,
+    expected: list[tuple[Path, str]],
+    label: str,
+    errors: list[str],
+) -> None:
+    """Compare selected repo files to their distributable archive members."""
+    if not archive.exists():
+        return
+
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            names = set(zf.namelist())
+            for source, member in expected:
+                if member not in names:
+                    errors.append(f"{label}: missing {member}")
+                    continue
+                if source.read_bytes() != zf.read(member):
+                    errors.append(
+                        f"{label}: stale {member}; rebuild {archive.name}"
+                    )
+    except zipfile.BadZipFile:
+        errors.append(f"{label}: {archive.name} is not a valid zip archive")
+
+
+def _generated_mcpb_readme() -> bytes:
+    return """# Apple Mail MCP bundle
+
+Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/`** tree copied from [`plugin/skills`](https://github.com/agenticassets/apple-mail-mcp/tree/main/plugin/skills) for Claude Code workflows.
+
+## What is inside this archive
+
+| Path | Role |
+|------|------|
+| `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**27 tools**) |
+| `start_mcp.sh` | Creates `venv/`, installs `requirements.txt`, execs Python entry |
+| `requirements.txt` | Runtime Python dependencies |
+| `ui/` *(optional)* | MCP Apps dashboard helpers for `inbox_dashboard` |
+| `skills/` | Bundled Claude Code skills (`SKILL.md` per subdirectory) |
+
+For grouped tool summaries, see the upstream [`README`](https://github.com/agenticassets/apple-mail-mcp#readme).
+
+## Claude Desktop install (.mcpb)
+
+1. Claude Desktop → **Settings → Developer → MCP Servers → Install from file** → choose this `.mcpb`.
+2. Approve Automation + Mail Data Access prompts when macOS asks.
+3. Populate **Default Mail Account** / **Default Mail Signature** / **Email Preferences** in the MCP inspector when available.
+
+Prefer **`--draft-safe`** for shared/agent hosts; manifests typically enable it by default — override only deliberately.
+
+## Claude Code skills (manual sync)
+
+Mirror the bundle's `skills/` directory into Claude Code (`~/.claude/skills`):
+
+```
+mkdir -p ~/.claude/skills
+cp -a skills/. ~/.claude/skills/
+```
+
+Skills included (each subfolder owns a `SKILL.md`):
+
+- `apple-mail-operator` — MCP + Mail navigation bootstrap
+- `inbox-triage` — 5–10 minute read-first scan
+- `email-management` — sustained Inbox Zero umbrella
+- `mailbox-taxonomy` — folder taxonomy + noise diagnosis
+- `email-archive-cleanup` — staged archive / bulk move / trash with dry runs
+- `mail-rules-advisor` — Mail rule/filter proposals (**Mail UI apply only** — no MCP rule API)
+- `email-drafting` — compose/reply drafts (`--draft-safe` aware)
+- `email-style-profile` — derive voice prefs from Sent mail + `USER_EMAIL_PREFERENCES`
+- `email-attachments` — list/save attachments with path safeguards
+
+Also copies `skills/CLAUDE.md` authoring notes — safe to ignore for runtime.
+
+## Operational notes
+
+- Keep **`DEFAULT_MAIL_ACCOUNT`** set when multiple accounts fan out slowly.
+- Set **`DEFAULT_MAIL_SIGNATURE`** to an exact Mail signature name when drafts should include your standard signature.
+- Use narrow `recent_days` / caps before escalating cross-account AppleScript workloads.
+- `export_emails`, `save_email_attachment`, compose send paths imply disk or dispatch risk — preview + confirm.
+
+Support & source: https://github.com/agenticassets/apple-mail-mcp
+""".encode()
+
+
+def _check_artifact_freshness(expected_version: str, errors: list[str]) -> None:
+    plugin_expected = [
+        (ROOT / "plugin" / rel, f"plugin/{rel.as_posix()}")
+        for rel in _iter_plugin_payload_files()
+    ]
+    _compare_zip_members(
+        ROOT / "apple-mail-plugin.zip",
+        plugin_expected,
+        "apple-mail-plugin.zip",
+        errors,
+    )
+
+    mcpb = ROOT / f"apple-mail-mcp-v{expected_version}.mcpb"
+    mcpb_expected: list[tuple[Path, str]] = [
+        (ROOT / "apple-mail-mcpb/manifest.json", "manifest.json"),
+        (ROOT / "plugin/apple_mail_mcp.py", "apple_mail_mcp.py"),
+        (ROOT / "plugin/requirements.txt", "requirements.txt"),
+        (ROOT / "plugin/start_mcp.sh", "start_mcp.sh"),
+    ]
+    for subdir in ("apple_mail_mcp", "skills", "ui"):
+        root = ROOT / "plugin" / subdir
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            rel = path.relative_to(root)
+            if path.is_dir():
+                continue
+            if "__pycache__" in rel.parts or path.suffix == ".pyc":
+                continue
+            mcpb_expected.append((path, f"{subdir}/{rel.as_posix()}"))
+    _compare_zip_members(mcpb, mcpb_expected, mcpb.name, errors)
+    if mcpb.exists():
+        try:
+            with zipfile.ZipFile(mcpb) as zf:
+                actual_readme = zf.read("README.md")
+        except KeyError:
+            errors.append(f"{mcpb.name}: missing README.md")
+        except zipfile.BadZipFile:
+            pass
+        else:
+            if actual_readme != _generated_mcpb_readme():
+                errors.append(f"{mcpb.name}: stale README.md; rebuild {mcpb.name}")
+
+
 def main() -> None:
     errors: list[str] = []
     expected_version = _read_project_version()
@@ -128,6 +274,8 @@ def main() -> None:
         errors.append("registered in code, missing from mcpb: " + ", ".join(only_code))
     if only_mcpb:
         errors.append("present in mcpb tools[], missing from code: " + ", ".join(only_mcpb))
+
+    _check_artifact_freshness(expected_version, errors)
 
     if errors:
         print("validate_manifests: FAILED", file=sys.stderr)

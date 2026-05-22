@@ -213,7 +213,7 @@ def _parse_account_overview_statistics(text: str) -> Dict[str, Any]:
     section = None
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped == "👥 TOP SENDERS":
+        if stripped in {"👥 TOP SENDERS", "👥 SAMPLE SENDERS"}:
             section = "senders"
             continue
         if stripped == "📁 MAILBOX DISTRIBUTION":
@@ -565,7 +565,7 @@ def get_statistics(
                 set outputText to outputText & return
 
                 -- Top senders (show top 5)
-                set outputText to outputText & "👥 TOP SENDERS" & return
+                set outputText to outputText & "👥 SAMPLE SENDERS" & return
                 set outputText to outputText & "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" & return
                 set topCount to 0
                 repeat with senderPair in senderCounts

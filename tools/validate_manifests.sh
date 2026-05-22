@@ -187,6 +187,14 @@ then
   err "MCPB tools[] parity check failed (see stderr above)"
 fi
 
+# --- 4. Distribution artifact freshness ---
+# Keep the Bash CI entry aligned with tools/validate_manifests.py, which also
+# checks local plugin/MCPB archives when they exist.
+if ! PY_VALIDATION_OUTPUT="$(python3 tools/validate_manifests.py 2>&1)"; then
+  printf '%s\n' "$PY_VALIDATION_OUTPUT" >&2
+  err "Python manifest/artifact validation failed (see stderr above)"
+fi
+
 if ((${#ERRORS[@]} > 0)); then
   echo "validate_manifests.sh: FAILED" >&2
   for e in "${ERRORS[@]}"; do
