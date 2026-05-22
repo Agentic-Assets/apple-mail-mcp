@@ -109,6 +109,18 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         self.assertNotIn("No account specified", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
+    def test_get_top_senders_uses_newest_slice_not_whose(self):
+        cap = _ScriptCapture(return_value="TOTAL|||0")
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+        ):
+            smart_inbox_tools.get_top_senders(
+                account=self.ACCOUNT, days_back=30, top_n=10
+            )
+        script = cap.last_script
+        self.assertIn("messages 1 thru 100 of targetMailbox", script)
+        self.assertNotIn("whose date received", script)
+
     # --- manage ---
 
     def test_move_email_uses_default_account(self):
@@ -198,9 +210,8 @@ class DefaultAccountFallbackTests(unittest.TestCase):
 
     # --- compose ---
     #
-    # compose_email and forward_email (no message) and manage_drafts route
-    # through run_applescript; reply_to_email uses subprocess.run directly
-    # because it needs AppleScriptObjC (use framework) for clipboard injection.
+    # compose_email, reply_to_email, forward_email, and manage_drafts route
+    # through run_applescript (including AppleScriptObjC use-framework paths).
     # We assert resolution via the script that DOES get captured.
 
     def test_compose_email_uses_default_account(self):
@@ -218,28 +229,14 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
     def test_reply_to_email_uses_default_account(self):
-        # reply_to_email shells out to osascript; mock subprocess.run instead.
-        captured = {}
-
-        def fake_subprocess_run(cmd, input=None, capture_output=False, timeout=None):
-            captured["input"] = input
-            result = subprocess.CompletedProcess(args=cmd, returncode=0)
-            result.stdout = b"Reply sent successfully!"
-            result.stderr = b""
-            return result
-
-        with patch(
-            "apple_mail_mcp.tools.compose.subprocess.run",
-            side_effect=fake_subprocess_run,
-        ):
+        cap = _ScriptCapture(return_value="Reply sent successfully!")
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap):
             result = compose_tools.reply_to_email(
                 subject_keyword="Foo",
                 reply_body="hi",
             )
         self.assertNotIn("No account specified", result)
-        self.assertIn(
-            f'account "{self.ACCOUNT}"', captured["input"].decode("utf-8")
-        )
+        self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
     def test_forward_email_uses_default_account(self):
         # No `message` arg -> goes through run_applescript path.
@@ -330,6 +327,54 @@ class NoAccountErrorTests(unittest.TestCase):
             f"Expected an error prefix, got: {result!r}",
         )
         self.assertIn("No account", result)
+
+
+class SmartInboxPerfTests(unittest.TestCase):
+    """Group E: smart_inbox perf changes — optional body scan and ROW aggregation."""
+
+    ACCOUNT = "Work"
+
+    def test_get_needs_response_scan_body_false_skips_content_in_script(self):
+        cap = _ScriptCapture(return_value="ok")
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+        ):
+            smart_inbox_tools.get_needs_response(
+                account=self.ACCOUNT, days_back=1, max_results=1
+            )
+        self.assertNotIn("content of aMessage", cap.last_script)
+
+    def test_get_needs_response_scan_body_true_includes_content(self):
+        cap = _ScriptCapture(return_value="ok")
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+        ):
+            smart_inbox_tools.get_needs_response(
+                account=self.ACCOUNT,
+                days_back=1,
+                max_results=1,
+                scan_body=True,
+            )
+        self.assertIn("content of aMessage", cap.last_script)
+
+    def test_get_top_senders_parses_row_lines_and_aggregates(self):
+        raw = (
+            "ROW|||alice@a.com\n"
+            "ROW|||bob@b.com\n"
+            "ROW|||alice@a.com\n"
+            "TOTAL|||3"
+        )
+        cap = _ScriptCapture(return_value=raw)
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+        ):
+            result = smart_inbox_tools.get_top_senders(
+                account=self.ACCOUNT, days_back=1, top_n=10
+            )
+        self.assertIn("1. alice@a.com: 2 emails", result)
+        self.assertIn("2. bob@b.com: 1 emails", result)
+        self.assertIn("Total emails analysed: 3", result)
+        self.assertIn("Unique senders: 2", result)
 
 
 class AppleScriptTimeoutHandlingTests(unittest.TestCase):

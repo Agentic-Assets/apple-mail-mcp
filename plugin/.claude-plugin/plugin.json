@@ -1,6 +1,6 @@
 {
   "name": "apple-mail",
-  "description": "Natural language interface for Apple Mail — search, compose, triage, organize, and analyze email with 27 MCP tools and an expert email management skill",
+  "description": "Natural language interface for Apple Mail — search, compose, triage, organize, and analyze email with 27 MCP tools plus bundled Claude Code workflow skills (Mail operator, triage, inbox zero, taxonomy, archiving, Mail rules advisor, drafting, attachments, writing style)",
   "version": "3.1.5",
   "license": "MIT",
   "homepage": "https://github.com/patrickfreyer/apple-mail-mcp",
@@ -9,13 +9,25 @@
     "name": "Patrick Freyer",
     "email": "freyer.patrick@bcg.com"
   },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "apple-mail",
+    "email",
+    "ai",
+    "claude",
+    "automation",
+    "macos",
+    "applescript"
+  ],
+  "category": "productivity",
   "commands": [
     "./commands/"
   ],
   "mcpServers": {
     "apple-mail": {
       "command": "/bin/bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/start_mcp.sh"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/start_mcp.sh", "--draft-safe"]
     }
   }
 }
