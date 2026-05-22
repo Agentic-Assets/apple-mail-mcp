@@ -125,6 +125,25 @@ class GetStatisticsJsonTests(unittest.TestCase):
             ],
         )
 
+    def test_account_overview_json_surfaces_scan_errors(self):
+        with patch(
+            "apple_mail_mcp.tools.analytics.run_applescript",
+            return_value=(
+                ACCOUNT_OVERVIEW_TEXT
+                + "\nMAILBOX SCAN ERRORS\n"
+                + "__APPLE_MAIL_MCP_ERROR__|||Smart Mailbox|||operation timed out\n"
+            ),
+        ):
+            result = analytics_tools.get_statistics(
+                account="Work",
+                scope="account_overview",
+                days_back=7,
+                output_format="json",
+            )
+
+        self.assertEqual(result["errors"], ["Smart Mailbox: operation timed out"])
+        self.assertEqual(result["statistics"]["total_emails"], 10)
+
     def test_sender_stats_json_shape(self):
         with patch(
             "apple_mail_mcp.tools.analytics.run_applescript",

@@ -268,7 +268,31 @@ def _parse_mailbox_breakdown_statistics(text: str) -> Dict[str, Any]:
     return stats
 
 
+_STATISTICS_ERROR_PREFIX = "__APPLE_MAIL_MCP_ERROR__|||"
+
+
+def _parse_statistics_errors(text: str) -> List[str]:
+    errors: List[str] = []
+    for line in text.splitlines():
+        if not line.startswith(_STATISTICS_ERROR_PREFIX):
+            continue
+        parts = line.split("|||", 2)
+        if len(parts) == 3:
+            mailbox = parts[1].strip() or "unknown mailbox"
+            message = parts[2].strip() or "unknown error"
+            errors.append(f"{mailbox}: {message}")
+    return errors
+
+
+def _strip_statistics_error_lines(text: str) -> str:
+    return "\n".join(
+        line for line in text.splitlines()
+        if not line.startswith(_STATISTICS_ERROR_PREFIX)
+    )
+
+
 def _parse_statistics_text(scope: str, text: str) -> Dict[str, Any]:
+    text = _strip_statistics_error_lines(text)
     if scope == "account_overview":
         return _parse_account_overview_statistics(text)
     if scope == "sender_stats":
@@ -435,6 +459,7 @@ def get_statistics(
                 set totalWithAttachments to 0
                 set senderCounts to {{}}
                 set mailboxCounts to {{}}
+                set scanErrors to {{}}
 
                 -- Analyze all mailboxes
                 repeat with aMailbox in allMailboxes
@@ -512,8 +537,13 @@ def get_statistics(
                             end if
 
                         end if
-                    on error
-                        -- Skip mailboxes that throw errors (smart mailboxes, etc.)
+                    on error errMsg
+                        -- Surface per-mailbox failures instead of silently losing coverage.
+                        try
+                            set end of scanErrors to "{_STATISTICS_ERROR_PREFIX}" & mailboxName & "|||" & errMsg
+                        on error
+                            set end of scanErrors to "{_STATISTICS_ERROR_PREFIX}unknown mailbox|||" & errMsg
+                        end try
                     end try
                 end repeat
 
@@ -559,6 +589,12 @@ def get_statistics(
                         set outputText to outputText & item 1 of mailboxPair & ": " & item 2 of mailboxPair & return
                     end if
                 end repeat
+                if (count of scanErrors) > 0 then
+                    set outputText to outputText & return & "MAILBOX SCAN ERRORS" & return
+                    repeat with scanError in scanErrors
+                        set outputText to outputText & scanError & return
+                    end repeat
+                end if
 
             on error errMsg
                 return "Error: " & errMsg
@@ -599,6 +635,7 @@ def get_statistics(
                 set totalFromSender to 0
                 set unreadFromSender to 0
                 set withAttachments to 0
+                set scanErrors to {{}}
 
                 repeat with aMailbox in allMailboxes
                     try
@@ -646,14 +683,25 @@ def get_statistics(
                             end repeat
 
                         end if
-                    on error
-                        -- Skip mailboxes that throw errors (smart mailboxes, etc.)
+                    on error errMsg
+                        -- Surface per-mailbox failures instead of silently losing coverage.
+                        try
+                            set end of scanErrors to "{_STATISTICS_ERROR_PREFIX}" & mailboxName & "|||" & errMsg
+                        on error
+                            set end of scanErrors to "{_STATISTICS_ERROR_PREFIX}unknown mailbox|||" & errMsg
+                        end try
                     end try
                 end repeat
 
                 set outputText to outputText & "Total emails: " & totalFromSender & return
                 set outputText to outputText & "Unread: " & unreadFromSender & return
                 set outputText to outputText & "With attachments: " & withAttachments & return
+                if (count of scanErrors) > 0 then
+                    set outputText to outputText & return & "MAILBOX SCAN ERRORS" & return
+                    repeat with scanError in scanErrors
+                        set outputText to outputText & scanError & return
+                    end repeat
+                end if
 
             on error errMsg
                 return "Error: " & errMsg
@@ -750,6 +798,7 @@ def get_statistics(
             statistics=statistics,
             sender=sender,
             mailbox=mailbox,
+            errors=_parse_statistics_errors(result),
         )
 
     return result
@@ -1180,21 +1229,21 @@ async def inbox_dashboard(
     include_preview: bool = False,
     max_total: int = 20,
     max_per_account: int = 10,
+    output_format: str = "ui",
     timeout: Optional[int] = None,
 ) -> Any:
     """
     Get an interactive dashboard view of your email inbox.
 
-    Returns an interactive UI dashboard resource that displays:
+    By default, returns an interactive UI dashboard resource that displays:
     - Unread email counts by account (visual cards with badges)
     - Recent emails for the selected/default account, or all accounts if no
       account/default is configured
     - Quick action buttons for common operations (Mark Read, Archive, Delete)
     - Search functionality to filter emails
 
-    This tool returns a UIResource that can be rendered by compatible
-    MCP clients (like Claude Desktop with MCP Apps support) to provide
-    an interactive dashboard experience.
+    Set ``output_format="json"`` for structured dashboard metadata without
+    requiring MCP Apps UI support.
 
     Args:
         account: Optional account name. Defaults to ``DEFAULT_MAIL_ACCOUNT``
@@ -1202,20 +1251,20 @@ async def inbox_dashboard(
         include_preview: Include body previews for recent emails (slower; default False).
         max_total: Maximum recent emails across all accounts (default: 20).
         max_per_account: Maximum recent emails per account (default: 10).
+        output_format: ``ui`` (default) or ``json``.
         timeout: Optional per-call AppleScript timeout in seconds (default: 60).
 
     Note: Requires mcp-ui-server package and a compatible MCP client.
 
     Returns:
         UIResource with uri "ui://apple-mail/inbox-dashboard" containing
-        an interactive HTML dashboard, or error message if UI is unavailable.
+        an interactive HTML dashboard, or a structured dict when
+        ``output_format="json"``.
     """
-    from apple_mail_mcp import UI_AVAILABLE
-    if not UI_AVAILABLE:
-        return "Error: UI module not available. Please install mcp-ui-server package."
+    if output_format not in {"ui", "json"}:
+        return "Error: Invalid output_format. Use: ui, json"
 
     from apple_mail_mcp.tools.inbox import get_mailbox_unread_counts
-    from ui import create_inbox_dashboard_ui
 
     per_call_timeout = timeout if timeout is not None else 60
     selected_account = account or _server.DEFAULT_MAIL_ACCOUNT
@@ -1234,6 +1283,23 @@ async def inbox_dashboard(
         timeout=per_call_timeout,
     )
     accounts_data, recent_emails = await asyncio.gather(unread_task, recent_task)
+
+    if output_format == "json":
+        return {
+            "account": selected_account,
+            "include_preview": include_preview,
+            "max_total": max_total,
+            "max_per_account": max_per_account,
+            "accounts": accounts_data,
+            "recent_emails": recent_emails,
+            "errors": [],
+        }
+
+    from apple_mail_mcp import UI_AVAILABLE
+    if not UI_AVAILABLE:
+        return "Error: UI module not available. Please install mcp-ui-server package."
+
+    from ui import create_inbox_dashboard_ui
 
     return create_inbox_dashboard_ui(
         accounts_data=accounts_data,
