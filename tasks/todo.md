@@ -2,15 +2,17 @@
 
 **Branch:** `feat/apple-mail-plugin-robustness`
 
-**Active workstream:** [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md)
+**Active workstream:** [`scalability-24k-hardening-2026-05-22.md`](scalability-24k-hardening-2026-05-22.md) (v3.1.9 24K-mailbox safety)
+
+**Prior:** [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md)
 
 **Backlog sidecar:** [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md)
 
-**Latest verification (2026-05-22):** `validate_manifests.sh` OK (3.1.8, 27 tools); `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 validate_manifests.sh` OK; `pytest tests/ -q` 276 passed + 29 subtests; wrapper surface OK; `claude plugin validate ./plugin` and `claude plugin validate .` passed; rebuilt `apple-mail-plugin.zip` and local `apple-mail-mcp-v3.1.8.mcpb`; live production quick/perf/heavy gates passed against `cayman@agenticassets.ai`.
+**Latest verification (2026-05-22):** `validate_manifests.sh` OK (3.1.9, 27 tools); `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 validate_manifests.sh` OK; `pytest tests/ -q` 290 passed + 29 subtests (276 baseline + 14 new scalability tests); wrapper surface OK; `claude plugin validate ./plugin` and `claude plugin validate .` passed; rebuilt `apple-mail-plugin.zip` and `apple-mail-mcp-v3.1.9.mcpb`; final `plugin-dev:plugin-validator` and `plugin-dev:skill-reviewer` passes both ship-ready.
 
 ## Next Action
 
-Branch shipped: robustness commits pushed; v3.1.8 release candidate validated with `plugin-dev:plugin-validator` and `plugin-dev:skill-reviewer`. Open PR when ready, or schedule the v3.1.9 backlog from [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md).
+v3.1.9 hardening pushed: compose subject-fallback bounded, `get_statistics`/`get_top_senders` gated on `days_back=0`, `list_inbox_emails` accepts `limit`/`unread_only` aliases with warning, 4 skills got the shared "Large-inbox pre-flight" block. Open PR when ready.
 
 ## Blockers / Caveats
 

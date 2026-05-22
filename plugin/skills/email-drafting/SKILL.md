@@ -51,6 +51,8 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 4. **Signature intent** — `include_signature=True` applies `DEFAULT_MAIL_SIGNATURE` if set; pass `signature_name` to override, `include_signature=False` to suppress. `create_rich_email_draft` does not accept signature params — switch to a plain compose tool when a named signature is required.
 5. **Source message id** (replies/forwards only) — pass the `message_id` returned by search/list. Fall back to `subject_keyword` only when no id is available.
 
+**Large-inbox caveat:** the pre-draft `get_email_thread` verification can stall on long threads in a 24k mailbox. Prefer fetching by `message_id` (`get_email_thread(message_id=...)` or `get_email_by_id(message_id=...)`) rather than re-resolving the thread via account + subject signature.
+
 `mode="open"` saves first then leaves the compose window open, so closing it should not trigger Mail's Save/Don't Save prompt.
 
 ## Tool Selection Pattern

@@ -362,6 +362,7 @@ def get_statistics(
     days_back: int = 30,
     output_format: str = "text",
     timeout: Optional[int] = None,
+    allow_full_scan: bool = False,
 ) -> Union[str, Dict[str, Any]]:
     """
     Get comprehensive email statistics and analytics.
@@ -379,9 +380,12 @@ def get_statistics(
         scope: Analysis scope: "account_overview", "sender_stats", "mailbox_breakdown"
         sender: Specific sender for "sender_stats" scope
         mailbox: Specific mailbox for "mailbox_breakdown" scope
-        days_back: Number of days to analyze (default: 30, 0 = all time)
+        days_back: Number of days to analyze (default: 30). ``0`` (all time)
+            requires ``allow_full_scan=True`` because it can force Mail.app to
+            walk a deep archive on a 24K+ inbox.
         output_format: ``text`` (default, human-readable) or ``json`` (structured dict).
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
+        allow_full_scan: Required opt-in for ``days_back=0`` (all-time).
 
     Returns:
         Formatted statistics report with metrics and insights, or a structured
@@ -390,6 +394,22 @@ def get_statistics(
 
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
+
+    if days_back <= 0 and not allow_full_scan:
+        msg = (
+            "Error: days_back=0 (all-time) requires allow_full_scan=True. "
+            "Unbounded statistics scans can stall on large mailboxes — use a "
+            "bounded window (e.g. days_back=7 or 30) or pass allow_full_scan=True."
+        )
+        if output_format == "json":
+            return _statistics_json_error(
+                "all_time_scan_blocked",
+                account=account,
+                days_back=days_back,
+                scope=scope,
+                message=msg,
+            )
+        return msg
 
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT

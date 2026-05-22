@@ -339,6 +339,8 @@ async def list_inbox_emails(
     flag_replied: bool = False,
     timeout: Optional[int] = None,
     allow_full_scan: bool = False,
+    limit: Optional[int] = None,
+    unread_only: Optional[bool] = None,
 ) -> str:
     """Defaults to 50 most-recent emails from the default account.
 
@@ -389,16 +391,49 @@ async def list_inbox_emails(
             Raise this for known-slow accounts (large Exchange inboxes) when
             the default budget is too tight.
         allow_full_scan: Required explicit opt-in for `max_emails=0`.
+        limit: Deprecated alias for `max_emails`. Accepted for backward
+            compatibility with agents that misremember the param name; emits
+            a warning in the response. Prefer `max_emails`.
+        unread_only: Deprecated alias for `include_read=not unread_only`.
+            Accepted for backward compatibility; emits a warning. Prefer
+            `include_read=False`.
 
     Returns:
         Formatted list of emails with subject, sender, date, and read status.
         When multi-account dispatch encounters per-account timeouts, the
         response includes the slow account names so the caller can retry
-        them individually.
+        them individually. When deprecated aliases (`limit`, `unread_only`)
+        are used, a `WARNING:` line (text mode) or `warnings` field (JSON
+        mode) is included so the caller learns the canonical names.
     """
 
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
+
+    # Tolerant alias handling: agents frequently misremember the param names
+    # as `limit` / `unread_only`. Accept them, map to canonical, and surface a
+    # warning so the agent learns the right names.
+    warnings: List[str] = []
+    if limit is not None:
+        if max_emails != 50:
+            return (
+                "Error: pass either `max_emails` or `limit`, not both. "
+                "`limit` is a deprecated alias for `max_emails`."
+            )
+        max_emails = limit
+        warnings.append(
+            "WARNING: 'limit' is a deprecated alias for 'max_emails' — please use 'max_emails' going forward."
+        )
+    if unread_only is not None:
+        if include_read is not True:
+            return (
+                "Error: pass either `include_read` or `unread_only`, not both. "
+                "`unread_only` is a deprecated alias for `include_read=not unread_only`."
+            )
+        include_read = not bool(unread_only)
+        warnings.append(
+            "WARNING: 'unread_only' is a deprecated alias — please use 'include_read=False' for unread-only listings."
+        )
 
     if max_emails <= 0 and not allow_full_scan:
         return (
@@ -424,7 +459,7 @@ async def list_inbox_emails(
     want_message_id = bool(exclude_replied or flag_replied)
 
     if output_format == "json":
-        return await _list_inbox_emails_json(
+        body = await _list_inbox_emails_json(
             account,
             max_emails,
             include_read,
@@ -434,8 +469,9 @@ async def list_inbox_emails(
             flag_replied=flag_replied,
             include_message_id=want_message_id,
         )
+        return _attach_warnings_to_json(body, warnings) if warnings else body
 
-    return await _list_inbox_emails_text(
+    body = await _list_inbox_emails_text(
         account,
         max_emails,
         include_read,
@@ -445,6 +481,28 @@ async def list_inbox_emails(
         flag_replied=flag_replied,
         include_message_id=want_message_id,
     )
+    if warnings:
+        return "\n".join(warnings) + "\n" + body
+    return body
+
+
+def _attach_warnings_to_json(body: str, warnings: List[str]) -> str:
+    """Attach a `warnings` list to a JSON-serialized inbox response."""
+    try:
+        parsed = json.loads(body)
+    except (ValueError, TypeError):
+        return body
+    if isinstance(parsed, list):
+        parsed = {"emails": parsed, "warnings": list(warnings)}
+    elif isinstance(parsed, dict):
+        existing = parsed.get("warnings")
+        if isinstance(existing, list):
+            existing.extend(warnings)
+        else:
+            parsed["warnings"] = list(warnings)
+    else:
+        return body
+    return json.dumps(parsed, indent=2)
 
 
 def _run_text_one(

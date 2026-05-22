@@ -35,6 +35,8 @@ Widen timeframe only after checking performance.
 list_email_attachments(subject_keyword="...", max_results=10)
 ```
 
+**Large-inbox caveat:** `list_email_attachments(subject_keyword=...)` widens into a full scan if `recent_days` is loose or omitted on a 24k inbox — always co-filter with a tight `recent_days` ceiling (≤7 if possible) or pass `message_ids=[...]` from a prior bounded `search_emails`.
+
 If duplicates exist, escalate with `search_emails` + **`get_email_by_id`** targeting specific numeric ids prior to save.
 
 ### 3. Persist With Validation

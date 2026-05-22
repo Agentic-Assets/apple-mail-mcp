@@ -709,6 +709,7 @@ def get_top_senders(
     top_n: int = 10,
     group_by_domain: bool = False,
     timeout: Optional[int] = None,
+    allow_full_scan: bool = False,
 ) -> str:
     """Analyse a mailbox to find the most frequent senders.
 
@@ -719,14 +720,24 @@ def get_top_senders(
         account: Account name (e.g., "Gmail", "Work", "Personal").
             Falls back to ``DEFAULT_MAIL_ACCOUNT`` env-configured account when None.
         mailbox: Mailbox to analyse (default: "INBOX")
-        days_back: How many days back to look (default: 30, 0 = all time)
+        days_back: How many days back to look (default: 30). ``0`` (all time)
+            requires ``allow_full_scan=True`` to prevent unbounded scans on
+            24K+ inboxes.
         top_n: Number of top senders to return (default: 10)
         group_by_domain: Group results by domain instead of individual sender (default: False)
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
+        allow_full_scan: Required opt-in for ``days_back=0`` (all-time).
 
     Returns:
         Ranked list of senders (or domains) with email counts
     """
+    if days_back <= 0 and not allow_full_scan:
+        return (
+            "Error: days_back=0 (all-time) requires allow_full_scan=True. "
+            "Unbounded sender scans can stall on large mailboxes — use a "
+            "bounded window (e.g. days_back=14 or 30) or pass allow_full_scan=True."
+        )
+
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:

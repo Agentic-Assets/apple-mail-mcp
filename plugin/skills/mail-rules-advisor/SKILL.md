@@ -15,7 +15,7 @@ Produce **implementable**, human-applied Mail rules derived from MCP analytics. 
 get_top_senders(limit=30, days_back=30, group_by_domain=true)
 ```
 
-Focus on recurring automated domains versus human counterparts.
+Focus on recurring automated domains versus human counterparts. Note: `get_top_senders(days_back=0)` requires `allow_full_scan=True` (v3.1.9) — default to `days_back=14` first and widen only if signal is thin.
 
 ### 2. Drill Candidates
 

@@ -7,6 +7,28 @@ description: This skill should be used when the user asks to "archive old mail s
 
 High-leverage transformations with **explicit human checkpoints**. Optimize for reversible moves (`Archive`, `Trash` soft-delete) unless the operator understands permanent deletes.
 
+## Large-inbox pre-flight (required when inbox > ~5,000 messages)
+
+Apple Mail's AppleScript bridge slows non-linearly on large mailboxes (24k+ is common). Before running any discovery or bulk tool:
+
+1. **Size the inbox once per session**: `get_inbox_overview(output_format="compact", include_mailboxes=false, include_recent=false)`. If it returns slowly or partially, treat the inbox as large and apply the rules below.
+2. **Bound every scan.** Pass an explicit `recent_days` (start at 2, widen only on demand). Never call `recent_days=0` / `allow_full_scan=True` without user confirmation.
+3. **Co-filter sender-based actions.** `move_email(sender=...)`, `search_emails(sender=...)`, and `list_email_attachments(subject_keyword=...)` can stall on 24k mail. Pair sender filters with `subject_keyword=` or a tight `recent_days` ceiling, or collect `message_ids` from a bounded search and pass `message_ids=[...]` instead.
+4. **`get_awaiting_reply` is timeout-prone** (it cross-walks Sent mail). Start with `days_back=2, max_results=5`; if it stalls, skip it and check Sent directly with `search_emails(mailbox="Sent", recent_days=2, ...)`.
+5. **Always drill by id, never re-search by subject.** Once `search_emails` / `list_inbox_emails` returns a `message_id`, use `get_email_by_id(message_id=...)` and `get_email_thread(message_id=...)`. Re-searching by subject re-pays the scan cost.
+6. **Param names matter.** `list_inbox_emails` takes `max_emails` (not `limit`) and `include_read` (not `unread_only`). Example: `list_inbox_emails(max_emails=25, include_read=False, include_content=False)`.
+7. **`inbox_dashboard` is the rescue path.** When `get_inbox_overview` times out or returns partial JSON, fall back to `inbox_dashboard()` — it returns a structured snapshot (unread, recent, pinned, suggestions) in a single bounded call.
+
+## ID-list flow (preferred for bulk moves and trash)
+
+On a 24k inbox, re-filtering by sender/subject inside `move_email` or `manage_trash` re-pays the scan cost for every batch. Prefer:
+
+1. `search_emails(sender="...", subject_keyword="...", recent_days=30, limit=50)` — bounded preview that returns `message_id`s.
+2. Collect the `message_id`s from the result.
+3. `move_email(message_ids=[ids], to_mailbox="...", max_moves=50)` or `manage_trash(message_ids=[ids], action="move_to_trash", max_deletes=50)`.
+
+Sender-only `move_email(sender=...)` calls **require a co-filter** — pair with `subject_keyword=`, a tight `recent_days≤30` ceiling, or use the `message_ids=[...]` form above. A bare `sender=` filter against a 24k inbox can stall.
+
 ## Standard Campaign Shape
 
 ### 1. Frame The Objective And Scope
