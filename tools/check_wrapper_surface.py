@@ -6,8 +6,8 @@ This script checks the *generated* `apple-mail` wrapper on PATH, which embeds
 tool schemas at generation time and can drift when new tools are added.
 
 Usage:
-  python tools/check_wrapper_surface.py
-  python tools/check_wrapper_surface.py --wrapper /path/to/apple-mail
+  python3 tools/check_wrapper_surface.py
+  python3 tools/check_wrapper_surface.py --wrapper /path/to/apple-mail
 
 Exit 0 when all critical commands are present; exit 1 otherwise.
 """

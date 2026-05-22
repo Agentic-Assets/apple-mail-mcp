@@ -99,7 +99,7 @@
     },
     {
       "name": "manage_drafts",
-      "description": "Complete draft lifecycle: list, create, send, delete. Send action is blocked in --read-only mode."
+      "description": "Complete draft lifecycle: list, create, send, delete. Send action is blocked in --read-only and --draft-safe mode."
     },
     {
       "name": "list_email_attachments",
@@ -151,7 +151,7 @@
     },
     {
       "name": "get_statistics",
-      "description": "Email analytics: account overview, sender stats, or mailbox breakdown. Scans the 20 largest mailboxes, up to 500 messages each."
+      "description": "Email analytics: account overview, sender stats, or mailbox breakdown. Short windows scan 10 mailboxes up to 100 messages each; longer windows scan 20 up to 500."
     },
     {
       "name": "export_emails",

@@ -103,7 +103,7 @@ Known wrapper checks to keep separate from manifest validation:
 **Wrapper command-surface check** (repo script; skips if no wrapper on PATH):
 
 ```bash
-python tools/check_wrapper_surface.py
+python3 tools/check_wrapper_surface.py
 ```
 
 **Regenerate wrapper** after adding MCP tools (mcporter embeds schemas at generation time):
@@ -114,7 +114,7 @@ rsync -a --delete --exclude venv /path/to/apple-mail-mcp/plugin/ "$APPLE_MAIL_CL
 cd "$APPLE_MAIL_CLI_HOME"
 npx mcporter@0.11.3 generate-cli --from apple-mail-cli.mjs --bundle apple-mail-cli.mjs
 ./install.sh
-python /path/to/apple-mail-mcp/tools/check_wrapper_surface.py
+python3 /path/to/apple-mail-mcp/tools/check_wrapper_surface.py
 ```
 
 **Repo CLI vs wrapper naming:**

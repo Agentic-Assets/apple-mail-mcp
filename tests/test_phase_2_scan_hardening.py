@@ -340,6 +340,33 @@ class DashboardAccountScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["recent"]["max_per_account"], 3)
         self.assertEqual(captured["recent"]["timeout"], 45)
 
+    async def test_inbox_dashboard_json_does_not_require_ui_package(self):
+        async def fake_recent(**kwargs):
+            return [{"subject": "Hello"}]
+
+        with (
+            patch("apple_mail_mcp.UI_AVAILABLE", False),
+            patch(
+                "apple_mail_mcp.tools.inbox.get_mailbox_unread_counts",
+                return_value={"Work": 4},
+            ),
+            patch(
+                "apple_mail_mcp.tools.analytics._get_recent_emails_structured_async",
+                side_effect=fake_recent,
+            ),
+        ):
+            result = await analytics_tools.inbox_dashboard(
+                account="Work",
+                max_total=5,
+                max_per_account=3,
+                output_format="json",
+            )
+
+        self.assertEqual(result["account"], "Work")
+        self.assertEqual(result["accounts"], {"Work": 4})
+        self.assertEqual(result["recent_emails"], [{"subject": "Hello"}])
+        self.assertEqual(result["errors"], [])
+
 
 class HeavyScanGuardTests(unittest.TestCase):
     def test_overview_flags_skip_mailbox_and_recent_applescript_loops(self):

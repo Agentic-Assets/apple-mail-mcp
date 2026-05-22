@@ -66,7 +66,8 @@ Cowork uses Anthropic's **remote marketplace backend** (`remoteMarketplaceClient
 
 ```bash
 cd /path/to/apple-mail-mcp
-zip -r apple-mail-plugin.zip plugin/
+zip -r apple-mail-plugin.zip plugin/ \
+  -x 'plugin/venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store'
 ```
 
 **Important:** Apple Mail MCP requires **macOS Mail.app** on the host Mac (`start_mcp.sh` → AppleScript). Cowork's Linux VM cannot run Mail directly; the plugin MCP server must execute on your Mac host. If tools fail after upload, use the **Claude Code CLI** install or the **Desktop `.mcpb`** path below instead.
@@ -190,10 +191,10 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Composition
 | Tool | Description |
 |------|-------------|
-| `compose_email` | Send a new email (defaults to `DEFAULT_MAIL_ACCOUNT`) |
-| `reply_to_email` | Reply or reply-all with optional HTML body |
-| `forward_email` | Forward with optional message, CC/BCC |
-| `manage_drafts` | Create, list, send, and delete drafts (`send` blocked in `--read-only`) |
+| `compose_email` | Create a quiet draft by default; `mode="open"` saves then leaves Mail open for review; sends only with explicit `mode="send"` and send-capable server config |
+| `reply_to_email` | Reply or reply-all with optional HTML body; prefer `message_id` from search/list results |
+| `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
+| `manage_drafts` | Create, list, send, and delete drafts (`send` blocked in `--read-only` and `--draft-safe`) |
 | `create_rich_email_draft` | Build a multipart HTML `.eml` draft and save it to Drafts by default |
 
 ### Attachments
@@ -212,7 +213,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Analytics & Export
 | Tool | Description |
 |------|-------------|
-| `get_statistics` | Account overview, sender stats, or mailbox breakdown (top 20 mailboxes × 500 msgs) |
+| `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 100 messages, longer windows 20 × 500 |
 | `export_emails` | Export single emails or full mailboxes to TXT/HTML (default cap 1000) |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 
