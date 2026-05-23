@@ -32,8 +32,8 @@ Finalize progress:
 - [ ] 5. skill-reviewer (if plugin/skills touched)
 - [ ] 6. Rebuild release artifacts — `bash tools/dev-check.sh release` (rebuilds apple-mail-plugin.zip + .mcpb, runs full validators, runs mcpb unpack smoke). NEVER skip this step.
 - [ ] 7. Final review checklist
-- [ ] 8. Commit (only if user asked)
-- [ ] 9. Push (only if user asked)
+- [ ] 8. Commit (default: yes, after release tier is green)
+- [ ] 9. Push (default: yes, to current branch — open PR if branch is protected)
 ```
 
 ### 1. plugin-validator first (required)
@@ -135,9 +135,11 @@ If any step fails, fix the underlying issue — do not commit stale artifacts.
 - [ ] No secrets or local paths committed
 - [ ] Unrelated dirty files left unstaged
 
-### 8. Commit and push (user must ask)
+### 8. Commit and push (default: yes — close the loop yourself)
 
-**Commit** only when the user explicitly requests it. Stage focused paths; do not sweep unrelated WIP.
+Once steps 1-7 are green, **commit and push without waiting to be asked**. The user's standing preference is that finalize closes its own loop. Pause and ask only when there is genuine ambiguity (unrelated WIP in the tree, secrets in staged paths, partial implementation, or a force-push would be required).
+
+Stage focused paths; never `git add -A`.
 
 ```bash
 git add <relevant paths>
@@ -148,13 +150,13 @@ EOF
 )"
 ```
 
-**Push** only when the user explicitly requests it:
+**Push** as the closing action of finalize:
 
 ```bash
 git push -u origin HEAD
 ```
 
-Use `gh pr create` only when the user asks for a PR.
+If `HEAD` is on a protected branch (e.g. `main` with branch-protection rules), switch to a feature branch and open a PR with `gh pr create` instead — same default-to-action principle.
 
 ## Release note
 
