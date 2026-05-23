@@ -30,9 +30,10 @@ Finalize progress:
 - [ ] 3. Code + tests verified
 - [ ] 4. Docs, CLAUDE.md, skills, manifests synced (remaining drift)
 - [ ] 5. skill-reviewer (if plugin/skills touched)
-- [ ] 6. Final review checklist
-- [ ] 7. Commit (only if user asked)
-- [ ] 8. Push (only if user asked)
+- [ ] 6. Rebuild release artifacts — `bash tools/dev-check.sh release` (rebuilds apple-mail-plugin.zip + .mcpb, runs full validators, runs mcpb unpack smoke). NEVER skip this step.
+- [ ] 7. Final review checklist
+- [ ] 8. Commit (only if user asked)
+- [ ] 9. Push (only if user asked)
 ```
 
 ### 1. plugin-validator first (required)
@@ -105,9 +106,28 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 
 If step 4 edited any `plugin/skills/*/SKILL.md`, delegate to `plugin-dev:skill-reviewer` and apply wording fixes.
 
-### 6. Final review checklist
+### 6. Rebuild release artifacts (required — never skip)
+
+`apple-mail-plugin.zip` (Claude Code) and `apple-mail-mcp-v{VERSION}.mcpb` (Claude Desktop) must be regenerated from current sources before commit. Both ship with the repo and stale artifacts have caused real installer failures (e.g. Claude Desktop rejecting an MCPB built without `mcpb pack`).
+
+```bash
+bash tools/dev-check.sh release
+```
+
+That tier runs `validate_manifests` + `pytest` + the wrapper-surface check, then invokes `tools/build-artifacts.sh` to:
+
+1. Rebuild `apple-mail-plugin.zip` with the README exclusion list (`venv`, `__pycache__`, `*.pyc`, `.DS_Store`).
+2. Rebuild `apple-mail-mcp-v{VERSION}.mcpb` via `apple-mail-mcpb/build-mcpb.sh` (which prefers official `mcpb pack`).
+3. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh`.
+4. Run `mcpb unpack` + `mcpb validate` as a final structural smoke (if `mcpb` CLI present).
+
+If any step fails, fix the underlying issue — do not commit stale artifacts.
+
+### 7. Final review checklist
 
 - [ ] plugin-validator PASS after fixes
+- [ ] `tools/dev-check.sh release` finished green (artifacts rebuilt, `mcpb unpack` smoke OK)
+- [ ] `apple-mail-plugin.zip` and `apple-mail-mcp-v{VERSION}.mcpb` modified time newer than every changed plugin source
 - [ ] Behavior described in docs matches `compose.py` / other tool defaults
 - [ ] No stale "open by default" or subject-matching guidance where `message_id` is preferred
 - [ ] No skill suggests `compose_email` / `create_rich_email_draft` / `manage_drafts(action="create")` for replies; `standalone_confirmed=True` is documented where standalone-with-Re: is legitimate
@@ -115,7 +135,7 @@ If step 4 edited any `plugin/skills/*/SKILL.md`, delegate to `plugin-dev:skill-r
 - [ ] No secrets or local paths committed
 - [ ] Unrelated dirty files left unstaged
 
-### 7. Commit and push (user must ask)
+### 8. Commit and push (user must ask)
 
 **Commit** only when the user explicitly requests it. Stage focused paths; do not sweep unrelated WIP.
 
@@ -138,7 +158,7 @@ Use `gh pr create` only when the user asks for a PR.
 
 ## Release note
 
-If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `validate_manifests.sh`, rebuild MCPB if needed (`apple-mail-mcpb/CLAUDE.md`).
+If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/dev-check.sh release` (which rebuilds both artifacts and runs the structural mcpb-unpack smoke).
 
 ## Additional resources
 

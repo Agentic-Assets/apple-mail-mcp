@@ -6,6 +6,7 @@
 #   surface  — default + check_wrapper_surface.py (skips if no wrapper on PATH)
 #   manifest — validate_manifests.sh only
 #   live     — default + quick-check against Mail.app (macOS, explicit)
+#   release  — default + wrapper + rebuild apple-mail-plugin.zip + .mcpb + REQUIRE_DIST_ARTIFACTS validate (run before commit/PR)
 #   all      — default + wrapper check always
 #
 # Usage:
@@ -80,8 +81,13 @@ case "$TIER" in
     run_default
     run_wrapper
     ;;
+  release)
+    run_default
+    run_wrapper
+    bash tools/build-artifacts.sh
+    ;;
   *)
-    echo "Usage: bash tools/dev-check.sh [default|surface|manifest|live|all]" >&2
+    echo "Usage: bash tools/dev-check.sh [default|surface|manifest|live|release|all]" >&2
     exit 2
     ;;
 esac

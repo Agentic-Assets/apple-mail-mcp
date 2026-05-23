@@ -52,11 +52,13 @@ Tiered local gate (no live Mail except `live` tier). Requires root `.venv/`.
 | `surface` | default + wrapper check always |
 | `manifest` | manifests only |
 | `live` | default + `.venv/bin/apple-mail quick-check --json` |
+| `release` | default + wrapper + `tools/build-artifacts.sh` (rebuilds `apple-mail-plugin.zip` + `.mcpb`, runs `REQUIRE_DIST_ARTIFACTS` validate, runs `mcpb unpack`/`validate` smoke). **Run before every commit that touches `plugin/` or manifests** — finalize-apple-mail-mcp skill enforces this. |
 | `all` | default + wrapper check always |
 
 ```bash
 bash tools/dev-check.sh
 bash tools/dev-check.sh surface
+bash tools/dev-check.sh release   # always before commit/PR
 ```
 
 ## pre-commit hook
