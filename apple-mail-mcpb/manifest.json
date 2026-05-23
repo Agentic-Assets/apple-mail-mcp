@@ -1,8 +1,8 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.1.10",
-  "description": "Natural language interface for Apple Mail with 27 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
+  "version": "3.2.1",
+  "description": "Natural language interface for Apple Mail with 28 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, full-inbox export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
   },
@@ -59,7 +59,7 @@
     },
     {
       "name": "list_inbox_emails",
-      "description": "List inbox emails across all accounts or a single account. Defaults to 50 most-recent; max_emails=0 requires allow_full_scan=True. Canonical params are max_emails and include_read — legacy aliases `limit` / `unread_only` are accepted with a warning. include_read=False binds a bounded newest-first slice (scan_cap = min(max(max_emails*10, 100), 1000)) before filtering, so Mail never materializes a 24K-message Exchange inbox. Async parallel per-account dispatch; returns {emails, errors, warnings} JSON."
+      "description": "List inbox emails across all accounts or a single account. Defaults to 50 most-recent; max_emails=0 is rejected with UNBOUNDED_SCAN_REQUIRED — use full_inbox_export for audited full-mailbox walks. Canonical params are max_emails and include_read — legacy aliases `limit` / `unread_only` are accepted with a warning. include_read=False binds a bounded newest-first slice (scan_cap = min(max(max_emails*10, 100), 1000)) before filtering, so Mail never materializes a 24K-message Exchange inbox. Async parallel per-account dispatch; returns {emails, errors, warnings} JSON."
     },
     {
       "name": "get_mailbox_unread_counts",
@@ -83,7 +83,7 @@
     },
     {
       "name": "reply_to_email",
-      "description": "Reply to an email by message_id (preferred) or subject keyword. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h) or allow_full_scan=True. Default mode saves quietly to Drafts; mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, CC/BCC, and HTML body."
+      "description": "Reply to an email by message_id (preferred) or subject keyword. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass message_id for constant-cost lookups or route audited full-mailbox sweeps through full_inbox_export. Default mode saves quietly to Drafts; mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, CC/BCC, and HTML body."
     },
     {
       "name": "compose_email",
@@ -91,7 +91,7 @@
     },
     {
       "name": "forward_email",
-      "description": "Forward an email by message_id (preferred) or subject keyword. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h) or allow_full_scan=True. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, optional prepended message, and CC/BCC."
+      "description": "Forward an email by message_id (preferred) or subject keyword. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass message_id for constant-cost lookups or route audited full-mailbox sweeps through full_inbox_export. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, optional prepended message, and CC/BCC."
     },
     {
       "name": "create_rich_email_draft",
@@ -111,7 +111,7 @@
     },
     {
       "name": "search_emails",
-      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 requires allow_full_scan=True; all_accounts=True overrides default account. AppleScript scan_cap scales with recent_days (floor=limit+offset+1, ceiling=500) so narrow filters over a wider window actually inspect a meaningful portion of that window."
+      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 without date_from is rejected with UNBOUNDED_SCAN_REQUIRED — pass recent_days=7 or date_from='YYYY-MM-DD', or route audited full-mailbox sweeps through full_inbox_export. all_accounts=True overrides default account. AppleScript scan_cap scales with recent_days (floor=limit+offset+1, ceiling=500) so narrow filters over a wider window actually inspect a meaningful portion of that window."
     },
     {
       "name": "get_email_by_id",
@@ -119,7 +119,7 @@
     },
     {
       "name": "get_email_thread",
-      "description": "Return the full conversation thread for an email, grouped by subject across Inbox + Sent. Defaults to last 48 hours; recent_days=0 requires allow_full_scan=True."
+      "description": "Return the full conversation thread for an email, grouped by subject across Inbox + Sent. Defaults to last 48 hours; recent_days=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass recent_days=7 or smaller, or route audited full-mailbox sweeps through full_inbox_export."
     },
     {
       "name": "update_email_status",
@@ -147,15 +147,19 @@
     },
     {
       "name": "get_top_senders",
-      "description": "Rank senders by frequency over a date window (default 30 days). days_back=0 requires allow_full_scan=True. Optional grouping by domain. Top-N sort happens Python-side for fast responses."
+      "description": "Rank senders by frequency over a date window (default 30 days). days_back=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass days_back=7 or 30, or route audited full-mailbox sweeps through full_inbox_export. Optional grouping by domain. Top-N sort happens Python-side for fast responses."
     },
     {
       "name": "get_statistics",
-      "description": "Email analytics: account overview, sender stats, or mailbox breakdown. Short windows scan 10 mailboxes up to 100 messages each; longer windows scan 20 up to 500. days_back=0 requires allow_full_scan=True to prevent unbounded scans on large inboxes."
+      "description": "Email analytics: account overview, sender stats, or mailbox breakdown. Short windows scan 10 mailboxes up to 100 messages each; longer windows scan 20 up to 500. days_back=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass days_back=7 or 30, or route audited full-mailbox sweeps through full_inbox_export to prevent unbounded scans on large inboxes."
     },
     {
       "name": "export_emails",
       "description": "Export emails to txt or html. Single email by subject, or up to max_emails messages from a mailbox (default 1000)."
+    },
+    {
+      "name": "full_inbox_export",
+      "description": "Walk every message in a mailbox (default INBOX) and stream metadata in batches. EXPENSIVE — on a 24K-message inbox this can take 2–5 minutes. Use only for true full-mailbox audits; prefer list_inbox_emails or search_emails for normal queries. Supports JSON or NDJSON output and progress notifications."
     },
     {
       "name": "inbox_dashboard",

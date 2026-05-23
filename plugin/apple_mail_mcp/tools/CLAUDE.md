@@ -1,5 +1,5 @@
 # tools/ — MCP tool registrations
-All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six modules (side-effect registration). **27 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l`.
+All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six modules (side-effect registration). **28 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l`.
 
 ## Module map
 
@@ -9,7 +9,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | `search.py` | 3 | Find & fetch: `search_emails`, `get_email_by_id`, `get_email_thread` |
 | `compose.py` | 5 | Send & drafts: `create_rich_email_draft`, `compose_email`, `reply_to_email`, `forward_email`, `manage_drafts` |
 | `manage.py` | 6 | Move/status/trash/sync: `move_email`, `save_email_attachment`, `update_email_status`, `manage_trash`, `create_mailbox`, `synchronize_account` |
-| `analytics.py` | 4 | Stats & export: `list_email_attachments`, `get_statistics`, `export_emails`, `inbox_dashboard` |
+| `analytics.py` | 5 | Stats & export: `list_email_attachments`, `get_statistics`, `export_emails`, `inbox_dashboard`, `full_inbox_export` |
 | `smart_inbox.py` | 3 | Triage heuristics: `get_awaiting_reply`, `get_needs_response`, `get_top_senders` |
 
 ## Add a tool
@@ -20,7 +20,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 ## Performance (summary)
 
-- Default `recent_days=2.0` (48h); `recent_days=0` now requires `allow_full_scan=True`. `list_inbox_emails(max_emails=0)` also requires `allow_full_scan=True`. Prefer bounded newest-message slices (`messages 1 thru N`) over broad `whose` clauses on large remote mailboxes.
+- Default `recent_days=2.0` (48h). Tools refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED`. The only tool that walks the entire inbox is `full_inbox_export` (slow; documented cost). Prefer bounded newest-message slices (`messages 1 thru N`) over broad `whose` clauses on large remote mailboxes.
 - Pass `timeout` through to `run_applescript`; catch `AppleScriptTimeout` → structured error with account name.
 - Mutations: `normalize_message_ids` / `message_ids` for targeted ops. Detail: `docs/CLAUDE-conventions.md`.
 

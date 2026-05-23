@@ -27,6 +27,8 @@ There is no dedicated newsletter detector. Use `get_top_senders()` to rank by vo
 
 Start with `list_mailboxes(include_counts=False)` to map structure. If the user approves a slower count pass, request counts for the short candidate set, then call `get_statistics(scope="mailbox_breakdown", mailbox="...")` on the top three by message count. Mailboxes with thousands of messages and a high read ratio are good archive candidates.
 
+For a true full-inbox analytics pass, see [`../../references/large-inbox-rules.md`](../../references/large-inbox-rules.md) — `get_statistics(scope="account_overview", days_back=0)` returns `UNBOUNDED_SCAN_REQUIRED`; use `full_inbox_export` only for annual / compliance work.
+
 ## Actionable Signals
 
 | Pattern | Suggested action |

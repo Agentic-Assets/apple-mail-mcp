@@ -40,3 +40,22 @@ TIME_RANGES = {
     "month": 30,
     "all": 0,
 }
+
+
+# ---------------------------------------------------------------------------
+# Scan bounds (Phase A of the whose-elimination refactor)
+#
+# Centralized bounded-slice caps that will replace per-tool magic numbers in
+# wave-2 migrations. Kept here so a single edit retunes every tool.
+# ---------------------------------------------------------------------------
+SCAN_BOUNDS = {
+    "DRAFT_LOOKUP": 100,        # was DRAFT_LIST_CAP in compose.py
+    "MESSAGE_LOOKUP": 100,      # was MESSAGE_LOOKUP_CAP in compose.py
+    "TRASH_SCAN": 200,          # was SCAN_CAP in manage.py
+    "INBOX_SHORT": 30,          # smart_inbox short windows
+    "INBOX_LONG": 100,          # smart_inbox long windows
+    "INBOX_DEFAULT_CAP": 200,   # list_inbox_emails baseline
+    "INBOX_MAX_CAP": 1000,      # list_inbox_emails upper bound
+    "SEARCH_BASE_CAP": 200,
+    "SEARCH_WINDOW_CAP": 500,
+}

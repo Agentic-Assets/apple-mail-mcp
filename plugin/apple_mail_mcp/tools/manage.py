@@ -15,7 +15,6 @@ from apple_mail_mcp.server import (
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     contains_any_condition,
-    equals_any_numeric_condition,
     inject_preferences,
     escape_applescript,
     normalize_message_ids,
@@ -26,6 +25,8 @@ from apple_mail_mcp.core import (
     build_filter_condition,
     validate_account_name,
 )
+from apple_mail_mcp.bounded_scan import build_whose_id_list
+from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.tools.search import _search_mail_records_sync as _search_mail_records
 
 
@@ -114,7 +115,7 @@ def _move_email_by_message_ids(
     safe_account = escape_applescript(account)
     safe_from = escape_applescript(from_mailbox)
     safe_to = escape_applescript(to_mailbox)
-    id_condition = equals_any_numeric_condition("id", normalized_ids)
+    id_condition = build_whose_id_list(normalized_ids)
     mode_label = (
         f"DRY RUN - PREVIEW MOVE BY IDS: {safe_from} -> {safe_to}"
         if dry_run
@@ -429,7 +430,7 @@ def save_email_attachment(
             return "Error: 'message_ids' must contain one or more numeric Mail ids"
         message_filter_script = (
             f"set inboxMessages to every message of inboxMailbox whose "
-            f"{equals_any_numeric_condition('id', normalized_ids)}"
+            f"{build_whose_id_list(normalized_ids)}"
         )
         not_found_detail = f"Message ids: {', '.join(normalized_ids)}"
 
@@ -471,12 +472,14 @@ def save_email_attachment(
     escaped_path = escape_applescript(expanded_path)
 
     # Cap candidate set for subject search only — ID lookup is exact.
-    SCAN_CAP = 200
+    # Sourced from ``constants.SCAN_BOUNDS["TRASH_SCAN"]`` so the cap is tunable
+    # in one place alongside other bounded-scan limits.
+    scan_cap = SCAN_BOUNDS["TRASH_SCAN"]
     cap_script = ""
     if message_ids is None:
         cap_script = f"""
-            if (count of inboxMessages) > {SCAN_CAP} then
-                set inboxMessages to items 1 thru {SCAN_CAP} of inboxMessages
+            if (count of inboxMessages) > {scan_cap} then
+                set inboxMessages to items 1 thru {scan_cap} of inboxMessages
             end if"""
 
     script = f'''
@@ -620,7 +623,7 @@ def update_email_status(
         if not normalized_ids:
             return "Error: 'message_ids' must contain one or more numeric Mail ids"
 
-        id_condition = equals_any_numeric_condition("id", normalized_ids)
+        id_condition = build_whose_id_list(normalized_ids)
 
         script = f'''
         tell application "Mail"
@@ -892,7 +895,7 @@ def manage_trash(
         if not normalized_ids:
             return "Error: 'message_ids' must contain one or more numeric Mail ids"
 
-        id_condition = equals_any_numeric_condition("id", normalized_ids)
+        id_condition = build_whose_id_list(normalized_ids)
 
         if action == "move_to_trash":
             mode_label = (

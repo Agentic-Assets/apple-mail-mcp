@@ -3,10 +3,11 @@
 import asyncio
 from collections import Counter
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional, Union
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     inject_preferences,
@@ -20,6 +21,7 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.constants import (
     NEWSLETTER_PLATFORM_PATTERNS,
     NEWSLETTER_KEYWORD_PATTERNS,
+    SCAN_BOUNDS,
     THREAD_PREFIXES,
 )
 
@@ -363,8 +365,10 @@ def get_awaiting_reply(
 
     escaped_account = escape_applescript(account)
 
+    # ``INBOX_SHORT`` (30) caps the inbox slice; the sent slice stays at 20
+    # to match the existing tighter follow-up window.
     sent_cap = min(max(max_results, 5), 20)
-    inbox_cap = min(max(max_results * 2, 10), 30)
+    inbox_cap = min(max(max_results * 2, 10), SCAN_BOUNDS["INBOX_SHORT"])
     inbox_script = _build_awaiting_reply_inbox_script(
         escaped_account=escaped_account,
         inbox_cap=inbox_cap,
@@ -469,8 +473,9 @@ def get_needs_response(
 
     newsletter_condition = _newsletter_filter_condition("messageSender")
 
-    # Cap message collection. Tighter caps keep daily triage under agent budgets.
-    inbox_cap = min(max(max_results * 2, 20), 30)
+    # Cap message collection. Tighter caps keep daily triage under agent
+    # budgets; ``INBOX_SHORT`` (30) is the centralized ceiling.
+    inbox_cap = min(max(max_results * 2, 20), SCAN_BOUNDS["INBOX_SHORT"])
     sent_cap = 20
 
     body_scan_block = (
@@ -709,8 +714,7 @@ def get_top_senders(
     top_n: int = 10,
     group_by_domain: bool = False,
     timeout: Optional[int] = None,
-    allow_full_scan: bool = False,
-) -> str:
+) -> Union[str, Dict[str, Any]]:
     """Analyse a mailbox to find the most frequent senders.
 
     Useful for identifying key contacts, high-volume senders to filter,
@@ -721,21 +725,32 @@ def get_top_senders(
             Falls back to ``DEFAULT_MAIL_ACCOUNT`` env-configured account when None.
         mailbox: Mailbox to analyse (default: "INBOX")
         days_back: How many days back to look (default: 30). ``0`` (all time)
-            requires ``allow_full_scan=True`` to prevent unbounded scans on
-            24K+ inboxes.
+            is no longer accepted — pass ``days_back=7`` or ``30`` and route
+            unbounded sweeps through ``full_inbox_export``.
         top_n: Number of top senders to return (default: 10)
         group_by_domain: Group results by domain instead of individual sender (default: False)
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
-        allow_full_scan: Required opt-in for ``days_back=0`` (all-time).
 
     Returns:
         Ranked list of senders (or domains) with email counts
     """
-    if days_back <= 0 and not allow_full_scan:
-        return (
-            "Error: days_back=0 (all-time) requires allow_full_scan=True. "
-            "Unbounded sender scans can stall on large mailboxes — use a "
-            "bounded window (e.g. days_back=14 or 30) or pass allow_full_scan=True."
+    if days_back <= 0:
+        return serialize_tool_error(
+            ToolError(
+                code="UNBOUNDED_SCAN_REQUIRED",
+                message=(
+                    "get_top_senders refuses to scan without days_back; "
+                    "pass days_back=7 or 30"
+                ),
+                remediation={
+                    "preferred": "Pass days_back=7 or 30",
+                    "fallback_tool": "full_inbox_export",
+                    "fallback_tool_args": {
+                        "account": account,
+                        "mailbox": mailbox,
+                    },
+                },
+            )
         )
 
     if account is None:
@@ -755,8 +770,9 @@ def get_top_senders(
     date_check = "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
 
     # Cap message scan. Prefer a bounded newest-first slice + Python aggregation
-    # over `whose` filters that materialize huge inboxes.
-    scan_cap = min(100, max(top_n * 5, 15))
+    # over `whose` filters that materialize huge inboxes. ``INBOX_LONG`` (100)
+    # is the centralized ceiling for the longest-window read tools.
+    scan_cap = min(SCAN_BOUNDS["INBOX_LONG"], max(top_n * 5, 15))
     if days_back > 14:
         scan_cap = min(scan_cap, 25)
     if days_back >= 30:

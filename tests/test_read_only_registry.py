@@ -29,6 +29,7 @@ READ_ONLY_TOOLS = {
     "list_email_attachments",
     "get_statistics",
     "inbox_dashboard",
+    "full_inbox_export",
 }
 
 WRITE_TOOLS = {

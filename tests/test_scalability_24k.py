@@ -1,7 +1,11 @@
 """Scalability hardening for 24K-mailbox safety (v3.1.9 + v3.1.10).
 
 Covers:
-- Subject-keyword fallback in reply/forward requires date bound or allow_full_scan.
+- Subject-keyword fallback in reply/forward refuses recent_days<=0 and
+  returns a structured UNBOUNDED_SCAN_REQUIRED ToolError envelope (the
+  legacy allow_full_scan opt-in was retired in the whose-elimination
+  refactor — callers must pass message_id or fall back to
+  full_inbox_export).
 - get_statistics and get_top_senders require allow_full_scan when days_back=0.
 - list_inbox_emails accepts deprecated aliases `limit` / `unread_only` and
   surfaces a warning.
@@ -34,23 +38,21 @@ class ComposeFullScanGateTests(unittest.TestCase):
                 reply_body="Hi",
                 recent_days=0,
             )
-        self.assertTrue(result.startswith("Error:"))
-        self.assertIn("allow_full_scan", result)
+        # Post-allow_full_scan-retirement: tools return a JSON-encoded
+        # ToolError envelope (string) steering callers toward message_id
+        # or full_inbox_export. The tool signature is `-> str`, so the
+        # response must be a string whose JSON body carries the envelope.
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("recent_days", parsed.get("message", ""))
+        self.assertEqual(
+            parsed.get("remediation", {}).get("fallback_tool"),
+            "full_inbox_export",
+        )
         runner.assert_not_called()
-
-    def test_reply_subject_allows_explicit_full_scan(self):
-        with patch(
-            "apple_mail_mcp.tools.compose.run_applescript",
-            return_value="ok",
-        ):
-            result = compose_tools.reply_to_email(
-                account="Work",
-                subject_keyword="Invoice",
-                reply_body="Hi",
-                recent_days=0,
-                allow_full_scan=True,
-            )
-        self.assertNotIn("Error: subject-keyword", result)
 
     def test_forward_subject_without_date_bound_is_blocked(self):
         with patch("apple_mail_mcp.tools.compose.run_applescript") as runner:
@@ -60,8 +62,15 @@ class ComposeFullScanGateTests(unittest.TestCase):
                 to="x@example.com",
                 recent_days=0,
             )
-        self.assertTrue(result.startswith("Error:"))
-        self.assertIn("allow_full_scan", result)
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertEqual(
+            parsed.get("remediation", {}).get("fallback_tool"),
+            "full_inbox_export",
+        )
         runner.assert_not_called()
 
     def test_reply_message_id_path_unaffected(self):
@@ -88,14 +97,22 @@ class ComposeFullScanGateTests(unittest.TestCase):
 
 class StatisticsFullScanGateTests(unittest.TestCase):
     def test_statistics_blocks_days_back_zero_text(self):
+        # v3.1.11+: ``allow_full_scan`` retired — days_back<=0 returns a
+        # JSON-encoded ``UNBOUNDED_SCAN_REQUIRED`` ToolError envelope as a
+        # string (consistent with the `-> str` tool signature).
         result = analytics_tools.get_statistics(
             account="Work",
             scope="account_overview",
             days_back=0,
         )
         self.assertIsInstance(result, str)
-        self.assertTrue(result.startswith("Error:"))
-        self.assertIn("allow_full_scan", result)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("days_back", parsed.get("message", ""))
+        remediation = parsed.get("remediation") or {}
+        self.assertEqual(remediation.get("fallback_tool"), "full_inbox_export")
 
     def test_statistics_blocks_days_back_zero_json(self):
         result = analytics_tools.get_statistics(
@@ -104,46 +121,47 @@ class StatisticsFullScanGateTests(unittest.TestCase):
             days_back=0,
             output_format="json",
         )
-        # JSON-mode error returns a dict object (not a serialized string).
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result.get("error"), "all_time_scan_blocked")
+        # JSON-mode error returns the same ToolError envelope as a string.
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
 
-    def test_statistics_allows_days_back_zero_with_opt_in(self):
-        with patch(
-            "apple_mail_mcp.tools.analytics.run_applescript",
-            return_value="",
-        ):
-            result = analytics_tools.get_statistics(
+    def test_statistics_no_longer_accepts_allow_full_scan(self):
+        # v3.1.11: allow_full_scan removed from the signature.
+        with self.assertRaises(TypeError):
+            analytics_tools.get_statistics(
                 account="Work",
                 scope="account_overview",
                 days_back=0,
                 allow_full_scan=True,
             )
-        # Should NOT be the all-time-blocked error.
-        if isinstance(result, str):
-            self.assertNotIn("all-time", result)
 
 
 class TopSendersFullScanGateTests(unittest.TestCase):
     def test_top_senders_blocks_days_back_zero(self):
+        # v3.1.11+: ``allow_full_scan`` retired — days_back<=0 returns a
+        # JSON-encoded ``UNBOUNDED_SCAN_REQUIRED`` ToolError envelope as a
+        # string (consistent with the `-> str` tool signature).
         result = smart_inbox_tools.get_top_senders(
             account="Work",
             days_back=0,
         )
-        self.assertTrue(result.startswith("Error:"))
-        self.assertIn("allow_full_scan", result)
+        self.assertIsInstance(result, str)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+        self.assertTrue(parsed.get("error"))
+        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        remediation = parsed.get("remediation") or {}
+        self.assertEqual(remediation.get("fallback_tool"), "full_inbox_export")
 
-    def test_top_senders_allows_explicit_full_scan(self):
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript",
-            return_value="",
-        ):
-            result = smart_inbox_tools.get_top_senders(
+    def test_top_senders_no_longer_accepts_allow_full_scan(self):
+        # v3.1.11: allow_full_scan removed from the signature.
+        with self.assertRaises(TypeError):
+            smart_inbox_tools.get_top_senders(
                 account="Work",
                 days_back=0,
                 allow_full_scan=True,
             )
-        self.assertFalse(result.startswith("Error: days_back=0"))
 
 
 class ListInboxAliasTests(unittest.TestCase):
@@ -303,27 +321,31 @@ class SearchScanCapScalingTests(unittest.TestCase):
             recent_days=recent_days,
         )
 
-    def test_default_recent_days_2_scales_to_100(self):
-        # recent_days=2 → window_cap=100, floor=21 → scan_cap=100
+    def test_default_recent_days_2_scales_to_300(self):
+        # Phase A: window cap comes from
+        # bounded_scan.compute_scan_upper_bound(2.0) = 200 + 2*50 = 300,
+        # floored at limit+1+offset (=21) → scan_cap=300.
         script = self._script(recent_days=2.0)
-        self.assertIn("> 100", script)
+        self.assertIn("> 300", script)
 
-    def test_recent_days_7_scales_to_350(self):
+    def test_recent_days_7_caps_at_500(self):
+        # compute_scan_upper_bound(7.0) = 200 + 350 = 550, clamped to 500.
         script = self._script(recent_days=7.0)
-        self.assertIn("> 350", script)
+        self.assertIn("> 500", script)
 
     def test_recent_days_30_caps_at_500(self):
-        # recent_days=30 → 30*50=1500 capped at 500
+        # recent_days=30 → 200 + 1500 = 1700, clamped to 500.
         script = self._script(recent_days=30.0)
         self.assertIn("> 500", script)
 
     def test_recent_days_zero_uses_floor(self):
-        # recent_days=0 (full scan) keeps base scan_cap = limit + 1 + offset = 21
+        # recent_days=0 keeps base scan_cap = limit + 1 + offset = 21
+        # (the recent_days>0 branch is skipped; compute_* helper is not consulted).
         script = self._script(recent_days=0.0)
         self.assertIn("> 21", script)
 
     def test_floor_dominates_when_limit_is_huge(self):
-        # limit=600 → base_cap=601 > window_cap=100, scan_cap=601
+        # limit=600 → base_cap=601 > compute(2.0)=300, scan_cap=601.
         script = self._script(recent_days=2.0, limit=600)
         self.assertIn("> 601", script)
 

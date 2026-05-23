@@ -22,6 +22,8 @@ New or edited skills: delegate drafting to subagents; run **`plugin-dev:plugin-v
 | `email-style-profile/` | Learn writing voice from Sent mail + `USER_EMAIL_PREFERENCES` |
 | `email-attachments/` | List + save attachments safely |
 
+**Shared references:** Single-sourced large-inbox safety rules live in [`references/large-inbox-rules.md`](references/large-inbox-rules.md), included by `apple-mail-operator`, `inbox-triage`, `email-archive-cleanup`, and `email-management`.
+
 Already-replied safeguard — honored by:
 
 - `email-drafting/` — honors already-replied safeguard (pre-draft thread verification required before `reply_to_email`; never compose-as-reply).

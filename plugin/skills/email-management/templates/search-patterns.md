@@ -9,7 +9,7 @@ The MCP provides two main search tools:
 1. **`search_emails()`** - Advanced filtering with multiple criteria, optionally with content preview via `include_content=True`
 2. **`get_email_thread()`** - Best for viewing conversation threads
 
-Note: `search_emails` defaults to the last 48 hours and the configured default account. Prefer widening to `recent_days=7` or `recent_days=30`; full scans require `recent_days=0, allow_full_scan=True` and user approval. When you pass an explicit `date_from`, `recent_days` does not apply.
+Note: `search_emails` defaults to the last 48 hours and the configured default account. Prefer widening to `recent_days=7` or `recent_days=30`. `recent_days=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; if you really need every message, call `full_inbox_export` (slow; documented cost). Otherwise pass a bounded `recent_days` / `max_emails`. When you pass an explicit `date_from`, `recent_days` does not apply.
 
 ## Search Pattern Cheat Sheet
 

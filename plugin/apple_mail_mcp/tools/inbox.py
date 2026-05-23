@@ -17,6 +17,9 @@ from apple_mail_mcp.core import (
     validate_account_name,
     account_not_found_json,
 )
+from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.bounded_scan import build_bounded_message_scan
+from apple_mail_mcp.constants import SCAN_BOUNDS
 
 
 def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: Optional[int] = 60) -> set:
@@ -99,6 +102,36 @@ def _parse_pipe_delimited_emails(
 # list_inbox_emails — async, per-account dispatch
 # ---------------------------------------------------------------------------
 
+def _build_inbox_collection_block(max_emails: int, include_read: bool) -> str:
+    """Build the AppleScript that sets ``inboxMessages`` to a bounded slice.
+
+    When ``include_read=False`` we bind a bounded newest-first window BEFORE
+    applying ``whose read status is false`` so Mail never materializes the
+    whole mailbox to evaluate the filter on a 24K-message inbox.
+    """
+    if not include_read:
+        scan_cap = min(
+            max(max_emails * 10, SCAN_BOUNDS["INBOX_DEFAULT_CAP"] // 2),
+            SCAN_BOUNDS["INBOX_MAX_CAP"],
+        )
+        bounded = build_bounded_message_scan(
+            "inboxMailbox",
+            scan_cap,
+            whose_condition="read status is false",
+        )
+        return (
+            f'{bounded}\n'
+            f'            set inboxMessages to candidateMessages\n'
+            f'            if (count of inboxMessages) > {max_emails} then '
+            f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
+        )
+    bounded = build_bounded_message_scan("inboxMailbox", max_emails)
+    return (
+        f'{bounded}\n'
+        f'            set inboxMessages to candidateMessages'
+    )
+
+
 def _build_list_inbox_text_script(
     account: str,
     max_emails: int,
@@ -114,6 +147,7 @@ def _build_list_inbox_text_script(
     *before* applying `whose read status is false`, so Mail never materializes
     a 24K-message Exchange inbox to evaluate the filter.
     """
+    assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
     message_id_text_block = ""
     if include_message_id:
@@ -125,41 +159,7 @@ def _build_list_inbox_text_script(
             '                        set outputText to outputText & "__MSG_ID__|||" & internetMessageId & return'
         )
 
-    if max_emails > 0:
-        if not include_read:
-            # Bind a bounded newest-first slice BEFORE applying
-            # `whose read status is false` so Mail never materializes the
-            # whole mailbox to evaluate the filter on a 24K-message inbox.
-            scan_cap = max(max_emails * 10, 100)
-            if scan_cap > 1000:
-                scan_cap = 1000
-            collection = (
-                f'set inboxCount to count of messages of inboxMailbox\n'
-                f'                if inboxCount > {scan_cap} then\n'
-                f'                    set candidateMessages to messages 1 thru {scan_cap} of inboxMailbox\n'
-                f'                else\n'
-                f'                    set candidateMessages to messages of inboxMailbox\n'
-                f'                end if\n'
-                f'                set inboxMessages to (candidateMessages whose read status is false)\n'
-                f'                if (count of inboxMessages) > {max_emails} then '
-                f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
-            )
-        else:
-            collection = (
-                f'if (count of messages of inboxMailbox) > {max_emails} then\n'
-                f'                    set inboxMessages to messages 1 thru {max_emails} of inboxMailbox\n'
-                f'                else\n'
-                f'                    set inboxMessages to messages of inboxMailbox\n'
-                f'                end if'
-            )
-    else:
-        if not include_read:
-            collection = (
-                'set inboxMessages to (messages of inboxMailbox '
-                'whose read status is false)'
-            )
-        else:
-            collection = 'set inboxMessages to messages of inboxMailbox'
+    collection = _build_inbox_collection_block(max_emails, include_read)
 
     return f"""
     tell application "Mail"
@@ -180,7 +180,7 @@ def _build_list_inbox_text_script(
                 set sentCount to 0
                 repeat with aMessage in inboxMessages
                     set currentIndex to currentIndex + 1
-                    if {max_emails} > 0 and currentIndex > {max_emails} then exit repeat
+                    if currentIndex > {max_emails} then exit repeat
 
                     try
                         set messageSubject to subject of aMessage
@@ -229,40 +229,10 @@ def _build_list_inbox_json_script(
     ``|||<internet-message-id>`` field between the account name and the
     optional content preview. Callers use this for replied-detection.
     """
+    assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
 
-    if max_emails > 0:
-        if not include_read:
-            scan_cap = max(max_emails * 10, 100)
-            if scan_cap > 1000:
-                scan_cap = 1000
-            collection = (
-                f'set inboxCount to count of messages of inboxMailbox\n'
-                f'                if inboxCount > {scan_cap} then\n'
-                f'                    set candidateMessages to messages 1 thru {scan_cap} of inboxMailbox\n'
-                f'                else\n'
-                f'                    set candidateMessages to messages of inboxMailbox\n'
-                f'                end if\n'
-                f'                set inboxMessages to (candidateMessages whose read status is false)\n'
-                f'                if (count of inboxMessages) > {max_emails} then '
-                f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
-            )
-        else:
-            collection = (
-                f'if (count of messages of inboxMailbox) > {max_emails} then\n'
-                f'                    set inboxMessages to messages 1 thru {max_emails} of inboxMailbox\n'
-                f'                else\n'
-                f'                    set inboxMessages to messages of inboxMailbox\n'
-                f'                end if'
-            )
-    else:
-        if not include_read:
-            collection = (
-                'set inboxMessages to (messages of inboxMailbox '
-                'whose read status is false)'
-            )
-        else:
-            collection = 'set inboxMessages to messages of inboxMailbox'
+    collection = _build_inbox_collection_block(max_emails, include_read)
 
     if include_content:
         content_field = (
@@ -307,7 +277,7 @@ def _build_list_inbox_json_script(
             set currentIndex to 0
             repeat with aMessage in inboxMessages
                 set currentIndex to currentIndex + 1
-                if {max_emails} > 0 and currentIndex > {max_emails} then exit repeat
+                if currentIndex > {max_emails} then exit repeat
                 try
                     set messageSubject to subject of aMessage
                     set messageSender to sender of aMessage
@@ -359,7 +329,6 @@ async def list_inbox_emails(
     exclude_replied: bool = False,
     flag_replied: bool = False,
     timeout: Optional[int] = None,
-    allow_full_scan: bool = False,
     limit: Optional[int] = None,
     unread_only: Optional[bool] = None,
 ) -> str:
@@ -370,14 +339,16 @@ async def list_inbox_emails(
     Replaces the former get_recent_emails tool — use account + max_emails to
     get recent emails from a single account.
 
+    If you need every message in the inbox, use ``full_inbox_export`` instead.
+
     Smart defaults:
         - When `account` is None and `all_accounts` is False, the tool falls
           back to the ``DEFAULT_MAIL_ACCOUNT`` env-configured account if one
           is set. Pass `all_accounts=True` to opt back into multi-account
           dispatch even when a default is configured.
-        - `max_emails` defaults to 50. `max_emails=0` is blocked unless
-          `allow_full_scan=True` because it can force Mail.app to walk a
-          large remote inbox.
+        - `max_emails` defaults to 50. `max_emails=0` is rejected with
+          ``UNBOUNDED_SCAN_REQUIRED`` — unbounded inbox walks belong in
+          ``full_inbox_export``.
 
     Performance guidance:
         - On multi-account setups with a 10K+ Exchange/Gmail inbox, prefer
@@ -411,7 +382,6 @@ async def list_inbox_emails(
         timeout: Optional per-account AppleScript timeout in seconds (default: 120s).
             Raise this for known-slow accounts (large Exchange inboxes) when
             the default budget is too tight.
-        allow_full_scan: Required explicit opt-in for `max_emails=0`.
         limit: Deprecated alias for `max_emails`. Accepted for backward
             compatibility with agents that misremember the param name; emits
             a warning in the response. Prefer `max_emails`.
@@ -456,11 +426,22 @@ async def list_inbox_emails(
             "WARNING: 'unread_only' is a deprecated alias — please use 'include_read=False' for unread-only listings."
         )
 
-    if max_emails <= 0 and not allow_full_scan:
-        return (
-            "Error: max_emails=0 requires allow_full_scan=True. "
-            "Unbounded inbox scans can make Mail.app fetch a large message backlog."
+    if max_emails <= 0:
+        err = ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                "list_inbox_emails refuses to walk the full inbox; "
+                "use full_inbox_export instead"
+            ),
+            remediation={
+                "preferred": "Pass max_emails=50 or 200",
+                "fallback_tool": "full_inbox_export",
+                "fallback_tool_args": {
+                    "account": account or "<your account>",
+                },
+            },
         )
+        return json.dumps(err.to_dict(), indent=2)
 
     # Smart default: fall back to the configured default account when neither
     # `account` nor `all_accounts` is set. Lazy attribute read so tests can
