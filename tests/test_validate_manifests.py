@@ -145,6 +145,32 @@ class ValidateManifestsTests(unittest.TestCase):
             )
         self.assertEqual(errors, [])
 
+    def test_plugin_zip_has_manifest_at_root_not_nested(self):
+        # Regression: Cowork (and `claude plugin validate`) look for
+        # .claude-plugin/plugin.json at the unzip root. If the zip wraps
+        # everything in a `plugin/` prefix, validation fails with
+        # "No manifest found in directory". Always zip from inside plugin/.
+        archive = ROOT / "apple-mail-plugin.zip"
+        if not archive.exists():
+            self.skipTest("apple-mail-plugin.zip not built; run tools/build-artifacts.sh")
+        import zipfile as _zf
+        with _zf.ZipFile(archive) as zf:
+            names = zf.namelist()
+        self.assertIn(
+            ".claude-plugin/plugin.json",
+            names,
+            msg=(
+                "plugin.json must be at zip root for Cowork uploads. "
+                "Rebuild with tools/build-artifacts.sh (zips from inside plugin/)."
+            ),
+        )
+        nested = [n for n in names if n.startswith("plugin/")]
+        self.assertEqual(
+            nested,
+            [],
+            msg=f"zip must not wrap files under plugin/ — found {len(nested)} such entries",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

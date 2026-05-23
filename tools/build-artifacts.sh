@@ -19,9 +19,14 @@ MCPB_OUT="apple-mail-mcp-v${VERSION}.mcpb"
 
 echo "→ Building ${ZIP_OUT} (Claude Code plugin)"
 rm -f "${ZIP_OUT}"
+# Zip from INSIDE plugin/ so `.claude-plugin/plugin.json` sits at the zip root.
+# Cowork's plugin uploader and `claude plugin validate` both look for the
+# manifest at the unzip root — a `plugin/` prefix causes "No manifest found".
 # -X strips extra attrs; exclusion list matches README install instructions.
-zip -rq -X "${ZIP_OUT}" plugin \
-  -x 'plugin/venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store'
+(
+  cd plugin && zip -rq -X "../${ZIP_OUT}" . \
+    -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store'
+)
 
 echo "→ Building ${MCPB_OUT} (Claude Desktop bundle)"
 bash apple-mail-mcpb/build-mcpb.sh >/dev/null
@@ -33,13 +38,24 @@ APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh
 # directory entries, but a successful `mcpb unpack` proves Claude Desktop
 # will accept the bundle.
 if command -v mcpb >/dev/null 2>&1; then
-  TMP="$(mktemp -d)"
-  trap 'rm -rf "${TMP}"' EXIT
-  mcpb unpack "${MCPB_OUT}" "${TMP}" >/dev/null
+  TMP_MCPB="$(mktemp -d)"
+  trap 'rm -rf "${TMP_MCPB}" "${TMP_ZIP:-}"' EXIT
+  mcpb unpack "${MCPB_OUT}" "${TMP_MCPB}" >/dev/null
   mcpb validate apple-mail-mcpb/manifest.json >/dev/null
   echo "→ mcpb unpack + validate OK"
 else
   echo "→ mcpb CLI not installed; skipping unpack smoke (npm install -g @anthropic-ai/mcpb)"
+fi
+
+# Plugin-zip structural smoke: unzip and validate as Cowork's plugin
+# uploader does — `.claude-plugin/plugin.json` must live at zip root.
+if command -v claude >/dev/null 2>&1; then
+  TMP_ZIP="$(mktemp -d)"
+  (cd "${TMP_ZIP}" && unzip -q "${ROOT}/${ZIP_OUT}")
+  claude plugin validate "${TMP_ZIP}" >/dev/null
+  echo "→ claude plugin validate OK (manifest at zip root)"
+else
+  echo "→ claude CLI not on PATH; skipping plugin-zip unpack smoke"
 fi
 
 echo

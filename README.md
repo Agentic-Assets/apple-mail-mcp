@@ -66,8 +66,15 @@ Cowork uses Anthropic's **remote marketplace backend** (`remoteMarketplaceClient
 
 ```bash
 cd /path/to/apple-mail-mcp
-zip -r apple-mail-plugin.zip plugin/ \
-  -x 'plugin/venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store'
+bash tools/build-artifacts.sh   # produces apple-mail-plugin.zip + .mcpb (manifest at zip root)
+```
+
+If you must build the zip by hand, zip from **inside** `plugin/` so `.claude-plugin/plugin.json` sits at the zip root — Cowork rejects uploads where it is nested under `plugin/`:
+
+```bash
+cd /path/to/apple-mail-mcp/plugin
+zip -rq -X ../apple-mail-plugin.zip . \
+  -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store'
 ```
 
 **Important:** Apple Mail MCP requires **macOS Mail.app** on the host Mac (`start_mcp.sh` → AppleScript). Cowork's Linux VM cannot run Mail directly; the plugin MCP server must execute on your Mac host. If tools fail after upload, use the **Claude Code CLI** install or the **Desktop `.mcpb`** path below instead.

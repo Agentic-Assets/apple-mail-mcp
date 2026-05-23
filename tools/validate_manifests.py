@@ -219,8 +219,11 @@ def _check_artifact_freshness(
     *,
     require_artifacts: bool = False,
 ) -> None:
+    # Zip is built from inside `plugin/` so contents sit at the zip root.
+    # Cowork (and `claude plugin validate`) look for `.claude-plugin/plugin.json`
+    # at the unzip root — a `plugin/` prefix breaks the upload.
     plugin_expected = [
-        (ROOT / "plugin" / rel, f"plugin/{rel.as_posix()}")
+        (ROOT / "plugin" / rel, rel.as_posix())
         for rel in _iter_plugin_payload_files()
     ]
     _compare_zip_members(
