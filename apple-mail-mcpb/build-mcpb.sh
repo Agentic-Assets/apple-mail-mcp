@@ -164,11 +164,26 @@ EOF
 
 # Step 7: Create the MCPB package
 echo -e "\n${YELLOW}Step 7: Creating MCPB package...${NC}"
-cd "${BUILD_DIR}"
 OUTPUT_FILE="${OUTPUT_DIR}/${PACKAGE_NAME}-v${VERSION}.mcpb"
 
-# Create zip archive with .mcpb extension
-zip -r -q "${OUTPUT_FILE}" . -x "*.DS_Store" "*__MACOSX*" "*.git*"
+# Drop noise that should never ship inside the bundle.
+find "${BUILD_DIR}" -name ".DS_Store" -delete 2>/dev/null || true
+find "${BUILD_DIR}" -type d -name "__MACOSX" -exec rm -rf {} + 2>/dev/null || true
+find "${BUILD_DIR}" -type d -name ".git" -exec rm -rf {} + 2>/dev/null || true
+
+# Prefer the official `mcpb pack` CLI — it produces a bundle layout Claude Desktop accepts.
+# Fall back to `zip` only when mcpb isn't installed (developer-local fallback).
+if command -v mcpb >/dev/null 2>&1; then
+    echo -e "  Using ${GREEN}mcpb pack${NC} (official CLI) for bundle creation"
+    rm -f "${OUTPUT_FILE}"
+    mcpb pack "${BUILD_DIR}" "${OUTPUT_FILE}"
+else
+    echo -e "  ${YELLOW}⚠${NC} mcpb CLI not found — falling back to raw zip (install with: npm install -g @anthropic-ai/mcpb)"
+    cd "${BUILD_DIR}"
+    # -X strips extra attrs; do not add directory entries (mcpb extractor chokes on them).
+    zip -rq -X "${OUTPUT_FILE}" . -x "*.DS_Store" "*__MACOSX*" "*.git*"
+    cd - >/dev/null
+fi
 
 # Step 8: Verify package
 echo -e "\n${YELLOW}Step 8: Verifying package...${NC}"
