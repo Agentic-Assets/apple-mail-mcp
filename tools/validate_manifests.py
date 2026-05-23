@@ -88,7 +88,7 @@ def _iter_plugin_payload_files() -> list[Path]:
             continue
         if any(part in excluded_parts for part in rel.parts):
             continue
-        if path.name in {".DS_Store"} or path.suffix == ".pyc":
+        if path.name in {".DS_Store", "CLAUDE.md"} or path.suffix == ".pyc":
             continue
         files.append(rel)
     return sorted(files)

@@ -22,10 +22,15 @@ rm -f "${ZIP_OUT}"
 # Zip from INSIDE plugin/ so `.claude-plugin/plugin.json` sits at the zip root.
 # Cowork's plugin uploader and `claude plugin validate` both look for the
 # manifest at the unzip root — a `plugin/` prefix causes "No manifest found".
-# -X strips extra attrs; exclusion list matches README install instructions.
+#
+# Flags:
+#   -X  strip extra Unix attrs (consistent bytes)
+#   -D  no directory entries — Cowork's web validator (and the MCPB
+#       extractor we already fixed) choke on zero-byte `dir/` entries.
+#       Same defect that broke the .mcpb upload; fix it here too.
 (
-  cd plugin && zip -rq -X "../${ZIP_OUT}" . \
-    -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store'
+  cd plugin && zip -rq -X -D "../${ZIP_OUT}" . \
+    -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store' 'CLAUDE.md' '*/CLAUDE.md'
 )
 
 echo "→ Building ${MCPB_OUT} (Claude Desktop bundle)"

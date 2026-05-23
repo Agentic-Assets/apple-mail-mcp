@@ -145,6 +145,26 @@ class ValidateManifestsTests(unittest.TestCase):
             )
         self.assertEqual(errors, [])
 
+    def test_plugin_zip_has_no_directory_entries(self):
+        # Regression: zero-byte directory entries (names ending in `/`) broke
+        # Cowork's plugin uploader the same way they broke the MCPB
+        # extractor. Build script uses `zip -D` to suppress them.
+        archive = ROOT / "apple-mail-plugin.zip"
+        if not archive.exists():
+            self.skipTest("apple-mail-plugin.zip not built; run tools/build-artifacts.sh")
+        import zipfile as _zf
+        with _zf.ZipFile(archive) as zf:
+            offenders = [n for n in zf.namelist() if n.endswith("/")]
+        self.assertEqual(
+            offenders,
+            [],
+            msg=(
+                f"plugin zip must contain no bare directory entries "
+                f"(found {len(offenders)}: {offenders[:3]}); "
+                f"rebuild with tools/build-artifacts.sh (uses `zip -D`)"
+            ),
+        )
+
     def test_plugin_zip_has_manifest_at_root_not_nested(self):
         # Regression: Cowork (and `claude plugin validate`) look for
         # .claude-plugin/plugin.json at the unzip root. If the zip wraps
