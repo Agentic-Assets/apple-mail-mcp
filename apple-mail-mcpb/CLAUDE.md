@@ -14,6 +14,8 @@ APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash ../tools/validate_manifests.sh
 
 Copies `apple_mail_mcp.py`, `start_mcp.sh`, `requirements.txt`, `apple_mail_mcp/`, mirrored `plugin/skills` → **`skills/`** in build output, optional `ui/`. No venv in bundle — user machine creates it via `start_mcp.sh`. Keep embedded README Python 3.10+ claim in sync.
 
+**Build must use `mcpb pack`** (official CLI, `npm install -g @anthropic-ai/mcpb`). Raw `zip -r .` emits zero-byte directory entries that `mcpb unpack` and Claude Desktop's installer treat as files — install fails with `ENOENT: no such file or directory, open '.../ui/'`. `build-mcpb.sh` prefers `mcpb pack` and falls back to `zip -X` only when the CLI is missing. `validate_manifests.py` enforces the structural rule on every commit.
+
 ## tools[] must match code
 
 Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; description must claim correct count (**28**). Validated by [`tools/validate_manifests.sh`](../tools/validate_manifests.sh).

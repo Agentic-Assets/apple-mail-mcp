@@ -103,6 +103,48 @@ class ValidateManifestsTests(unittest.TestCase):
             ["missing.zip: missing archive; rebuild missing.zip"],
         )
 
+    def test_check_no_directory_entries_flags_bare_directory_members(self):
+        # Regression: raw `zip -r .` emits zero-byte entries whose names end
+        # in `/`. `mcpb unpack` (and Claude Desktop's installer) treats those
+        # as files and aborts with ENOENT. The MCPB must be built via
+        # `mcpb pack`. See apple-mail-mcpb/build-mcpb.sh.
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "bad.mcpb"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("ui/", b"")
+                zf.writestr("ui/__init__.py", b"# real file")
+                zf.writestr("apple_mail_mcp/", b"")
+
+            errors = []
+            validate_manifests._check_no_directory_entries(archive, archive.name, errors)
+
+        self.assertEqual(len(errors), 1)
+        msg = errors[0]
+        self.assertIn("contains 2 directory entries", msg)
+        self.assertIn("ui/", msg)
+        self.assertIn("apple_mail_mcp/", msg)
+        self.assertIn("mcpb pack", msg)
+
+    def test_check_no_directory_entries_passes_on_clean_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "good.mcpb"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("ui/__init__.py", b"# real file")
+                zf.writestr("manifest.json", b"{}")
+
+            errors = []
+            validate_manifests._check_no_directory_entries(archive, archive.name, errors)
+
+        self.assertEqual(errors, [])
+
+    def test_check_no_directory_entries_skips_absent_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            errors = []
+            validate_manifests._check_no_directory_entries(
+                Path(tmp) / "missing.mcpb", "missing.mcpb", errors
+            )
+        self.assertEqual(errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()

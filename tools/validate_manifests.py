@@ -123,6 +123,33 @@ def _compare_zip_members(
         errors.append(f"{label}: {archive.name} is not a valid zip archive")
 
 
+def _check_no_directory_entries(
+    archive: Path,
+    label: str,
+    errors: list[str],
+) -> None:
+    """Reject zero-byte directory entries — `mcpb unpack` / Claude Desktop choke on them.
+
+    Why: raw `zip -r .` emits entries whose names end in `/`. The MCPB extractor
+    treats those as files and aborts with ENOENT. Always build via `mcpb pack`
+    (or `zip -X` without bare-directory inclusion).
+    """
+    if not archive.exists():
+        return
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            offenders = [n for n in zf.namelist() if n.endswith("/")]
+    except zipfile.BadZipFile:
+        return  # already reported by _compare_zip_members
+    if offenders:
+        sample = ", ".join(offenders[:3]) + (", ..." if len(offenders) > 3 else "")
+        errors.append(
+            f"{label}: contains {len(offenders)} directory entr"
+            f"{'y' if len(offenders) == 1 else 'ies'} ({sample}); "
+            f"rebuild with `mcpb pack` (Claude Desktop installer fails on these)"
+        )
+
+
 def _generated_mcpb_readme() -> bytes:
     return """# Apple Mail MCP bundle
 
@@ -229,6 +256,7 @@ def _check_artifact_freshness(
         errors,
         require_present=require_artifacts,
     )
+    _check_no_directory_entries(mcpb, mcpb.name, errors)
     if mcpb.exists():
         try:
             with zipfile.ZipFile(mcpb) as zf:
