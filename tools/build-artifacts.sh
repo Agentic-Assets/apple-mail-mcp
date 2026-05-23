@@ -48,12 +48,14 @@ else
 fi
 
 # Plugin-zip structural smoke: unzip and validate as Cowork's plugin
-# uploader does — `.claude-plugin/plugin.json` must live at zip root.
+# uploader does — `.claude-plugin/plugin.json` must live at zip root, AND
+# `--strict` must pass (Cowork promotes warnings to errors; default mode
+# does not, which is why our older zip passed locally but failed Cowork).
 if command -v claude >/dev/null 2>&1; then
   TMP_ZIP="$(mktemp -d)"
   (cd "${TMP_ZIP}" && unzip -q "${ROOT}/${ZIP_OUT}")
-  claude plugin validate "${TMP_ZIP}" >/dev/null
-  echo "→ claude plugin validate OK (manifest at zip root)"
+  claude plugin validate "${TMP_ZIP}" --strict >/dev/null
+  echo "→ claude plugin validate --strict OK (manifest at zip root, no warnings)"
 else
   echo "→ claude CLI not on PATH; skipping plugin-zip unpack smoke"
 fi

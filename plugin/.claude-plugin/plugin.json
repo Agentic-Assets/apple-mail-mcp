@@ -20,9 +20,6 @@
     "macos",
     "applescript"
   ],
-  "commands": [
-    "./commands/"
-  ],
   "mcpServers": {
     "apple-mail": {
       "command": "/bin/bash",
