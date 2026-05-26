@@ -206,7 +206,7 @@ python3 tools/check_wrapper_surface.py
 APPLE_MAIL_CLI_HOME="${APPLE_MAIL_CLI_HOME:-$HOME/.local/share/apple-mail-cli}"
 rsync -a --delete --exclude venv /path/to/apple-mail-mcp/plugin/ "$APPLE_MAIL_CLI_HOME/plugin/"
 cd "$APPLE_MAIL_CLI_HOME"
-npx mcporter@0.11.3 generate-cli --from apple-mail-cli.mjs --bundle apple-mail-cli.mjs
+npx mcporter@0.11.3 generate-cli --from ./apple-mail-cli.cjs --bundle apple-mail-cli.cjs
 ./install.sh
 python3 /path/to/apple-mail-mcp/tools/check_wrapper_surface.py
 ```
