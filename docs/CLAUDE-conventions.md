@@ -92,6 +92,16 @@ Tool-count claims drift. Description fields in `plugin.json`, `marketplace.json`
 
 ---
 
+## Marketplace vs plugin.json — component ownership
+
+Claude Code rejects the install with *"conflicting manifests: both plugin.json and marketplace entry specify components"* when both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while `strict` is not `true` on the marketplace entry.
+
+Rule for this repo: **all component declarations live in `plugin/.claude-plugin/plugin.json`** (today: only `mcpServers`). The marketplace entry is metadata-only (`name`, `displayName`, `description`, `version`, `author`, `source`, `keywords`, `strict: false`). Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them in marketplace.json. If a future change truly needs marketplace-side components, set `"strict": true` in the same edit.
+
+The guard lives in `tools/validate_manifests.py::_check_marketplace_contract`; regression tests `test_marketplace_contract_rejects_dual_component_declarations` / `..._allows_dual_components_when_strict_true` lock it in. Also see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json".
+
+---
+
 ## Plugin-dev agents
 
 This repo **is** a Claude Code plugin. For plugin shell, MCP wiring, skills, agents, commands, hooks, or manifests, defer to `plugin-dev:*` agents — they override memory about plugin authoring:

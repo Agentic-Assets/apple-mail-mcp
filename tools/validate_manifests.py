@@ -14,6 +14,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Per Claude Code marketplace rules: if both marketplace.json plugins[0] and
+# plugin.json declare any of these fields, the install errors out unless the
+# marketplace entry sets `strict: true`. See _check_marketplace_contract.
+MARKETPLACE_COMPONENT_FIELDS = ("commands", "agents", "skills", "hooks", "mcpServers")
+
 
 def _fail(msg: str) -> None:
     print(f"validate_manifests: {msg}", file=sys.stderr)
@@ -250,6 +255,22 @@ def _check_marketplace_contract(expected_version: str, errors: list[str]) -> Non
             errors.append(
                 "marketplace.json plugins[0].skills: missing "
                 f"{skill_path}/SKILL.md"
+            )
+
+    if source_manifest is not None:
+        market_components = [
+            f for f in MARKETPLACE_COMPONENT_FIELDS if plugin_ref.get(f)
+        ]
+        plugin_components = [
+            f for f in MARKETPLACE_COMPONENT_FIELDS if source_manifest.get(f)
+        ]
+        if market_components and plugin_components and not plugin_ref.get("strict"):
+            errors.append(
+                "marketplace.json plugins[0]: component fields "
+                f"{market_components} conflict with plugin.json "
+                f"components {plugin_components}; remove components from one "
+                "manifest or set strict: true "
+                "(Claude Code rejects the install otherwise)"
             )
 
 

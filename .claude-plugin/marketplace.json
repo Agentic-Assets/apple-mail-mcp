@@ -32,17 +32,6 @@
         "automation",
         "macos",
         "applescript"
-      ],
-      "skills": [
-        "./plugin/skills/apple-mail-operator",
-        "./plugin/skills/inbox-triage",
-        "./plugin/skills/email-management",
-        "./plugin/skills/mailbox-taxonomy",
-        "./plugin/skills/email-archive-cleanup",
-        "./plugin/skills/mail-rules-advisor",
-        "./plugin/skills/email-drafting",
-        "./plugin/skills/email-style-profile",
-        "./plugin/skills/email-attachments"
       ]
     }
   ]

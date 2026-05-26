@@ -248,6 +248,112 @@ class ValidateManifestsTests(unittest.TestCase):
             ],
         )
 
+    def _write_dual_manifest_fixture(
+        self, root: Path, *, strict: bool, market_components: dict, plugin_components: dict
+    ) -> None:
+        plugin_dir = root / "plugin/.claude-plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(
+            json.dumps({"name": "fixture", **plugin_components}),
+            encoding="utf-8",
+        )
+        marketplace = root / ".claude-plugin"
+        marketplace.mkdir()
+        market_entry = {
+            "name": "fixture",
+            "version": "1.0.0",
+            "source": "./plugin",
+            **market_components,
+        }
+        if strict:
+            market_entry["strict"] = True
+        (marketplace / "marketplace.json").write_text(
+            json.dumps({"plugins": [market_entry]}),
+            encoding="utf-8",
+        )
+        skill_dir = root / "plugin/skills/op"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: op\n---\n", encoding="utf-8")
+
+    def test_marketplace_contract_rejects_dual_component_declarations(self):
+        """Regression: 2026-05-25 — Claude Code surfaced 'conflicting manifests'
+        because marketplace.json listed `skills` while plugin.json declared
+        `mcpServers` with strict: false. The fix removed the redundant skills
+        array (auto-discovery handles them); this guards against re-introducing
+        the conflict."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_dual_manifest_fixture(
+                root,
+                strict=False,
+                market_components={"skills": ["./plugin/skills/op"]},
+                plugin_components={
+                    "mcpServers": {"fixture": {"command": "/bin/true"}}
+                },
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_marketplace_contract("1.0.0", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertIn(
+            "marketplace.json plugins[0]: component fields ['skills'] "
+            "conflict with plugin.json components ['mcpServers']; "
+            "remove components from one manifest or set strict: true "
+            "(Claude Code rejects the install otherwise)",
+            errors,
+        )
+
+    def test_marketplace_contract_allows_dual_components_when_strict_true(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_dual_manifest_fixture(
+                root,
+                strict=True,
+                market_components={"skills": ["./plugin/skills/op"]},
+                plugin_components={
+                    "mcpServers": {"fixture": {"command": "/bin/true"}}
+                },
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_marketplace_contract("1.0.0", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        conflict_errors = [e for e in errors if "conflict with plugin.json" in e]
+        self.assertEqual(conflict_errors, [])
+
+    def test_marketplace_contract_allows_components_only_in_plugin_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_dual_manifest_fixture(
+                root,
+                strict=False,
+                market_components={},
+                plugin_components={
+                    "mcpServers": {"fixture": {"command": "/bin/true"}}
+                },
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_marketplace_contract("1.0.0", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        conflict_errors = [e for e in errors if "conflict with plugin.json" in e]
+        self.assertEqual(conflict_errors, [])
+
     def test_server_json_contract_rejects_package_install_drift(self):
         server_json = {
             "$schema": "bad",
