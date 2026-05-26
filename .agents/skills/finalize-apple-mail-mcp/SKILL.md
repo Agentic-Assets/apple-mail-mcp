@@ -13,6 +13,25 @@ Run this **after implementation is done** and before calling the branch finished
 - User says: finalize, ship, sync docs, update CLAUDE.md, validate manifests, pre-release check
 - Before opening a PR or tagging a release
 
+## Recommended skills for the change being finalized
+
+Pick by what the diff actually touched — don't run all of them. Each is
+either a Skill (run inline) or an Agent (delegate via Task). The dev-mode
+hook in `.claude/hooks/dev_mode_reminder.sh` reflects the same map.
+
+| If the diff touched… | Use |
+|----------------------|-----|
+| AppleScript inside Python f-strings (`tools/*.py`, `core.py`) | The `.claude/hooks/check_applescript_compiles.py` parse check fires automatically on edit. Live-verify on TU Exchange (`apple-mail awaiting-reply --account "TU - Cayman" --days 7 --limit 5`) before ship. |
+| Perf-sensitive paths (`smart_inbox.py`, `analytics.py`, large-inbox loops) | `python-performance-optimization` skill |
+| Timeout subdivision, retry/backoff, `AppleScriptTimeout` handling | `python-resilience` skill |
+| Silent `except` / `on error` skips, `errors[]` surfacing, partial-failure JSON | `python-error-handling` skill |
+| New tests, missing test coverage, parser-vs-script gaps | `testing-python` or `python-testing-patterns` skill |
+| `asyncio` fan-out, `asyncio.run()`-in-loop bugs | `async-python-patterns` skill |
+| Pre-ship review pass | `reviewing-code` + `code-review` skills; `python-anti-patterns` as checklist |
+| Confirming a change actually works in the running app | `verify` + `run` skills |
+| Plugin manifest / marketplace / MCPB drift | `plugin-dev:plugin-validator` agent (REQUIRED — step 1 below) |
+| `plugin/skills/*/SKILL.md` wording or triggers | `plugin-dev:skill-reviewer` agent |
+
 ## Out of scope
 
 - New feature implementation

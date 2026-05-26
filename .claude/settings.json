@@ -3,5 +3,35 @@
     "plugin-dev@claude-plugins-official": true,
     "python-development@claude-code-workflows": true,
     "apple-mail@apple-mail-mcp": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post_edit_check.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/dev_mode_reminder.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session_context.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }
