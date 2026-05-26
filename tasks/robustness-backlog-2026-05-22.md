@@ -24,14 +24,26 @@ This sidecar preserves the detailed backlog that previously lived in
 ### `get_statistics` / `account_overview`
 
 - [x] Lower scan defaults for short `days_back` (10 mailboxes x 100 messages when `days_back <= 7`; else 20 x 500).
-- [ ] Prefer `unread count of aMailbox` over per-message unread scan where scope allows.
-- [ ] Replace any remaining silent `on error` skips with `errors[]` in response.
+- [x] Prefer `unread count of aMailbox` over per-message unread scan where scope allows.
+      Account-overview now emits `MBOX|||name|||total|||unread` header rows from
+      Mail.app's `count of messages` + `unread count` APIs; the per-message
+      `read status` fetch is dropped. `total_emails` / `unread` now reflect true
+      mailbox-wide totals across the sampled mailboxes; sample-bounded stats
+      (flagged, with-attachments, top_senders, mailbox_distribution) still
+      respect `days_back`.
+- [x] Replace any remaining silent `on error` skips with `errors[]` in response.
+      Per-message inner-loop errors are now counted and surfaced as a single
+      `__APPLE_MAIL_MCP_ERROR__|||mailbox|||N message(s) skipped due to read
+      errors` line per mailbox, parsed into the JSON `errors[]`.
 
 ### `get_needs_response`
 
 - [x] Remove default `content of aMessage` fetch; `scan_body: bool = False`.
 - [x] Tighter inbox/sent caps (`inbox_cap <= 100`, `sent_cap = 100`).
-- [ ] Reply matching in Python rather than nested AppleScript.
+- [x] Reply matching in Python rather than nested AppleScript.
+      Inbox script now emits a flat `MSG|||...` row per candidate; replied set
+      built in Python via `fetch_replied_ids` and matched with O(1) set lookup
+      (was O(N×M) AppleScript `repeat with repliedRef`).
 
 ### `get_awaiting_reply` / `get_top_senders`
 
@@ -42,8 +54,13 @@ Verification target: `.venv/bin/apple-mail perf-test --include-analysis --allow-
 
 ## Phase 3 — JSON finish
 
-- [ ] `inbox_dashboard` -> dict JSON (not string).
-- [ ] Smart inbox tools -> structured JSON + `errors[]`.
+- [x] `inbox_dashboard` -> dict JSON (not string).
+      Already returns a Python dict for `output_format="json"` (verified in
+      `analytics.py:inbox_dashboard`, lines 1696-1705).
+- [x] Smart inbox tools -> structured JSON + `errors[]`.
+      `get_needs_response`, `get_awaiting_reply`, and `get_top_senders` all
+      accept `output_format="json"` and return a dict with stable keys plus
+      an `errors[]` array. Error and timeout paths return dicts in JSON mode.
 - [x] `list_inbox_emails` JSON -> `{emails, errors}` (breaking; document if changed).
       JSON path now always returns a Python `dict` (not a JSON string) with stable
       shape `{"emails": [...], "errors": [...]}`. `errors` is always present
@@ -51,7 +68,10 @@ Verification target: `.venv/bin/apple-mail perf-test --include-analysis --allow-
       dict in JSON mode too. `UNBOUNDED_SCAN_REQUIRED` refusals stay as a JSON
       string for parity with text-mode callers. Callers that previously did
       `json.loads(result)` should drop the call.
-- [ ] Add generated-wrapper `--raw` examples for `get-inbox-overview` and wrapper commands with poor flag discovery.
+- [x] Add generated-wrapper `--raw` examples for `get-inbox-overview` and wrapper commands with poor flag discovery.
+      `docs/AGENT_LIVE_TESTING.md` now has a "--raw examples for advanced
+      wrapper options" subsection covering statistics scopes, smart-inbox
+      triage, dashboard JSON mode, and full inbox export.
 
 ## Phase 4 — Ship hygiene
 
