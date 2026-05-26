@@ -30,7 +30,8 @@ rm -f "${ZIP_OUT}"
 #       Same defect that broke the .mcpb upload; fix it here too.
 (
   cd plugin && zip -rq -X -D "../${ZIP_OUT}" . \
-    -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store' 'CLAUDE.md' '*/CLAUDE.md'
+    -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store' 'CLAUDE.md' '*/CLAUDE.md' \
+       '.env' '.env.*' '*.log' '*.tmp' '*.bak' '*.swp'
 )
 
 echo "→ Building ${MCPB_OUT} (Claude Desktop bundle)"

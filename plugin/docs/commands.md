@@ -33,5 +33,5 @@ The command exists for users who invoke `/email-management` explicitly. The skil
 
 - **`../skills/`** — Source of truth for workflow content
 - **`../apple_mail_mcp/tools/`** — MCP tools invoked by skill workflows
-- **`../.claude-plugin/plugin.json`** — Registers `"commands": ["./commands/"]` alongside `mcpServers`
+- **`../.claude-plugin/plugin.json`** — Registers `mcpServers`; commands are auto-discovered from `commands/` and must not be declared in `plugin.json` (strict validation rejects that field)
 - **`../../.claude-plugin/marketplace.json`** — Marketplace entry pointing at `./plugin`

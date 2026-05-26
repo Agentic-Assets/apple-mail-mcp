@@ -52,7 +52,7 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ### Read-only enforcement
 
-`--read-only` removes send tools from the registry; it does **not** branch inside tool implementations. `manage_drafts` stays registered but blocks the "send" action internally. New email-sending capabilities: extend `SEND_TOOLS` in `__main__.py`.
+`--read-only` removes send tools from the registry; it does **not** branch inside tool implementations. `manage_drafts` stays registered but blocks the "send" action internally. New email-sending capabilities: extend `SEND_TOOLS` in `plugin/apple_mail_mcp/server.py`.
 
 ### Rich HTML drafts
 
@@ -88,7 +88,7 @@ Version is duplicated across **five** files — bump all together when releasing
 | `server.json` | `version` and `packages[0].version` |
 | `apple-mail-mcpb/manifest.json` | `version` |
 
-Tool-count claims drift. Description fields in `plugin.json`, `marketplace.json`, and `apple-mail-mcpb/manifest.json` must match `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. The mcpb manifest also embeds the full `tools[]` array — both count and names must match code. Run [`tools/validate_manifests.py`](../tools/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove.
+Tool-count claims drift. Description fields in `plugin.json`, `marketplace.json`, and `apple-mail-mcpb/manifest.json` must match `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. The mcpb manifest also embeds the full `tools[]` array — both count and names must match code. Run [`tools/validate_manifests.py`](../tools/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove; run `bash tools/dev-check.sh release` before shipping manifest, package, or artifact changes.
 
 ---
 
@@ -137,7 +137,7 @@ New entry points ship as skills only. `plugin/commands/email-management.md` stay
 
 **Routing cheat sheet:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). **Narrow skills** may stay shorter than the umbrella template if they include triggers, sibling matrix, performance notes, and destructive red lines. **Umbrella template:** `plugin/skills/email-management/SKILL.md` (also has `references/`, `examples/`, `templates/`).
 
-After adding or editing any skill: run **`plugin-dev:skill-reviewer`**. After manifest or skill-count marketing copy changes: **`plugin-dev:plugin-validator`** + `bash tools/validate_manifests.sh`.
+After adding or editing any skill: run **`plugin-dev:skill-reviewer`**. After manifest, package, artifact, or skill-count marketing copy changes: **`plugin-dev:plugin-validator`** + `bash tools/dev-check.sh release`.
 
 ---
 

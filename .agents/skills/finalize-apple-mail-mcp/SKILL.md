@@ -94,7 +94,7 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 - `CLAUDE.md` (root)
 - `plugin/docs/CLAUDE.md`, `plugin/apple_mail_mcp/CLAUDE.md`, `plugin/apple_mail_mcp/tools/CLAUDE.md`
 - `plugin/skills/CLAUDE.md`, `tests/CLAUDE.md`, `tools/CLAUDE.md`, `docs/CLAUDE.md`
-- `.claude-plugin/docs/CLAUDE.md`, `apple-mail-mcpb/CLAUDE.md`, `tasks/CLAUDE.md`
+- `.claude-plugin/CLAUDE.md`, `apple-mail-mcpb/CLAUDE.md`, `tasks/CLAUDE.md`
 
 **Manifest rules** (see `tools/CLAUDE.md`):
 
@@ -116,7 +116,7 @@ bash tools/dev-check.sh release
 
 That tier runs `validate_manifests` + `pytest` + the wrapper-surface check, then invokes `tools/build-artifacts.sh` to:
 
-1. Rebuild `apple-mail-plugin.zip` with the README exclusion list (`venv`, `__pycache__`, `*.pyc`, `.DS_Store`).
+1. Rebuild `apple-mail-plugin.zip` with the README exclusion list (`venv`, `__pycache__`, `*.pyc`, `.DS_Store`, `CLAUDE.md`, `.env*`, logs, temp/backup files).
 2. Rebuild `apple-mail-mcp-v{VERSION}.mcpb` via `apple-mail-mcpb/build-mcpb.sh` (which prefers official `mcpb pack`).
 3. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh`.
 4. Run `mcpb unpack` + `mcpb validate` as a final structural smoke (if `mcpb` CLI present).
@@ -126,7 +126,7 @@ If any step fails, fix the underlying issue — do not commit stale artifacts.
 ### 7. Final review checklist
 
 - [ ] plugin-validator PASS after fixes
-- [ ] `tools/dev-check.sh release` finished green (artifacts rebuilt, `mcpb unpack` smoke OK)
+- [ ] `tools/dev-check.sh release` finished green (artifacts rebuilt, `mcpb unpack` smoke OK, `claude plugin validate --strict` OK when CLI is available)
 - [ ] `apple-mail-plugin.zip` and `apple-mail-mcp-v{VERSION}.mcpb` modified time newer than every changed plugin source
 - [ ] Behavior described in docs matches `compose.py` / other tool defaults
 - [ ] No stale "open by default" or subject-matching guidance where `message_id` is preferred

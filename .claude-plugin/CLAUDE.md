@@ -7,9 +7,9 @@ Top-level **Claude Code marketplace** registration → [`plugin/`](../plugin/) v
 | Field | Example | Meaning |
 |-------|---------|---------|
 | `metadata.version` | `1.0.0` | **This marketplace JSON** — not the plugin. Don't bump on every release. |
-| `plugins[0].version` | `3.2.0` | **Plugin release** — sync with `pyproject.toml`, `plugin.json`, `server.json`, mcpb manifest. |
+| `plugins[0].version` | `3.2.1` | **Plugin release** — sync with `pyproject.toml`, `plugin.json`, `server.json`, mcpb manifest. |
 
-`validate_manifests.sh` checks `plugins[0].version` and tool-count in `plugins[0].description` only.
+`validate_manifests.sh` checks `plugins[0].version`, tool-count in `plugins[0].description`, `source`, listed skill paths, and plugin name/version parity with `plugin/.claude-plugin/plugin.json`.
 
 ## Not here
 

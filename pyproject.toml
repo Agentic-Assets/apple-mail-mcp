@@ -37,6 +37,7 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp>=3.1.0,<4",
+    "mcp-ui-server==1.0.0",
 ]
 
 [project.scripts]
@@ -50,7 +51,7 @@ Issues = "https://github.com/agenticassets/apple-mail-mcp/issues"
 Changelog = "https://github.com/agenticassets/apple-mail-mcp/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["plugin/apple_mail_mcp"]
+packages = ["plugin/apple_mail_mcp", "plugin/ui"]
 
 [tool.hatch.build.targets.sdist]
 include = ["plugin/apple_mail_mcp/**"]

@@ -7,6 +7,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -28,6 +29,36 @@ def _read_project_version() -> str:
     if not match:
         _fail("pyproject.toml: missing [project].version")
     return match.group(1)
+
+
+def _read_project_name() -> str:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    block = re.search(r"^\[project\]\s*$([\s\S]*?)(?=^\[|\Z)", text, re.M)
+    if not block:
+        _fail("pyproject.toml: missing [project] section")
+    match = re.search(r'^name\s*=\s*["\']([^"\']+)["\']', block.group(1), re.M)
+    if not match:
+        _fail("pyproject.toml: missing [project].name")
+    return match.group(1)
+
+
+def _read_pyproject_array(section: str, key: str) -> list[str]:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    section_match = re.search(
+        rf"^\[{re.escape(section)}\]\s*$([\s\S]*?)(?=^\[|\Z)",
+        text,
+        re.M,
+    )
+    if not section_match:
+        return []
+    key_match = re.search(
+        rf"^{re.escape(key)}\s*=\s*\[([\s\S]*?)\]",
+        section_match.group(1),
+        re.M,
+    )
+    if not key_match:
+        return []
+    return re.findall(r'["\']([^"\']+)["\']', key_match.group(1))
 
 
 def _json_field(path: Path, dotted: str):
@@ -77,18 +108,297 @@ def _check_tool_count_claim(text: str | None, source: str, actual: int, errors: 
         )
 
 
+def _check_plugin_manifest_contract(errors: list[str]) -> None:
+    """Validate plugin fields that have caused strict install/runtime failures."""
+    plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
+
+    # Cowork/Claude strict validation rejected this field for this plugin. The
+    # commands/ directory is auto-discovered, so declaring it is unnecessary.
+    if "commands" in plugin:
+        errors.append(
+            "plugin.json: unsupported strict-validator field 'commands'; "
+            "rely on commands/ auto-discovery"
+        )
+
+    servers = plugin.get("mcpServers") or {}
+    server = servers.get("apple-mail")
+    if not isinstance(server, dict):
+        errors.append("plugin.json: missing mcpServers.apple-mail")
+        return
+
+    if server.get("command") != "/bin/bash":
+        errors.append("plugin.json mcpServers.apple-mail.command: expected /bin/bash")
+
+    args = server.get("args")
+    if not isinstance(args, list):
+        errors.append("plugin.json mcpServers.apple-mail.args: expected list")
+        return
+    if not args or args[0] != "${CLAUDE_PLUGIN_ROOT}/start_mcp.sh":
+        errors.append(
+            "plugin.json mcpServers.apple-mail.args: first arg must be "
+            "${CLAUDE_PLUGIN_ROOT}/start_mcp.sh"
+        )
+    if "--draft-safe" not in args:
+        errors.append("plugin.json mcpServers.apple-mail.args: missing --draft-safe")
+
+
+def _check_mcpb_runtime_contract(mcpb: dict, errors: list[str]) -> None:
+    """Validate the Desktop bundle starts the same safe wrapper as the plugin."""
+    server = mcpb.get("server") or {}
+    config = server.get("mcp_config") or {}
+
+    if server.get("type") != "python":
+        errors.append("mcpb manifest server.type: expected python")
+
+    entry_point = server.get("entry_point")
+    if not isinstance(entry_point, str) or not entry_point:
+        errors.append("mcpb manifest server.entry_point: expected non-empty string")
+    elif not (ROOT / "plugin" / entry_point).exists():
+        errors.append(f"mcpb manifest server.entry_point: missing plugin/{entry_point}")
+
+    if config.get("command") != "/bin/bash":
+        errors.append("mcpb manifest server.mcp_config.command: expected /bin/bash")
+
+    args = config.get("args")
+    if not isinstance(args, list):
+        errors.append("mcpb manifest server.mcp_config.args: expected list")
+    else:
+        if not args or args[0] != "${__dirname}/start_mcp.sh":
+            errors.append(
+                "mcpb manifest server.mcp_config.args: first arg must be "
+                "${__dirname}/start_mcp.sh"
+            )
+        if "--draft-safe" not in args:
+            errors.append("mcpb manifest server.mcp_config.args: missing --draft-safe")
+
+    env = config.get("env") or {}
+    for key in (
+        "USER_EMAIL_PREFERENCES",
+        "DEFAULT_MAIL_ACCOUNT",
+        "DEFAULT_MAIL_SIGNATURE",
+    ):
+        if key not in env:
+            errors.append(f"mcpb manifest server.mcp_config.env: missing {key}")
+            continue
+        value = env.get(key)
+        if not isinstance(value, str):
+            errors.append(f"mcpb manifest server.mcp_config.env.{key}: expected string")
+            continue
+        for config_key in re.findall(r"\$\{user_config\.([^}]+)\}", value):
+            if config_key not in (mcpb.get("user_config") or {}):
+                errors.append(
+                    f"mcpb manifest server.mcp_config.env.{key}: "
+                    f"unknown user_config.{config_key}"
+                )
+
+
+def _check_marketplace_contract(expected_version: str, errors: list[str]) -> None:
+    """Ensure marketplace source and skill pointers resolve to the plugin."""
+    market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+    plugins = market.get("plugins") or []
+    if not plugins:
+        errors.append("marketplace.json: missing plugins[0]")
+        return
+    plugin_ref = plugins[0]
+
+    source = plugin_ref.get("source")
+    source_path: Path | None = None
+    source_manifest: dict | None = None
+    if not isinstance(source, str):
+        errors.append("marketplace.json plugins[0].source: expected string")
+    elif not source.startswith("./"):
+        errors.append(
+            "marketplace.json plugins[0].source: path must start with ./ "
+            f"(got {source})"
+        )
+    else:
+        source_path = ROOT / source[2:]
+        manifest_path = source_path / ".claude-plugin/plugin.json"
+        if not manifest_path.exists():
+            errors.append(
+                "marketplace.json plugins[0].source: missing "
+                f"{source}/.claude-plugin/plugin.json"
+            )
+        else:
+            source_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    expected_name = (source_manifest or {}).get("name", "missing")
+    if plugin_ref.get("name") != expected_name:
+        errors.append(
+            "marketplace.json plugins[0].name: got "
+            f"'{plugin_ref.get('name')}', expected plugin.json name '{expected_name}'"
+        )
+    if plugin_ref.get("version") != expected_version:
+        errors.append(
+            "marketplace.json plugins[0].version: got "
+            f"'{plugin_ref.get('version')}', expected '{expected_version}'"
+        )
+
+    skills = plugin_ref.get("skills") or []
+    for skill_path in skills:
+        if not isinstance(skill_path, str):
+            errors.append("marketplace.json plugins[0].skills: entries must be strings")
+            continue
+        if not skill_path.startswith("./"):
+            errors.append(
+                "marketplace.json plugins[0].skills: path must start with ./ "
+                f"(got {skill_path})"
+            )
+            continue
+        skill_file = ROOT / skill_path[2:] / "SKILL.md"
+        if not skill_file.exists():
+            errors.append(
+                "marketplace.json plugins[0].skills: missing "
+                f"{skill_path}/SKILL.md"
+            )
+
+
+def _check_server_json_contract(
+    server: dict,
+    *,
+    expected_version: str,
+    project_name: str,
+    errors: list[str],
+) -> None:
+    expected_schema = (
+        "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
+    )
+    if server.get("$schema") != expected_schema:
+        errors.append(f"server.json $schema: expected {expected_schema}")
+
+    packages = server.get("packages") or []
+    if not packages:
+        errors.append("server.json: missing packages[0]")
+        return
+
+    package = packages[0]
+    if package.get("registryType") != "pypi":
+        errors.append("server.json packages[0].registryType: expected pypi")
+    if package.get("identifier") != project_name:
+        errors.append(
+            "server.json packages[0].identifier: got "
+            f"'{package.get('identifier')}', expected '{project_name}'"
+        )
+    if package.get("version") != expected_version:
+        errors.append(
+            "server.json packages[0].version: got "
+            f"'{package.get('version')}', expected '{expected_version}'"
+        )
+    transport = package.get("transport") or {}
+    if transport.get("type") != "stdio":
+        errors.append("server.json packages[0].transport.type: expected stdio")
+
+
+def _requirement_name(requirement: str) -> str:
+    name = re.split(r"[<>=!~;\[]", requirement.strip(), maxsplit=1)[0]
+    return name.lower().replace("_", "-")
+
+
+def _check_python_package_contract(errors: list[str]) -> None:
+    """Ensure PyPI package metadata can run the same shipped runtime paths."""
+    pyproject_deps = {
+        _requirement_name(dep)
+        for dep in _read_pyproject_array("project", "dependencies")
+    }
+    requirements = {
+        _requirement_name(line)
+        for line in (ROOT / "plugin/requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    for dep in sorted(requirements - pyproject_deps):
+        errors.append(
+            "pyproject.toml dependencies: missing runtime dependency "
+            f"{dep} from plugin/requirements.txt"
+        )
+
+    packages = set(
+        _read_pyproject_array("tool.hatch.build.targets.wheel", "packages")
+    )
+    if "plugin/ui" not in packages:
+        errors.append(
+            "pyproject.toml wheel packages: missing plugin/ui for "
+            "inbox_dashboard UI runtime"
+        )
+
+
+def _check_source_syntax(errors: list[str]) -> None:
+    """Catch startup syntax failures before a fresh artifact is shipped."""
+    start_script = ROOT / "plugin/start_mcp.sh"
+    if start_script.exists():
+        result = subprocess.run(
+            ["bash", "-n", str(start_script)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            suffix = f" {detail[-1]}" if detail else ""
+            errors.append(f"plugin/start_mcp.sh: shell syntax error:{suffix}")
+
+    for base in ("plugin/apple_mail_mcp.py", "plugin/apple_mail_mcp", "plugin/ui"):
+        path = ROOT / base
+        paths = [path] if path.is_file() else sorted(path.rglob("*.py")) if path.exists() else []
+        for py_file in paths:
+            rel = py_file.relative_to(ROOT).as_posix()
+            try:
+                compile(py_file.read_text(encoding="utf-8"), rel, "exec")
+            except SyntaxError as exc:
+                errors.append(f"{rel}: python syntax error: {exc.msg} at line {exc.lineno}")
+
+
+def _is_excluded_payload_file(rel: Path) -> bool:
+    excluded_parts = {"venv", "__pycache__"}
+    if any(part in excluded_parts for part in rel.parts):
+        return True
+    if rel.name in {".DS_Store", "CLAUDE.md"}:
+        return True
+    if rel.name == ".env" or rel.name.startswith(".env."):
+        return True
+    if rel.suffix in {".pyc", ".log", ".tmp", ".bak", ".swp"}:
+        return True
+    return False
+
+
+def _tracked_plugin_files(plugin_root: Path) -> list[Path] | None:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--", "plugin"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    rels: list[Path] = []
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        path = Path(raw.decode())
+        try:
+            rel = path.relative_to("plugin")
+        except ValueError:
+            continue
+        full_path = plugin_root / rel
+        if full_path.is_file():
+            rels.append(rel)
+    return rels
+
+
 def _iter_plugin_payload_files() -> list[Path]:
     """Return plugin files expected to be byte-identical in apple-mail-plugin.zip."""
     plugin_root = ROOT / "plugin"
-    excluded_parts = {"venv", "__pycache__"}
+    tracked = _tracked_plugin_files(plugin_root)
+    if tracked is not None:
+        return sorted(rel for rel in tracked if not _is_excluded_payload_file(rel))
+
     files: list[Path] = []
     for path in plugin_root.rglob("*"):
         rel = path.relative_to(plugin_root)
         if path.is_dir():
             continue
-        if any(part in excluded_parts for part in rel.parts):
-            continue
-        if path.name in {".DS_Store", "CLAUDE.md"} or path.suffix == ".pyc":
+        if _is_excluded_payload_file(rel):
             continue
         files.append(rel)
     return sorted(files)
@@ -101,6 +411,8 @@ def _compare_zip_members(
     errors: list[str],
     *,
     require_present: bool = False,
+    exact_members: bool = False,
+    allowed_extra_members: set[str] | None = None,
 ) -> None:
     """Compare selected repo files to their distributable archive members."""
     if not archive.exists():
@@ -110,7 +422,16 @@ def _compare_zip_members(
 
     try:
         with zipfile.ZipFile(archive) as zf:
-            names = set(zf.namelist())
+            all_names = zf.namelist()
+            names = set(all_names)
+            expected_names = {member for _, member in expected}
+            duplicates = sorted(
+                name for name in names if all_names.count(name) > 1
+            )
+            for duplicate in duplicates:
+                errors.append(
+                    f"{label}: duplicate member {duplicate}; rebuild {archive.name}"
+                )
             for source, member in expected:
                 if member not in names:
                     errors.append(f"{label}: missing {member}")
@@ -119,6 +440,18 @@ def _compare_zip_members(
                     errors.append(
                         f"{label}: stale {member}; rebuild {archive.name}"
                     )
+            if exact_members:
+                allowed = allowed_extra_members or set()
+                unexpected = sorted(
+                    name
+                    for name in names - expected_names - allowed
+                    if not name.endswith("/")
+                )
+                if unexpected:
+                    sample = ", ".join(unexpected[:3]) + (
+                        ", ..." if len(unexpected) > 3 else ""
+                    )
+                    errors.append(f"{label}: unexpected {sample}; rebuild {archive.name}")
     except zipfile.BadZipFile:
         errors.append(f"{label}: {archive.name} is not a valid zip archive")
 
@@ -132,7 +465,7 @@ def _check_no_directory_entries(
 
     Why: raw `zip -r .` emits entries whose names end in `/`. The MCPB extractor
     treats those as files and aborts with ENOENT. Always build via `mcpb pack`
-    (or `zip -X` without bare-directory inclusion).
+    (or `zip -X -D` for raw archives).
     """
     if not archive.exists():
         return
@@ -146,7 +479,8 @@ def _check_no_directory_entries(
         errors.append(
             f"{label}: contains {len(offenders)} directory entr"
             f"{'y' if len(offenders) == 1 else 'ies'} ({sample}); "
-            f"rebuild with `mcpb pack` (Claude Desktop installer fails on these)"
+            f"rebuild without directory entries (`zip -D` or `mcpb pack`; "
+            f"Claude/Cowork installers fail on these)"
         )
 
 
@@ -162,7 +496,7 @@ Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/
 | `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**28 tools**) |
 | `start_mcp.sh` | Creates `venv/`, installs `requirements.txt`, execs Python entry |
 | `requirements.txt` | Runtime Python dependencies |
-| `ui/` *(optional)* | MCP Apps dashboard helpers for `inbox_dashboard` |
+| `ui/` | MCP Apps dashboard helpers for `inbox_dashboard` |
 | `skills/` | Bundled Claude Code skills (`SKILL.md` per subdirectory) |
 
 For grouped tool summaries, see the upstream [`README`](https://github.com/agenticassets/apple-mail-mcp#readme).
@@ -232,7 +566,9 @@ def _check_artifact_freshness(
         "apple-mail-plugin.zip",
         errors,
         require_present=require_artifacts,
+        exact_members=True,
     )
+    _check_no_directory_entries(ROOT / "apple-mail-plugin.zip", "apple-mail-plugin.zip", errors)
 
     mcpb = ROOT / f"apple-mail-mcp-v{expected_version}.mcpb"
     mcpb_expected: list[tuple[Path, str]] = [
@@ -258,6 +594,8 @@ def _check_artifact_freshness(
         mcpb.name,
         errors,
         require_present=require_artifacts,
+        exact_members=True,
+        allowed_extra_members={"README.md"},
     )
     _check_no_directory_entries(mcpb, mcpb.name, errors)
     if mcpb.exists():
@@ -276,6 +614,7 @@ def _check_artifact_freshness(
 def main() -> None:
     errors: list[str] = []
     expected_version = _read_project_version()
+    project_name = _read_project_name()
 
     version_checks = [
         (ROOT / "plugin/.claude-plugin/plugin.json", "version", "plugin.json"),
@@ -295,6 +634,7 @@ def main() -> None:
         errors.append("no @mcp.tool registrations found")
 
     plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    _check_plugin_manifest_contract(errors)
     _check_tool_count_claim(plugin.get("description"), "plugin.json description", actual_count, errors)
 
     market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
@@ -308,9 +648,11 @@ def main() -> None:
             actual_count,
             errors,
         )
+    _check_marketplace_contract(expected_version, errors)
 
     mcpb = json.loads((ROOT / "apple-mail-mcpb/manifest.json").read_text(encoding="utf-8"))
     _check_tool_count_claim(mcpb.get("description"), "mcpb manifest description", actual_count, errors)
+    _check_mcpb_runtime_contract(mcpb, errors)
 
     mcpb_names = [tool["name"] for tool in mcpb.get("tools", [])]
     if len(mcpb_names) != actual_count:
@@ -326,6 +668,16 @@ def main() -> None:
         errors.append("registered in code, missing from mcpb: " + ", ".join(only_code))
     if only_mcpb:
         errors.append("present in mcpb tools[], missing from code: " + ", ".join(only_mcpb))
+
+    server = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+    _check_server_json_contract(
+        server,
+        expected_version=expected_version,
+        project_name=project_name,
+        errors=errors,
+    )
+    _check_python_package_contract(errors)
+    _check_source_syntax(errors)
 
     _check_artifact_freshness(
         expected_version,
