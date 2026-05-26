@@ -2,58 +2,26 @@
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
+    fetch_replied_ids,
     inject_preferences,
     escape_applescript,
     run_applescript,
     inbox_mailbox_script,
     date_cutoff_script,
     validate_account_name,
-    replied_ids_script,
 )
 from apple_mail_mcp.constants import (
     NEWSLETTER_PLATFORM_PATTERNS,
     NEWSLETTER_KEYWORD_PATTERNS,
     SCAN_BOUNDS,
-    THREAD_PREFIXES,
 )
-
-
-def _strip_subject_prefixes_script() -> str:
-    """Return AppleScript handler to strip Re:/Fwd:/etc prefixes from a subject."""
-    # Build a list of prefixes to strip
-    prefix_checks = ""
-    for prefix in THREAD_PREFIXES:
-        escaped = escape_applescript(prefix)
-        prefix_checks += f'''
-                ignoring case
-                    if baseSubj starts with "{escaped}" then
-                        set baseSubj to text {len(prefix) + 1} thru -1 of baseSubj
-                        -- trim leading space
-                        repeat while baseSubj starts with " "
-                            set baseSubj to text 2 thru -1 of baseSubj
-                        end repeat
-                        set didStrip to true
-                    end if
-                end ignoring
-'''
-    return f'''
-    on stripPrefixes(subj)
-        set baseSubj to subj
-        set didStrip to true
-        repeat while didStrip
-            set didStrip to false
-            {prefix_checks}
-        end repeat
-        return baseSubj
-    end stripPrefixes
-'''
 
 
 def _newsletter_filter_condition(sender_var: str = "messageSender") -> str:
@@ -72,19 +40,6 @@ def _newsletter_filter_condition(sender_var: str = "messageSender") -> str:
         for k in NEWSLETTER_KEYWORD_PATTERNS
     )
     return f"({platform_checks} or {keyword_checks})"
-
-
-def _strip_subject_prefixes(subject: str) -> str:
-    base = subject.strip()
-    changed = True
-    while changed:
-        changed = False
-        for prefix in THREAD_PREFIXES:
-            if base.casefold().startswith(prefix.casefold()):
-                base = base[len(prefix) :].lstrip()
-                changed = True
-                break
-    return base
 
 
 def _is_noreply_recipient(address: str) -> bool:
@@ -175,6 +130,31 @@ def _normalize_message_id(raw_id: str) -> str:
     return raw_id
 
 
+def _filter_awaiting_reply(
+    *,
+    sent_rows: list[_AwaitingReplySentRow],
+    replied_to_ids: set[str],
+    exclude_noreply: bool,
+    max_results: int,
+) -> list[_AwaitingReplySentRow]:
+    """Apply noreply + already-replied filters; cap to *max_results*."""
+    awaiting: list[_AwaitingReplySentRow] = []
+    for sent_row in sent_rows:
+        if len(awaiting) >= max_results:
+            break
+        if exclude_noreply and _is_noreply_recipient(sent_row.recipient_address):
+            continue
+        mid = (
+            _normalize_message_id(sent_row.internet_message_id)
+            if sent_row.internet_message_id
+            else ""
+        )
+        if mid and mid in replied_to_ids:
+            continue
+        awaiting.append(sent_row)
+    return awaiting
+
+
 def _format_awaiting_reply_results(
     *,
     account: str,
@@ -184,24 +164,18 @@ def _format_awaiting_reply_results(
     exclude_noreply: bool,
     max_results: int,
 ) -> str:
+    awaiting = _filter_awaiting_reply(
+        sent_rows=sent_rows,
+        replied_to_ids=replied_to_ids,
+        exclude_noreply=exclude_noreply,
+        max_results=max_results,
+    )
     lines = [
         "EMAILS AWAITING REPLY",
         f"Account: {account} | Last {days_back} days",
         "========================================",
         "",
     ]
-    awaiting: list[_AwaitingReplySentRow] = []
-    for sent_row in sent_rows:
-        if len(awaiting) >= max_results:
-            break
-        if exclude_noreply and _is_noreply_recipient(sent_row.recipient_address):
-            continue
-        # Normalize the sent message's own Message-ID for lookup.
-        mid = _normalize_message_id(sent_row.internet_message_id) if sent_row.internet_message_id else ""
-        if mid and mid in replied_to_ids:
-            continue
-        awaiting.append(sent_row)
-
     for index, sent_row in enumerate(awaiting, start=1):
         lines.append(f"{index}. {sent_row.subject}")
         lines.append(f"   To: {sent_row.recipient_address}")
@@ -211,6 +185,39 @@ def _format_awaiting_reply_results(
     lines.append("========================================")
     lines.append(f"Found {len(awaiting)} sent email(s) awaiting reply.")
     return "\n".join(lines)
+
+
+def _build_awaiting_reply_json(
+    *,
+    account: str,
+    days_back: int,
+    max_results: int,
+    sent_rows: list[_AwaitingReplySentRow],
+    replied_to_ids: set[str],
+    exclude_noreply: bool,
+) -> Dict[str, Any]:
+    awaiting = _filter_awaiting_reply(
+        sent_rows=sent_rows,
+        replied_to_ids=replied_to_ids,
+        exclude_noreply=exclude_noreply,
+        max_results=max_results,
+    )
+    return {
+        "account": account,
+        "days_back": days_back,
+        "max_results": max_results,
+        "awaiting": [
+            {
+                "subject": row.subject,
+                "recipient": row.recipient_address,
+                "sent_at": row.sent_at,
+                "message_id": row.internet_message_id,
+                "mail_app_id": row.mail_app_id,
+            }
+            for row in awaiting
+        ],
+        "errors": [],
+    }
 
 
 def _build_awaiting_reply_inbox_script(
@@ -346,6 +353,12 @@ def _build_awaiting_reply_sent_script(
     '''
 
 
+def _awaiting_reply_error(message: str, *, output_format: str) -> Union[str, Dict[str, Any]]:
+    if output_format == "json":
+        return {"error": message, "errors": [message], "awaiting": []}
+    return f"Error: {message}"
+
+
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def get_awaiting_reply(
@@ -354,7 +367,8 @@ def get_awaiting_reply(
     exclude_noreply: bool = True,
     max_results: int = 20,
     timeout: Optional[int] = None,
-) -> str:
+    output_format: str = "text",
+) -> Union[str, Dict[str, Any]]:
     """Find sent emails that haven't received a reply yet.
 
     Scans the Sent mailbox for outgoing emails and cross-references with
@@ -369,18 +383,37 @@ def get_awaiting_reply(
         exclude_noreply: Skip emails sent to noreply/no-reply addresses (default: True)
         max_results: Maximum results to return (default: 20)
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
+        output_format: ``"text"`` (default, human-readable) or ``"json"``
+            (returns a structured dict suitable for programmatic use).
 
     Returns:
-        List of sent emails still awaiting a reply with subject, recipient, and date sent
+        Either a formatted text block or a dict ``{"account", "days_back",
+        "max_results", "awaiting": [...], "errors": []}`` depending on
+        *output_format*.
     """
+    if output_format not in {"text", "json"}:
+        return _awaiting_reply_error(
+            f"invalid output_format: {output_format!r} (expected 'text' or 'json')",
+            output_format="text",
+        )
+
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
-        return "Error: No account specified and DEFAULT_MAIL_ACCOUNT is not set"
+        return _awaiting_reply_error(
+            "No account specified and DEFAULT_MAIL_ACCOUNT is not set",
+            output_format=output_format,
+        )
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
     if account_err:
+        if output_format == "json":
+            # ``validate_account_name`` returns either a serialized JSON
+            # ``ToolError`` string or a plain "Error: ..." string. Surface
+            # whichever shape it produced under the JSON ``error`` key so
+            # callers don't have to dual-decode.
+            return {"error": account_err, "errors": [account_err], "awaiting": []}
         return account_err
 
     escaped_account = escape_applescript(account)
@@ -408,30 +441,330 @@ def get_awaiting_reply(
     try:
         inbox_raw = run_applescript(inbox_script, timeout=inbox_timeout)
     except AppleScriptTimeout:
-        return (
-            f"Error: get_awaiting_reply timed out during inbox scan on account '{account}' "
-            f"after {inbox_timeout}s — try increasing timeout or reducing days_back"
+        return _awaiting_reply_error(
+            (
+                f"get_awaiting_reply timed out during inbox scan on account '{account}' "
+                f"after {inbox_timeout}s — try increasing timeout or reducing days_back"
+            ),
+            output_format=output_format,
         )
     try:
         sent_raw = run_applescript(sent_script, timeout=sent_timeout)
     except AppleScriptTimeout:
-        return (
-            f"Error: get_awaiting_reply timed out during sent scan on account '{account}' "
-            f"after {sent_timeout}s — try increasing timeout or reducing days_back"
+        return _awaiting_reply_error(
+            (
+                f"get_awaiting_reply timed out during sent scan on account '{account}' "
+                f"after {sent_timeout}s — try increasing timeout or reducing days_back"
+            ),
+            output_format=output_format,
         )
 
     for raw in (inbox_raw, sent_raw):
         if raw.startswith("Error:"):
+            if output_format == "json":
+                return {"error": raw, "errors": [raw], "awaiting": []}
             return raw
+
+    sent_rows = _parse_awaiting_reply_sent_rows(sent_raw)
+    replied_to_ids = _parse_inbox_replied_ids(inbox_raw)
+
+    if output_format == "json":
+        return _build_awaiting_reply_json(
+            account=account,
+            days_back=days_back,
+            max_results=max_results,
+            sent_rows=sent_rows,
+            replied_to_ids=replied_to_ids,
+            exclude_noreply=exclude_noreply,
+        )
 
     return _format_awaiting_reply_results(
         account=account,
         days_back=days_back,
-        sent_rows=_parse_awaiting_reply_sent_rows(sent_raw),
-        replied_to_ids=_parse_inbox_replied_ids(inbox_raw),
+        sent_rows=sent_rows,
+        replied_to_ids=replied_to_ids,
         exclude_noreply=exclude_noreply,
         max_results=max_results,
     )
+
+
+@dataclass(frozen=True)
+class _NeedsResponseRow:
+    """Structured per-message candidate emitted by the inbox script."""
+
+    message_id: str  # Internet Message-ID (or "" when missing)
+    subject: str
+    sender: str
+    date_str: str
+    is_flagged: bool
+    has_question: bool
+
+
+def _parse_needs_response_inbox_rows(raw: str) -> list[_NeedsResponseRow]:
+    """Parse ``MSG|||...`` lines into ``_NeedsResponseRow`` instances.
+
+    Schema: MSG|||message_id|||subject|||sender|||date_str|||is_flagged|||has_question
+    Booleans are encoded as ``"true"`` / ``"false"``. Malformed rows are
+    skipped silently so a single bad message can't poison the result.
+    """
+    rows: list[_NeedsResponseRow] = []
+    for line in raw.splitlines():
+        if not line.startswith("MSG|||"):
+            continue
+        parts = line.split("|||", 6)
+        if len(parts) != 7:
+            continue
+        rows.append(
+            _NeedsResponseRow(
+                message_id=parts[1],
+                subject=parts[2],
+                sender=parts[3],
+                date_str=parts[4],
+                is_flagged=parts[5].strip().lower() == "true",
+                has_question=parts[6].strip().lower() == "true",
+            )
+        )
+    return rows
+
+
+def _priority_label(*, has_question: bool, is_flagged: bool, already_replied: bool) -> str:
+    """Match the AppleScript priority labeling the legacy tool produced."""
+    if has_question or is_flagged:
+        if has_question and is_flagged:
+            label = "HIGH (flagged + question)"
+        elif is_flagged:
+            label = "HIGH (flagged)"
+        else:
+            label = "MEDIUM (contains question)"
+    else:
+        label = "NORMAL"
+    if already_replied:
+        label = f"[ALREADY REPLIED] {label}"
+    return label
+
+
+def _classify_needs_response_rows(
+    rows: list[_NeedsResponseRow],
+    *,
+    replied_ids: set[str],
+    include_already_replied: bool,
+    max_results: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """Split candidates into (high, normal, skipped_replied_count).
+
+    Each item dict matches the JSON output shape; the text formatter just
+    re-renders the same dicts. The high/normal split mirrors the legacy
+    AppleScript behavior: ``has_question or is_flagged`` -> high.
+    """
+    high: list[dict[str, Any]] = []
+    normal: list[dict[str, Any]] = []
+    skipped = 0
+
+    for row in rows:
+        if len(high) + len(normal) >= max_results:
+            break
+        already_replied = False
+        if row.message_id and replied_ids:
+            already_replied = _normalize_message_id(row.message_id) in replied_ids
+
+        if already_replied and not include_already_replied:
+            skipped += 1
+            continue
+
+        priority = _priority_label(
+            has_question=row.has_question,
+            is_flagged=row.is_flagged,
+            already_replied=already_replied,
+        )
+        entry = {
+            "subject": row.subject,
+            "sender": row.sender,
+            "date": row.date_str,
+            "priority": priority,
+            "already_replied": already_replied,
+            "message_id": row.message_id,
+        }
+        if row.has_question or row.is_flagged:
+            high.append(entry)
+        else:
+            normal.append(entry)
+
+    return high, normal, skipped
+
+
+def _format_needs_response_text(
+    *,
+    account: str,
+    mailbox: str,
+    days_back: int,
+    high: list[dict[str, Any]],
+    normal: list[dict[str, Any]],
+    skipped_replied: int,
+    include_already_replied: bool,
+) -> str:
+    """Render the human-readable output identical to the legacy AppleScript."""
+    lines = [
+        "EMAILS NEEDING RESPONSE",
+        f"Account: {account} | Mailbox: {mailbox} | Last {days_back} days",
+        "========================================",
+        "",
+    ]
+    result_count = 0
+    for entry in (*high, *normal):
+        result_count += 1
+        lines.append(f"{result_count}. [{entry['priority']}] {entry['subject']}")
+        lines.append(f"   From: {entry['sender']}")
+        lines.append(f"   Date: {entry['date']}")
+        lines.append("")
+
+    lines.append("========================================")
+    lines.append(f"Found {result_count} email(s) needing response.")
+    if not include_already_replied and skipped_replied > 0:
+        lines.append(
+            f"Filtered {skipped_replied} already-replied email(s). "
+            "Re-run with include_already_replied=True to see them."
+        )
+    # Trailing newline + return-style separator matched the legacy output.
+    return "\n".join(lines) + "\n"
+
+
+def _build_needs_response_inbox_script(
+    *,
+    escaped_account: str,
+    escaped_mailbox: str,
+    days_back: int,
+    inbox_cap: int,
+    max_results: int,
+    scan_body: bool,
+) -> str:
+    """Return AppleScript that emits one ``MSG|||...`` row per candidate email.
+
+    Filters newsletters/automated senders inline (cheaper than fetching every
+    sender into Python). Does NOT perform replied-detection — that runs as a
+    separate script so the per-message loop is a flat O(N) walk.
+    """
+    newsletter_condition = _newsletter_filter_condition("messageSender")
+    date_check = "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
+    body_scan_block = (
+        """
+                            try
+                                set msgContent to content of aMessage
+                                if length of msgContent > 500 then
+                                    set msgContent to text 1 thru 500 of msgContent
+                                end if
+                                if msgContent contains "?" then set hasQuestion to true
+                            end try
+"""
+        if scan_body
+        else ""
+    )
+    return f'''
+    tell application "Mail"
+        try
+            set targetAccount to account "{escaped_account}"
+
+            try
+                set targetMailbox to mailbox "{escaped_mailbox}" of targetAccount
+            on error
+                if "{escaped_mailbox}" is "INBOX" then
+                    set targetMailbox to mailbox "Inbox" of targetAccount
+                else
+                    error "Mailbox not found: {escaped_mailbox}"
+                end if
+            end try
+
+            {date_cutoff_script(days_back, "cutoffDate")}
+
+            -- Bounded newest-first slice; no `whose` filter to avoid
+            -- materializing deep remote mailboxes.
+            set mailboxMessages to {{}}
+            set mailboxCount to count of messages of targetMailbox
+            if mailboxCount > {inbox_cap} then
+                set mailboxUpperBound to {inbox_cap}
+            else
+                set mailboxUpperBound to mailboxCount
+            end if
+            if mailboxUpperBound > 0 then
+                set mailboxMessages to messages 1 thru mailboxUpperBound of targetMailbox
+            end if
+
+            set outputLines to {{}}
+            set emittedCount to 0
+
+            repeat with aMessage in mailboxMessages
+                if emittedCount >= {max_results} then exit repeat
+                try
+                    set messageDate to date received of aMessage
+                    {date_check}
+
+                    if not (read status of aMessage) then
+                        set messageSender to sender of aMessage
+                        set messageSubject to subject of aMessage
+
+                        -- Newsletter/automated filter stays in AppleScript:
+                        -- shipping every sender back to Python would defeat the
+                        -- point of bounding the scan.
+                        set isNewsletter to false
+                        set isAutomated to false
+                        ignoring case
+                            set isNewsletter to {newsletter_condition}
+                            set isAutomated to (messageSender contains "noreply" or messageSender contains "no-reply" or messageSender contains "donotreply" or messageSender contains "do-not-reply" or messageSender contains "notifications@" or messageSender contains "mailer-daemon" or messageSender contains "postmaster@")
+                        end ignoring
+
+                        if not isNewsletter and not isAutomated then
+                            set hasQuestion to (messageSubject contains "?")
+                            {body_scan_block}
+
+                            set isFlagged to false
+                            try
+                                set isFlagged to flagged status of aMessage
+                            end try
+
+                            -- Internet Message-ID may not be available on every
+                            -- message; emit "" in that case so Python treats it
+                            -- as never-replied.
+                            set inboxMessageId to ""
+                            try
+                                set rawMessageId to message id of aMessage
+                                if rawMessageId is not missing value then
+                                    set inboxMessageId to rawMessageId as string
+                                end if
+                            end try
+
+                            set flagText to "false"
+                            if isFlagged then set flagText to "true"
+                            set questionText to "false"
+                            if hasQuestion then set questionText to "true"
+
+                            set end of outputLines to "MSG|||" & inboxMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText
+                            set emittedCount to emittedCount + 1
+                        end if
+                    end if
+                end try
+            end repeat
+
+            set AppleScript's text item delimiters to linefeed
+            set outputText to outputLines as string
+            set AppleScript's text item delimiters to ""
+            return outputText
+        on error errMsg
+            return "Error: " & errMsg
+        end try
+    end tell
+    '''
+
+
+def _needs_response_error(
+    message: str, *, output_format: str
+) -> Union[str, Dict[str, Any]]:
+    if output_format == "json":
+        return {
+            "error": message,
+            "errors": [message],
+            "high_priority": [],
+            "normal_priority": [],
+        }
+    return f"Error: {message}"
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -445,7 +778,8 @@ def get_needs_response(
     include_already_replied: bool = False,
     check_already_replied: bool = False,
     timeout: Optional[int] = None,
-) -> str:
+    output_format: str = "text",
+) -> Union[str, Dict[str, Any]]:
     """Identify unread emails that likely need a response from you.
 
     Filters out newsletters, automated emails, and noreply senders.
@@ -454,7 +788,9 @@ def get_needs_response(
 
     Replied-detection: scans the Sent mailbox for ``In-Reply-To:`` and
     ``References:`` headers to build a set of Message-IDs the user has
-    replied to. Header-based detection only — no subject-substring matching.
+    replied to, then matches each candidate's Internet Message-ID against
+    that set in Python (O(1) set lookup). Header-based detection only —
+    no subject-substring matching.
 
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal").
@@ -475,245 +811,166 @@ def get_needs_response(
             IMAP downloads and causes timeouts on large inboxes. Enable on
             smaller accounts or when duplicate-reply protection is required.
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
+        output_format: ``"text"`` (default, human-readable) or ``"json"``
+            (returns a structured dict suitable for programmatic use).
 
     Returns:
-        Ranked list of emails likely needing a response, with priority hints
+        Ranked list of emails likely needing a response. Either a formatted
+        text block or a dict ``{"account", "mailbox", "days_back",
+        "max_results", "high_priority": [...], "normal_priority": [...],
+        "skipped_replied_count", "errors"}`` depending on *output_format*.
     """
+    if output_format not in {"text", "json"}:
+        return _needs_response_error(
+            f"invalid output_format: {output_format!r} (expected 'text' or 'json')",
+            output_format="text",
+        )
+
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
-        return "Error: No account specified and DEFAULT_MAIL_ACCOUNT is not set"
+        return _needs_response_error(
+            "No account specified and DEFAULT_MAIL_ACCOUNT is not set",
+            output_format=output_format,
+        )
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
     if account_err:
+        if output_format == "json":
+            return {
+                "error": account_err,
+                "errors": [account_err],
+                "high_priority": [],
+                "normal_priority": [],
+            }
         return account_err
 
     escaped_account = escape_applescript(account)
     escaped_mailbox = escape_applescript(mailbox)
-
-    newsletter_condition = _newsletter_filter_condition("messageSender")
 
     # Cap message collection. Tighter caps keep daily triage under agent
     # budgets; ``INBOX_SHORT`` (30) is the centralized ceiling.
     inbox_cap = min(max(max_results * 2, 20), SCAN_BOUNDS["INBOX_SHORT"])
     sent_cap = 20
 
-    body_scan_block = (
-        """
-                                try
-                                    set msgContent to content of aMessage
-                                    if length of msgContent > 500 then
-                                        set msgContent to text 1 thru 500 of msgContent
-                                    end if
-                                    if msgContent contains "?" then set hasQuestion to true
-                                end try
-"""
-        if scan_body
-        else ""
-    )
-
-    include_replied_flag = "true" if include_already_replied else "false"
-
-    # When check_already_replied=True the script scans both inbox and Sent.
-    # Split the budget: 70% for the main inbox+sent inline scan, 30% reserved
-    # for the AppleScript overhead. This mirrors the get_awaiting_reply pattern.
+    # Budget: when replied-detection is on, the inbox scan gets the bulk
+    # of the wall-clock budget (the Sent scan is bounded and typically
+    # 1–3 s). Mirrors the get_awaiting_reply 60/40 split, but skewed
+    # further toward inbox because the Sent slice here is smaller.
     effective_timeout = timeout if timeout is not None else 120
     if check_already_replied:
-        script_timeout = max(30, int(effective_timeout * 0.7))
+        inbox_timeout = max(30, int(effective_timeout * 0.7))
+        sent_timeout = max(30, int(effective_timeout * 0.3))
     else:
-        script_timeout = effective_timeout
+        inbox_timeout = effective_timeout
+        sent_timeout = effective_timeout  # unused when check_already_replied=False
 
-    replied_builder = (
-        replied_ids_script(
-            account_var="targetAccount",
-            sent_cap=sent_cap,
-            replied_var="repliedIds",
-        )
-        if check_already_replied
-        else "set repliedIds to {}"
+    inbox_script = _build_needs_response_inbox_script(
+        escaped_account=escaped_account,
+        escaped_mailbox=escaped_mailbox,
+        days_back=days_back,
+        inbox_cap=inbox_cap,
+        max_results=max_results,
+        scan_body=scan_body,
     )
 
-    script = f'''
-    tell application "Mail"
-        set outputText to "EMAILS NEEDING RESPONSE" & return
-        set outputText to outputText & "Account: {escaped_account} | Mailbox: {escaped_mailbox} | Last {days_back} days" & return
-        set outputText to outputText & "========================================" & return & return
-
-        {date_cutoff_script(days_back, "cutoffDate")}
-
-        try
-            set targetAccount to account "{escaped_account}"
-
-            -- Get target mailbox
-            try
-                set targetMailbox to mailbox "{escaped_mailbox}" of targetAccount
-            on error
-                if "{escaped_mailbox}" is "INBOX" then
-                    set targetMailbox to mailbox "Inbox" of targetAccount
-                else
-                    error "Mailbox not found: {escaped_mailbox}"
-                end if
-            end try
-
-            -- Build Message-ID + subject reply lookups from Sent. The primary
-            -- check uses In-Reply-To: / References: header parsing so we
-            -- don't depend on fragile subject substring matching.
-            {replied_builder}
-
-            -- Scan a bounded newest-first slice. Do not use a broad `whose`
-            -- filter here; Mail.app can materialize deep remote mailboxes
-            -- before filtering and start large background downloads.
-            set mailboxMessages to {{}}
-            set mailboxCount to count of messages of targetMailbox
-            if mailboxCount > {inbox_cap} then
-                set mailboxUpperBound to {inbox_cap}
-            else
-                set mailboxUpperBound to mailboxCount
-            end if
-            if mailboxUpperBound > 0 then
-                set mailboxMessages to messages 1 thru mailboxUpperBound of targetMailbox
-            end if
-
-            set highPriority to {{}}
-            set normalPriority to {{}}
-            set totalChecked to 0
-            set skippedRepliedCount to 0
-
-            repeat with aMessage in mailboxMessages
-                if (count of highPriority) + (count of normalPriority) >= {max_results} then exit repeat
-
-                try
-                    set messageDate to date received of aMessage
-                    {"if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""}
-
-                    -- The whose-filter already restricted to unread, but keep
-                    -- a defensive check for the fallback path.
-                    if not (read status of aMessage) then
-                        set messageSender to sender of aMessage
-                        set messageSubject to subject of aMessage
-
-                        -- Filter out newsletters and automated senders.
-                        -- A4c: `ignoring case` covers both checks at once
-                        -- without a per-message shell-out.
-                        set isNewsletter to false
-                        set isAutomated to false
-                        ignoring case
-                            set isNewsletter to {newsletter_condition}
-                            set isAutomated to (messageSender contains "noreply" or messageSender contains "no-reply" or messageSender contains "donotreply" or messageSender contains "do-not-reply" or messageSender contains "notifications@" or messageSender contains "mailer-daemon" or messageSender contains "postmaster@")
-                        end ignoring
-
-                        if not isNewsletter and not isAutomated then
-                            -- Primary check: Internet Message-ID match against
-                            -- replies in Sent. Wrapped in try because not every
-                            -- Mail.app message exposes `message id` reliably.
-                            set alreadyReplied to false
-                            try
-                                set inboxMessageId to message id of aMessage
-                                if inboxMessageId is not missing value and inboxMessageId is not "" then
-                                    set normalizedInboxId to inboxMessageId as string
-                                    if normalizedInboxId does not start with "<" then
-                                        set normalizedInboxId to "<" & normalizedInboxId & ">"
-                                    end if
-                                    repeat with repliedRef in repliedIds
-                                        if (repliedRef as string) is normalizedInboxId then
-                                            set alreadyReplied to true
-                                            exit repeat
-                                        end if
-                                    end repeat
-                                end if
-                            end try
-
-                            set keepThisEmail to true
-                            if alreadyReplied and not {include_replied_flag} then
-                                set keepThisEmail to false
-                                set skippedRepliedCount to skippedRepliedCount + 1
-                            end if
-
-                            if keepThisEmail then
-                                -- Determine priority
-                                set hasQuestion to (messageSubject contains "?")
-                                {body_scan_block}
-
-                                set isFlagged to false
-                                try
-                                    set isFlagged to flagged status of aMessage
-                                end try
-
-                                set priorityLabel to ""
-                                if hasQuestion or isFlagged then
-                                    if hasQuestion and isFlagged then
-                                        set priorityLabel to "HIGH (flagged + question)"
-                                    else if isFlagged then
-                                        set priorityLabel to "HIGH (flagged)"
-                                    else
-                                        set priorityLabel to "MEDIUM (contains question)"
-                                    end if
-                                else
-                                    set priorityLabel to "NORMAL"
-                                end if
-
-                                if alreadyReplied then
-                                    set priorityLabel to "[ALREADY REPLIED] " & priorityLabel
-                                end if
-
-                                set emailEntry to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & priorityLabel
-                                if hasQuestion or isFlagged then
-                                    set end of highPriority to emailEntry
-                                else
-                                    set end of normalPriority to emailEntry
-                                end if
-                            end if
-                        end if
-                    end if
-                end try
-            end repeat
-
-            -- Format output: high priority first, then normal
-            set resultCount to 0
-            repeat with entry in highPriority
-                set resultCount to resultCount + 1
-                set AppleScript's text item delimiters to "|||"
-                set parts to text items of entry
-                set AppleScript's text item delimiters to ""
-                set outputText to outputText & resultCount & ". [" & item 4 of parts & "] " & item 1 of parts & return
-                set outputText to outputText & "   From: " & item 2 of parts & return
-                set outputText to outputText & "   Date: " & item 3 of parts & return & return
-            end repeat
-
-            repeat with entry in normalPriority
-                set resultCount to resultCount + 1
-                set AppleScript's text item delimiters to "|||"
-                set parts to text items of entry
-                set AppleScript's text item delimiters to ""
-                set outputText to outputText & resultCount & ". [" & item 4 of parts & "] " & item 1 of parts & return
-                set outputText to outputText & "   From: " & item 2 of parts & return
-                set outputText to outputText & "   Date: " & item 3 of parts & return & return
-            end repeat
-
-            set outputText to outputText & "========================================" & return
-            set outputText to outputText & "Found " & resultCount & " email(s) needing response." & return
-            if not {include_replied_flag} and skippedRepliedCount > 0 then
-                set outputText to outputText & "Filtered " & skippedRepliedCount & " already-replied email(s). Re-run with include_already_replied=True to see them." & return
-            end if
-
-        on error errMsg
-            return "Error: " & errMsg
-        end try
-
-        return outputText
-    end tell
-
-    {_strip_subject_prefixes_script()}
-    '''
-
     try:
-        return run_applescript(script, timeout=script_timeout)
+        inbox_raw = run_applescript(inbox_script, timeout=inbox_timeout)
     except AppleScriptTimeout:
-        return (
-            f"Error: get_needs_response timed out on account '{account}' after "
-            f"{script_timeout}s — try increasing timeout or reducing days_back"
+        return _needs_response_error(
+            (
+                f"get_needs_response timed out on account '{account}' after "
+                f"{inbox_timeout}s — try increasing timeout or reducing days_back"
+            ),
+            output_format=output_format,
         )
+
+    if inbox_raw.startswith("Error:"):
+        if output_format == "json":
+            return {
+                "error": inbox_raw,
+                "errors": [inbox_raw],
+                "high_priority": [],
+                "normal_priority": [],
+            }
+        return inbox_raw
+
+    # Replied set: fetched via core helper which routes through this module's
+    # ``run_applescript`` symbol via the injected runner so tests patching
+    # ``apple_mail_mcp.tools.smart_inbox.run_applescript`` see the call.
+    # When check_already_replied=False the set stays empty and the inbox
+    # script is the only AppleScript invocation.
+    if check_already_replied:
+        replied_ids: set[str] = fetch_replied_ids(
+            account,
+            sent_cap=sent_cap,
+            timeout=sent_timeout,
+            runner=run_applescript,
+        )
+    else:
+        replied_ids = set()
+
+    rows = _parse_needs_response_inbox_rows(inbox_raw)
+    high, normal, skipped_replied = _classify_needs_response_rows(
+        rows,
+        replied_ids=replied_ids,
+        include_already_replied=include_already_replied,
+        max_results=max_results,
+    )
+
+    if output_format == "json":
+        return {
+            "account": account,
+            "mailbox": mailbox,
+            "days_back": days_back,
+            "max_results": max_results,
+            "high_priority": high,
+            "normal_priority": normal,
+            "skipped_replied_count": skipped_replied,
+            "errors": [],
+        }
+
+    return _format_needs_response_text(
+        account=account,
+        mailbox=mailbox,
+        days_back=days_back,
+        high=high,
+        normal=normal,
+        skipped_replied=skipped_replied,
+        include_already_replied=include_already_replied,
+    )
+
+
+def _top_senders_error(
+    message: str,
+    *,
+    output_format: str,
+    account: Optional[str] = None,
+    mailbox: Optional[str] = None,
+    days_back: Optional[int] = None,
+    top_n: Optional[int] = None,
+    group_by_domain: Optional[bool] = None,
+    error_code: str = "error",
+) -> Union[str, Dict[str, Any]]:
+    if output_format == "json":
+        payload: Dict[str, Any] = {
+            "error": error_code,
+            "errors": [message],
+            "senders": [],
+        }
+        if account is not None:
+            payload["account"] = account
+        if mailbox is not None:
+            payload["mailbox"] = mailbox
+        if days_back is not None:
+            payload["days_back"] = days_back
+        if top_n is not None:
+            payload["top_n"] = top_n
+        if group_by_domain is not None:
+            payload["group_by_domain"] = group_by_domain
+        return payload
+    return f"Error: {message}"
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -724,6 +981,7 @@ def get_top_senders(
     days_back: int = 30,
     top_n: int = 10,
     group_by_domain: bool = False,
+    output_format: str = "text",
     timeout: Optional[int] = None,
 ) -> Union[str, Dict[str, Any]]:
     """Analyse a mailbox to find the most frequent senders.
@@ -740,38 +998,72 @@ def get_top_senders(
             unbounded sweeps through ``full_inbox_export``.
         top_n: Number of top senders to return (default: 10)
         group_by_domain: Group results by domain instead of individual sender (default: False)
+        output_format: ``"text"`` (default, human-readable) or ``"json"``
+            (structured dict with stable keys + ``errors[]``).
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
 
     Returns:
-        Ranked list of senders (or domains) with email counts
+        Ranked list of senders (or domains) with email counts. Text by
+        default; a dict with keys ``{account, mailbox, days_back, top_n,
+        group_by_domain, senders, total_analysed, mailbox_count,
+        unique_senders, scan_cap, errors}`` when ``output_format='json'``.
     """
-    if days_back <= 0:
-        return serialize_tool_error(
-            ToolError(
-                code="UNBOUNDED_SCAN_REQUIRED",
-                message=(
-                    "get_top_senders refuses to scan without days_back; "
-                    "pass days_back=7 or 30"
-                ),
-                remediation={
-                    "preferred": "Pass days_back=7 or 30",
-                    "fallback_tool": "full_inbox_export",
-                    "fallback_tool_args": {
-                        "account": account,
-                        "mailbox": mailbox,
-                    },
-                },
-            )
+    if output_format not in {"text", "json"}:
+        return _top_senders_error(
+            f"invalid output_format: {output_format!r} (expected 'text' or 'json')",
+            output_format="text",
         )
+
+    if days_back <= 0:
+        err = ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                "get_top_senders refuses to scan without days_back; "
+                "pass days_back=7 or 30"
+            ),
+            remediation={
+                "preferred": "Pass days_back=7 or 30",
+                "fallback_tool": "full_inbox_export",
+                "fallback_tool_args": {
+                    "account": account,
+                    "mailbox": mailbox,
+                },
+            },
+        )
+        if output_format == "json":
+            payload = err.to_dict()
+            payload.setdefault("errors", [])
+            payload["senders"] = []
+            return payload
+        return serialize_tool_error(err)
 
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
-        return "Error: No account specified and DEFAULT_MAIL_ACCOUNT is not set"
+        return _top_senders_error(
+            "No account specified and DEFAULT_MAIL_ACCOUNT is not set",
+            output_format=output_format,
+            mailbox=mailbox,
+            days_back=days_back,
+            top_n=top_n,
+            group_by_domain=group_by_domain,
+            error_code="account_required",
+        )
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
     if account_err:
+        if output_format == "json":
+            return {
+                "error": "account_not_found",
+                "errors": [account_err],
+                "account": account,
+                "mailbox": mailbox,
+                "days_back": days_back,
+                "top_n": top_n,
+                "group_by_domain": group_by_domain,
+                "senders": [],
+            }
         return account_err
 
     escaped_account = escape_applescript(account)
@@ -888,13 +1180,29 @@ def get_top_senders(
         raw = run_applescript(script, timeout=timeout)
     except AppleScriptTimeout:
         wait_s = timeout if timeout is not None else 120
-        return (
-            f"Error: get_top_senders timed out on account '{account}' after "
-            f"{wait_s}s — try increasing timeout or reducing days_back"
+        return _top_senders_error(
+            f"get_top_senders timed out on account '{account}' after "
+            f"{wait_s}s — try increasing timeout or reducing days_back",
+            output_format=output_format,
+            account=account,
+            mailbox=mailbox,
+            days_back=days_back,
+            top_n=top_n,
+            group_by_domain=group_by_domain,
+            error_code="timeout",
         )
 
     if raw.startswith("ERROR|||"):
-        return f"Error: {raw.split('|||', 1)[1]}"
+        return _top_senders_error(
+            raw.split("|||", 1)[1],
+            output_format=output_format,
+            account=account,
+            mailbox=mailbox,
+            days_back=days_back,
+            top_n=top_n,
+            group_by_domain=group_by_domain,
+            error_code="applescript_error",
+        )
 
     # Parse ROW lines and aggregate in Python (fast Counter vs AppleScript O(n^2)).
     total_analysed = 0
@@ -917,10 +1225,32 @@ def get_top_senders(
                 sender_counts[key] += 1
 
     unique_count = len(sender_counts)
-    entries = sender_counts.most_common(top_n)
-    top_entries = entries
+    top_entries = sender_counts.most_common(top_n)
 
-    # Reproduce the original output format exactly.
+    if output_format == "json":
+        sender_records: List[Dict[str, Any]] = []
+        for key, cnt in top_entries:
+            entry: Dict[str, Any] = {
+                "key": key,
+                "count": cnt,
+            }
+            if total_analysed > 0:
+                entry["percent"] = round((cnt / total_analysed) * 100)
+            sender_records.append(entry)
+        return {
+            "account": account,
+            "mailbox": mailbox,
+            "days_back": days_back,
+            "top_n": top_n,
+            "group_by_domain": group_by_domain,
+            "senders": sender_records,
+            "total_analysed": total_analysed,
+            "mailbox_count": mailbox_count,
+            "unique_senders": unique_count,
+            "scan_cap": scan_cap,
+            "errors": [],
+        }
+
     lines = [
         title_label,
         f"Account: {account} | Mailbox: {mailbox} | Last {days_back} days",

@@ -29,39 +29,58 @@ def _run(coro):
 
 
 class GetNeedsResponseScriptTests(unittest.TestCase):
-    """Verify get_needs_response now emits Message-ID based replied detection."""
+    """Verify get_needs_response uses Message-ID based replied detection.
 
-    def test_script_builds_replied_ids_from_sent_headers(self):
-        captured = {}
+    After the 3.2 refactor the inbox loop is a flat ``MSG|||...`` emitter and
+    replied-matching happens in Python (O(1) set lookup vs AppleScript O(N×M)).
+    These tests pin the new shape: the inbox script must surface
+    ``message id of aMessage`` so Python can do the join, and when
+    ``check_already_replied=True`` a second script (fetched via the shared
+    core helper) must parse In-Reply-To / References from Sent.
+    """
+
+    def test_inbox_script_emits_structured_message_id_rows(self):
+        captured: dict[str, list[str]] = {"scripts": []}
 
         def fake_run(script, timeout=120):
-            captured["script"] = script
-            return "EMAILS NEEDING RESPONSE"
+            captured["scripts"].append(script)
+            return ""
 
         with patch(
             "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
         ):
             smart_inbox_tools.get_needs_response(
-                account="Work", days_back=1, max_results=1
+                account="Work",
+                days_back=1,
+                max_results=1,
+                check_already_replied=True,
             )
 
-        script = captured["script"]
-        # repliedIds variable + In-Reply-To header parsing must be present.
-        self.assertIn("set repliedIds to {}", script)
-        self.assertIn("In-Reply-To:", script)
-        self.assertIn("References:", script)
-        # Inbox message-id lookup uses Mail.app's `message id of aMessage`.
-        self.assertIn("message id of aMessage", script)
+        # Two scripts now: inbox emitter + replied-id probe.
+        self.assertEqual(len(captured["scripts"]), 2)
+        inbox_script, replied_script = captured["scripts"]
+        # Inbox script must surface message-id so Python can do the match.
+        self.assertIn("message id of aMessage", inbox_script)
+        # Inbox emits structured MSG|||... rows (parsed in Python).
+        self.assertIn('"MSG|||"', inbox_script)
+        # Inner repliedIds AppleScript loop is gone — matching is in Python.
+        self.assertNotIn("repeat with repliedRef in repliedIds", inbox_script)
+        # The replied-id probe still does header-based detection.
+        self.assertIn("set repliedIds to {}", replied_script)
+        self.assertIn("In-Reply-To:", replied_script)
+        self.assertIn("References:", replied_script)
         # Subject fallback must NOT be present — header-based only.
-        self.assertNotIn("sentSubjects", script)
-        self.assertNotIn("subject of aSentMessage", script)
+        self.assertNotIn("sentSubjects", inbox_script)
+        self.assertNotIn("sentSubjects", replied_script)
+        self.assertNotIn("subject of aSentMessage", inbox_script)
+        self.assertNotIn("subject of aSentMessage", replied_script)
 
-    def test_include_already_replied_false_skips_and_emits_filter_footer(self):
-        captured = {}
+    def test_check_already_replied_false_does_not_call_sent_script(self):
+        captured: dict[str, list[str]] = {"scripts": []}
 
         def fake_run(script, timeout=120):
-            captured["script"] = script
-            return "ok"
+            captured["scripts"].append(script)
+            return ""
 
         with patch(
             "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
@@ -70,40 +89,72 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
                 account="Work",
                 days_back=1,
                 max_results=5,
-                include_already_replied=False,
+                # check_already_replied default = False.
             )
 
-        script = captured["script"]
-        self.assertIn("set skippedRepliedCount to 0", script)
-        # Skip branch increments the counter and drops the email.
-        self.assertIn("skippedRepliedCount + 1", script)
-        # Footer message references the toggle.
-        self.assertIn("include_already_replied=True", script)
-        # Default-false path uses keep=false to skip.
-        self.assertIn("if alreadyReplied and not false then", script)
+        # Exactly one script: the inbox emitter. No Sent scan.
+        self.assertEqual(len(captured["scripts"]), 1)
+        self.assertNotIn("sentMailbox", captured["scripts"][0])
+
+    def test_include_already_replied_false_skips_replied_emails(self):
+        # Schema: MSG|||message_id|||subject|||sender|||date|||is_flagged|||has_question
+        inbox_raw = (
+            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+        )
+        replied_raw = "<replied-1@example.com>"
+        sequence = [inbox_raw, replied_raw]
+
+        def fake_run(script, timeout=120):
+            return sequence.pop(0) if sequence else ""
+
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
+        ):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=1,
+                max_results=10,
+                include_already_replied=False,
+                check_already_replied=True,
+            )
+
+        self.assertIsInstance(result, str)
+        # The kept email appears; the replied one is filtered out.
+        self.assertIn("Project sync", result)
+        self.assertNotIn("Old thread", result)
+        # Footer references the toggle.
+        self.assertIn("include_already_replied=True", result)
+        # And the count of skipped emails is surfaced.
+        self.assertIn("Filtered 1 already-replied", result)
 
     def test_include_already_replied_true_keeps_and_annotates(self):
-        captured = {}
+        inbox_raw = (
+            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+        )
+        replied_raw = "<replied-1@example.com>"
+        sequence = [inbox_raw, replied_raw]
 
         def fake_run(script, timeout=120):
-            captured["script"] = script
-            return "ok"
+            return sequence.pop(0) if sequence else ""
 
         with patch(
             "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
         ):
-            smart_inbox_tools.get_needs_response(
+            result = smart_inbox_tools.get_needs_response(
                 account="Work",
                 days_back=1,
-                max_results=5,
+                max_results=10,
                 include_already_replied=True,
+                check_already_replied=True,
             )
 
-        script = captured["script"]
-        # When include_already_replied=True, the keep-branch is unconditional.
-        self.assertIn("if alreadyReplied and not true then", script)
-        # The [ALREADY REPLIED] prefix is templated into the script.
-        self.assertIn("[ALREADY REPLIED]", script)
+        self.assertIsInstance(result, str)
+        # Both kept; replied one annotated with the [ALREADY REPLIED] prefix.
+        self.assertIn("Project sync", result)
+        self.assertIn("Old thread", result)
+        self.assertIn("[ALREADY REPLIED]", result)
 
 
 class ListInboxRepliedTests(unittest.TestCase):
