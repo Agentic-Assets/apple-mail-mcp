@@ -658,30 +658,38 @@ class FixCAccountOverviewInboxCaseFallbackTests(unittest.TestCase):
 
 
 class FixDRepliedIdsSubjectCapTests(unittest.TestCase):
-    """Fix D: replied_ids_script must cap subject-fallback reads."""
+    """Fix D (updated): subject-fallback path is entirely removed from replied_ids_script.
 
-    def test_script_contains_both_caps_as_literals(self):
-        from apple_mail_mcp.core import replied_ids_script, REPLIED_HEADER_READ_CAP, REPLIED_SUBJECT_READ_CAP
+    The original capped the subject path; it is now fully gone. These tests
+    assert that the subject path is absent and that only the header-based cap
+    constant remains.
+    """
+
+    def test_script_contains_header_cap_but_no_subject_cap(self):
+        from apple_mail_mcp.core import replied_ids_script, REPLIED_HEADER_READ_CAP
 
         script = replied_ids_script()
         self.assertIn(f"set headerReadCap to {REPLIED_HEADER_READ_CAP}", script)
-        self.assertIn(f"set subjectReadCap to {REPLIED_SUBJECT_READ_CAP}", script)
+        # Subject cap must be completely gone.
+        self.assertNotIn("subjectReadCap", script)
+        self.assertNotIn("subjectReadCount", script)
 
-    def test_subject_read_is_guarded_by_cap(self):
+    def test_script_has_no_subject_of_sent_message(self):
         from apple_mail_mcp.core import replied_ids_script
 
         script = replied_ids_script()
-        # Subject read must be inside a cap check
-        self.assertIn("subjectReadCount < subjectReadCap", script)
-        self.assertIn("set subjectReadCount to subjectReadCount + 1", script)
+        self.assertNotIn("subject of aSentMessage", script)
+        self.assertNotIn("sentSubjects", script)
 
-    def test_constants_are_positive_integers(self):
-        from apple_mail_mcp.core import REPLIED_HEADER_READ_CAP, REPLIED_SUBJECT_READ_CAP
+    def test_only_header_cap_constant_exists(self):
+        import apple_mail_mcp.core as core_module
 
-        self.assertIsInstance(REPLIED_HEADER_READ_CAP, int)
-        self.assertGreater(REPLIED_HEADER_READ_CAP, 0)
-        self.assertIsInstance(REPLIED_SUBJECT_READ_CAP, int)
-        self.assertGreater(REPLIED_SUBJECT_READ_CAP, REPLIED_HEADER_READ_CAP)
+        self.assertIsInstance(core_module.REPLIED_HEADER_READ_CAP, int)
+        self.assertGreater(core_module.REPLIED_HEADER_READ_CAP, 0)
+        self.assertFalse(
+            hasattr(core_module, "REPLIED_SUBJECT_READ_CAP"),
+            "REPLIED_SUBJECT_READ_CAP must not exist; subject fallback is gone",
+        )
 
 
 class FixEAwaitingReplyTimeoutSubdivisionTests(unittest.TestCase):

@@ -52,8 +52,9 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
         self.assertIn("References:", script)
         # Inbox message-id lookup uses Mail.app's `message id of aMessage`.
         self.assertIn("message id of aMessage", script)
-        # Fallback subject list is still built for resilience.
-        self.assertIn("sentSubjects", script)
+        # Subject fallback must NOT be present — header-based only.
+        self.assertNotIn("sentSubjects", script)
+        self.assertNotIn("subject of aSentMessage", script)
 
     def test_include_already_replied_false_skips_and_emits_filter_footer(self):
         captured = {}
@@ -314,6 +315,29 @@ class CoreRepliedIdsScriptTests(unittest.TestCase):
             ids = fetch_replied_ids("Work", sent_cap=50)
 
         self.assertEqual(ids, {"<id-a@example.com>", "<id-b@example.com>"})
+
+    def test_replied_ids_script_has_no_subject_of_sent_message(self):
+        """Regression: subject fallback path must be completely absent."""
+        from apple_mail_mcp.core import replied_ids_script
+
+        script = replied_ids_script()
+        self.assertNotIn("subject of aSentMessage", script)
+        self.assertNotIn("sentSubjects", script)
+        self.assertNotIn("subjectReadCap", script)
+        self.assertNotIn("subjectReadCount", script)
+
+    def test_replied_ids_script_no_subject_read_cap_constant(self):
+        """Regression: REPLIED_SUBJECT_READ_CAP must not exist as a constant."""
+        import apple_mail_mcp.core as core_module
+
+        self.assertFalse(
+            hasattr(core_module, "REPLIED_SUBJECT_READ_CAP"),
+            "REPLIED_SUBJECT_READ_CAP must be removed; subject fallback is gone",
+        )
+        # Header cap still exists.
+        self.assertTrue(hasattr(core_module, "REPLIED_HEADER_READ_CAP"))
+        self.assertIsInstance(core_module.REPLIED_HEADER_READ_CAP, int)
+        self.assertGreater(core_module.REPLIED_HEADER_READ_CAP, 0)
 
 
 if __name__ == "__main__":

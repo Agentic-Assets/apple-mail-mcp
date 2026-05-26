@@ -370,10 +370,15 @@ class SmartInboxPerfTests(unittest.TestCase):
         self.assertIn("content of aMessage", cap.last_script)
 
     def test_get_awaiting_reply_formats_from_parallel_row_payloads(self):
-        inbox_raw = "INBOX|||Re: Need update|||alice@example.com"
+        # New format: inbox emits INBOXHDR rows with In-Reply-To / References.
+        # Sent emits SENT|||mail_app_id|||internet_message_id|||subject|||recipient|||date.
+        # "Need update" sent message has id <need-update@ex.com>; inbox has
+        # an INBOXHDR referencing it — so it should be filtered out.
+        # "Project Alpha" has id <proj-alpha@ex.com>; no inbox reference — stays.
+        inbox_raw = "INBOXHDR|||in-reply-to|||<need-update@ex.com>"
         sent_raw = (
-            "SENT|||Project Alpha|||bob@example.com|||Bob|||<date>\n"
-            "SENT|||Need update|||alice@example.com|||Alice|||<date>"
+            "SENT|||101|||<proj-alpha@ex.com>|||Project Alpha|||bob@example.com|||<date>\n"
+            "SENT|||102|||<need-update@ex.com>|||Need update|||alice@example.com|||<date>"
         )
 
         def fake_run(script, timeout=120):
@@ -394,7 +399,8 @@ class SmartInboxPerfTests(unittest.TestCase):
         self.assertEqual(mock_run.call_count, 2)
         self.assertIn("Project Alpha", result)
         self.assertIn("bob@example.com", result)
-        self.assertNotIn("1. Need update", result)
+        # "Need update" is filtered because inbox references its Message-ID.
+        self.assertNotIn("Need update", result)
 
     def test_get_top_senders_parses_row_lines_and_aggregates(self):
         raw = (
@@ -589,6 +595,89 @@ class Fix3NeedsResponseDefaultsTests(unittest.TestCase):
         # With check_already_replied=True, the Sent mailbox resolve block
         # must appear in the generated script.
         self.assertIn("sentMailbox", cap.last_script)
+
+
+class GetAwaitingReplyMessageIdTests(unittest.TestCase):
+    """Regression tests for the Message-ID based get_awaiting_reply rewrite.
+
+    The old implementation matched on subject substrings; the new one uses
+    In-Reply-To / References headers from inbox messages.
+    """
+
+    ACCOUNT = "Work"
+
+    def _run(self, inbox_raw, sent_raw, **kwargs):
+        def fake_run(script, timeout=120):
+            if "inboxMailbox" in script:
+                return inbox_raw
+            return sent_raw
+
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
+        ):
+            return smart_inbox_tools.get_awaiting_reply(
+                account=self.ACCOUNT,
+                days_back=7,
+                max_results=20,
+                exclude_noreply=False,
+                **kwargs,
+            )
+
+    def test_inbox_in_reply_to_cancels_matching_sent_message(self):
+        """An inbox INBOXHDR In-Reply-To matching a sent Message-ID removes it."""
+        inbox_raw = "INBOXHDR|||in-reply-to|||<abc@example.com>"
+        sent_raw = "SENT|||1|||<abc@example.com>|||Test subject|||bob@example.com|||Mon Jan 1 2026"
+        result = self._run(inbox_raw, sent_raw)
+        self.assertNotIn("Test subject", result)
+        self.assertIn("0 sent email(s) awaiting reply", result)
+
+    def test_inbox_references_header_cancels_matching_sent_message(self):
+        """An inbox References header containing a sent Message-ID removes it."""
+        inbox_raw = "INBOXHDR|||references|||<ref1@host> <abc@example.com> <ref3@host>"
+        sent_raw = "SENT|||1|||<abc@example.com>|||Follow up|||carol@example.com|||Mon Jan 1 2026"
+        result = self._run(inbox_raw, sent_raw)
+        self.assertNotIn("Follow up", result)
+
+    def test_different_message_ids_tracked_independently(self):
+        """Two sent messages with identical subjects but different Message-IDs are independent."""
+        # Only the first is replied-to; the second (same subject) must still appear.
+        inbox_raw = "INBOXHDR|||in-reply-to|||<id-first@example.com>"
+        sent_raw = (
+            "SENT|||1|||<id-first@example.com>|||Same subject|||bob@example.com|||Mon Jan 1 2026\n"
+            "SENT|||2|||<id-second@example.com>|||Same subject|||carol@example.com|||Tue Jan 2 2026"
+        )
+        result = self._run(inbox_raw, sent_raw)
+        # "Same subject" must appear exactly once (for id-second).
+        self.assertIn("Same subject", result)
+        # Only one awaiting.
+        self.assertIn("1 sent email(s) awaiting reply", result)
+
+    def test_no_subject_contains_in_applescripts(self):
+        """The generated AppleScripts must not use 'whose subject contains' for cross-correlation."""
+        captured_scripts = []
+
+        def fake_run(script, timeout=120):
+            captured_scripts.append(script)
+            return ""
+
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
+        ):
+            smart_inbox_tools.get_awaiting_reply(
+                account=self.ACCOUNT, days_back=7, max_results=5
+            )
+
+        self.assertEqual(len(captured_scripts), 2)
+        inbox_script, sent_script = captured_scripts
+        # Neither script should use subject-substring cross-correlation.
+        self.assertNotIn("whose subject contains", inbox_script)
+        self.assertNotIn("whose subject contains", sent_script)
+        self.assertNotIn("subject of aSentMessage", inbox_script)
+        self.assertNotIn("subject of aSentMessage", sent_script)
+        # Inbox script must use INBOXHDR protocol (header extraction).
+        self.assertIn("INBOXHDR|||", inbox_script)
+        # Sent script must emit internet_message_id.
+        self.assertIn("message id of aMessage", sent_script)
 
 
 if __name__ == "__main__":

@@ -11,10 +11,9 @@ from apple_mail_mcp.server import USER_PREFERENCES
 # Performance caps for replied_ids_script
 # ---------------------------------------------------------------------------
 # Full-header reads are expensive on Exchange (one IMAP download each).
-# Subject reads are cheaper but still network I/O on Exchange; cap them
-# more generously.  Internal-only — not exposed as tool parameters.
+# Capped here to avoid per-message IMAP downloads on large Exchange inboxes.
+# Internal-only — not exposed as tool parameters.
 REPLIED_HEADER_READ_CAP = 10
-REPLIED_SUBJECT_READ_CAP = 50
 
 
 def inject_preferences(func):
@@ -516,16 +515,7 @@ def fetch_replied_ids_script(account: str, sent_cap: int = 200) -> str:
     parseable replies.
     """
     escaped_account = escape_applescript(account)
-    # Minimal inline stripPrefixes handler (no-op) — replied_ids_script
-    # references `my stripPrefixes(...)` only for the subjects fallback,
-    # which callers using this entrypoint do not consume. Keep the
-    # handler as a no-op identity to satisfy the reference without
-    # importing constants here.
     return f'''
-    on stripPrefixes(subj)
-        return subj
-    end stripPrefixes
-
     tell application "Mail"
         try
             set targetAccount to account "{escaped_account}"
@@ -607,27 +597,24 @@ def replied_ids_script(
     account_var: str = "targetAccount",
     sent_cap: int = 200,
     replied_var: str = "repliedIds",
-    subjects_var: str = "sentSubjects",
-    strip_prefixes_handler: str = "stripPrefixes",
 ) -> str:
-    """Return AppleScript that builds Message-ID + subject lookup lists from Sent.
+    """Return AppleScript that builds a Message-ID lookup list from Sent.
 
-    Sets two AppleScript variables inside a ``tell application "Mail"`` block:
+    Sets one AppleScript variable inside a ``tell application "Mail"`` block:
 
     - *replied_var* (default ``repliedIds``): list of Internet Message-IDs the
       user has replied to, extracted from ``In-Reply-To:`` and ``References:``
       headers in the Sent mailbox (each token like ``<abc@example.com>``).
-    - *subjects_var* (default ``sentSubjects``): fallback list of stripped
-      subjects from the Sent mailbox, kept for resilience when header
-      extraction fails (e.g. very old Exchange messages).
 
-    The caller must have a handler named *strip_prefixes_handler* (default
-    ``stripPrefixes``) in scope — typically appended via
-    ``_strip_subject_prefixes_script()``.
+    Replied detection is header-based only (Message-ID / In-Reply-To /
+    References). No subject-fallback path exists — subject matching is
+    unreliable and prohibitively expensive on large Exchange inboxes.
 
     Performance:
         - Bounded newest-first slice of *sent_cap* messages (default 200).
         - NO ``whose`` clauses — Mail.app can materialize remote sent mailboxes.
+        - Full-header reads are capped at ``REPLIED_HEADER_READ_CAP`` messages
+          to avoid per-message IMAP downloads on Exchange.
         - Each per-message access is wrapped in ``try`` so one bad message
           doesn't kill the loop.
         - The entire block is wrapped in ``try`` so a missing sent mailbox
@@ -636,7 +623,6 @@ def replied_ids_script(
     sent_resolve = sent_mailbox_resolve_script("sentMailbox", account_var)
     return f'''
             set {replied_var} to {{}}
-            set {subjects_var} to {{}}
             try
                 {sent_resolve}
                 if sentMailbox is not missing value then
@@ -649,12 +635,8 @@ def replied_ids_script(
                     end if
                     -- Limit full-header reads to {REPLIED_HEADER_READ_CAP} messages to avoid
                     -- per-message IMAP downloads on Exchange which cause timeouts.
-                    -- Limit subject-fallback reads to {REPLIED_SUBJECT_READ_CAP} messages
-                    -- (cheaper than headers but still network I/O on Exchange).
                     set headerReadCap to {REPLIED_HEADER_READ_CAP}
                     set headerReadCount to 0
-                    set subjectReadCap to {REPLIED_SUBJECT_READ_CAP}
-                    set subjectReadCount to 0
                     if sentUpperBound > 0 then
                         set sentMessages to messages 1 thru sentUpperBound of sentMailbox
                     end if
@@ -704,16 +686,6 @@ def replied_ids_script(
                                         end if
                                     end if
                                 end repeat
-                            end if
-                            -- Fallback subject collection (capped to avoid unbounded
-                            -- IMAP round-trips on Exchange for remaining messages).
-                            if subjectReadCount < subjectReadCap then
-                                try
-                                    set sentSubj to subject of aSentMessage
-                                    set baseSent to my {strip_prefixes_handler}(sentSubj)
-                                    set end of {subjects_var} to baseSent
-                                    set subjectReadCount to subjectReadCount + 1
-                                end try
                             end if
                         end try
                     end repeat

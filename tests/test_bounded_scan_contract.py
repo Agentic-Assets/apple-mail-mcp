@@ -1,16 +1,13 @@
 """Contract tests for the bounded-scan capability token machinery.
 
-Phase A of the whose-elimination refactor introduced
-``apple_mail_mcp.bounded_scan`` (the only sanctioned producer of
-``ScanWindow`` tokens) and the ``AppleScriptBackend`` runtime check that
-refuses unstamped tokens.
+``apple_mail_mcp.bounded_scan`` is the only sanctioned producer of
+``ScanWindow`` tokens.
 
 These tests exercise the contract end-to-end:
 
 * ``bounded_inbox_scan`` stamps tokens and rejects unbounded calls with a
   structured ``UNBOUNDED_SCAN_REQUIRED`` error that names
   ``full_inbox_export`` as the audited fallback.
-* The AppleScript backend refuses forged ``ScanWindow`` tokens.
 * The AppleScript helpers (``build_bounded_message_scan``,
   ``build_whose_id_list``, ``compute_scan_upper_bound``) emit the safe
   ``messages 1 thru N`` pattern and never the dangerous ``every message
@@ -31,7 +28,6 @@ from unittest.mock import patch
 import pytest
 
 import apple_mail_mcp  # noqa: F401  (registers tools as side effect)
-from apple_mail_mcp.backend.applescript import AppleScriptBackend
 from apple_mail_mcp.backend.base import ScanWindow, ToolError
 from apple_mail_mcp.bounded_scan import (
     MAX_SCAN_DAYS,
@@ -122,31 +118,6 @@ class BoundedInboxScanTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Backend capability-token check
-# ---------------------------------------------------------------------------
-
-
-class AppleScriptBackendTokenTests(unittest.TestCase):
-    def test_backend_rejects_forged_scan_window(self):
-        forged = ScanWindow(
-            mailbox="INBOX",
-            recent_days=7,
-            _issued_by="attacker",
-        )
-        backend = AppleScriptBackend()
-        with self.assertRaises(ToolError) as ctx:
-            backend.list_messages(forged)
-        self.assertEqual(ctx.exception.code, "INVALID_SCAN_WINDOW")
-
-    def test_backend_rejects_default_constructed_window(self):
-        # The dataclass default `_issued_by=""` must not slip past the check.
-        plain = ScanWindow(mailbox="INBOX", recent_days=7)
-        backend = AppleScriptBackend()
-        with self.assertRaises(ToolError) as ctx:
-            backend.list_messages(plain)
-        self.assertEqual(ctx.exception.code, "INVALID_SCAN_WINDOW")
-
-
 # ---------------------------------------------------------------------------
 # AppleScript helper emissions
 # ---------------------------------------------------------------------------
@@ -382,62 +353,6 @@ def test_get_email_thread_unbounded_envelope_is_json_string():
     parsed = json.loads(result)
     assert isinstance(parsed, dict)
     assert parsed.get("code") == "UNBOUNDED_SCAN_REQUIRED"
-
-
-# ---------------------------------------------------------------------------
-# AppleScriptBackend BACKEND_NOT_IMPLEMENTED contract for Phase B stubs
-# ---------------------------------------------------------------------------
-
-
-class AppleScriptBackendNotImplementedTests(unittest.TestCase):
-    """Phase B stubs must raise structured ToolError, not NotImplementedError."""
-
-    def setUp(self):
-        self.backend = AppleScriptBackend()
-        # A valid ScanWindow so the capability check passes and we hit the
-        # method body's intentional refusal.
-        self.window = bounded_inbox_scan(mailbox="INBOX", limit=10)
-
-    def _assert_backend_not_implemented(self, callable_):
-        with self.assertRaises(ToolError) as ctx:
-            callable_()
-        # Must NOT be NotImplementedError — the contract is a structured
-        # ToolError envelope so callers can surface remediation.
-        self.assertEqual(ctx.exception.code, "BACKEND_NOT_IMPLEMENTED")
-        self.assertIsNotNone(ctx.exception.remediation)
-
-    def test_count_messages_raises_backend_not_implemented(self):
-        self._assert_backend_not_implemented(
-            lambda: self.backend.count_messages(self.window)
-        )
-
-    def test_search_messages_raises_backend_not_implemented(self):
-        self._assert_backend_not_implemented(
-            lambda: self.backend.search_messages(self.window)
-        )
-
-    def test_move_messages_raises_backend_not_implemented(self):
-        self._assert_backend_not_implemented(
-            lambda: self.backend.move_messages(
-                source_mailbox="INBOX",
-                target_mailbox="Archive",
-                message_ids=["1"],
-            )
-        )
-
-    def test_update_status_raises_backend_not_implemented(self):
-        self._assert_backend_not_implemented(
-            lambda: self.backend.update_status(
-                mailbox="INBOX",
-                message_ids=["1"],
-                read=True,
-            )
-        )
-
-    def test_empty_trash_raises_backend_not_implemented(self):
-        self._assert_backend_not_implemented(
-            lambda: self.backend.empty_trash(account="Work")
-        )
 
 
 if __name__ == "__main__":

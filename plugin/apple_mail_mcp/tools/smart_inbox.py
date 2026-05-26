@@ -115,40 +115,12 @@ def _sent_mailbox_script(var_name: str, account_var: str) -> str:
 
 
 @dataclass(frozen=True)
-class _AwaitingReplyInboxRow:
-    subject: str
-    sender: str
-
-
-@dataclass(frozen=True)
 class _AwaitingReplySentRow:
+    mail_app_id: str
+    internet_message_id: str
     subject: str
     recipient_address: str
-    recipient_name: str
     sent_at: str
-
-
-def _subjects_likely_match(sent_subject: str, inbox_subject: str) -> bool:
-    sent_base = _strip_subject_prefixes(sent_subject)
-    inbox_base = _strip_subject_prefixes(inbox_subject)
-    sent_fold = sent_base.casefold()
-    inbox_fold = inbox_base.casefold()
-    return inbox_fold in sent_fold or sent_fold in inbox_fold
-
-
-def _inbox_sender_matches_recipient(inbox_sender: str, recipient_address: str) -> bool:
-    return recipient_address.casefold() in inbox_sender.casefold()
-
-
-def _parse_awaiting_reply_inbox_rows(raw: str) -> list[_AwaitingReplyInboxRow]:
-    rows: list[_AwaitingReplyInboxRow] = []
-    for line in raw.splitlines():
-        if not line.startswith("INBOX|||"):
-            continue
-        parts = line.split("|||", 2)
-        if len(parts) == 3:
-            rows.append(_AwaitingReplyInboxRow(subject=parts[1], sender=parts[2]))
-    return rows
 
 
 def _parse_awaiting_reply_sent_rows(raw: str) -> list[_AwaitingReplySentRow]:
@@ -156,31 +128,51 @@ def _parse_awaiting_reply_sent_rows(raw: str) -> list[_AwaitingReplySentRow]:
     for line in raw.splitlines():
         if not line.startswith("SENT|||"):
             continue
-        parts = line.split("|||", 4)
-        if len(parts) == 5:
+        parts = line.split("|||", 5)
+        if len(parts) == 6:
             rows.append(
                 _AwaitingReplySentRow(
-                    subject=parts[1],
-                    recipient_address=parts[2],
-                    recipient_name=parts[3],
-                    sent_at=parts[4],
+                    mail_app_id=parts[1],
+                    internet_message_id=parts[2],
+                    subject=parts[3],
+                    recipient_address=parts[4],
+                    sent_at=parts[5],
                 )
             )
     return rows
 
 
-def _has_reply_in_inbox(
-    sent_row: _AwaitingReplySentRow,
-    inbox_rows: list[_AwaitingReplyInboxRow],
-) -> bool:
-    for inbox_row in inbox_rows:
-        if not _subjects_likely_match(sent_row.subject, inbox_row.subject):
+def _parse_inbox_replied_ids(raw: str) -> set[str]:
+    """Build the set of Message-IDs referenced by inbox In-Reply-To / References headers."""
+    replied: set[str] = set()
+    for line in raw.splitlines():
+        if not line.startswith("INBOXHDR|||"):
             continue
-        if _inbox_sender_matches_recipient(
-            inbox_row.sender, sent_row.recipient_address
-        ):
-            return True
-    return False
+        parts = line.split("|||", 2)
+        if len(parts) < 3:
+            continue
+        field = parts[1]  # "in-reply-to" or "references"
+        value = parts[2].strip()
+        if not value:
+            continue
+        # Extract all <id@host> tokens from the header value.
+        for token in value.split():
+            token = token.strip()
+            if token.startswith("<") and token.endswith(">") and "@" in token:
+                replied.add(token)
+            elif "@" in token and not token.startswith("<"):
+                replied.add("<" + token + ">")
+    return replied
+
+
+def _normalize_message_id(raw_id: str) -> str:
+    """Ensure a Message-ID has angle brackets."""
+    raw_id = raw_id.strip()
+    if not raw_id.startswith("<"):
+        raw_id = "<" + raw_id
+    if not raw_id.endswith(">"):
+        raw_id = raw_id + ">"
+    return raw_id
 
 
 def _format_awaiting_reply_results(
@@ -188,7 +180,7 @@ def _format_awaiting_reply_results(
     account: str,
     days_back: int,
     sent_rows: list[_AwaitingReplySentRow],
-    inbox_rows: list[_AwaitingReplyInboxRow],
+    replied_to_ids: set[str],
     exclude_noreply: bool,
     max_results: int,
 ) -> str:
@@ -204,19 +196,15 @@ def _format_awaiting_reply_results(
             break
         if exclude_noreply and _is_noreply_recipient(sent_row.recipient_address):
             continue
-        if _has_reply_in_inbox(sent_row, inbox_rows):
+        # Normalize the sent message's own Message-ID for lookup.
+        mid = _normalize_message_id(sent_row.internet_message_id) if sent_row.internet_message_id else ""
+        if mid and mid in replied_to_ids:
             continue
         awaiting.append(sent_row)
 
     for index, sent_row in enumerate(awaiting, start=1):
-        if sent_row.recipient_name:
-            display_recip = (
-                f"{sent_row.recipient_name} <{sent_row.recipient_address}>"
-            )
-        else:
-            display_recip = sent_row.recipient_address
         lines.append(f"{index}. {sent_row.subject}")
-        lines.append(f"   To: {display_recip}")
+        lines.append(f"   To: {sent_row.recipient_address}")
         lines.append(f"   Sent: {sent_row.sent_at}")
         lines.append("")
 
@@ -231,6 +219,11 @@ def _build_awaiting_reply_inbox_script(
     inbox_cap: int,
     days_back: int,
 ) -> str:
+    """Return AppleScript that emits In-Reply-To and References headers from inbox messages.
+
+    Uses header-specific extraction (header value of header named "...") rather
+    than reading all headers or subject fields.
+    """
     inbox_date_check = (
         "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
     )
@@ -257,9 +250,22 @@ def _build_awaiting_reply_inbox_script(
                 try
                     set messageDate to date received of aMessage
                     {inbox_date_check}
-                    set msgSubject to subject of aMessage
-                    set msgSender to sender of aMessage
-                    set end of outputLines to "INBOX|||" & msgSubject & "|||" & msgSender
+                    -- Extract In-Reply-To and References headers specifically
+                    -- to avoid reading all headers (expensive on Exchange).
+                    set inReplyTo to ""
+                    set refsHeader to ""
+                    try
+                        set inReplyTo to header value of header named "In-Reply-To" of aMessage
+                    end try
+                    try
+                        set refsHeader to header value of header named "References" of aMessage
+                    end try
+                    if inReplyTo is not "" then
+                        set end of outputLines to "INBOXHDR|||in-reply-to|||" & inReplyTo
+                    end if
+                    if refsHeader is not "" then
+                        set end of outputLines to "INBOXHDR|||references|||" & refsHeader
+                    end if
                 end try
             end repeat
 
@@ -278,6 +284,10 @@ def _build_awaiting_reply_sent_script(
     sent_cap: int,
     days_back: int,
 ) -> str:
+    """Return AppleScript that emits sent message rows with internet_message_id.
+
+    Shape: SENT|||mail_app_id|||internet_message_id|||subject|||recipient|||date_sent
+    """
     sent_date_check = (
         "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
     )
@@ -304,16 +314,26 @@ def _build_awaiting_reply_sent_script(
                 try
                     set messageDate to date sent of aMessage
                     {sent_date_check}
-                    set messageSubject to subject of aMessage
-                    set messageRecipients to every to recipient of aMessage
-                    if (count of messageRecipients) > 0 then
-                        set recipAddr to address of item 1 of messageRecipients
-                        set recipName to ""
-                        try
-                            set recipName to name of item 1 of messageRecipients
-                        end try
-                        set end of outputLines to "SENT|||" & messageSubject & "|||" & recipAddr & "|||" & recipName & "|||" & (messageDate as string)
-                    end if
+                    set mailAppId to ""
+                    try
+                        set mailAppId to id of aMessage as string
+                    end try
+                    set internetMsgId to ""
+                    try
+                        set internetMsgId to message id of aMessage as string
+                    end try
+                    set messageSubject to ""
+                    try
+                        set messageSubject to subject of aMessage
+                    end try
+                    set recipAddr to ""
+                    try
+                        set messageRecipients to every to recipient of aMessage
+                        if (count of messageRecipients) > 0 then
+                            set recipAddr to address of item 1 of messageRecipients
+                        end if
+                    end try
+                    set end of outputLines to "SENT|||" & mailAppId & "|||" & internetMsgId & "|||" & messageSubject & "|||" & recipAddr & "|||" & (messageDate as string)
                 end try
             end repeat
 
@@ -338,8 +358,9 @@ def get_awaiting_reply(
     """Find sent emails that haven't received a reply yet.
 
     Scans the Sent mailbox for outgoing emails and cross-references with
-    the Inbox to see if a reply (matching subject) was received from the
-    same recipient. Useful for follow-up tracking.
+    the Inbox using Message-ID matching (In-Reply-To / References headers)
+    to determine whether a reply has arrived. No subject-substring matching
+    is used. Useful for follow-up tracking.
 
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal").
@@ -407,7 +428,7 @@ def get_awaiting_reply(
         account=account,
         days_back=days_back,
         sent_rows=_parse_awaiting_reply_sent_rows(sent_raw),
-        inbox_rows=_parse_awaiting_reply_inbox_rows(inbox_raw),
+        replied_to_ids=_parse_inbox_replied_ids(inbox_raw),
         exclude_noreply=exclude_noreply,
         max_results=max_results,
     )
@@ -433,9 +454,7 @@ def get_needs_response(
 
     Replied-detection: scans the Sent mailbox for ``In-Reply-To:`` and
     ``References:`` headers to build a set of Message-IDs the user has
-    replied to. This is far more reliable than the legacy subject-substring
-    match, which dropped short or drift-prone subjects. The subject match
-    is kept as a fallback only.
+    replied to. Header-based detection only — no subject-substring matching.
 
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal").
@@ -500,11 +519,9 @@ def get_needs_response(
             account_var="targetAccount",
             sent_cap=sent_cap,
             replied_var="repliedIds",
-            subjects_var="sentSubjects",
-            strip_prefixes_handler="stripPrefixes",
         )
         if check_already_replied
-        else "set repliedIds to {}\n            set sentSubjects to {}"
+        else "set repliedIds to {}"
     )
 
     script = f'''
@@ -596,23 +613,6 @@ def get_needs_response(
                                     end repeat
                                 end if
                             end try
-
-                            -- Fallback subject-substring check (kept for
-                            -- resilience when headers are unavailable).
-                            if not alreadyReplied then
-                                set baseSubject to my stripPrefixes(messageSubject)
-                                ignoring case
-                                    repeat with sentSubj in sentSubjects
-                                        set sentSubjText to sentSubj as string
-                                        if sentSubjText is not "" and baseSubject is not "" then
-                                            if sentSubjText contains baseSubject or baseSubject contains sentSubjText then
-                                                set alreadyReplied to true
-                                                exit repeat
-                                            end if
-                                        end if
-                                    end repeat
-                                end ignoring
-                            end if
 
                             set keepThisEmail to true
                             if alreadyReplied and not {include_replied_flag} then
