@@ -619,13 +619,13 @@ class FixBListInboxIdFallbackTests(unittest.IsolatedAsyncioTestCase):
             return raw_empty_id + "\n" + raw_valid_id
 
         with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
-            result = await inbox_tools.list_inbox_emails(
+            data = await inbox_tools.list_inbox_emails(
                 account="Work", max_emails=5, output_format="json"
             )
 
-        import json as _json
-        data = _json.loads(result)
-        emails = data if isinstance(data, list) else data.get("emails", [])
+        # v3.2.x: JSON path returns a dict with stable shape directly.
+        self.assertIsInstance(data, dict)
+        emails = data["emails"]
         # Only the row with a non-empty id should survive
         self.assertEqual(len(emails), 1)
         self.assertEqual(emails[0]["message_id"], "42")

@@ -804,9 +804,12 @@ class ListInboxEmailsTests(unittest.TestCase):
         with _clear_default_mail_account(), patch(
             "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run
         ):
-            raw = _run(inbox_tools.list_inbox_emails(output_format="json", max_emails=5))
+            payload = _run(
+                inbox_tools.list_inbox_emails(output_format="json", max_emails=5)
+            )
 
-        payload = json.loads(raw)
+        # v3.2.x: JSON path returns a dict directly (no json.loads needed).
+        self.assertIsInstance(payload, dict)
         self.assertIn("emails", payload)
         self.assertIn("errors", payload)
         self.assertEqual(payload["errors"], ["TU"])

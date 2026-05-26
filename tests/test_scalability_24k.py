@@ -204,16 +204,18 @@ class ListInboxAliasTests(unittest.TestCase):
         self.assertIn("unread_only", result)
 
     def test_warnings_attached_to_json_output(self):
+        # v3.2.x: _list_inbox_emails_json returns a dict directly, and the
+        # public tool also returns the dict (no json.dumps). warnings are
+        # attached in place.
         async def fake_json(*a, **k):
-            return json.dumps([{"subject": "x"}])
+            return {"emails": [{"subject": "x"}], "errors": []}
 
         with patch(
             "apple_mail_mcp.tools.inbox._list_inbox_emails_json",
             side_effect=fake_json,
         ):
-            result = self._run(account="Work", limit=2, output_format="json")
+            parsed = self._run(account="Work", limit=2, output_format="json")
 
-        parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
         self.assertIn("warnings", parsed)
         self.assertTrue(

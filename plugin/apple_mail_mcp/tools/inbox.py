@@ -352,7 +352,7 @@ async def list_inbox_emails(
     timeout: Optional[int] = None,
     limit: Optional[int] = None,
     unread_only: Optional[bool] = None,
-) -> str:
+) -> Union[str, Dict[str, Any]]:
     """Defaults to 50 most-recent emails from the default account.
 
     List all emails from inbox across all accounts or a specific account.
@@ -411,12 +411,27 @@ async def list_inbox_emails(
             `include_read=False`.
 
     Returns:
-        Formatted list of emails with subject, sender, date, and read status.
+        Text mode: formatted list of emails with subject, sender, date, and
+        read status (always a ``str``).
+
+        JSON mode (``output_format='json'``): a Python ``dict`` with stable
+        shape ``{"emails": [...], "errors": [...]}``. ``errors`` is the list
+        of account names whose AppleScript probe timed out (empty list when
+        nothing timed out). When deprecated aliases (`limit`, `unread_only`)
+        are used a ``warnings`` key is also present.
+
+        **Breaking change (v3.2.x):** the JSON path previously returned a
+        JSON-encoded ``str`` (sometimes a raw list, sometimes an object). It
+        now always returns a ``dict``. Callers that previously did
+        ``json.loads(result)`` should drop the ``json.loads`` call.
+
+        Refusal errors (``UNBOUNDED_SCAN_REQUIRED``) continue to return a
+        JSON-encoded ``str`` so text-mode and JSON-mode callers see the same
+        shape for that one error path.
+
         When multi-account dispatch encounters per-account timeouts, the
-        response includes the slow account names so the caller can retry
-        them individually. When deprecated aliases (`limit`, `unread_only`)
-        are used, a `WARNING:` line (text mode) or `warnings` field (JSON
-        mode) is included so the caller learns the canonical names.
+        text response includes ``PARTIAL: ... timed out`` and the JSON
+        response surfaces the slow accounts in ``errors``.
     """
 
     if output_format not in {"text", "json"}:
@@ -475,7 +490,12 @@ async def list_inbox_emails(
         account_err = validate_account_name(account, timeout=validation_timeout)
         if account_err:
             if output_format == "json":
-                return account_not_found_json(account, timeout=validation_timeout)
+                # ``account_not_found_json`` returns a JSON-encoded string for
+                # back-compat with other tools; parse to a dict for JSON-mode
+                # callers so they receive the same shape as success paths.
+                return json.loads(
+                    account_not_found_json(account, timeout=validation_timeout)
+                )
             return account_err
 
     # When replied-detection is requested we need the Message-ID per row.
@@ -492,7 +512,7 @@ async def list_inbox_emails(
             flag_replied=flag_replied,
             include_message_id=want_message_id,
         )
-        return _attach_warnings_to_json(body, warnings) if warnings else body
+        return _attach_warnings_to_json(body, warnings)
 
     body = await _list_inbox_emails_text(
         account,
@@ -509,23 +529,24 @@ async def list_inbox_emails(
     return body
 
 
-def _attach_warnings_to_json(body: str, warnings: List[str]) -> str:
-    """Attach a `warnings` list to a JSON-serialized inbox response."""
-    try:
-        parsed = json.loads(body)
-    except (ValueError, TypeError):
+def _attach_warnings_to_json(
+    body: Dict[str, Any], warnings: List[str]
+) -> Dict[str, Any]:
+    """Attach a ``warnings`` list to the JSON-mode inbox response dict.
+
+    Returns *body* unchanged when *warnings* is empty so the stable shape
+    ``{"emails": [...], "errors": [...]}`` is preserved for the common case.
+    Otherwise appends to or sets the ``warnings`` key in place and returns
+    *body*.
+    """
+    if not warnings:
         return body
-    if isinstance(parsed, list):
-        parsed = {"emails": parsed, "warnings": list(warnings)}
-    elif isinstance(parsed, dict):
-        existing = parsed.get("warnings")
-        if isinstance(existing, list):
-            existing.extend(warnings)
-        else:
-            parsed["warnings"] = list(warnings)
+    existing = body.get("warnings")
+    if isinstance(existing, list):
+        existing.extend(warnings)
     else:
-        return body
-    return json.dumps(parsed, indent=2)
+        body["warnings"] = list(warnings)
+    return body
 
 
 def _run_text_one(
@@ -788,11 +809,24 @@ async def _list_inbox_emails_json(
     exclude_replied: bool = False,
     flag_replied: bool = False,
     include_message_id: bool = False,
-) -> str:
-    """Return inbox emails as a JSON string. When include_content is True,
-    each record gains a `content_preview` field. Always returns an object
-    with `emails` and (optionally) `errors` keys so callers can detect
-    partial multi-account responses."""
+) -> Dict[str, Any]:
+    """Return inbox emails as a structured dict.
+
+    Stable shape: ``{"emails": [...], "errors": [...]}`` for both the
+    single-account and multi-account paths. ``errors`` is the list of
+    account names whose probe timed out (empty list when nothing timed
+    out). Account-listing timeouts surface as
+    ``{"emails": [], "errors": ["__account_listing__"]}``.
+
+    When ``include_content`` is True each record gains a ``content_preview``
+    field; when replied detection is requested, records may carry an
+    ``already_replied`` field or be filtered out entirely depending on the
+    flags.
+
+    **Breaking change (v3.2.x):** previously returned a JSON-encoded
+    ``str`` (sometimes a raw list, sometimes a dict). Callers that did
+    ``json.loads(result)`` should drop the ``json.loads``.
+    """
 
     if account:
         try:
@@ -805,26 +839,26 @@ async def _list_inbox_emails_json(
                 timeout,
                 include_message_id,
             )
-            emails = _parse_pipe_delimited_emails(raw, has_message_id=include_message_id)
-            if include_message_id and (exclude_replied or flag_replied):
-                replied = await asyncio.to_thread(fetch_replied_ids, account, 200, timeout)
-                emails = _apply_replied_to_emails(
-                    emails,
-                    replied,
-                    exclude_replied=exclude_replied,
-                    flag_replied=flag_replied,
-                )
-            return json.dumps(emails, indent=2)
         except AppleScriptTimeout:
-            return json.dumps({"emails": [], "errors": [account]}, indent=2)
+            return {"emails": [], "errors": [account]}
+        emails = _parse_pipe_delimited_emails(raw, has_message_id=include_message_id)
+        if include_message_id and (exclude_replied or flag_replied):
+            replied = await asyncio.to_thread(fetch_replied_ids, account, 200, timeout)
+            emails = _apply_replied_to_emails(
+                emails,
+                replied,
+                exclude_replied=exclude_replied,
+                flag_replied=flag_replied,
+            )
+        return {"emails": emails, "errors": []}
 
     try:
         accounts = await asyncio.to_thread(_list_mail_accounts, timeout)
     except AppleScriptTimeout:
-        return json.dumps({"emails": [], "errors": ["__account_listing__"]}, indent=2)
+        return {"emails": [], "errors": ["__account_listing__"]}
 
     if not accounts:
-        return json.dumps({"emails": []}, indent=2)
+        return {"emails": [], "errors": []}
 
     async def run_one(acct: str):
         try:
@@ -866,10 +900,7 @@ async def _list_inbox_emails_json(
             )
         combined.extend(parsed)
 
-    payload: Dict[str, Any] = {"emails": combined}
-    if errors:
-        payload["errors"] = errors
-    return json.dumps(payload, indent=2)
+    return {"emails": combined, "errors": errors}
 
 
 # ---------------------------------------------------------------------------

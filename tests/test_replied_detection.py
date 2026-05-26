@@ -203,18 +203,18 @@ class ListInboxRepliedTests(unittest.TestCase):
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run
         ):
-            response = json.loads(
-                _run(
-                    inbox_tools.list_inbox_emails(
-                        account="Work",
-                        max_emails=10,
-                        output_format="json",
-                        exclude_replied=True,
-                    )
+            response = _run(
+                inbox_tools.list_inbox_emails(
+                    account="Work",
+                    max_emails=10,
+                    output_format="json",
+                    exclude_replied=True,
                 )
             )
 
-        subjects = [r["subject"] for r in response]
+        # v3.2.x: JSON path returns a dict directly.
+        self.assertIsInstance(response, dict)
+        subjects = [r["subject"] for r in response["emails"]]
         self.assertEqual(subjects, ["S1"])
 
     def test_flag_replied_annotates_json_with_already_replied_field(self):
@@ -232,19 +232,21 @@ class ListInboxRepliedTests(unittest.TestCase):
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run
         ):
-            response = json.loads(
-                _run(
-                    inbox_tools.list_inbox_emails(
-                        account="Work",
-                        max_emails=10,
-                        output_format="json",
-                        exclude_replied=False,
-                        flag_replied=True,
-                    )
+            response = _run(
+                inbox_tools.list_inbox_emails(
+                    account="Work",
+                    max_emails=10,
+                    output_format="json",
+                    exclude_replied=False,
+                    flag_replied=True,
                 )
             )
 
-        marked = {r["subject"]: r.get("already_replied", False) for r in response}
+        # v3.2.x: JSON path returns a dict directly.
+        self.assertIsInstance(response, dict)
+        marked = {
+            r["subject"]: r.get("already_replied", False) for r in response["emails"]
+        }
         self.assertEqual(marked, {"S1": False, "S2": True})
 
 

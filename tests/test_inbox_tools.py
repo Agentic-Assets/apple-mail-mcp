@@ -47,6 +47,8 @@ class InboxToolTests(unittest.TestCase):
     def test_json_list_inbox_can_include_content_preview(self):
         # The JSON-format inbox listing should request a content preview when
         # include_content=True and parse the pipe-delimited script output.
+        # JSON mode now returns a dict with stable shape {emails, errors};
+        # callers must read .emails rather than treating the result as a list.
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -55,19 +57,19 @@ class InboxToolTests(unittest.TestCase):
             return "Subject|||sender@example.com|||Thu, Jan 1, 2026|||false|||Work|||1|||Hello | world"
 
         with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
-            response = json.loads(
-                _run(
-                    inbox_tools.list_inbox_emails(
-                        account="Work",
-                        max_emails=1,
-                        include_content=True,
-                        output_format="json",
-                    )
+            response = _run(
+                inbox_tools.list_inbox_emails(
+                    account="Work",
+                    max_emails=1,
+                    include_content=True,
+                    output_format="json",
                 )
             )
 
+        self.assertIsInstance(response, dict)
+        self.assertEqual(response["errors"], [])
         self.assertIn("content of aMessage", captured["script"])
-        self.assertEqual(response[0]["content_preview"], "Hello | world")
+        self.assertEqual(response["emails"][0]["content_preview"], "Hello | world")
 
     def test_parser_preserves_delimiters_in_content_preview(self):
         # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||content_preview
@@ -177,22 +179,24 @@ class ListInboxEmailsMessageIdTests(unittest.TestCase):
 
     def test_json_output_always_has_message_id(self):
         # Schema now always includes mail_app_id at field[5].
+        # JSON mode returns a dict {emails, errors}.
         raw = "Subject|||sender@example.com|||Date|||false|||Work|||42"
 
         with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=raw):
-            response = json.loads(
-                _run(
-                    inbox_tools.list_inbox_emails(
-                        account="Work",
-                        max_emails=1,
-                        output_format="json",
-                    )
+            response = _run(
+                inbox_tools.list_inbox_emails(
+                    account="Work",
+                    max_emails=1,
+                    output_format="json",
                 )
             )
 
-        self.assertEqual(len(response), 1)
-        self.assertIn("message_id", response[0])
-        self.assertEqual(response[0]["message_id"], "42")
+        self.assertIsInstance(response, dict)
+        emails = response["emails"]
+        self.assertEqual(len(emails), 1)
+        self.assertIn("message_id", emails[0])
+        self.assertEqual(emails[0]["message_id"], "42")
+        self.assertEqual(response["errors"], [])
 
     def test_json_script_always_emits_mail_app_id(self):
         captured = {}

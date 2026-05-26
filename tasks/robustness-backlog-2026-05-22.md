@@ -44,7 +44,13 @@ Verification target: `.venv/bin/apple-mail perf-test --include-analysis --allow-
 
 - [ ] `inbox_dashboard` -> dict JSON (not string).
 - [ ] Smart inbox tools -> structured JSON + `errors[]`.
-- [ ] `list_inbox_emails` JSON -> `{emails, errors}` (breaking; document if changed).
+- [x] `list_inbox_emails` JSON -> `{emails, errors}` (breaking; document if changed).
+      JSON path now always returns a Python `dict` (not a JSON string) with stable
+      shape `{"emails": [...], "errors": [...]}`. `errors` is always present
+      (empty list when no per-account timeout). Account-not-found JSON returns a
+      dict in JSON mode too. `UNBOUNDED_SCAN_REQUIRED` refusals stay as a JSON
+      string for parity with text-mode callers. Callers that previously did
+      `json.loads(result)` should drop the call.
 - [ ] Add generated-wrapper `--raw` examples for `get-inbox-overview` and wrapper commands with poor flag discovery.
 
 ## Phase 4 — Ship hygiene

@@ -36,11 +36,13 @@ class AccountValidationTests(unittest.TestCase):
             self.assertIn("account_not_found", err)
 
     def test_list_inbox_unknown_account_returns_fast_error(self):
+        # v3.2.x: account_not_found in JSON mode now returns a dict directly
+        # (parity with the success-path {emails, errors} shape).
         with patch(
             "apple_mail_mcp.tools.inbox.validate_account_name",
             return_value="Error: account_not_found — 'Missing' is not configured in Mail. Available accounts: Work",
         ):
-            result = _run(
+            payload = _run(
                 inbox_tools.list_inbox_emails(
                     account="Missing",
                     max_emails=5,
@@ -48,7 +50,7 @@ class AccountValidationTests(unittest.TestCase):
                 )
             )
 
-        payload = json.loads(result)
+        self.assertIsInstance(payload, dict)
         self.assertEqual(payload["error"], "account_not_found")
         self.assertEqual(payload["account"], "Missing")
 
