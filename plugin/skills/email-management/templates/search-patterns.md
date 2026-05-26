@@ -757,9 +757,10 @@ filtered_search = search_emails(
    )
    ```
 
-3. **Use thread search for conversations**
+3. **Use message-id thread lookup for conversations**
    ```python
-   get_email_thread(subject_keyword="discussion topic")
+   results = search_emails(subject_keyword="discussion topic", limit=5)
+   get_email_thread(message_id=results["emails"][0]["message_id"])
    ```
 
 ## Quick Reference Table
@@ -768,7 +769,7 @@ filtered_search = search_emails(
 |-------------|----------|
 | Quick subject search | `search_emails(subject_keyword="...", include_content=True)` |
 | Advanced filtering | `search_emails(...)` |
-| View conversation | `get_email_thread(subject_keyword="...")` |
+| View conversation | `search_emails(...)` → `get_email_thread(message_id="...")`; use subject lookup only when no id is available |
 | Find by sender | `search_emails(sender="...")` |
 | Find by date | `search_emails(date_from="...", date_to="...")` |
 | Find unread | `search_emails(read_status="unread")` |

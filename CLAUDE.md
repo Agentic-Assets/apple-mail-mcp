@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**28 tools**, **355 tests + 30 subtests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Claude Code plugin (`plugin/`), and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.claude-plugin/marketplace.json`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**28 tools**, **367 tests + 30 subtests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Claude Code plugin (`plugin/`), and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.claude-plugin/marketplace.json`.
 
 ## Agent orchestration (required)
 
@@ -51,7 +51,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/pytest tests/                    # 355 tests + 30 subtests
+.venv/bin/pytest tests/                    # 367 tests + 30 subtests
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```
@@ -64,7 +64,7 @@ python3 -m venv .venv && .venv/bin/pip install -e . pytest
 - `server.json` → top-level + `packages[0].version`
 - `apple-mail-mcpb/manifest.json` → `version`
 
-Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. No repo lint config — don't add without asking.
+Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. Before shipping, run `bash tools/dev-check.sh release`; the validator enforces exact plugin zip/MCPB payloads, package deps/packages, install contracts, source syntax, and artifact freshness. No repo lint config — don't add without asking.
 
 ## Related folders
 

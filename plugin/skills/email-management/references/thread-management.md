@@ -4,7 +4,7 @@ Apple Mail does not expose true conversation threads to AppleScript. The MCP ser
 
 ## Tool
 
-`get_email_thread(subject_keyword="...", account="...", mailbox="All")` returns all messages whose normalized subject matches the keyword, sorted chronologically.
+`get_email_thread(message_id="...", account="...")` returns the reconstructed conversation around a known Mail message id. Use `subject_keyword` only as a fallback when no id is available.
 
 ## When To Use
 
@@ -17,14 +17,15 @@ Apple Mail does not expose true conversation threads to AppleScript. The MCP ser
 ### Read a conversation in order
 
 ```text
-get_email_thread(subject_keyword="Q2 planning")
+results = search_emails(subject_keyword="Q2 planning", limit=5)
+get_email_thread(message_id=results["emails"][0]["message_id"])
 ```
 
 The result is already chronological. Read top to bottom for context.
 
 ### Archive a resolved thread
 
-1. `get_email_thread(subject_keyword="...")` to surface every related message.
+1. `search_emails(...)` to identify the target message id, then `get_email_thread(message_id="...")` to surface related messages.
 2. Confirm the count and date range with the user.
 3. `move_email(subject_keyword="...", to_mailbox="Archive/2026", max_moves=N)` where N is the confirmed count plus a small buffer.
 

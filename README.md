@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **337** unit tests + **30 subtests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **367** unit tests + **30 subtests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -73,8 +73,8 @@ If you must build the zip by hand, zip from **inside** `plugin/` so `.claude-plu
 
 ```bash
 cd /path/to/apple-mail-mcp/plugin
-zip -rq -X ../apple-mail-plugin.zip . \
-  -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store'
+zip -rq -X -D ../apple-mail-plugin.zip . \
+  -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store' 'CLAUDE.md' '*/CLAUDE.md'
 ```
 
 **Important:** Apple Mail MCP requires **macOS Mail.app** on the host Mac (`start_mcp.sh` → AppleScript). Cowork's Linux VM cannot run Mail directly; the plugin MCP server must execute on your Mac host. If tools fail after upload, use the **Claude Code CLI** install or the **Desktop `.mcpb`** path below instead.
@@ -444,7 +444,7 @@ The plugin MCP server starts with **`--draft-safe`** by default (see `plugin/.cl
 
 - macOS with Apple Mail configured
 - Python 3.10+
-- `fastmcp>=3.1.0,<4` (+ optional `mcp-ui-server` for the `inbox_dashboard` tool)
+- `fastmcp>=3.1.0,<4` and `mcp-ui-server==1.0.0` for the MCP Apps dashboard
 - Claude Desktop or any MCP-compatible client
 - Mail.app permissions: Automation + Mail Data Access (grant in **System Settings > Privacy & Security > Automation**)
 
@@ -493,7 +493,7 @@ MIT -- see [LICENSE](LICENSE).
 
 ## Links
 
-- [Changelog](CHANGELOG.md)
+- [Releases](https://github.com/agenticassets/apple-mail-mcp/releases)
 - [Issues](https://github.com/agenticassets/apple-mail-mcp/issues)
 - [Discussions](https://github.com/agenticassets/apple-mail-mcp/discussions)
 - [FastMCP](https://github.com/jlowin/fastmcp)

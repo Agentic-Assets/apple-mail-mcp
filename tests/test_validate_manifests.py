@@ -1,9 +1,11 @@
 """Tests for tools/validate_manifests.py (Phase 1 CI guardrails)."""
 
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 import zipfile
 from pathlib import Path
 
@@ -68,6 +70,282 @@ class ValidateManifestsTests(unittest.TestCase):
             )
 
         self.assertEqual(errors, ["artifact.zip: missing payload/source.txt"])
+
+    def test_compare_zip_members_reports_unexpected_extra_member_when_exact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "source.txt"
+            archive = tmp_path / "artifact.zip"
+            source.write_text("current", encoding="utf-8")
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("payload/source.txt", "current")
+                zf.writestr("payload/stale.txt", "deleted source")
+
+            errors = []
+            validate_manifests._compare_zip_members(
+                archive,
+                [(source, "payload/source.txt")],
+                "artifact.zip",
+                errors,
+                exact_members=True,
+            )
+
+        self.assertEqual(
+            errors,
+            ["artifact.zip: unexpected payload/stale.txt; rebuild artifact.zip"],
+        )
+
+    def test_compare_zip_members_reports_duplicate_member(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "source.txt"
+            archive = tmp_path / "artifact.zip"
+            source.write_text("current", encoding="utf-8")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with zipfile.ZipFile(archive, "w") as zf:
+                    zf.writestr("payload/source.txt", "old")
+                    zf.writestr("payload/source.txt", "current")
+
+            errors = []
+            validate_manifests._compare_zip_members(
+                archive,
+                [(source, "payload/source.txt")],
+                "artifact.zip",
+                errors,
+                exact_members=True,
+            )
+
+        self.assertIn(
+            "artifact.zip: duplicate member payload/source.txt; rebuild artifact.zip",
+            errors,
+        )
+
+    def test_plugin_manifest_contract_rejects_strict_validator_and_runtime_breaks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest_path = root / "plugin/.claude-plugin"
+            manifest_path.mkdir(parents=True)
+            (manifest_path / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "name": "apple-mail",
+                        "description": "Apple Mail with 28 tools",
+                        "version": "1.0.0",
+                        "commands": "./commands",
+                        "mcpServers": {
+                            "apple-mail": {
+                                "command": "bash",
+                                "args": ["start_mcp.sh"],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_plugin_manifest_contract(errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertIn(
+            "plugin.json: unsupported strict-validator field 'commands'; rely on commands/ auto-discovery",
+            errors,
+        )
+        self.assertIn("plugin.json mcpServers.apple-mail.command: expected /bin/bash", errors)
+        self.assertIn(
+            "plugin.json mcpServers.apple-mail.args: first arg must be ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
+            errors,
+        )
+        self.assertIn(
+            "plugin.json mcpServers.apple-mail.args: missing --draft-safe",
+            errors,
+        )
+
+    def test_mcpb_runtime_contract_rejects_missing_draft_safe_and_bad_entrypoint(self):
+        manifest = {
+            "user_config": {
+                "default_account": {},
+            },
+            "server": {
+                "type": "node",
+                "entry_point": "missing.py",
+                "mcp_config": {
+                    "command": "python3",
+                    "args": ["apple_mail_mcp.py"],
+                    "env": {
+                        "USER_EMAIL_PREFERENCES": "${user_config.missing_preferences}",
+                        "DEFAULT_MAIL_ACCOUNT": "${user_config.default_account}",
+                    },
+                }
+            }
+        }
+        errors = []
+
+        validate_manifests._check_mcpb_runtime_contract(manifest, errors)
+
+        self.assertEqual(
+            errors,
+            [
+                "mcpb manifest server.type: expected python",
+                "mcpb manifest server.entry_point: missing plugin/missing.py",
+                "mcpb manifest server.mcp_config.command: expected /bin/bash",
+                "mcpb manifest server.mcp_config.args: first arg must be ${__dirname}/start_mcp.sh",
+                "mcpb manifest server.mcp_config.args: missing --draft-safe",
+                "mcpb manifest server.mcp_config.env.USER_EMAIL_PREFERENCES: unknown user_config.missing_preferences",
+                "mcpb manifest server.mcp_config.env: missing DEFAULT_MAIL_SIGNATURE",
+            ],
+        )
+
+    def test_marketplace_contract_checks_source_and_skill_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            marketplace = root / ".claude-plugin"
+            marketplace.mkdir()
+            (marketplace / "marketplace.json").write_text(
+                json.dumps(
+                    {
+                        "plugins": [
+                            {
+                                "name": "wrong-name",
+                                "version": "2.0.0",
+                                "source": "plugin",
+                                "skills": [
+                                    "./plugin/skills/good-skill",
+                                    "./plugin/skills/missing-skill",
+                                    "plugin/skills/not-relative",
+                                ]
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            good = root / "plugin/skills/good-skill"
+            good.mkdir(parents=True)
+            (good / "SKILL.md").write_text("---\nname: good\n---\n", encoding="utf-8")
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_marketplace_contract("1.0.0", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(
+            errors,
+            [
+                "marketplace.json plugins[0].source: path must start with ./ (got plugin)",
+                "marketplace.json plugins[0].name: got 'wrong-name', expected plugin.json name 'missing'",
+                "marketplace.json plugins[0].version: got '2.0.0', expected '1.0.0'",
+                "marketplace.json plugins[0].skills: missing ./plugin/skills/missing-skill/SKILL.md",
+                "marketplace.json plugins[0].skills: path must start with ./ (got plugin/skills/not-relative)",
+            ],
+        )
+
+    def test_server_json_contract_rejects_package_install_drift(self):
+        server_json = {
+            "$schema": "bad",
+            "version": "1.0.0",
+            "packages": [
+                {
+                    "registryType": "npm",
+                    "identifier": "wrong-package",
+                    "version": "2.0.0",
+                    "transport": {"type": "http"},
+                }
+            ],
+        }
+        errors = []
+
+        validate_manifests._check_server_json_contract(
+            server_json,
+            expected_version="1.0.0",
+            project_name="mcp-apple-mail",
+            errors=errors,
+        )
+
+        self.assertEqual(
+            errors,
+            [
+                "server.json $schema: expected https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+                "server.json packages[0].registryType: expected pypi",
+                "server.json packages[0].identifier: got 'wrong-package', expected 'mcp-apple-mail'",
+                "server.json packages[0].version: got '2.0.0', expected '1.0.0'",
+                "server.json packages[0].transport.type: expected stdio",
+            ],
+        )
+
+    def test_python_package_contract_requires_runtime_dependency_and_ui_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pyproject.toml").write_text(
+                """
+[project]
+name = "mcp-apple-mail"
+dependencies = [
+    "fastmcp>=3.1.0,<4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["plugin/apple_mail_mcp"]
+""",
+                encoding="utf-8",
+            )
+            plugin = root / "plugin"
+            plugin.mkdir()
+            (plugin / "requirements.txt").write_text(
+                "fastmcp>=3.1.0,<4\nmcp-ui-server==1.0.0\n",
+                encoding="utf-8",
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_python_package_contract(errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(
+            errors,
+            [
+                "pyproject.toml dependencies: missing runtime dependency mcp-ui-server from plugin/requirements.txt",
+                "pyproject.toml wheel packages: missing plugin/ui for inbox_dashboard UI runtime",
+            ],
+        )
+
+    def test_source_syntax_rejects_broken_startup_payloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin = root / "plugin"
+            package = plugin / "apple_mail_mcp"
+            package.mkdir(parents=True)
+            (plugin / "start_mcp.sh").write_text("if true; then\n", encoding="utf-8")
+            (plugin / "apple_mail_mcp.py").write_text("def broken(:\n", encoding="utf-8")
+            (package / "__init__.py").write_text("", encoding="utf-8")
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_source_syntax(errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertTrue(
+            any(err.startswith("plugin/start_mcp.sh: shell syntax error:") for err in errors),
+            errors,
+        )
+        self.assertTrue(
+            any(err.startswith("plugin/apple_mail_mcp.py: python syntax error:") for err in errors),
+            errors,
+        )
 
     def test_compare_zip_members_skips_absent_archive_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,6 +441,54 @@ class ValidateManifestsTests(unittest.TestCase):
                 f"(found {len(offenders)}: {offenders[:3]}); "
                 f"rebuild with tools/build-artifacts.sh (uses `zip -D`)"
             ),
+        )
+
+    def test_artifact_freshness_rejects_plugin_zip_directory_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            plugin_root = tmp_path / "plugin"
+            plugin_root.mkdir()
+            (plugin_root / "start_mcp.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            archive = tmp_path / "apple-mail-plugin.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("start_mcp.sh", "#!/bin/sh\n")
+                zf.writestr("skills/", b"")
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = tmp_path
+            try:
+                validate_manifests._check_artifact_freshness("1.0.0", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("apple-mail-plugin.zip: contains 1 directory entry", errors[0])
+        self.assertIn("skills/", errors[0])
+
+    def test_artifact_freshness_rejects_forbidden_plugin_payload_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            plugin_root = tmp_path / "plugin"
+            plugin_root.mkdir()
+            (plugin_root / "start_mcp.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (plugin_root / ".env").write_text("SECRET=value\n", encoding="utf-8")
+            archive = tmp_path / "apple-mail-plugin.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("start_mcp.sh", "#!/bin/sh\n")
+                zf.writestr(".env", "SECRET=value\n")
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = tmp_path
+            try:
+                validate_manifests._check_artifact_freshness("1.0.0", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertIn(
+            "apple-mail-plugin.zip: unexpected .env; rebuild apple-mail-plugin.zip",
+            errors,
         )
 
     def test_plugin_zip_has_manifest_at_root_not_nested(self):

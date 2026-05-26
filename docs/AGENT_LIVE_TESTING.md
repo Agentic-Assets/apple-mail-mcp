@@ -189,6 +189,12 @@ bash tools/dev-check.sh             # manual equivalent
 bash tools/dev-check.sh surface     # always include wrapper check
 ```
 
+Release packaging gate before commit/PR when `plugin/`, manifests, `pyproject.toml`, `requirements.txt`, zip, or MCPB surfaces changed:
+
+```bash
+bash tools/dev-check.sh release
+```
+
 Live Mail verification is manual on macOS with Mail.app running.
 
 ## MCP config for agents
@@ -237,4 +243,4 @@ The Claude Code plugin bundles **nine** workflow skills under `plugin/skills/`. 
 
 Full skill map: [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). User install copy: [`README`](../README.md) § Claude Code Skills.
 
-When editing skills, run **`plugin-dev:skill-reviewer`**. When editing manifests or bundled skill marketing copy, run **`bash tools/validate_manifests.sh`** and **`plugin-dev:plugin-validator`**.
+When editing skills, run **`plugin-dev:skill-reviewer`**. When editing manifests, package/dependency files, release artifacts, or bundled skill marketing copy, run **`bash tools/dev-check.sh release`** and **`plugin-dev:plugin-validator`**. Use **`bash tools/validate_manifests.sh`** for quick inner-loop checks.

@@ -95,7 +95,8 @@ if [ -d "${SOURCE_DIR}/ui" ]; then
     rm -rf "${BUILD_DIR}/ui/__pycache__"
     echo -e "  ${GREEN}✓${NC} UI Module included (MCP Apps dashboard support)"
 else
-    echo -e "  ${YELLOW}⚠${NC} UI directory not found (optional, skipping)"
+    echo -e "  ${RED}✗${NC} UI directory not found: ${SOURCE_DIR}/ui"
+    exit 1
 fi
 
 # Note: Virtual environment will be created on user's machine during first run
@@ -116,7 +117,7 @@ Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/
 | `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**28 tools**) |
 | `start_mcp.sh` | Creates `venv/`, installs `requirements.txt`, execs Python entry |
 | `requirements.txt` | Runtime Python dependencies |
-| `ui/` *(optional)* | MCP Apps dashboard helpers for `inbox_dashboard` |
+| `ui/` | MCP Apps dashboard helpers for `inbox_dashboard` |
 | `skills/` | Bundled Claude Code skills (`SKILL.md` per subdirectory) |
 
 For grouped tool summaries, see the upstream [`README`](https://github.com/agenticassets/apple-mail-mcp#readme).
@@ -180,8 +181,9 @@ if command -v mcpb >/dev/null 2>&1; then
 else
     echo -e "  ${YELLOW}⚠${NC} mcpb CLI not found — falling back to raw zip (install with: npm install -g @anthropic-ai/mcpb)"
     cd "${BUILD_DIR}"
-    # -X strips extra attrs; do not add directory entries (mcpb extractor chokes on them).
-    zip -rq -X "${OUTPUT_FILE}" . -x "*.DS_Store" "*__MACOSX*" "*.git*"
+    # -X strips extra attrs; -D suppresses bare directory entries
+    # (`mcpb unpack` / Claude Desktop installers choke on them).
+    zip -rq -X -D "${OUTPUT_FILE}" . -x "*.DS_Store" "*__MACOSX*" "*.git*"
     cd - >/dev/null
 fi
 

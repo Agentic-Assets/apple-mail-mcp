@@ -536,7 +536,8 @@ manage_drafts(
     action="list"
 )
 
-# 2. Send completed drafts
+# 2. Send completed drafts only when the server is intentionally not --draft-safe
+#    and the user explicitly confirmed. Default plugin installs block sending.
 manage_drafts(
     account="Work",
     action="send",
@@ -556,24 +557,30 @@ manage_drafts(
 ### Create Draft for Complex Email
 
 ```
-# 1. Review context
-get_email_thread(
+# 1. Find the latest message and keep its message_id
+search_emails(
     account="Work",
     subject_keyword="Complex Topic",
-    mailbox="All"
+    mailbox="All",
+    limit=5
 )
 
-# 2. Create draft with initial thoughts
-manage_drafts(
+# 2. Review the thread by message_id
+get_email_thread(
     account="Work",
-    action="create",
-    subject="Re: Complex Topic - My Analysis",
-    to="stakeholder@company.com",
-    cc="team@company.com",
-    body="[Draft - Need to expand]\n\n1. Summary of situation\n2. Analysis\n3. Recommendation\n\n[Notes to self: Check data, consult with team]"
+    message_id="<message_id-from-search>"
 )
 
-# 3. Schedule time to complete
+# 3. Create a reply draft with original thread context
+reply_to_email(
+    account="Work",
+    message_id="<message_id-from-search>",
+    cc="team@company.com",
+    body="[Draft - Need to expand]\n\n1. Summary of situation\n2. Analysis\n3. Recommendation\n\n[Notes to self: Check data, consult with team]",
+    mode="draft"
+)
+
+# 4. Schedule time to complete
 # (Set calendar reminder to finish draft)
 ```
 

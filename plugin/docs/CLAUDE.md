@@ -40,7 +40,7 @@ Claude Code → /bin/bash ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh → plugin/venv/bin
 ## When to change what
 
 - **Manifest edits** (`plugin.json`, marketplace, mcpb): bump version in all five version files (see root `CLAUDE.md`); run **`plugin-dev:plugin-validator`** before merge.
-- **Launcher / deps**: edit `start_mcp.sh` or `requirements.txt`; test fresh venv by removing `plugin/venv/`.
+- **Launcher / deps**: edit `start_mcp.sh`, `requirements.txt`, or `pyproject.toml`; keep plugin and PyPI dependencies/packages aligned (`mcp-ui-server`, `plugin/ui`); test fresh venv by removing `plugin/venv/`; run `bash tools/dev-check.sh release`.
 - **New MCP tools**: implement under `apple_mail_mcp/tools/` and register in `apple_mail_mcp/__init__.py` — not in this wrapper layer.
 - **New user entry points**: add skills under `skills/` only (no new commands).
 - **Venvs**: `plugin/venv/` = user install (gitignored); `../../.venv/` = dev pytest/editable install.
