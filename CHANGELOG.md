@@ -5,6 +5,106 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.4.0 — 2026-05-26
+
+Hardening release: 15 real bugs fixed (1 HIGH security, 8 type-safety / None-handling,
+3 silent-error / resource, 3 AppleScript-injection / shell-quoting) plus a new lint +
+static-analysis + property-test baseline. No breaking changes to MCP tool signatures
+or return shapes.
+
+### Security
+
+- **HIGH — `create_rich_email_draft` path traversal**: `output_path` accepted from
+  the caller was written directly to disk without `validate_save_path` / sensitive-dir
+  guard. An attacker could pass `output_path="~/.ssh/authorized_keys"` (or `~/.aws/credentials`,
+  `~/.claude/settings.json`, `~/Library/Keychains/*`) and silently corrupt the file with
+  a draft `.eml` body. Now resolved with `os.path.realpath(os.path.expanduser(...))`
+  and rejected against the shared `SENSITIVE_DIRS` list before any write.
+- **`search_emails` forgotten-wiring**: `escaped_sender = escape_applescript(sender)`
+  was computed but never used; the raw `sender` string flowed into the AppleScript
+  filter fragment. Now wired correctly so quote / backslash / newline injection
+  characters are escaped before they reach `osascript`.
+- **`compose.py` shell-quote consistency**: 6 `do shell script "cat '{path}'"` /
+  `"rm -f '{path}'"` call sites in `_send_html_email` / `reply_to_email` /
+  `forward_email` rewritten to `"cat " & quoted form of "{path}"`, matching the
+  safe pattern already used for `body_temp_path`. Single-quoted bare paths are
+  brittle if `tempfile.gettempdir()` ever returns a path containing a quote.
+
+### Reliability
+
+- **`validate_save_path` NUL-byte contract change** (minor API): paths containing
+  `\x00`–`\x1F` or `\x7F` previously raised `ValueError` from `os.path.realpath`,
+  bubbling an uncaught exception out of the MCP tool boundary. Now returns the
+  standard structured-error string, matching every other validator in `core.py`.
+  Surfaced by a new Hypothesis property test.
+- **`analytics.py` entire-mailbox export file-handle leak**: the batch-export
+  `on error -- Continue` handler skipped `close access fileRef`, leaking a kernel
+  fd per failed message. Now closes inside a guarded `try / close access / end try`
+  block, mirroring the single-email export path.
+- **`core.fetch_replied_ids_impl` silent except**: caught `Exception` and returned
+  empty `set()` for ALL non-timeout errors (`OSError`, `PermissionError`, broken
+  Mail connection). Triage tools (`get_awaiting_reply`, `get_needs_response`)
+  then falsely reported every sent message as awaiting reply. Now logs at
+  `WARNING` with exception class + message before returning, while still
+  returning empty so callers keep working.
+- **`update_email_status` bulk-action silent fallback**: bulk
+  `set read status of every message …` failures fell through to the per-message
+  loop without surfacing the bulk error. Now captures `errMsg`/`errNum` in the
+  `on error` block and emits a `BULKERR|errNum=… errMsg=…` row so callers see
+  the real failure.
+- **`subprocess.run(["open", "-a", "Mail", ...])` in `create_rich_email_draft`**:
+  raised `CalledProcessError` / `FileNotFoundError` uncaught when Mail.app
+  wasn't available or the `.eml` was malformed. Now wrapped in try/except
+  returning a structured error.
+
+### Type-safety (mypy: 27 errors → 0 across 16 source files)
+
+- **`compose.py` `Optional[str]` flowing into non-None operations** (5 sites):
+  `account.strip()` on `str | None` → `AttributeError`; `"Account: " + account`
+  string concatenation with `None` → `TypeError`; `escape_applescript(account)`
+  silently stringifying `None` to the literal `"None"` reaching synthesised
+  AppleScript. Each fixed with an `assert account is not None` immediately
+  after the `_resolve_account` error guard, documenting the invariant that
+  a non-`None` account and a `None` error are mutually exclusive.
+- **`_build_found_message_lookup` return type tightened** from
+  `Tuple[str, Optional[object]]` to `tuple[str, ToolError | None]` —
+  reflects the actual runtime invariant and stops mypy noise at every
+  call site.
+- **`inbox.py` `**dict[str, int | str | None]` typed-kwargs unpacking** (4 sites):
+  a heterogeneous-value dict was spread into functions with per-param types,
+  hiding potential `TypeError`s at runtime. Replaced with explicit kwargs at
+  every call site. Same file: `body` variable shadowing (`Dict[str, Any]`
+  then re-assigned `str`) fixed by renaming to `text_body`; `item` dict in
+  `list_mailboxes` annotated as `Dict[str, Any]`.
+- **`core.parse_email_list` missing annotations** on `emails` and `current_email`
+  (residual pre-existing mypy warning) — annotated explicitly.
+
+### Testing & static analysis
+
+- **+279 tests** (suite 367 → 646+), all green:
+  - +90 AppleScript script-idiom regression tests (`test_applescript_script_idioms.py`)
+  - +12 `osacompile` parse-checks per builder (skips on Linux, runs on macOS CI)
+  - +25 Hypothesis property tests on `escape_applescript`, `validate_account_name`,
+    `validate_save_path` — found the NUL-byte bug
+  - +33 `jsonschema` contract tests for `get_inbox_overview`, `list_inbox_emails`,
+    `get_awaiting_reply`, `search_emails`, `get_email_thread`
+  - +70 bug-fix regression tests (`test_compose_none_handling.py`,
+    `test_compose_security.py`, `test_core_validators.py`, `test_search_escaping.py`,
+    `test_inbox_typed_kwargs.py`, `test_analytics_resource_safety.py`,
+    `test_core_fetch_replied_ids.py`, `test_manage_bulk_action_errors.py`)
+- **New dev dependencies** under `[project.optional-dependencies] dev`:
+  `ruff`, `mypy`, `pytest-cov`, `hypothesis`, `jsonschema`. Install with
+  `pip install -e ".[dev]"`.
+- **`tools/dev-check.sh lint` tier**: runs `ruff check`, `ruff format --check`,
+  and `mypy` on the plugin source. Wired into the `release` tier.
+- **`tools/pre-commit-validate.sh`**: now runs `ruff check` on staged Python files.
+- **CI**: `.github/workflows/ci.yml` installs dev deps and runs `ruff check`
+  on `plugin/ tools/ tests/`.
+- **`pyproject.toml`**: `[tool.ruff]`, `[tool.ruff.lint]` (rules E, F, I, B,
+  UP, SIM, RET, PTH), `[tool.mypy]` (permissive baseline, no `disallow_untyped_defs`),
+  `[tool.pytest.ini_options]`.
+- **Coverage baseline**: 78% measured (lowest: `__main__.py` 48%, `manage.py` 62%).
+
 ## 3.3.1 — 2026-05-26
 
 Hotfix for a 3.3.0 regression in `get_awaiting_reply`: the Phase 2 inbox
