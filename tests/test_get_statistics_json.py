@@ -7,28 +7,34 @@ from apple_mail_mcp import server as _server
 from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import analytics as analytics_tools
 
-# New ROW||| format emitted by the refactored account_overview AppleScript.
-# Each ROW line: ROW|||mailbox|||read(1/0)|||flagged(1/0)|||hasAttach(1/0)|||sender
+# New MBOX/ROW||| format emitted by the refactored account_overview AppleScript.
+# MBOX|||mailbox|||totalCount|||unreadCount drives mailbox-wide totals via
+# Mail.app's count APIs (cheap, no per-message work).
+# ROW|||mailbox|||flagged(1/0)|||hasAttach(1/0)|||sender drives the
+# sample-based flagged/attachment/sender/mailbox-distribution stats.
 # Producing: total=10, unread=2, flagged=1, withAttach=3,
 #            alice=5 msgs, bob=3 msgs, INBOX=7, Archive=3
 _INBOX = "INBOX"
 _ARCH = "Archive"
 ACCOUNT_OVERVIEW_RAW = "\n".join([
-    # INBOX messages (7): alice x5, bob x1, carol x1
-    f"ROW|||{_INBOX}|||1|||0|||1|||alice@example.com",   # read, attach
-    f"ROW|||{_INBOX}|||1|||0|||0|||alice@example.com",   # read
-    f"ROW|||{_INBOX}|||1|||0|||1|||alice@example.com",   # read, attach
-    f"ROW|||{_INBOX}|||1|||0|||0|||alice@example.com",   # read
-    f"ROW|||{_INBOX}|||0|||1|||0|||alice@example.com",   # unread, flagged
-    f"ROW|||{_INBOX}|||1|||0|||1|||bob@example.com",     # read, attach
-    f"ROW|||{_INBOX}|||0|||0|||0|||carol@example.com",   # unread
-    # Archive messages (3): alice x0, bob x2, dave x1
-    f"ROW|||{_ARCH}|||1|||0|||0|||bob@example.com",      # read
-    f"ROW|||{_ARCH}|||1|||0|||0|||bob@example.com",      # read
-    f"ROW|||{_ARCH}|||1|||0|||0|||dave@example.com",     # read
+    # Mailbox-wide totals (true counts via Mail's count APIs)
+    f"MBOX|||{_INBOX}|||7|||2",   # INBOX: 7 messages, 2 unread
+    f"MBOX|||{_ARCH}|||3|||0",    # Archive: 3 messages, 0 unread
+    # INBOX sample (7): alice x5, bob x1, carol x1
+    f"ROW|||{_INBOX}|||0|||1|||alice@example.com",   # attach
+    f"ROW|||{_INBOX}|||0|||0|||alice@example.com",
+    f"ROW|||{_INBOX}|||0|||1|||alice@example.com",   # attach
+    f"ROW|||{_INBOX}|||0|||0|||alice@example.com",
+    f"ROW|||{_INBOX}|||1|||0|||alice@example.com",   # flagged
+    f"ROW|||{_INBOX}|||0|||1|||bob@example.com",     # attach
+    f"ROW|||{_INBOX}|||0|||0|||carol@example.com",
+    # Archive sample (3): alice x0, bob x2, dave x1
+    f"ROW|||{_ARCH}|||0|||0|||bob@example.com",
+    f"ROW|||{_ARCH}|||0|||0|||bob@example.com",
+    f"ROW|||{_ARCH}|||0|||0|||dave@example.com",
 ])
-# total=10, unread=2, flagged=1, attach=3
-# alice=5, bob=3, carol=1, dave=1; INBOX=7, Archive=3
+# total=10 (MBOX sums), unread=2 (MBOX sums), flagged=1, attach=3 (sample)
+# alice=5, bob=3, carol=1, dave=1; INBOX=7, Archive=3 (MBOX totals)
 
 SENDER_STATS_TEXT = """\
 SENDER STATISTICS
@@ -145,6 +151,31 @@ class GetStatisticsJsonTests(unittest.TestCase):
 
         self.assertIn("Smart Mailbox: operation timed out", result["errors"])
         self.assertEqual(result["statistics"]["total_emails"], 10)
+
+    def test_account_overview_json_surfaces_per_message_skip_errors(self):
+        """Per-message read errors must surface as a 'N skipped' line in errors."""
+        raw_with_skips = (
+            ACCOUNT_OVERVIEW_RAW
+            + "\n__APPLE_MAIL_MCP_ERROR__|||INBOX|||3 message(s) skipped due to read errors"
+        )
+        with patch(
+            "apple_mail_mcp.tools.analytics.run_applescript",
+            return_value=raw_with_skips,
+        ):
+            result = analytics_tools.get_statistics(
+                account="Work",
+                scope="account_overview",
+                days_back=7,
+                output_format="json",
+            )
+
+        self.assertIn(
+            "INBOX: 3 message(s) skipped due to read errors",
+            result["errors"],
+        )
+        # Mailbox-wide totals (from MBOX) are unaffected by sample skips.
+        self.assertEqual(result["statistics"]["total_emails"], 10)
+        self.assertEqual(result["statistics"]["unread"], 2)
 
     def test_sender_stats_json_shape(self):
         with patch(

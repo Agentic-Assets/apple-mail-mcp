@@ -383,6 +383,13 @@ def get_statistics(
     ``mailbox_breakdown`` is bounded by Mail.app's own count APIs and is not
     capped.
 
+    ``account_overview`` reports **mailbox-wide** ``total_emails``/``unread``/
+    ``read`` counts via Mail.app's ``count of messages`` / ``unread count of
+    aMailbox`` APIs (not date-windowed). The ``days_back`` window still bounds
+    the per-message sample used for ``top_senders``, ``flagged``,
+    ``with_attachments``, and ``mailbox_distribution`` — those remain
+    sample-based because Mail.app exposes no mailbox-wide count for them.
+
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
             ``DEFAULT_MAIL_ACCOUNT`` when None.
@@ -526,9 +533,12 @@ def get_statistics(
                     end if
                 end if
 
-                -- Analyze all mailboxes; emit one structured line per message
-                -- so Python can aggregate senders with Counter (O(N)) instead
-                -- of the former in-script O(N×senders) list scan.
+                -- Analyze all mailboxes. For each mailbox emit:
+                --   MBOX|||name|||totalCount|||unreadCount   (mailbox-wide via Mail's count APIs)
+                --   ROW|||name|||flagged|||hasAttach|||sender   (per message in the bounded sample)
+                -- Python aggregates senders with Counter (O(N)) and derives
+                -- true totals from the MBOX rows; ROW lines drive the sample-
+                -- based flagged/attachment/sender/mailbox-distribution stats.
                 repeat with aMailbox in allMailboxes
                     try
                         set mailboxName to name of aMailbox
@@ -536,12 +546,22 @@ def get_statistics(
                         -- Skip system folders
                         if {skip_folder_checks} then
 
-                            -- Bind a bounded newest-first slice. Avoid broad
-                            -- `every message ... whose date ...` filters:
-                            -- Mail.app may materialize remote mailboxes before
-                            -- filtering and trigger large downloads.
-                            set mailboxMessages to {{}}
+                            -- Mailbox-wide totals via Mail's count APIs. No
+                            -- per-message work — cheap even on 24K-message
+                            -- Exchange mailboxes.
                             set mailboxMessageCount to count of messages of aMailbox
+                            set mailboxUnreadCount to 0
+                            try
+                                set mailboxUnreadCount to unread count of aMailbox
+                            end try
+                            set end of outputLines to "MBOX|||" & mailboxName & "|||" & mailboxMessageCount & "|||" & mailboxUnreadCount
+
+                            -- Bind a bounded newest-first slice for the sample
+                            -- scan. Avoid broad `every message ... whose date
+                            -- ...` filters: Mail.app may materialize remote
+                            -- mailboxes before filtering and trigger large
+                            -- downloads.
+                            set mailboxMessages to {{}}
                             if mailboxMessageCount > {max_messages_per_mailbox} then
                                 set mailboxUpperBound to {max_messages_per_mailbox}
                             else
@@ -551,6 +571,7 @@ def get_statistics(
                                 set mailboxMessages to messages 1 thru mailboxUpperBound of aMailbox
                             end if
 
+                            set mboxErrorCount to 0
                             repeat with aMessage in mailboxMessages
                                 try
                                     if {days_back} > 0 then
@@ -558,7 +579,6 @@ def get_statistics(
                                         if messageDate < targetDate then exit repeat
                                     end if
 
-                                    set isRead to read status of aMessage
                                     set isFlagged to false
                                     try
                                         set isFlagged to flagged status of aMessage
@@ -566,12 +586,7 @@ def get_statistics(
                                     set attachCount to count of mail attachments of aMessage
                                     set messageSender to sender of aMessage
 
-                                    -- ROW|||mailbox|||read|||flagged|||hasAttach|||sender
-                                    if isRead then
-                                        set readStr to "1"
-                                    else
-                                        set readStr to "0"
-                                    end if
+                                    -- ROW|||mailbox|||flagged|||hasAttach|||sender
                                     if isFlagged then
                                         set flagStr to "1"
                                     else
@@ -582,9 +597,18 @@ def get_statistics(
                                     else
                                         set attachStr to "0"
                                     end if
-                                    set end of outputLines to "ROW|||" & mailboxName & "|||" & readStr & "|||" & flagStr & "|||" & attachStr & "|||" & messageSender
+                                    set end of outputLines to "ROW|||" & mailboxName & "|||" & flagStr & "|||" & attachStr & "|||" & messageSender
+                                on error
+                                    -- Single-message read failure: count and
+                                    -- continue so a poisoned message doesn't
+                                    -- silently shrink the sample.
+                                    set mboxErrorCount to mboxErrorCount + 1
                                 end try
                             end repeat
+
+                            if mboxErrorCount > 0 then
+                                set end of outputLines to "{_STATISTICS_ERROR_PREFIX}" & mailboxName & "|||" & mboxErrorCount & " message(s) skipped due to read errors"
+                            end if
 
                         end if
                     on error errMsg
@@ -639,32 +663,52 @@ def get_statistics(
             return raw_overview
 
         from collections import Counter as _Counter
-        total_emails = 0
-        total_unread = 0
-        total_flagged = 0
-        total_with_attachments = 0
-        mailbox_totals: dict = {}
+        # Mailbox-wide totals come from MBOX|||name|||total|||unread rows
+        # (Mail.app's own count APIs). Sample counts come from ROW lines.
+        mbox_total_counts: dict = {}
+        mbox_unread_counts: dict = {}
+        sample_flagged = 0
+        sample_with_attachments = 0
+        sample_total = 0
         sender_counter: _Counter = _Counter()
         scan_errors: list = []
 
         for line in raw_overview.splitlines():
-            if line.startswith("ROW|||"):
-                parts = line.split("|||", 5)
-                if len(parts) < 6:
+            if line.startswith("MBOX|||"):
+                parts = line.split("|||", 3)
+                if len(parts) < 4:
                     continue
-                _, mbox, read_str, flag_str, attach_str, sender = parts
-                total_emails += 1
-                if read_str != "1":
-                    total_unread += 1
+                _, mbox, total_str, unread_str = parts
+                try:
+                    mbox_total_counts[mbox] = mbox_total_counts.get(mbox, 0) + int(total_str)
+                    mbox_unread_counts[mbox] = mbox_unread_counts.get(mbox, 0) + int(unread_str)
+                except ValueError:
+                    continue
+            elif line.startswith("ROW|||"):
+                parts = line.split("|||", 4)
+                if len(parts) < 5:
+                    continue
+                _, _mbox, flag_str, attach_str, sender = parts
+                sample_total += 1
                 if flag_str == "1":
-                    total_flagged += 1
+                    sample_flagged += 1
                 if attach_str == "1":
-                    total_with_attachments += 1
-                mailbox_totals[mbox] = mailbox_totals.get(mbox, 0) + 1
+                    sample_with_attachments += 1
                 if sender:
                     sender_counter[sender] += 1
             elif line.startswith(_STATISTICS_ERROR_PREFIX):
                 scan_errors.append(line)
+
+        # Prefer MBOX-derived mailbox-wide totals; fall back to ROW-derived
+        # sample totals when the script (or a legacy mock) emits no MBOX rows.
+        if mbox_total_counts:
+            total_emails = sum(mbox_total_counts.values())
+            total_unread = sum(mbox_unread_counts.values())
+            mailbox_totals = dict(mbox_total_counts)
+        else:
+            total_emails = sample_total
+            total_unread = 0  # legacy fallback can't compute true unread
+            mailbox_totals = {}
 
         total_read = total_emails - total_unread
         header = (
@@ -679,8 +723,8 @@ def get_statistics(
         if total_emails > 0:
             lines_out.append(f"Unread: {total_unread} ({round(total_unread / total_emails * 100)}%)\n")
             lines_out.append(f"Read: {total_read} ({round(total_read / total_emails * 100)}%)\n")
-            lines_out.append(f"Flagged: {total_flagged}\n")
-            lines_out.append(f"With Attachments: {total_with_attachments} ({round(total_with_attachments / total_emails * 100)}%)\n")
+            lines_out.append(f"Flagged: {sample_flagged}\n")
+            lines_out.append(f"With Attachments: {sample_with_attachments} ({round(sample_with_attachments / total_emails * 100)}%)\n")
         else:
             lines_out.append("Unread: 0\nRead: 0\nFlagged: 0\nWith Attachments: 0\n")
         lines_out.append("\n")
