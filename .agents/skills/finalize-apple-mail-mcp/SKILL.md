@@ -47,12 +47,13 @@ Finalize progress:
 - [ ] 1. plugin-validator — run and fix all reported issues
 - [ ] 2. Scope the diff (what changed, why)
 - [ ] 3. Code + tests verified
-- [ ] 4. Docs, CLAUDE.md, skills, manifests synced (remaining drift)
-- [ ] 5. skill-reviewer (if plugin/skills touched)
-- [ ] 6. Rebuild release artifacts — `bash tools/dev-check.sh release` (rebuilds apple-mail-plugin.zip + .mcpb, runs full validators, runs mcpb unpack smoke). NEVER skip this step.
-- [ ] 7. Final review checklist
-- [ ] 8. Commit (default: yes, after release tier is green)
-- [ ] 9. Push (default: yes, to current branch — open PR if branch is protected)
+- [ ] 4. code-simplifier — pass over the diff (REQUIRED for any non-trivial change)
+- [ ] 5. Docs, CLAUDE.md, skills, manifests synced (remaining drift)
+- [ ] 6. skill-reviewer (if plugin/skills touched)
+- [ ] 7. Rebuild release artifacts — `bash tools/dev-check.sh release` (rebuilds apple-mail-plugin.zip + .mcpb, runs full validators, runs mcpb unpack smoke). NEVER skip this step.
+- [ ] 8. Final review checklist
+- [ ] 9. Commit (default: yes, after release tier is green)
+- [ ] 10. Push (default: yes, to current branch — open PR if branch is protected)
 ```
 
 ### 1. plugin-validator first (required)
@@ -96,7 +97,29 @@ bash tools/pre-commit-validate.sh
 
 All must pass before updating any remaining doc claims.
 
-### 4. Sync documentation (delegate to `generalPurpose` subagent)
+### 4. code-simplifier (REQUIRED for any non-trivial change)
+
+Delegate to the **`code-simplifier:code-simplifier`** agent (Task
+`subagent_type="code-simplifier:code-simplifier"`). This is non-optional
+for any change beyond a one-line bugfix — root `CLAUDE.md` § Agent
+orchestration mandates it as part of every "ready to ship" pass.
+
+Scope the agent to the **recently-modified files** in the diff (it
+defaults to recent changes; pass explicit paths when the diff is large):
+
+- Behavior must be preserved — pytest after the simplifier pass must
+  match the pytest results from step 3.
+- The simplifier collapses duplication, drops dead branches, tightens
+  names; it does NOT redesign abstractions.
+- Especially important after refactors touching many call sites
+  (capability-token, structured-error, bounded-scan-style work), any
+  file that grew past ~600 LOC, or any helper with >3 near-copies.
+- If the simplifier returns edits, re-run pytest before continuing.
+
+Skip only when: the diff is a one-line bugfix, a manifest version bump,
+or docs-only edits with zero Python changed.
+
+### 5. Sync documentation (delegate to `generalPurpose` subagent)
 
 Update **only** what the code change still affects after step 1. Do not rewrite unrelated files.
 
@@ -121,11 +144,11 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 - Do **not** bump `metadata.version` in marketplace.json
 - MCPB `tools[]` names must match registered tool function names
 
-### 5. skill-reviewer (if plugin skills touched)
+### 6. skill-reviewer (if plugin skills touched)
 
-If step 4 edited any `plugin/skills/*/SKILL.md`, delegate to `plugin-dev:skill-reviewer` and apply wording fixes.
+If step 5 edited any `plugin/skills/*/SKILL.md`, delegate to `plugin-dev:skill-reviewer` and apply wording fixes.
 
-### 6. Rebuild release artifacts (required — never skip)
+### 7. Rebuild release artifacts (required — never skip)
 
 `apple-mail-plugin.zip` (Claude Code) and `apple-mail-mcp-v{VERSION}.mcpb` (Claude Desktop) must be regenerated from current sources before commit. Both ship with the repo and stale artifacts have caused real installer failures (e.g. Claude Desktop rejecting an MCPB built without `mcpb pack`).
 
@@ -142,9 +165,10 @@ That tier runs `validate_manifests` + `pytest` + the wrapper-surface check, then
 
 If any step fails, fix the underlying issue — do not commit stale artifacts.
 
-### 7. Final review checklist
+### 8. Final review checklist
 
 - [ ] plugin-validator PASS after fixes
+- [ ] code-simplifier pass complete (or explicitly skipped per step 4 exceptions); pytest still green afterward
 - [ ] `tools/dev-check.sh release` finished green (artifacts rebuilt, `mcpb unpack` smoke OK, `claude plugin validate --strict` OK when CLI is available)
 - [ ] `apple-mail-plugin.zip` and `apple-mail-mcp-v{VERSION}.mcpb` modified time newer than every changed plugin source
 - [ ] Behavior described in docs matches `compose.py` / other tool defaults
@@ -154,9 +178,9 @@ If any step fails, fix the underlying issue — do not commit stale artifacts.
 - [ ] No secrets or local paths committed
 - [ ] Unrelated dirty files left unstaged
 
-### 8. Commit and push (default: yes — close the loop yourself)
+### 9. Commit and push (default: yes — close the loop yourself)
 
-Once steps 1-7 are green, **commit and push without waiting to be asked**. The user's standing preference is that finalize closes its own loop. Pause and ask only when there is genuine ambiguity (unrelated WIP in the tree, secrets in staged paths, partial implementation, or a force-push would be required).
+Once steps 1-8 are green, **commit and push without waiting to be asked**. The user's standing preference is that finalize closes its own loop. Pause and ask only when there is genuine ambiguity (unrelated WIP in the tree, secrets in staged paths, partial implementation, or a force-push would be required).
 
 Stage focused paths; never `git add -A`.
 

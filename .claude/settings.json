@@ -1,9 +1,4 @@
 {
-  "enabledPlugins": {
-    "plugin-dev@claude-plugins-official": true,
-    "python-development@claude-code-workflows": true,
-    "apple-mail@apple-mail-mcp": true
-  },
   "hooks": {
     "PostToolUse": [
       {
@@ -32,6 +27,23 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/wrap_up_reminder.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
+  },
+  "enabledPlugins": {
+    "plugin-dev@claude-plugins-official": true,
+    "python-development@claude-code-workflows": true,
+    "apple-mail@apple-mail-mcp": true,
+    "code-simplifier@claude-plugins-official": true
   }
 }

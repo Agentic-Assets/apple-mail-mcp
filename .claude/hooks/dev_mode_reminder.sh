@@ -29,9 +29,15 @@ A change here lands in all three. Treat tool source as a public API.
 - **Before commits that touch `plugin/`, manifests, `pyproject.toml`,
   or release artifacts:** `bash tools/dev-check.sh release` — rebuilds
   both distributables, runs validator + 416 tests + mcpb smoke.
+- **Run `code-simplifier:code-simplifier` agent at end of session** —
+  REQUIRED before commit on any non-trivial change. Collapses duplication,
+  drops dead branches, tightens names; behavior must be preserved.
+  Especially after refactors touching many sites, files past ~600 LOC, or
+  helpers with >3 near-copies. Skip only for one-line bugfixes, version
+  bumps, or docs-only edits.
 - **To wrap up a change:** invoke the `finalize-apple-mail-mcp` skill —
-  it orchestrates plugin-validator, doc sync, artifact rebuild, and
-  commit/push.
+  it orchestrates plugin-validator, code-simplifier, doc sync, artifact
+  rebuild, and commit/push.
 
 ### Quick-pick by change type
 
@@ -83,6 +89,7 @@ they are cheap.
 | `mcp-builder`                            | New MCP tool design — schema, error contract, naming |
 | `plugin-dev:plugin-validator` (agent)    | After tool-count or manifest changes |
 | `plugin-dev:skill-reviewer` (agent)      | After editing `plugin/skills/*/SKILL.md` |
+| `code-simplifier:code-simplifier` (agent) | **End of session / before commit on any non-trivial change** — REQUIRED, not optional |
 | `finalize-apple-mail-mcp`                | Wrapping up any non-trivial change before commit/push |
 
 **Heuristic:** if you are about to edit a Python file in `plugin/` and
