@@ -94,11 +94,105 @@ apple-mail -o json search-emails --account "$DEFAULT_MAIL_ACCOUNT" --subject-key
 apple-mail -o json get-inbox-overview --raw '{"account":"'"$DEFAULT_MAIL_ACCOUNT"'","output_format":"json","compact":true,"include_mailboxes":false,"include_recent":false,"include_suggestions":false}'
 ```
 
+#### `--raw` examples for advanced wrapper options
+
+mcporter embeds tool schemas at generation time; some tools expose only a
+subset of parameters as named flags. Use `--raw <json>` to pass the full
+parameter set verbatim. These are copy-paste ready — set
+`DEFAULT_MAIL_ACCOUNT` first.
+
+```bash
+# Full inbox overview with all blocks suppressed → metadata-only JSON dict.
+apple-mail -o json get-inbox-overview --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "output_format":"json",
+  "compact":true,
+  "include_mailboxes":false,
+  "include_recent":false,
+  "include_suggestions":false
+}'
+
+# Account statistics scoped to last 7 days; JSON dict with mailbox_totals.
+apple-mail -o json get-statistics --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "scope":"account_overview",
+  "days_back":7,
+  "output_format":"json"
+}'
+
+# Sender-stats scope (requires sender filter).
+apple-mail -o json get-statistics --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "scope":"sender_stats",
+  "sender":"alerts@example.com",
+  "days_back":30,
+  "output_format":"json"
+}'
+
+# Mailbox breakdown using Mail.app count APIs (no per-message scan).
+apple-mail -o json get-statistics --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "scope":"mailbox_breakdown",
+  "mailbox":"INBOX",
+  "days_back":30,
+  "output_format":"json"
+}'
+
+# Triage: emails likely needing a response with replied-detection enabled.
+apple-mail -o json get-needs-response --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "days_back":7,
+  "max_results":20,
+  "check_already_replied":true,
+  "include_already_replied":false,
+  "output_format":"json"
+}'
+
+# Sent messages still awaiting a reply (header-based match).
+apple-mail -o json get-awaiting-reply --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "days_back":7,
+  "exclude_noreply":true,
+  "max_results":20,
+  "output_format":"json"
+}'
+
+# Top senders grouped by domain.
+apple-mail -o json get-top-senders --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "mailbox":"INBOX",
+  "days_back":30,
+  "top_n":10,
+  "group_by_domain":true,
+  "output_format":"json"
+}'
+
+# Inbox dashboard JSON (UI-free metadata; safe for headless agents).
+apple-mail -o json inbox-dashboard --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "include_preview":false,
+  "max_total":20,
+  "max_per_account":10,
+  "output_format":"json"
+}'
+
+# Full inbox metadata export (expensive — bounded by max_emails).
+apple-mail -o json full-inbox-export --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "mailbox":"INBOX",
+  "fields":["subject","sender","date_received","read_status","message_id"],
+  "max_emails":500,
+  "batch_size":250,
+  "output_format":"json"
+}'
+```
+
 Known wrapper checks to keep separate from manifest validation:
 
 - `apple-mail --help` must expose critical read commands, especially `get-email-by-id`.
 - Some wrapper commands only expose `--raw <json>` for advanced options.
 - Repo CLI flags like `--output-format` may not exist on every wrapper command; use the wrapper help as the source of truth.
+- `list_inbox_emails`, `get_statistics`, `get_inbox_overview`, `inbox_dashboard`, `get_needs_response`, `get_awaiting_reply`, and `get_top_senders` all return a Python `dict` for `output_format="json"` (not a JSON string). Through the generated wrapper the dict is rendered as JSON; through the MCP transport it crosses as a structured object.
 
 **Wrapper command-surface check** (repo script; skips if no wrapper on PATH):
 
