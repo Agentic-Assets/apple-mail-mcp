@@ -24,7 +24,6 @@ from apple_mail_mcp.core import (
     validate_account_name,
     account_not_found_json,
     list_mail_account_names,
-    INBOX_NAMES,
 )
 
 
@@ -345,7 +344,7 @@ def _build_search_script(
         per_msg_conditions.append(f"({subject_checks})")
     if sender:
         per_msg_conditions.append(
-            f'messageSender contains "{escape_applescript(sender)}"'
+            f'messageSender contains "{escaped_sender}"'
         )
     if read_status == "read":
         per_msg_conditions.append("messageRead is true")

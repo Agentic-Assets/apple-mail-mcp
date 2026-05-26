@@ -514,7 +514,7 @@ async def list_inbox_emails(
         )
         return _attach_warnings_to_json(body, warnings)
 
-    body = await _list_inbox_emails_text(
+    text_body = await _list_inbox_emails_text(
         account,
         max_emails,
         include_read,
@@ -525,8 +525,8 @@ async def list_inbox_emails(
         include_message_id=want_message_id,
     )
     if warnings:
-        return "\n".join(warnings) + "\n" + body
-    return body
+        return "\n".join(warnings) + "\n" + text_body
+    return text_body
 
 
 def _attach_warnings_to_json(
@@ -1403,7 +1403,7 @@ def _list_mailboxes_json(
             continue
         msg_count = int(parts[3]) if parts[3].lstrip("-").isdigit() else -1
         unread_count = int(parts[4]) if parts[4].lstrip("-").isdigit() else -1
-        item = {
+        item: Dict[str, Any] = {
             "account": parts[0],
             "name": parts[1],
             "path": parts[2],
@@ -1844,14 +1844,6 @@ async def get_inbox_overview(
         structure, recent preview, and optional AI suggestions. JSON mode
         returns a structured dict.
     """
-    json_kwargs = {
-        "account": account,
-        "include_mailboxes": include_mailboxes,
-        "include_recent": include_recent,
-        "include_suggestions": include_suggestions,
-        "max_recent": max_recent,
-    }
-
     if output_format not in {"text", "compact", "json"}:
         return "Error: Invalid output_format. Use: text, compact, json"
 
@@ -1862,7 +1854,11 @@ async def get_inbox_overview(
             if output_format == "json":
                 return _overview_json_error(
                     "account_not_found",
-                    **json_kwargs,
+                    account=account,
+                    include_mailboxes=include_mailboxes,
+                    include_recent=include_recent,
+                    include_suggestions=include_suggestions,
+                    max_recent=max_recent,
                 )
             return account_err
         accounts_to_query = [account]
@@ -1873,7 +1869,11 @@ async def get_inbox_overview(
             if output_format == "json":
                 return _overview_json_error(
                     "account_listing_timeout",
-                    **json_kwargs,
+                    account=account,
+                    include_mailboxes=include_mailboxes,
+                    include_recent=include_recent,
+                    include_suggestions=include_suggestions,
+                    max_recent=max_recent,
                     message="Error: Mail account listing timed out",
                     errors=["__account_listing__"],
                 )
@@ -1881,7 +1881,15 @@ async def get_inbox_overview(
 
     if not accounts_to_query:
         if output_format == "json":
-            return _format_overview_json([], [], **json_kwargs)
+            return _format_overview_json(
+                [],
+                [],
+                account=account,
+                include_mailboxes=include_mailboxes,
+                include_recent=include_recent,
+                include_suggestions=include_suggestions,
+                max_recent=max_recent,
+            )
         return _format_overview([], [], compact=output_format == "compact")
 
     async def run_one(acct: str):
@@ -1911,7 +1919,15 @@ async def get_inbox_overview(
         parsed.append(parsed_acct)
 
     if output_format == "json":
-        return _format_overview_json(parsed, errors, **json_kwargs)
+        return _format_overview_json(
+            parsed,
+            errors,
+            account=account,
+            include_mailboxes=include_mailboxes,
+            include_recent=include_recent,
+            include_suggestions=include_suggestions,
+            max_recent=max_recent,
+        )
 
     return _format_overview(
         parsed,

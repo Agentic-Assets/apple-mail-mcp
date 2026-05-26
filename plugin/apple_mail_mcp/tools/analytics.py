@@ -1202,7 +1202,10 @@ def export_emails(
                         close access fileRef
 
                     on error
-                        -- Continue with next email if one fails
+                        -- Close file handle before continuing to avoid fd leak
+                        try
+                            close access fileRef
+                        end try
                     end try
                 end repeat
 

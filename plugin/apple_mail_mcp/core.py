@@ -1,10 +1,13 @@
 """Core helpers: AppleScript execution, escaping, parsing, and preference injection."""
 
 import json
+import logging
 import os
 import re
 import subprocess
 from typing import Optional, List, Dict, Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 from apple_mail_mcp.server import USER_PREFERENCES
 
@@ -202,6 +205,17 @@ def validate_save_path(
     sensitive_action: str = "export emails to",
 ) -> Optional[str]:
     """Return an error string when *path* is outside home or under a sensitive dir."""
+    # Guard against NUL bytes and other low control characters that cause
+    # os.path.realpath to raise ValueError ("embedded null character in path").
+    # All characters in range U+0000–U+001F and U+007F are invalid in filesystem
+    # paths and would also break osascript's stdin pipe.
+    for ch in path:
+        cp = ord(ch)
+        if cp <= 0x1F or cp == 0x7F:
+            return (
+                f"Error: {path_label} contains an invalid control character "
+                f"(U+{cp:04X}). Null bytes and control characters are not allowed in paths."
+            )
     home_dir = os.path.expanduser("~")
     resolved = os.path.realpath(os.path.expanduser(path))
 
@@ -260,10 +274,10 @@ def equals_any_numeric_condition(field_name: str, values: List[str]) -> str:
 
 def parse_email_list(output: str) -> List[Dict[str, Any]]:
     """Parse the structured email output from AppleScript"""
-    emails = []
+    emails: List[Dict[str, Any]] = []
     lines = output.split("\n")
 
-    current_email = {}
+    current_email: Dict[str, Any] = {}
     for line in lines:
         line = line.strip()
         if (
@@ -568,7 +582,13 @@ def fetch_replied_ids(
         raw = fn(script, timeout=timeout)
     except AppleScriptTimeout:
         return set()
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "fetch_replied_ids failed for account %r: %s: %s",
+            account,
+            type(exc).__name__,
+            exc,
+        )
         return set()
     ids: set = set()
     for line in raw.splitlines():

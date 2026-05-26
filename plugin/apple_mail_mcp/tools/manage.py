@@ -625,7 +625,8 @@ def update_email_status(
                     if (count of targetMessages) > 0 then
                         try
                             {bulk_action_script}
-                        on error
+                        on error errMsg number errNum
+                            set outputText to outputText & "BULKERR|errNum=" & errNum & " errMsg=" & errMsg & return
                             repeat with aMessage in targetMessages
                                 {single_action_script}
                             end repeat

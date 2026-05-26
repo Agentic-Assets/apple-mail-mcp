@@ -80,7 +80,7 @@ KNOWN_DANGEROUS_WHOSE: set[Tuple[str, int]] = {
     # mailbox is local and typically small, so the regression window is
     # narrow — but the pattern is the exact one Phase A is meant to ban.
     # Tracked for Phase B follow-up.
-    ("compose.py", 142),
+    ("compose.py", 143),
 }
 
 

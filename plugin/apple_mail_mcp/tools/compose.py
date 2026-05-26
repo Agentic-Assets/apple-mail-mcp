@@ -18,6 +18,7 @@ from apple_mail_mcp.bounded_scan import build_bounded_message_scan
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
+    SENSITIVE_DIRS,
     inject_preferences,
     escape_applescript,
     run_applescript,
@@ -48,7 +49,7 @@ def _build_found_message_lookup(
     found_var: str = "foundMessage",
     messages_var: str = "mailboxMessages",
     tool_name: str = "compose",
-) -> Tuple[str, Optional[object]]:
+) -> "tuple[str, ToolError | None]":
     """Build AppleScript to resolve one message by id or bounded subject search.
 
     Subject-keyword fallback **requires** a positive date window. Without
@@ -563,6 +564,7 @@ def create_rich_email_draft(
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
         return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
     if not account.strip():
         return "Error: 'account' is required"
 
@@ -620,11 +622,26 @@ def create_rich_email_draft(
     message.set_content(plain_body)
     message.add_alternative(rich_body, subtype="html")
 
-    draft_path = (
-        Path(output_path).expanduser()
-        if output_path
-        else _default_rich_draft_path(subject)
-    )
+    if output_path:
+        # Resolve and validate the caller-supplied path before writing.
+        # validate_save_path also enforces a home-dir restriction which is
+        # intentionally narrower here — we only guard sensitive dirs.
+        try:
+            draft_path = Path(output_path).expanduser()
+            _resolved = os.path.realpath(os.path.expanduser(output_path))
+        except (RuntimeError, ValueError, OSError) as exc:
+            return f"Error: output_path is not a valid filesystem path: {exc}"
+        _home = os.path.expanduser("~")
+        for _rel in SENSITIVE_DIRS:
+            _sensitive = os.path.join(_home, _rel)
+            if _resolved.startswith(_sensitive + os.sep) or _resolved == _sensitive:
+                return (
+                    f"Error: output_path targets a sensitive directory and cannot be "
+                    f"used as a draft destination: {_sensitive}"
+                )
+    else:
+        draft_path = _default_rich_draft_path(subject)
+
     draft_path.parent.mkdir(parents=True, exist_ok=True)
     draft_path.write_bytes(bytes(message))
 
@@ -633,7 +650,13 @@ def create_rich_email_draft(
     opened = False
     saved = False
     if open_in_mail and can_open_in_mail:
-        subprocess.run(["open", "-a", "Mail", str(draft_path)], check=True)
+        try:
+            subprocess.run(["open", "-a", "Mail", str(draft_path)], check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            return (
+                f"Error: Failed to open draft in Mail.app: {exc}. "
+                "The .eml file was written but Mail could not open it."
+            )
         opened = True
         try:
             saved = _save_front_compose_window_as_draft(
@@ -758,7 +781,7 @@ use framework "AppKit"
 use scripting additions
 
 -- Step 1: Read HTML from temp file and place on clipboard
-set htmlString to do shell script "cat '{html_temp_path}'"
+set htmlString to do shell script "cat " & quoted form of "{html_temp_path}"
 set pb to current application's NSPasteboard's generalPasteboard()
 
 -- Save current clipboard for restoration
@@ -807,7 +830,7 @@ tell application "System Events"
 end tell
 
 -- Step 5: Clean up temp file
-do shell script "rm -f '{html_temp_path}'"
+do shell script "rm -f " & quoted form of "{html_temp_path}"
 
 -- Step 6: Restore clipboard
 if oldClip is not missing value then
@@ -933,6 +956,7 @@ def reply_to_email(
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
         return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
     if not message_id and not subject_keyword:
         return "Error: 'subject_keyword' or 'message_id' is required"
 
@@ -1092,7 +1116,7 @@ def reply_to_email(
         success_text = "Reply saved as draft!"
 
     cleanup_script = f'do shell script "rm -f " & quoted form of "{body_temp_path}"'
-    html_cleanup_script = f'do shell script "rm -f \'{html_temp_path}\'"'
+    html_cleanup_script = f'do shell script "rm -f " & quoted form of "{html_temp_path}"'
 
     sender_script = _compose_sender_script(
         "replyMessage", "targetAccount", sender_override
@@ -1105,7 +1129,7 @@ use framework "AppKit"
 use scripting additions
 
 -- Step 1: Place reply body HTML on clipboard via NSPasteboard
-set htmlString to do shell script "cat '{html_temp_path}'"
+set htmlString to do shell script "cat " & quoted form of "{html_temp_path}"
 set pb to current application's NSPasteboard's generalPasteboard()
 set oldClip to pb's stringForType:(current application's NSPasteboardTypeString)
 pb's clearContents()
@@ -1288,6 +1312,7 @@ def compose_email(
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
         return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
     if not to:
         return "Error: 'to' is required"
 
@@ -1511,6 +1536,7 @@ def forward_email(
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
         return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
     if not message_id and not subject_keyword:
         return "Error: 'subject_keyword' or 'message_id' is required"
     if not to:
@@ -1601,13 +1627,13 @@ def forward_email(
         fwd_html_tmp.write(fwd_html_content)
         fwd_html_tmp.close()
         fwd_html_temp_path = fwd_html_tmp.name
-        fwd_html_cleanup_script = f'do shell script "rm -f \'{fwd_html_temp_path}\'"'
+        fwd_html_cleanup_script = f'do shell script "rm -f " & quoted form of "{fwd_html_temp_path}"'
         fwd_html_paste_script = f"""
                 set visible of forwardMessage to true
                 activate
                 delay 1.5
 
-                set htmlString to do shell script "cat '{fwd_html_temp_path}'"
+                set htmlString to do shell script "cat " & quoted form of "{fwd_html_temp_path}"
                 set pb to current application's NSPasteboard's generalPasteboard()
                 set oldClip to pb's stringForType:(current application's NSPasteboardTypeString)
                 pb's clearContents()
@@ -1785,6 +1811,7 @@ def manage_drafts(
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
         return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
 
     body = _strip_cdata_wrappers(body)
 
