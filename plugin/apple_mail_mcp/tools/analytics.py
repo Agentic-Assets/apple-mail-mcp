@@ -467,11 +467,11 @@ def get_statistics(
     )
 
     if scope == "account_overview":
+        # Emit structured rows; aggregate senders with Python Counter (O(N) vs
+        # the former O(N×senders) in-AppleScript list scan).
         script = f'''
         tell application "Mail"
-            set outputText to "╔══════════════════════════════════════════╗" & return
-            set outputText to outputText & "║      EMAIL STATISTICS - {escaped_account}       ║" & return
-            set outputText to outputText & "╚══════════════════════════════════════════╝" & return & return
+            set outputLines to {{}}
 
             {date_filter}
 
@@ -526,17 +526,9 @@ def get_statistics(
                     end if
                 end if
 
-                -- Initialize counters
-                set totalEmails to 0
-                set totalUnread to 0
-                set totalRead to 0
-                set totalFlagged to 0
-                set totalWithAttachments to 0
-                set senderCounts to {{}}
-                set mailboxCounts to {{}}
-                set scanErrors to {{}}
-
-                -- Analyze all mailboxes
+                -- Analyze all mailboxes; emit one structured line per message
+                -- so Python can aggregate senders with Counter (O(N)) instead
+                -- of the former in-script O(N×senders) list scan.
                 repeat with aMailbox in allMailboxes
                     try
                         set mailboxName to name of aMailbox
@@ -558,7 +550,6 @@ def get_statistics(
                             if mailboxUpperBound > 0 then
                                 set mailboxMessages to messages 1 thru mailboxUpperBound of aMailbox
                             end if
-                            set mailboxTotal to 0
 
                             repeat with aMessage in mailboxMessages
                                 try
@@ -567,117 +558,166 @@ def get_statistics(
                                         if messageDate < targetDate then exit repeat
                                     end if
 
-                                    set totalEmails to totalEmails + 1
-                                    set mailboxTotal to mailboxTotal + 1
-
-                                    -- Count read/unread
-                                    if read status of aMessage then
-                                        set totalRead to totalRead + 1
-                                    else
-                                        set totalUnread to totalUnread + 1
-                                    end if
-
-                                    -- Count flagged
+                                    set isRead to read status of aMessage
+                                    set isFlagged to false
                                     try
-                                        if flagged status of aMessage then
-                                            set totalFlagged to totalFlagged + 1
-                                        end if
+                                        set isFlagged to flagged status of aMessage
                                     end try
-
-                                    -- Count attachments
-                                    set attachmentCount to count of mail attachments of aMessage
-                                    if attachmentCount > 0 then
-                                        set totalWithAttachments to totalWithAttachments + 1
-                                    end if
-
-                                    -- Track senders (top 10)
+                                    set attachCount to count of mail attachments of aMessage
                                     set messageSender to sender of aMessage
-                                    set senderFound to false
-                                    repeat with senderPair in senderCounts
-                                        if item 1 of senderPair is messageSender then
-                                            set item 2 of senderPair to (item 2 of senderPair) + 1
-                                            set senderFound to true
-                                            exit repeat
-                                        end if
-                                    end repeat
-                                    if not senderFound then
-                                        set end of senderCounts to {{messageSender, 1}}
+
+                                    -- ROW|||mailbox|||read|||flagged|||hasAttach|||sender
+                                    if isRead then
+                                        set readStr to "1"
+                                    else
+                                        set readStr to "0"
                                     end if
+                                    if isFlagged then
+                                        set flagStr to "1"
+                                    else
+                                        set flagStr to "0"
+                                    end if
+                                    if attachCount > 0 then
+                                        set attachStr to "1"
+                                    else
+                                        set attachStr to "0"
+                                    end if
+                                    set end of outputLines to "ROW|||" & mailboxName & "|||" & readStr & "|||" & flagStr & "|||" & attachStr & "|||" & messageSender
                                 end try
                             end repeat
-
-                            -- Store mailbox counts
-                            if mailboxTotal > 0 then
-                                set end of mailboxCounts to {{mailboxName, mailboxTotal}}
-                            end if
 
                         end if
                     on error errMsg
                         -- Surface per-mailbox failures instead of silently losing coverage.
                         try
-                            set end of scanErrors to "{_STATISTICS_ERROR_PREFIX}" & mailboxName & "|||" & errMsg
+                            set end of outputLines to "{_STATISTICS_ERROR_PREFIX}" & mailboxName & "|||" & errMsg
                         on error
-                            set end of scanErrors to "{_STATISTICS_ERROR_PREFIX}unknown mailbox|||" & errMsg
+                            set end of outputLines to "{_STATISTICS_ERROR_PREFIX}unknown mailbox|||unknown error"
                         end try
                     end try
                 end repeat
-
-                -- Format output
-                set outputText to outputText & "📊 VOLUME METRICS" & return
-                set outputText to outputText & "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" & return
-                set outputText to outputText & "Total Emails: " & totalEmails & return
-                if totalEmails > 0 then
-                    set outputText to outputText & "Unread: " & totalUnread & " (" & (round ((totalUnread / totalEmails) * 100)) & "%)" & return
-                    set outputText to outputText & "Read: " & totalRead & " (" & (round ((totalRead / totalEmails) * 100)) & "%)" & return
-                    set outputText to outputText & "Flagged: " & totalFlagged & return
-                    set outputText to outputText & "With Attachments: " & totalWithAttachments & " (" & (round ((totalWithAttachments / totalEmails) * 100)) & "%)" & return
-                else
-                    set outputText to outputText & "Unread: 0" & return
-                    set outputText to outputText & "Read: 0" & return
-                    set outputText to outputText & "Flagged: 0" & return
-                    set outputText to outputText & "With Attachments: 0" & return
-                end if
-                set outputText to outputText & return
-
-                -- Top senders (show top 5)
-                set outputText to outputText & "👥 SAMPLE SENDERS" & return
-                set outputText to outputText & "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" & return
-                set topCount to 0
-                repeat with senderPair in senderCounts
-                    set topCount to topCount + 1
-                    if topCount > 5 then exit repeat
-                    set outputText to outputText & item 1 of senderPair & ": " & item 2 of senderPair & " emails" & return
-                end repeat
-                set outputText to outputText & return
-
-                -- Mailbox distribution (show top 5)
-                set outputText to outputText & "📁 MAILBOX DISTRIBUTION" & return
-                set outputText to outputText & "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" & return
-                set topCount to 0
-                repeat with mailboxPair in mailboxCounts
-                    set topCount to topCount + 1
-                    if topCount > 5 then exit repeat
-                    if totalEmails > 0 then
-                        set mailboxPercent to round ((item 2 of mailboxPair / totalEmails) * 100)
-                        set outputText to outputText & item 1 of mailboxPair & ": " & item 2 of mailboxPair & " (" & mailboxPercent & "%)" & return
-                    else
-                        set outputText to outputText & item 1 of mailboxPair & ": " & item 2 of mailboxPair & return
-                    end if
-                end repeat
-                if (count of scanErrors) > 0 then
-                    set outputText to outputText & return & "MAILBOX SCAN ERRORS" & return
-                    repeat with scanError in scanErrors
-                        set outputText to outputText & scanError & return
-                    end repeat
-                end if
 
             on error errMsg
                 return "Error: " & errMsg
             end try
 
-            return outputText
+            set AppleScript's text item delimiters to linefeed
+            set rawOut to outputLines as string
+            set AppleScript's text item delimiters to ""
+            return rawOut
         end tell
         '''
+
+        # Parse emitted rows in Python and format output
+        try:
+            raw_overview = run_applescript(
+                script, timeout=timeout if timeout is not None else 120
+            )
+        except AppleScriptTimeout:
+            timeout_msg = (
+                f"Error: AppleScript timed out while computing statistics for '{account}'"
+            )
+            if output_format == "json":
+                return _statistics_json_error(
+                    "timeout",
+                    account=account,
+                    days_back=days_back,
+                    scope=scope,
+                    message=timeout_msg,
+                )
+            return timeout_msg
+
+        if raw_overview.startswith("Error:"):
+            if output_format == "json":
+                return _statistics_json_error(
+                    "applescript_error",
+                    account=account,
+                    days_back=days_back,
+                    scope=scope,
+                    message=raw_overview,
+                )
+            return raw_overview
+
+        from collections import Counter as _Counter
+        total_emails = 0
+        total_unread = 0
+        total_flagged = 0
+        total_with_attachments = 0
+        mailbox_totals: dict = {}
+        sender_counter: _Counter = _Counter()
+        scan_errors: list = []
+
+        for line in raw_overview.splitlines():
+            if line.startswith("ROW|||"):
+                parts = line.split("|||", 5)
+                if len(parts) < 6:
+                    continue
+                _, mbox, read_str, flag_str, attach_str, sender = parts
+                total_emails += 1
+                if read_str != "1":
+                    total_unread += 1
+                if flag_str == "1":
+                    total_flagged += 1
+                if attach_str == "1":
+                    total_with_attachments += 1
+                mailbox_totals[mbox] = mailbox_totals.get(mbox, 0) + 1
+                if sender:
+                    sender_counter[sender] += 1
+            elif line.startswith(_STATISTICS_ERROR_PREFIX):
+                scan_errors.append(line)
+
+        total_read = total_emails - total_unread
+        header = (
+            "╔══════════════════════════════════════════╗\n"
+            f"║      EMAIL STATISTICS - {escaped_account}       ║\n"
+            "╚══════════════════════════════════════════╝\n\n"
+        )
+        lines_out = [header]
+        lines_out.append("📊 VOLUME METRICS\n")
+        lines_out.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        lines_out.append(f"Total Emails: {total_emails}\n")
+        if total_emails > 0:
+            lines_out.append(f"Unread: {total_unread} ({round(total_unread / total_emails * 100)}%)\n")
+            lines_out.append(f"Read: {total_read} ({round(total_read / total_emails * 100)}%)\n")
+            lines_out.append(f"Flagged: {total_flagged}\n")
+            lines_out.append(f"With Attachments: {total_with_attachments} ({round(total_with_attachments / total_emails * 100)}%)\n")
+        else:
+            lines_out.append("Unread: 0\nRead: 0\nFlagged: 0\nWith Attachments: 0\n")
+        lines_out.append("\n")
+        lines_out.append("👥 SAMPLE SENDERS\n")
+        lines_out.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        for sender, cnt in sender_counter.most_common(5):
+            lines_out.append(f"{sender}: {cnt} emails\n")
+        lines_out.append("\n")
+        lines_out.append("📁 MAILBOX DISTRIBUTION\n")
+        lines_out.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        for i, (mbox, cnt) in enumerate(sorted(mailbox_totals.items(), key=lambda x: -x[1])):
+            if i >= 5:
+                break
+            if total_emails > 0:
+                pct = round(cnt / total_emails * 100)
+                lines_out.append(f"{mbox}: {cnt} ({pct}%)\n")
+            else:
+                lines_out.append(f"{mbox}: {cnt}\n")
+        if scan_errors:
+            lines_out.append("\nMAILBOX SCAN ERRORS\n")
+            for err in scan_errors:
+                lines_out.append(err + "\n")
+
+        result = "".join(lines_out)
+
+        if output_format == "json":
+            statistics = _parse_statistics_text(scope, result)
+            return _format_statistics_json(
+                scope=scope,
+                account=account,
+                days_back=days_back,
+                statistics=statistics,
+                sender=sender,
+                mailbox=mailbox,
+                errors=_parse_statistics_errors(result),
+            )
+        return result
 
     elif scope == "sender_stats":
         if not sender:

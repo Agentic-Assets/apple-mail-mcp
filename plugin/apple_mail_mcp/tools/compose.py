@@ -1192,17 +1192,22 @@ tell application "Mail"
                 {cleanup_script}
                 {html_cleanup_script}
             end try
+            -- Restore clipboard before returning on error
+            if oldClip is not missing value then
+                pb's clearContents()
+                pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
+            end if
             return "Error: " & errMsg & return & "Please check that the account name is correct and the email exists."
         end try
 
+        -- Restore clipboard
+        if oldClip is not missing value then
+            pb's clearContents()
+            pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
+        end if
+
         return outputText
     end tell
-
-    -- Restore clipboard
-    if oldClip is not missing value then
-        pb's clearContents()
-        pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
-    end if
     """
 
     try:

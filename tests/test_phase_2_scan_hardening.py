@@ -604,17 +604,19 @@ class FixBListInboxIdFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('set mailAppId to ""', script)
         self.assertIn("try\n                        set mailAppId to id of aMessage", script)
 
-    async def test_row_emitted_when_id_fails(self):
-        """Parser must include a row even when mail_app_id is empty string."""
-        # Build a raw output line with empty id field (6th field)
-        raw_line = 'Hello|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||'
+    async def test_row_with_empty_id_is_filtered(self):
+        """Parser must drop rows where mail_app_id is empty (Fix 19).
 
-        call_count = [0]
+        Empty ids cannot be used for targeted operations and likely result
+        from transient sync failures. Rows with a non-empty id are kept.
+        """
+        # Row with empty id (6th field)
+        raw_empty_id = 'Hello|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||'
+        # Row with a valid numeric id
+        raw_valid_id = 'Hello2|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||42'
 
         def fake_run(script, timeout=120):
-            call_count[0] += 1
-            # First call is account validation, second is the actual inbox fetch
-            return raw_line
+            return raw_empty_id + "\n" + raw_valid_id
 
         with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
             result = await inbox_tools.list_inbox_emails(
@@ -623,13 +625,10 @@ class FixBListInboxIdFallbackTests(unittest.IsolatedAsyncioTestCase):
 
         import json as _json
         data = _json.loads(result)
-        # Single-account JSON path returns a list directly
         emails = data if isinstance(data, list) else data.get("emails", [])
+        # Only the row with a non-empty id should survive
         self.assertEqual(len(emails), 1)
-        # Row must be present — the parser exposes the id field as "message_id"
-        self.assertIn("message_id", emails[0])
-        # Value must be empty string fallback (not missing entirely)
-        self.assertEqual(emails[0]["message_id"], "")
+        self.assertEqual(emails[0]["message_id"], "42")
 
 
 class FixCAccountOverviewInboxCaseFallbackTests(unittest.TestCase):

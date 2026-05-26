@@ -514,6 +514,16 @@ def get_needs_response(
     )
 
     include_replied_flag = "true" if include_already_replied else "false"
+
+    # When check_already_replied=True the script scans both inbox and Sent.
+    # Split the budget: 70% for the main inbox+sent inline scan, 30% reserved
+    # for the AppleScript overhead. This mirrors the get_awaiting_reply pattern.
+    effective_timeout = timeout if timeout is not None else 120
+    if check_already_replied:
+        script_timeout = max(30, int(effective_timeout * 0.7))
+    else:
+        script_timeout = effective_timeout
+
     replied_builder = (
         replied_ids_script(
             account_var="targetAccount",
@@ -698,12 +708,11 @@ def get_needs_response(
     '''
 
     try:
-        return run_applescript(script, timeout=timeout)
+        return run_applescript(script, timeout=script_timeout)
     except AppleScriptTimeout:
-        wait_s = timeout if timeout is not None else 120
         return (
             f"Error: get_needs_response timed out on account '{account}' after "
-            f"{wait_s}s — try increasing timeout or reducing days_back"
+            f"{script_timeout}s — try increasing timeout or reducing days_back"
         )
 
 
@@ -862,6 +871,7 @@ def get_top_senders(
             end repeat
 
             set end of outputLines to "TOTAL|||" & (totalAnalysed as string)
+            set end of outputLines to "MAILBOX_COUNT|||" & (mailboxCount as string)
 
             set AppleScript's text item delimiters to linefeed
             set outputText to outputLines as string
@@ -888,6 +898,7 @@ def get_top_senders(
 
     # Parse ROW lines and aggregate in Python (fast Counter vs AppleScript O(n^2)).
     total_analysed = 0
+    mailbox_count = 0
     sender_counts: Counter[str] = Counter()
     for line in raw.splitlines():
         if line.startswith("TOTAL|||"):
@@ -895,6 +906,11 @@ def get_top_senders(
                 total_analysed = int(line.split("|||", 1)[1].strip())
             except ValueError:
                 total_analysed = 0
+        elif line.startswith("MAILBOX_COUNT|||"):
+            try:
+                mailbox_count = int(line.split("|||", 1)[1].strip())
+            except ValueError:
+                mailbox_count = 0
         elif line.startswith("ROW|||"):
             key = line.split("|||", 1)[1].strip()
             if key:
@@ -922,6 +938,11 @@ def get_top_senders(
     lines.append("")
     lines.append("========================================")
     lines.append(f"Total emails analysed: {total_analysed}")
+    if mailbox_count > 0 and scan_cap < mailbox_count:
+        lines.append(
+            f"Note: analysed {total_analysed} of {mailbox_count} messages (capped at {scan_cap} — "
+            "increase days_back or use full_inbox_export for a complete count)"
+        )
     lines.append(f"Unique senders: {unique_count}")
 
     return "\n".join(lines) + "\n"

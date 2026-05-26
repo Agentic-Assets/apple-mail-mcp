@@ -24,6 +24,7 @@ from apple_mail_mcp.core import (
     build_mailbox_ref,
     build_filter_condition,
     validate_account_name,
+    validate_save_path,
 )
 from apple_mail_mcp.bounded_scan import build_whose_id_list
 from apple_mail_mcp.constants import SCAN_BOUNDS
@@ -437,33 +438,16 @@ def save_email_attachment(
     # Expand tilde in save_path (POSIX file in AppleScript does not expand ~)
     expanded_path = os.path.expanduser(save_path)
 
-    # Path validation: resolve to absolute path and enforce safety constraints
-    resolved_path = os.path.realpath(expanded_path)
-    home_dir = os.path.expanduser("~")
+    # Path validation: use shared helper for home-dir + sensitive-dir checks
+    path_err = validate_save_path(
+        expanded_path,
+        path_label="Save path",
+        sensitive_action="save attachments to",
+    )
+    if path_err:
+        return path_err
 
-    # Must be under the user's home directory
-    if not resolved_path.startswith(home_dir + os.sep) and resolved_path != home_dir:
-        return f"Error: Save path must be under your home directory ({home_dir}). Got: {resolved_path}"
-
-    # Block sensitive directories
-    sensitive_dirs = [
-        os.path.join(home_dir, ".ssh"),
-        os.path.join(home_dir, ".gnupg"),
-        os.path.join(home_dir, ".config"),
-        os.path.join(home_dir, ".aws"),
-        os.path.join(home_dir, ".claude"),
-        os.path.join(home_dir, "Library", "LaunchAgents"),
-        os.path.join(home_dir, "Library", "LaunchDaemons"),
-        os.path.join(home_dir, "Library", "Keychains"),
-    ]
-    for sensitive_dir in sensitive_dirs:
-        if (
-            resolved_path.startswith(sensitive_dir + os.sep)
-            or resolved_path == sensitive_dir
-        ):
-            return f"Error: Cannot save attachments to sensitive directory: {sensitive_dir}"
-
-    expanded_path = resolved_path
+    expanded_path = os.path.realpath(expanded_path)
 
     # Escape for AppleScript
     escaped_account = escape_applescript(account)
@@ -1206,6 +1190,7 @@ def create_mailbox(
     account: Optional[str] = None,
     name: str = "",
     parent_mailbox: Optional[str] = None,
+    timeout: Optional[int] = None,
 ) -> str:
     """
     Create a new mailbox (folder) in the specified account.
@@ -1222,6 +1207,7 @@ def create_mailbox(
         name: Name for the new mailbox. May contain "/" to create a
               nested path in one call (each segment is created if needed).
         parent_mailbox: Optional existing parent folder for nesting.
+        timeout: Optional AppleScript timeout in seconds (default: 120s).
 
     Returns:
         Confirmation with the new mailbox path.
@@ -1305,8 +1291,7 @@ def create_mailbox(
     end tell
     '''
 
-    return run_applescript(script)
-
+    return run_applescript(script, timeout=timeout if timeout is not None else 120)
 
 
 
@@ -1403,7 +1388,7 @@ def synchronize_account(
             end if
         end tell
         '''
-        return run_applescript(script)
+        return run_applescript(script, timeout=PER_ACCOUNT_TIMEOUT_S + 5)
 
     account = account.strip()
     account_err = validate_account_name(account, timeout=PER_ACCOUNT_TIMEOUT_S)
@@ -1436,4 +1421,4 @@ def synchronize_account(
         end try
     end tell
     '''
-    return run_applescript(script)
+    return run_applescript(script, timeout=PER_ACCOUNT_TIMEOUT_S + 5)

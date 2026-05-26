@@ -24,6 +24,7 @@ from apple_mail_mcp.core import (
     validate_account_name,
     account_not_found_json,
     list_mail_account_names,
+    INBOX_NAMES,
 )
 
 
@@ -76,13 +77,28 @@ def _build_applescript_date(
     """
 
 
-def _parse_search_records(output: str) -> List[Dict[str, Any]]:
-    """Parse structured search output into dict records."""
+_ERROR_MAILBOX_PREFIX = "ERROR_MAILBOX|||"
+
+
+def _parse_search_records(
+    output: str,
+) -> "tuple[List[Dict[str, Any]], List[Dict[str, str]]]":
+    """Parse structured search output into (records, mailbox_errors).
+
+    Each *mailbox_errors* entry is a dict with keys ``mailbox`` and ``message``
+    for mailboxes that emitted an ``ERROR_MAILBOX|||`` marker line.
+    """
     if not output:
-        return []
+        return [], []
 
     records = []
+    mailbox_errors: List[Dict[str, str]] = []
     for line in output.splitlines():
+        if line.startswith(_ERROR_MAILBOX_PREFIX):
+            tail = line[len(_ERROR_MAILBOX_PREFIX):]
+            mb, _, msg = tail.partition("|||")
+            mailbox_errors.append({"mailbox": mb.strip(), "message": msg.strip()})
+            continue
         parts = line.split("|||", 8)
         if len(parts) < 8:
             continue
@@ -108,7 +124,7 @@ def _parse_search_records(output: str) -> List[Dict[str, Any]]:
             record["content_preview"] = parts[8].strip()
         records.append(record)
 
-    return records
+    return records, mailbox_errors
 
 
 def _sort_search_records(
@@ -301,17 +317,9 @@ def _build_search_script(
                         end repeat
         """
     else:
-        escaped_mailbox = escape_applescript(mailbox)
+        _mailbox_resolve = build_mailbox_ref(mailbox, account_var="targetAccount", var_name="searchMailbox")
         mailbox_script = f'''
-                try
-                    set searchMailbox to mailbox "{escaped_mailbox}" of targetAccount
-                on error
-                    if "{escaped_mailbox}" is "INBOX" then
-                        set searchMailbox to mailbox "Inbox" of targetAccount
-                    else
-                        error "Mailbox not found: {escaped_mailbox}"
-                    end if
-                end try
+                {_mailbox_resolve}
                 set searchMailboxes to {{searchMailbox}}
         '''
         skip_script = ""
@@ -327,7 +335,7 @@ def _build_search_script(
     # Build per-message filter block. Avoid broad `every message ... whose`
     # filters because Mail.app can materialize remote mailboxes before applying
     # them. We bind a bounded newest-first slice, then filter in that slice.
-    escaped_body = escape_applescript(body_text.lower()) if body_text else ""
+    escaped_body = escape_applescript(body_text) if body_text else ""
     per_msg_conditions: List[str] = []
     if subject_terms:
         subject_checks = " or ".join(
@@ -521,8 +529,10 @@ def _build_search_script(
                                     set offsetRemaining to 0
                                 end if
                             end if
-                        on error
-                            -- Skip mailboxes that cannot be searched
+                        on error errMsg
+                            -- Emit a structured marker so Python can surface it
+                            -- in error_details instead of silently discarding it.
+                            set end of recordLines to "ERROR_MAILBOX|||" & (name of currentMailbox) & "|||" & errMsg
                         end try
                     end repeat
                 end repeat
@@ -581,8 +591,14 @@ def _search_one_account(
     body_text: Optional[str],
     timeout: Optional[int],
     recent_days: float = 0.0,
-) -> List[Dict[str, Any]]:
-    """Run the search AppleScript for a single account synchronously."""
+) -> "tuple[List[Dict[str, Any]], List[Dict[str, str]]]":
+    """Run the search AppleScript for a single account synchronously.
+
+    Returns (records, mailbox_errors). *mailbox_errors* is a list of dicts
+    with ``mailbox`` and ``message`` keys for Exchange mailboxes that could
+    not be searched (e.g. restricted folders). Callers surface these via
+    ``error_details`` so agents know which mailboxes were skipped.
+    """
     script = _build_search_script(
         account=account,
         mailbox=mailbox,
@@ -602,7 +618,8 @@ def _search_one_account(
     result = run_applescript(script, timeout=timeout if timeout is not None else 180)
     if result.startswith("ERROR|||"):
         raise ValueError(result.split("|||", 1)[1])
-    return _parse_search_records(result)
+    records, mailbox_errors = _parse_search_records(result)
+    return records, mailbox_errors
 
 
 async def _search_mail_records(
@@ -643,7 +660,7 @@ async def _search_mail_records(
     # Single-account: short-circuit, no gather overhead.
     if account:
         try:
-            records = await asyncio.to_thread(
+            records, mb_errors = await asyncio.to_thread(
                 _search_one_account,
                 account,
                 mailbox,
@@ -661,7 +678,11 @@ async def _search_mail_records(
                 timeout,
                 recent_days,
             )
-            return records, [], []
+            mb_error_details = [
+                {"account": account, "mailbox": e["mailbox"], "type": "mailbox_error", "message": e["message"]}
+                for e in mb_errors
+            ]
+            return records, [], mb_error_details
         except AppleScriptTimeout as exc:
             return [], [account], [_search_error_detail(account, exc)]
 
@@ -676,7 +697,7 @@ async def _search_mail_records(
 
     async def run_one(acct: str) -> tuple[str, Any]:
         try:
-            recs = await asyncio.to_thread(
+            recs, mb_errs = await asyncio.to_thread(
                 _search_one_account,
                 acct,
                 mailbox,
@@ -694,7 +715,7 @@ async def _search_mail_records(
                 timeout,
                 recent_days,
             )
-            return acct, recs
+            return acct, (recs, mb_errs)
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
         except Exception as exc:
@@ -710,7 +731,15 @@ async def _search_mail_records(
             errors.append(acct)
             error_details.append(_search_error_detail(acct, outcome))
         else:
-            combined.extend(outcome)
+            recs, mb_errs = outcome
+            combined.extend(recs)
+            for e in mb_errs:
+                error_details.append({
+                    "account": acct,
+                    "mailbox": e["mailbox"],
+                    "type": "mailbox_error",
+                    "message": e["message"],
+                })
 
     return combined, errors, error_details
 
@@ -727,7 +756,7 @@ def _search_mail_records_sync(**kwargs) -> List[Dict[str, Any]]:
     account = kwargs.get("account")
     if account:
         try:
-            return _search_one_account(
+            records, _mb_errors = _search_one_account(
                 account=account,
                 mailbox=kwargs.get("mailbox", "INBOX"),
                 subject_terms=kwargs.get("subject_terms"),
@@ -743,6 +772,7 @@ def _search_mail_records_sync(**kwargs) -> List[Dict[str, Any]]:
                 body_text=kwargs.get("body_text"),
                 timeout=kwargs.get("timeout"),
             )
+            return records
         except AppleScriptTimeout:
             raise
 
@@ -813,9 +843,9 @@ async def search_emails(
         - Multi-account search (account=None) on a 10K+ inbox can be slow.
           Prefer passing `account` plus `date_from` together when you know
           which mailbox the messages are in.
-        - body_text=True is O(N x message-size) — pair it with tight other
-          filters (account, date_from, subject_keyword) to keep wall time
-          predictable on Exchange / Gmail accounts with deep history.
+        - Setting `body_text` to any non-empty string scans message bodies
+          (O(N × message-size)); pair with tight filters (account, date_from,
+          subject_keyword) to keep wall time predictable on large mailboxes.
         - When account is None each account runs in parallel; one slow
           account no longer blocks the others, but its name will appear in
           the response's `errors` field (JSON) or partial banner (text).
@@ -835,9 +865,10 @@ async def search_emails(
         date_to: Optional end date filter (format: "YYYY-MM-DD")
         include_content: Whether to include email content preview (slower)
         max_content_length: Maximum content length in characters when include_content=True (default: 500, 0 = unlimited)
-        body_text: Optional text to search for in email body content (case-insensitive).
-            WARNING: body search is significantly slower as it reads each message body.
-            Always combine with account + date_from for inboxes over a few thousand messages.
+        body_text: Optional[str] text to search for in email body content (case-insensitive).
+            Setting `body_text` to any non-empty string scans message bodies
+            (O(N × message-size)); pair with tight filters (account, date_from,
+            subject_keyword) to keep wall time predictable on large mailboxes.
         max_results: Backward-compatible alias for limit
         output_format: Output format: "text" or "json" (default: "text")
         offset: Number of matching results to skip before returning data
@@ -1172,7 +1203,7 @@ def get_email_by_id(
     if result.startswith("ERROR|||"):
         return f"Error: {result.split('|||', 1)[1]}"
 
-    records = _parse_search_records(result)
+    records, _mb_errors = _parse_search_records(result)
     item = records[0] if records else None
     if output_format == "json":
         return json.dumps({"item": item})

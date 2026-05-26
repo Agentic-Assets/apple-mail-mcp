@@ -82,13 +82,19 @@ def _parse_pipe_delimited_emails(
         parts = line.split("|||", maxsplit)
         if len(parts) < 6:
             continue
+        mail_app_id = parts[5].strip()
+        # Filter rows with empty id — they cannot be used for targeted operations
+        # and are likely transient sync failures, matching search_emails's
+        # sanitize_field fallback behavior.
+        if not mail_app_id:
+            continue
         item: Dict[str, Any] = {
             "subject": parts[0].strip(),
             "sender": parts[1].strip(),
             "date": parts[2].strip(),
             "is_read": parts[3].strip().lower() == "true",
             "account": parts[4].strip(),
-            "message_id": parts[5].strip(),
+            "message_id": mail_app_id,
         }
         if has_message_id:
             if len(parts) >= 7 and parts[6].strip():
@@ -736,7 +742,7 @@ def _run_json_one(
     # Backward compatibility for older call sites that passed
     # (account, max_emails, include_read, timeout) before content previews
     # were added to the JSON path.
-    if timeout is None and type(include_content) is not bool:
+    if timeout is None and not isinstance(include_content, bool):
         timeout = include_content
         include_content = False
     script = _build_list_inbox_json_script(
@@ -954,15 +960,15 @@ def get_mailbox_unread_counts(
                     "Try again or pass a larger `timeout`."
                 ),
             }
-        counts: Dict[str, int] = {}
+        flat_counts: Dict[str, int] = {}
         for item in result.split("|"):
             if ":" in item:
                 acct_name, count_str = item.split(":", 1)
                 if count_str != "ERROR":
-                    counts[acct_name] = int(count_str)
+                    flat_counts[acct_name] = int(count_str)
                 else:
-                    counts[acct_name] = -1
-        return counts
+                    flat_counts[acct_name] = -1
+        return flat_counts
 
     account_filter = (
         f'''
@@ -1040,25 +1046,28 @@ def get_mailbox_unread_counts(
                 "Try again or pass a larger `timeout`."
             ),
         }
-    counts: Dict[str, Dict[str, int]] = {}
+    nested_counts: Dict[str, Dict[str, int]] = {}
     if not result:
-        return counts
+        return nested_counts
 
     for line in result.splitlines():
         parts = line.split("|||", 2)
         if len(parts) != 3:
             continue
         account_name, mailbox_name, unread_value = parts
-        counts.setdefault(account_name, {})[mailbox_name] = int(unread_value)
+        nested_counts.setdefault(account_name, {})[mailbox_name] = int(unread_value)
 
-    return counts
+    return nested_counts
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
-def list_accounts() -> List[str]:
+def list_accounts(timeout: Optional[int] = 30) -> List[str]:
     """
     List all available Mail accounts.
+
+    Args:
+        timeout: Optional AppleScript timeout in seconds (default: 30s).
 
     Returns:
         List of account names
@@ -1079,13 +1088,13 @@ def list_accounts() -> List[str]:
     end tell
     """
 
-    result = run_applescript(script)
+    result = run_applescript(script, timeout=timeout)
     return result.split("|") if result else []
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
-def list_account_addresses() -> Dict[str, List[str]]:
+def list_account_addresses(timeout: Optional[int] = 30) -> Dict[str, List[str]]:
     """
     List all configured email addresses for each Mail account.
 
@@ -1093,6 +1102,9 @@ def list_account_addresses() -> Dict[str, List[str]]:
     actual email address(es) it receives mail at — handy when an integration
     needs to know which inbox a message landed in by address rather than by
     Mail.app's display name.
+
+    Args:
+        timeout: Optional AppleScript timeout in seconds (default: 30s).
 
     Returns:
         Dict mapping account name -> list of email addresses configured on
@@ -1127,7 +1139,7 @@ def list_account_addresses() -> Dict[str, List[str]]:
     end tell
     """
 
-    result = run_applescript(script)
+    result = run_applescript(script, timeout=timeout)
     out: Dict[str, List[str]] = {}
     if not result:
         return out
@@ -1493,6 +1505,7 @@ def _run_overview_one(
     include_recent: bool = True,
     max_recent: int = 10,
 ) -> str:
+    effective_timeout = timeout if timeout is not None else 180
     return run_applescript(
         _build_overview_one_account_script(
             account,
@@ -1500,7 +1513,7 @@ def _run_overview_one(
             include_recent=include_recent,
             max_recent=max_recent,
         ),
-        timeout=timeout if timeout is not None else 180,
+        timeout=effective_timeout,
     )
 
 

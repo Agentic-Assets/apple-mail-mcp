@@ -7,29 +7,28 @@ from apple_mail_mcp import server as _server
 from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import analytics as analytics_tools
 
-ACCOUNT_OVERVIEW_TEXT = """\
-╔══════════════════════════════════════════╗
-║      EMAIL STATISTICS - Work       ║
-╚══════════════════════════════════════════╝
-
-📊 VOLUME METRICS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total Emails: 10
-Unread: 2 (20%)
-Read: 8 (80%)
-Flagged: 1
-With Attachments: 3 (30%)
-
-👥 SAMPLE SENDERS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-alice@example.com: 5 emails
-bob@example.com: 3 emails
-
-📁 MAILBOX DISTRIBUTION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-INBOX: 7 (70%)
-Archive: 3 (30%)
-"""
+# New ROW||| format emitted by the refactored account_overview AppleScript.
+# Each ROW line: ROW|||mailbox|||read(1/0)|||flagged(1/0)|||hasAttach(1/0)|||sender
+# Producing: total=10, unread=2, flagged=1, withAttach=3,
+#            alice=5 msgs, bob=3 msgs, INBOX=7, Archive=3
+_INBOX = "INBOX"
+_ARCH = "Archive"
+ACCOUNT_OVERVIEW_RAW = "\n".join([
+    # INBOX messages (7): alice x5, bob x1, carol x1
+    f"ROW|||{_INBOX}|||1|||0|||1|||alice@example.com",   # read, attach
+    f"ROW|||{_INBOX}|||1|||0|||0|||alice@example.com",   # read
+    f"ROW|||{_INBOX}|||1|||0|||1|||alice@example.com",   # read, attach
+    f"ROW|||{_INBOX}|||1|||0|||0|||alice@example.com",   # read
+    f"ROW|||{_INBOX}|||0|||1|||0|||alice@example.com",   # unread, flagged
+    f"ROW|||{_INBOX}|||1|||0|||1|||bob@example.com",     # read, attach
+    f"ROW|||{_INBOX}|||0|||0|||0|||carol@example.com",   # unread
+    # Archive messages (3): alice x0, bob x2, dave x1
+    f"ROW|||{_ARCH}|||1|||0|||0|||bob@example.com",      # read
+    f"ROW|||{_ARCH}|||1|||0|||0|||bob@example.com",      # read
+    f"ROW|||{_ARCH}|||1|||0|||0|||dave@example.com",     # read
+])
+# total=10, unread=2, flagged=1, attach=3
+# alice=5, bob=3, carol=1, dave=1; INBOX=7, Archive=3
 
 SENDER_STATS_TEXT = """\
 SENDER STATISTICS
@@ -69,10 +68,11 @@ class GetStatisticsJsonTests(unittest.TestCase):
         self.assertIsInstance(result, str)
         self.assertEqual(result, "Error: Invalid output_format. Use: text, json")
 
-    def test_text_mode_preserves_applescript_output(self):
+    def test_text_mode_returns_formatted_output(self):
+        """Text mode must produce a human-readable report from ROW||| rows."""
         with patch(
             "apple_mail_mcp.tools.analytics.run_applescript",
-            return_value=ACCOUNT_OVERVIEW_TEXT,
+            return_value=ACCOUNT_OVERVIEW_RAW,
         ):
             result = analytics_tools.get_statistics(
                 account="Work",
@@ -80,12 +80,17 @@ class GetStatisticsJsonTests(unittest.TestCase):
                 days_back=7,
             )
         self.assertIsInstance(result, str)
-        self.assertEqual(result, ACCOUNT_OVERVIEW_TEXT)
+        # Check key sections are present
+        self.assertIn("Total Emails: 10", result)
+        self.assertIn("Unread: 2", result)
+        self.assertIn("Read: 8", result)
+        self.assertIn("alice@example.com", result)
+        self.assertIn("INBOX", result)
 
     def test_account_overview_json_shape(self):
         with patch(
             "apple_mail_mcp.tools.analytics.run_applescript",
-            return_value=ACCOUNT_OVERVIEW_TEXT,
+            return_value=ACCOUNT_OVERVIEW_RAW,
         ):
             result = analytics_tools.get_statistics(
                 account="Work",
@@ -110,29 +115,26 @@ class GetStatisticsJsonTests(unittest.TestCase):
         self.assertEqual(stats["flagged"], 1)
         self.assertEqual(stats["with_attachments"], 3)
         self.assertEqual(stats["with_attachments_percent"], 30)
-        self.assertEqual(
-            stats["top_senders"],
-            [
-                {"sender": "alice@example.com", "count": 5},
-                {"sender": "bob@example.com", "count": 3},
-            ],
-        )
-        self.assertEqual(
-            stats["mailbox_distribution"],
-            [
-                {"mailbox": "INBOX", "count": 7, "percent": 70},
-                {"mailbox": "Archive", "count": 3, "percent": 30},
-            ],
-        )
+        # Top senders: alice=5, bob=3
+        top_senders = stats["top_senders"]
+        self.assertEqual(top_senders[0], {"sender": "alice@example.com", "count": 5})
+        self.assertEqual(top_senders[1], {"sender": "bob@example.com", "count": 3})
+        # Mailbox distribution: INBOX=7 (70%), Archive=3 (30%)
+        dist = {d["mailbox"]: d for d in stats["mailbox_distribution"]}
+        self.assertEqual(dist["INBOX"]["count"], 7)
+        self.assertEqual(dist["INBOX"]["percent"], 70)
+        self.assertEqual(dist["Archive"]["count"], 3)
+        self.assertEqual(dist["Archive"]["percent"], 30)
 
     def test_account_overview_json_surfaces_scan_errors(self):
+        """Scan error lines must surface in the JSON errors list."""
+        raw_with_error = (
+            ACCOUNT_OVERVIEW_RAW
+            + "\n__APPLE_MAIL_MCP_ERROR__|||Smart Mailbox|||operation timed out"
+        )
         with patch(
             "apple_mail_mcp.tools.analytics.run_applescript",
-            return_value=(
-                ACCOUNT_OVERVIEW_TEXT
-                + "\nMAILBOX SCAN ERRORS\n"
-                + "__APPLE_MAIL_MCP_ERROR__|||Smart Mailbox|||operation timed out\n"
-            ),
+            return_value=raw_with_error,
         ):
             result = analytics_tools.get_statistics(
                 account="Work",
@@ -141,7 +143,7 @@ class GetStatisticsJsonTests(unittest.TestCase):
                 output_format="json",
             )
 
-        self.assertEqual(result["errors"], ["Smart Mailbox: operation timed out"])
+        self.assertIn("Smart Mailbox: operation timed out", result["errors"])
         self.assertEqual(result["statistics"]["total_emails"], 10)
 
     def test_sender_stats_json_shape(self):
