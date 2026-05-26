@@ -228,8 +228,9 @@ def _build_awaiting_reply_inbox_script(
 ) -> str:
     """Return AppleScript that emits In-Reply-To and References headers from inbox messages.
 
-    Uses header-specific extraction (header value of header named "...") rather
-    than reading all headers or subject fields.
+    Iterates ``headers of aMessage`` to read only the two header rows we need
+    (no full RFC822 blob). ``header value of header named "..."`` is *not*
+    valid Mail.app dictionary syntax and fails to parse with osascript -2740.
     """
     inbox_date_check = (
         "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
@@ -257,15 +258,17 @@ def _build_awaiting_reply_inbox_script(
                 try
                     set messageDate to date received of aMessage
                     {inbox_date_check}
-                    -- Extract In-Reply-To and References headers specifically
-                    -- to avoid reading all headers (expensive on Exchange).
                     set inReplyTo to ""
                     set refsHeader to ""
                     try
-                        set inReplyTo to header value of header named "In-Reply-To" of aMessage
-                    end try
-                    try
-                        set refsHeader to header value of header named "References" of aMessage
+                        repeat with aHeader in (headers of aMessage)
+                            set hName to name of aHeader
+                            if hName is "In-Reply-To" then
+                                set inReplyTo to content of aHeader
+                            else if hName is "References" then
+                                set refsHeader to content of aHeader
+                            end if
+                        end repeat
                     end try
                     if inReplyTo is not "" then
                         set end of outputLines to "INBOXHDR|||in-reply-to|||" & inReplyTo

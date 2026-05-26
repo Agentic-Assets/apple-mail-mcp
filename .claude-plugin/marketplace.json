@@ -15,7 +15,7 @@
       "source": "./plugin",
       "strict": false,
       "description": "Natural language interface for Apple Mail — search, compose, triage, organize, and analyze email with 28 MCP tools plus bundled Claude Code workflow skills (Mail operator, triage, inbox zero, taxonomy, archiving, Mail rules advisor, drafting, attachments, writing style)",
-      "version": "3.3.0",
+      "version": "3.3.1",
       "author": {
         "name": "Agentic Assets"
       },

@@ -5,6 +5,22 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.3.1 — 2026-05-26
+
+Hotfix for a 3.3.0 regression in `get_awaiting_reply`: the Phase 2 inbox
+header-extraction AppleScript used `header value of header named "X" of
+msg`, which is not valid Mail.app dictionary syntax and failed to parse
+with osascript `-2740` ("A application constant or consideration can't
+go after this identifier"). Replaced with the standard `headers of
+aMessage` iteration that filters by `name of aHeader` and reads
+`content of aHeader`. The INBOXHDR row protocol consumed by the Python
+parser is unchanged; tests cover the parser behavior, not the broken
+AppleScript form, so no test churn was required.
+
+Reproduced on live TU Exchange inbox (24K messages): pre-fix returned
+`AppleScript error: ... syntax error ... (-2740)`; post-fix returns 4
+sent emails awaiting reply over a 7-day window.
+
 ## 3.3.0 — 2026-05-26
 
 Phase 2 + Phase 3 hardening: faster analysis paths, structured JSON across
