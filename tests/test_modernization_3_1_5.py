@@ -472,5 +472,124 @@ class AppleScriptTimeoutHandlingTests(unittest.TestCase):
         self.assertIn("timed out", result.lower())
 
 
+class Fix1AsyncioLoopSafetyTests(unittest.TestCase):
+    """Fix 1 regression: get_awaiting_reply must not call asyncio.run() from a
+    running event loop (FastMCP runs tools inside an event loop)."""
+
+    def test_get_awaiting_reply_callable_from_running_event_loop(self):
+        """Drive get_awaiting_reply from inside an async context.
+
+        Before the fix, asyncio.run() inside the sync tool raised
+        ``RuntimeError: asyncio.run() cannot be called from a running event
+        loop``. After the fix the two AppleScript calls are sequential and
+        this raises no runtime error.
+        """
+        import asyncio
+
+        cap = _ScriptCapture(return_value="ok")
+
+        async def _invoke():
+            with patch(
+                "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+            ):
+                return smart_inbox_tools.get_awaiting_reply(
+                    account="Work", days_back=1, max_results=1
+                )
+
+        # If asyncio.run() is still called inside the tool this will raise.
+        result = asyncio.run(_invoke())
+        # Two sequential script calls must have been made (inbox + sent).
+        self.assertEqual(cap.call_count if hasattr(cap, "call_count") else len(cap.scripts), 2)
+        # Must not be an error.
+        self.assertNotIn("RuntimeError", result)
+
+    def test_get_awaiting_reply_makes_two_sequential_applescript_calls(self):
+        cap = _ScriptCapture(return_value="ok")
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+        ) as mock_run:
+            smart_inbox_tools.get_awaiting_reply(
+                account="Work", days_back=1, max_results=1
+            )
+        self.assertEqual(mock_run.call_count, 2)
+
+
+class Fix2InboxAlwaysInStatisticsTests(unittest.TestCase):
+    """Fix 2 regression: get_statistics(scope='account_overview') must always
+    include the INBOX mailbox even when alphabetical ordering pushes it past
+    the max_mailboxes cap."""
+
+    def test_account_overview_script_contains_inbox_reference(self):
+        cap = _ScriptCapture(return_value="ok")
+        with patch(
+            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
+        ):
+            analytics_tools.get_statistics(
+                account="X", scope="account_overview", days_back=30
+            )
+        script = cap.last_script
+        # The INBOX guarantee block must be in the generated script.
+        self.assertIn('mailbox "INBOX" of targetAccount', script)
+        self.assertIn("inboxMailboxRef", script)
+
+    def test_account_overview_non_zero_inbox_returns_total_emails(self):
+        """Mock run_applescript to return a non-empty statistics text block
+        and assert that parsing yields total_emails > 0."""
+        from apple_mail_mcp.tools.analytics import (
+            _parse_account_overview_statistics,
+        )
+
+        mock_output = (
+            "╔══╗\n╚══╝\n\n"
+            "📊 VOLUME METRICS\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Total Emails: 42\n"
+            "Unread: 5 (12%)\n"
+            "Read: 37 (88%)\n"
+            "Flagged: 1\n"
+            "With Attachments: 3 (7%)\n"
+        )
+        parsed = _parse_account_overview_statistics(mock_output)
+        self.assertGreater(parsed["total_emails"], 0)
+
+
+class Fix3NeedsResponseDefaultsTests(unittest.TestCase):
+    """Fix 3 regression: check_already_replied must default to False and the
+    Sent mailbox must not be touched on default invocation."""
+
+    def test_default_check_already_replied_is_false(self):
+        import inspect
+        sig = inspect.signature(smart_inbox_tools.get_needs_response)
+        default = sig.parameters["check_already_replied"].default
+        self.assertIs(default, False, "check_already_replied default must be False")
+
+    def test_default_invocation_does_not_touch_sent_mailbox(self):
+        cap = _ScriptCapture(return_value="ok")
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+        ):
+            smart_inbox_tools.get_needs_response(
+                account="Work", days_back=1, max_results=1
+            )
+        # With check_already_replied=False (default), replied_ids_script should
+        # NOT be included — no reference to sentMailbox in the generated script.
+        self.assertNotIn("sentMailbox", cap.last_script)
+
+    def test_explicit_check_already_replied_true_includes_sent_scan(self):
+        cap = _ScriptCapture(return_value="ok")
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
+        ):
+            smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=1,
+                max_results=1,
+                check_already_replied=True,
+            )
+        # With check_already_replied=True, the Sent mailbox resolve block
+        # must appear in the generated script.
+        self.assertIn("sentMailbox", cap.last_script)
+
+
 if __name__ == "__main__":
     unittest.main()

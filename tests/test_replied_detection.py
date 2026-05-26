@@ -137,9 +137,10 @@ class ListInboxRepliedTests(unittest.TestCase):
     def test_exclude_replied_filters_matching_emails_json(self):
         # 1st call: inbox JSON for Work. 2nd call: fetch_replied_ids script
         # that emits one ID per line. 3rd call would not be made.
+        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||internet_message_id
         inbox_raw = (
-            "S1|||a@example.com|||Date|||false|||Work|||<id-1@example.com>\n"
-            "S2|||b@example.com|||Date|||false|||Work|||<id-2@example.com>"
+            "S1|||a@example.com|||Date|||false|||Work|||101|||<id-1@example.com>\n"
+            "S2|||b@example.com|||Date|||false|||Work|||102|||<id-2@example.com>"
         )
         replied_raw = "<id-2@example.com>"
         sequence = [inbox_raw, replied_raw]
@@ -165,9 +166,10 @@ class ListInboxRepliedTests(unittest.TestCase):
         self.assertEqual(subjects, ["S1"])
 
     def test_flag_replied_annotates_json_with_already_replied_field(self):
+        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||internet_message_id
         inbox_raw = (
-            "S1|||a@example.com|||Date|||false|||Work|||<id-1@example.com>\n"
-            "S2|||b@example.com|||Date|||false|||Work|||<id-2@example.com>"
+            "S1|||a@example.com|||Date|||false|||Work|||101|||<id-1@example.com>\n"
+            "S2|||b@example.com|||Date|||false|||Work|||102|||<id-2@example.com>"
         )
         replied_raw = "<id-2@example.com>"
         sequence = [inbox_raw, replied_raw]

@@ -478,9 +478,26 @@ def get_statistics(
             try
                 set targetAccount to account "{escaped_account}"
                 set allMailboxes to every mailbox of targetAccount
-                -- Cap mailbox scan to the first {max_mailboxes} mailboxes
+                -- Always include INBOX first so it isn't sliced out on Exchange
+                -- accounts where alphabetical ordering pushes it past the cap.
+                set inboxMailboxRef to missing value
+                try
+                    set inboxMailboxRef to mailbox "INBOX" of targetAccount
+                end try
                 if (count of allMailboxes) > {max_mailboxes} then
                     set allMailboxes to items 1 thru {max_mailboxes} of allMailboxes
+                end if
+                if inboxMailboxRef is not missing value then
+                    set hasInbox to false
+                    repeat with mb in allMailboxes
+                        if name of mb is "INBOX" then
+                            set hasInbox to true
+                            exit repeat
+                        end if
+                    end repeat
+                    if not hasInbox then
+                        set allMailboxes to {{inboxMailboxRef}} & allMailboxes
+                    end if
                 end if
 
                 -- Initialize counters

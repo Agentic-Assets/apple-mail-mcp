@@ -798,7 +798,8 @@ class ListInboxEmailsTests(unittest.TestCase):
                 return "Work\nTU"
             if 'account "TU"' in script:
                 raise AppleScriptTimeout("TU timed out")
-            return "Hello|||sender@example.com|||today|||false|||Work"
+            # Schema: subject|||sender|||date|||read|||account|||mail_app_id
+            return "Hello|||sender@example.com|||today|||false|||Work|||1"
 
         with _clear_default_mail_account(), patch(
             "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run

@@ -638,6 +638,10 @@ def replied_ids_script(
                     else
                         set sentUpperBound to sentCount
                     end if
+                    -- Limit full-header reads to 10 messages to avoid per-message
+                    -- IMAP downloads on Exchange which cause timeouts.
+                    set headerReadCap to 10
+                    set headerReadCount to 0
                     if sentUpperBound > 0 then
                         set sentMessages to messages 1 thru sentUpperBound of sentMailbox
                     end if
@@ -645,7 +649,10 @@ def replied_ids_script(
                         try
                             set msgHeaders to ""
                             try
-                                set msgHeaders to all headers of aSentMessage
+                                if headerReadCount < headerReadCap then
+                                    set msgHeaders to all headers of aSentMessage
+                                    set headerReadCount to headerReadCount + 1
+                                end if
                             end try
                             if msgHeaders is not "" then
                                 -- Scan header lines for In-Reply-To: and References:

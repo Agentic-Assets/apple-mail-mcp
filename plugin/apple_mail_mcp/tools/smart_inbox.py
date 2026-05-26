@@ -1,6 +1,5 @@
 """Smart inbox tools: follow-up tracking, actionable email detection, and sender analytics."""
 
-import asyncio
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
@@ -381,18 +380,9 @@ def get_awaiting_reply(
     )
     effective_timeout = timeout if timeout is not None else 120
 
-    async def _fetch_rows() -> tuple[str, str]:
-        return await asyncio.gather(
-            asyncio.to_thread(
-                run_applescript, inbox_script, timeout=effective_timeout
-            ),
-            asyncio.to_thread(
-                run_applescript, sent_script, timeout=effective_timeout
-            ),
-        )
-
     try:
-        inbox_raw, sent_raw = asyncio.run(_fetch_rows())
+        inbox_raw = run_applescript(inbox_script, timeout=effective_timeout)
+        sent_raw = run_applescript(sent_script, timeout=effective_timeout)
     except AppleScriptTimeout:
         return (
             f"Error: get_awaiting_reply timed out on account '{account}' after "
@@ -422,7 +412,7 @@ def get_needs_response(
     max_results: int = 20,
     scan_body: bool = False,
     include_already_replied: bool = False,
-    check_already_replied: bool = True,
+    check_already_replied: bool = False,
     timeout: Optional[int] = None,
 ) -> str:
     """Identify unread emails that likely need a response from you.
@@ -450,9 +440,11 @@ def get_needs_response(
             to prevent agents drafting duplicate replies. When True, those
             emails are kept but annotated with a ``[ALREADY REPLIED]``
             prefix in the priority label.
-        check_already_replied: When False, skip the Sent-mailbox replied
-            detection pass. Use only for fast large-mailbox analytics where
-            duplicate-reply protection is not needed.
+        check_already_replied: When True, scan the Sent mailbox to detect
+            already-replied emails (duplicate-reply protection). Defaults to
+            ``False`` because reading Sent headers on Exchange triggers per-message
+            IMAP downloads and causes timeouts on large inboxes. Enable on
+            smaller accounts or when duplicate-reply protection is required.
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
 
     Returns:

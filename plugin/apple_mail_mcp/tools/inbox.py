@@ -61,23 +61,26 @@ def _parse_pipe_delimited_emails(
 ) -> List[Dict[str, Any]]:
     """Parse '|||'-delimited AppleScript output into a list of email dicts.
 
-    Legacy schema (5 or 6 fields):
-        subject|||sender|||date|||read|||account[|||content_preview]
+    Current schema (6 or 7 or 8 fields):
+        subject|||sender|||date|||read|||account|||mail_app_id[|||internet_message_id][|||content_preview]
 
-    Extended schema when *has_message_id* is True (6 or 7 fields):
-        subject|||sender|||date|||read|||account|||internet_message_id[|||content_preview]
+    ``mail_app_id`` (the integer Mail.app ``id`` property) is always present
+    and emitted as ``"message_id"`` to match the ``search_emails`` record shape.
+
+    Extended schema when *has_message_id* is True (7 or 8 fields):
+        subject|||sender|||date|||read|||account|||mail_app_id|||internet_message_id[|||content_preview]
     """
     emails: List[Dict[str, Any]] = []
     if not raw:
         return emails
-    # Allow enough splits to capture both an Internet Message-ID field AND
-    # a free-form content preview that itself may contain "|||".
-    maxsplit = 6 if has_message_id else 5
+    # Fields: subject(0) sender(1) date(2) read(3) account(4) mail_app_id(5)
+    #         [internet_message_id(6)] [content_preview(7)]
+    maxsplit = 7 if has_message_id else 6
     for line in raw.split("\n"):
         if "|||" not in line:
             continue
         parts = line.split("|||", maxsplit)
-        if len(parts) < 5:
+        if len(parts) < 6:
             continue
         item: Dict[str, Any] = {
             "subject": parts[0].strip(),
@@ -85,15 +88,16 @@ def _parse_pipe_delimited_emails(
             "date": parts[2].strip(),
             "is_read": parts[3].strip().lower() == "true",
             "account": parts[4].strip(),
+            "message_id": parts[5].strip(),
         }
         if has_message_id:
-            if len(parts) >= 6 and parts[5].strip():
-                item["internet_message_id"] = parts[5].strip()
+            if len(parts) >= 7 and parts[6].strip():
+                item["internet_message_id"] = parts[6].strip()
+            if len(parts) >= 8 and parts[7].strip():
+                item["content_preview"] = parts[7].strip()
+        else:
             if len(parts) >= 7 and parts[6].strip():
                 item["content_preview"] = parts[6].strip()
-        else:
-            if len(parts) >= 6 and parts[5].strip():
-                item["content_preview"] = parts[5].strip()
         emails.append(item)
     return emails
 
@@ -225,9 +229,13 @@ def _build_list_inbox_json_script(
 ) -> str:
     """Build a JSON-format inbox script for one account.
 
-    When *include_message_id* is True, each emitted line gains an extra
-    ``|||<internet-message-id>`` field between the account name and the
-    optional content preview. Callers use this for replied-detection.
+    Each emitted line always includes the integer Mail.app ``id`` of the
+    message (field index 5, exposed as ``"message_id"`` by the parser) so
+    callers can pass it directly to ``get_email_by_id``.
+
+    When *include_message_id* is True, an extra
+    ``|||<internet-message-id>`` field (RFC 2822 Message-ID) is appended
+    after the integer id for replied-detection.
     """
     assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
@@ -283,9 +291,10 @@ def _build_list_inbox_json_script(
                     set messageSender to sender of aMessage
                     set messageDate to date received of aMessage
                     set messageRead to read status of aMessage
+                    set mailAppId to id of aMessage
                     {content_field}
                     {message_id_field}
-                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName{message_id_suffix}{content_suffix}
+                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailAppId{message_id_suffix}{content_suffix}
                 end try
             end repeat
         end try
@@ -976,13 +985,19 @@ def get_mailbox_unread_counts(
                     repeat with aMailbox in accountMailboxes
                         try
                             set mailboxName to name of aMailbox
-                            set unreadCount to unread count of aMailbox
-                            if {str(include_zero).lower()} or unreadCount > 0 then
-                                set end of resultList to accountName & "|||" & mailboxName & "|||" & unreadCount
-                            end if
-
+                            set subMailboxes to {{}}
                             try
                                 set subMailboxes to every mailbox of aMailbox
+                            end try
+                            if (count of subMailboxes) is 0 then
+                                -- Leaf mailbox: emit bare name
+                                set unreadCount to unread count of aMailbox
+                                if {str(include_zero).lower()} or unreadCount > 0 then
+                                    set end of resultList to accountName & "|||" & mailboxName & "|||" & unreadCount
+                                end if
+                            else
+                                -- Parent with children: emit only the child paths
+                                -- to avoid double-emitting the same logical mailbox.
                                 repeat with subBox in subMailboxes
                                     set subName to name of subBox
                                     set subUnread to unread count of subBox
@@ -990,7 +1005,7 @@ def get_mailbox_unread_counts(
                                         set end of resultList to accountName & "|||" & mailboxName & "/" & subName & "|||" & subUnread
                                     end if
                                 end repeat
-                            end try
+                            end if
                         end try
                     end repeat
                 end try
@@ -1296,9 +1311,12 @@ def _list_mailboxes_json(
                         set mailboxName to name of currentMailbox
                         {count_fields("currentMailbox")}
                         set end of resultLines to accountName & "|||" & mailboxName & "|||" & mailboxName & "|||" & msgCount & "|||" & unreadCount
+                        {cap_check}
                         try
                             set childMailboxes to every mailbox of currentMailbox
                             repeat with childMailbox in childMailboxes
+                                set mailboxIndex to mailboxIndex + 1
+                                {cap_check}
                                 set childName to name of childMailbox
                                 {count_fields("childMailbox")}
                                 set end of resultLines to accountName & "|||" & childName & "|||" & mailboxName & "/" & childName & "|||" & msgCount & "|||" & unreadCount
@@ -1349,11 +1367,13 @@ def _list_mailboxes_json(
         return json.dumps(mailboxes, indent=2)
 
     total = len(mailboxes)
+    # If the AppleScript returned exactly max_mailboxes items the cap likely
+    # fired and there may be more; mark truncated conservatively.
     truncated = total >= max_mailboxes
     payload = {
         "mailboxes": mailboxes,
         "total": total,
-        "returned": len(mailboxes),
+        "returned": total,
         "truncated": truncated,
     }
     return json.dumps(payload, indent=2)
