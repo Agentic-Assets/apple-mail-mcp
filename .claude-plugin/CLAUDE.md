@@ -28,7 +28,7 @@ The check lives in `tools/validate_manifests.py::_check_marketplace_contract` (r
 
 ```bash
 # From GitHub (users)
-claude plugin marketplace add agenticassets/apple-mail-mcp
+claude plugin marketplace add Agentic-Assets/apple-mail-mcp
 claude plugin install apple-mail@apple-mail-mcp
 
 # From repo checkout (dev)

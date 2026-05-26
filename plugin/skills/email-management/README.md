@@ -21,7 +21,7 @@ plugin/skills/email-management/
 ## Install (Claude Code plugin — recommended)
 
 ```bash
-claude plugin marketplace add agenticassets/apple-mail-mcp
+claude plugin marketplace add Agentic-Assets/apple-mail-mcp
 claude plugin install apple-mail@apple-mail-mcp
 ```
 

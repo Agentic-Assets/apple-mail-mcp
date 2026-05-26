@@ -1,20 +1,20 @@
 # Apple Mail MCP Server
 
-<!-- mcp-name: io.github.agenticassets/apple-mail -->
+<!-- mcp-name: io.github.agentic-assets/apple-mail -->
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI](https://img.shields.io/pypi/v/mcp-apple-mail)](https://pypi.org/project/mcp-apple-mail/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io)
-[![GitHub stars](https://img.shields.io/github/stars/agenticassets/apple-mail-mcp?style=social)](https://github.com/agenticassets/apple-mail-mcp/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/Agentic-Assets/apple-mail-mcp?style=social)](https://github.com/Agentic-Assets/apple-mail-mcp/stargazers)
 
 ## Star History
 
-<a href="https://star-history.com/#agenticassets/apple-mail-mcp&Date">
+<a href="https://star-history.com/#Agentic-Assets/apple-mail-mcp&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=agenticassets/apple-mail-mcp&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=agenticassets/apple-mail-mcp&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=agenticassets/apple-mail-mcp&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Agentic-Assets/apple-mail-mcp&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Agentic-Assets/apple-mail-mcp&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Agentic-Assets/apple-mail-mcp&type=Date" />
  </picture>
 </a>
 
@@ -48,7 +48,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 One install — MCP server (28 tools), legacy `/email-management` slash command, and **nine** bundled workflow skills under `plugin/skills/` (see table below).
 
 ```bash
-claude plugin marketplace add agenticassets/apple-mail-mcp
+claude plugin marketplace add Agentic-Assets/apple-mail-mcp
 claude plugin install apple-mail@apple-mail-mcp
 ```
 
@@ -79,7 +79,7 @@ zip -rq -X -D ../apple-mail-plugin.zip . \
 
 **Important:** Apple Mail MCP requires **macOS Mail.app** on the host Mac (`start_mcp.sh` → AppleScript). Cowork's Linux VM cannot run Mail directly; the plugin MCP server must execute on your Mac host. If tools fail after upload, use the **Claude Code CLI** install or the **Desktop `.mcpb`** path below instead.
 
-GitHub marketplace URL (when Cowork sync works): `agenticassets/apple-mail-mcp`
+GitHub marketplace URL (when Cowork sync works): `Agentic-Assets/apple-mail-mcp`
 
 ### Other Install Methods
 
@@ -91,7 +91,7 @@ tool code as the MCP server. It is meant for humans, shell scripts, smoke
 tests, and agents on another Mac.
 
 ```bash
-git clone https://github.com/agenticassets/apple-mail-mcp.git
+git clone https://github.com/Agentic-Assets/apple-mail-mcp.git
 cd apple-mail-mcp
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -151,7 +151,7 @@ claude mcp add apple-mail -- mcp-apple-mail
 <details>
 <summary><strong>Claude Desktop MCPB</strong></summary>
 
-1. Download the latest `apple-mail-mcp-*.mcpb` from [Releases](https://github.com/agenticassets/apple-mail-mcp/releases)
+1. Download the latest `apple-mail-mcp-*.mcpb` from [Releases](https://github.com/Agentic-Assets/apple-mail-mcp/releases)
 2. Open Claude Desktop → Settings → Developer → MCP Servers → Install from file
 3. Select the `.mcpb` file and grant Mail.app permissions
 
@@ -161,7 +161,7 @@ claude mcp add apple-mail -- mcp-apple-mail
 <summary><strong>Manual setup</strong></summary>
 
 ```bash
-git clone https://github.com/agenticassets/apple-mail-mcp.git
+git clone https://github.com/Agentic-Assets/apple-mail-mcp.git
 cd apple-mail-mcp/plugin
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
@@ -493,8 +493,8 @@ MIT -- see [LICENSE](LICENSE).
 
 ## Links
 
-- [Releases](https://github.com/agenticassets/apple-mail-mcp/releases)
-- [Issues](https://github.com/agenticassets/apple-mail-mcp/issues)
-- [Discussions](https://github.com/agenticassets/apple-mail-mcp/discussions)
+- [Releases](https://github.com/Agentic-Assets/apple-mail-mcp/releases)
+- [Issues](https://github.com/Agentic-Assets/apple-mail-mcp/issues)
+- [Discussions](https://github.com/Agentic-Assets/apple-mail-mcp/discussions)
 - [FastMCP](https://github.com/jlowin/fastmcp)
 - [Model Context Protocol](https://modelcontextprotocol.io)

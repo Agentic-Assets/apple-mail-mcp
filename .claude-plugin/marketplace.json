@@ -2,7 +2,7 @@
   "name": "apple-mail-mcp",
   "owner": {
     "name": "Agentic Assets",
-    "url": "https://github.com/agenticassets"
+    "url": "https://github.com/Agentic-Assets"
   },
   "metadata": {
     "description": "Apple Mail MCP — natural language email management for Claude Code",
@@ -19,8 +19,8 @@
       "author": {
         "name": "Agentic Assets"
       },
-      "homepage": "https://github.com/agenticassets/apple-mail-mcp",
-      "repository": "https://github.com/agenticassets/apple-mail-mcp",
+      "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",
+      "repository": "https://github.com/Agentic-Assets/apple-mail-mcp",
       "category": "productivity",
       "keywords": [
         "mcp",

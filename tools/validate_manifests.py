@@ -508,7 +508,7 @@ def _check_no_directory_entries(
 def _generated_mcpb_readme() -> bytes:
     return """# Apple Mail MCP bundle
 
-Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/`** tree copied from [`plugin/skills`](https://github.com/agenticassets/apple-mail-mcp/tree/main/plugin/skills) for Claude Code workflows.
+Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/`** tree copied from [`plugin/skills`](https://github.com/Agentic-Assets/apple-mail-mcp/tree/main/plugin/skills) for Claude Code workflows.
 
 ## What is inside this archive
 
@@ -520,7 +520,7 @@ Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/
 | `ui/` | MCP Apps dashboard helpers for `inbox_dashboard` |
 | `skills/` | Bundled Claude Code skills (`SKILL.md` per subdirectory) |
 
-For grouped tool summaries, see the upstream [`README`](https://github.com/agenticassets/apple-mail-mcp#readme).
+For grouped tool summaries, see the upstream [`README`](https://github.com/Agentic-Assets/apple-mail-mcp#readme).
 
 ## Claude Desktop install (.mcpb)
 
@@ -560,7 +560,7 @@ Also copies `skills/CLAUDE.md` authoring notes — safe to ignore for runtime.
 - Use narrow `recent_days` / caps before escalating cross-account AppleScript workloads.
 - `export_emails`, `save_email_attachment`, compose send paths imply disk or dispatch risk — preview + confirm.
 
-Support & source: https://github.com/agenticassets/apple-mail-mcp
+Support & source: https://github.com/Agentic-Assets/apple-mail-mcp
 """.encode()
 
 

@@ -7,12 +7,12 @@
     "name": "Agentic Assets"
   },
   "license": "MIT",
-  "homepage": "https://github.com/agenticassets/apple-mail-mcp",
+  "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agenticassets/apple-mail-mcp.git"
+    "url": "https://github.com/Agentic-Assets/apple-mail-mcp.git"
   },
-  "documentation": "https://github.com/agenticassets/apple-mail-mcp#readme",
+  "documentation": "https://github.com/Agentic-Assets/apple-mail-mcp#readme",
   "user_config": {
     "user_preferences": {
       "type": "string",
