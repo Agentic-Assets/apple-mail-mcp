@@ -7,6 +7,15 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from apple_mail_mcp.server import USER_PREFERENCES
 
+# ---------------------------------------------------------------------------
+# Performance caps for replied_ids_script
+# ---------------------------------------------------------------------------
+# Full-header reads are expensive on Exchange (one IMAP download each).
+# Subject reads are cheaper but still network I/O on Exchange; cap them
+# more generously.  Internal-only — not exposed as tool parameters.
+REPLIED_HEADER_READ_CAP = 10
+REPLIED_SUBJECT_READ_CAP = 50
+
 
 def inject_preferences(func):
     """Decorator that appends user preferences to tool docstrings"""
@@ -638,10 +647,14 @@ def replied_ids_script(
                     else
                         set sentUpperBound to sentCount
                     end if
-                    -- Limit full-header reads to 10 messages to avoid per-message
-                    -- IMAP downloads on Exchange which cause timeouts.
-                    set headerReadCap to 10
+                    -- Limit full-header reads to {REPLIED_HEADER_READ_CAP} messages to avoid
+                    -- per-message IMAP downloads on Exchange which cause timeouts.
+                    -- Limit subject-fallback reads to {REPLIED_SUBJECT_READ_CAP} messages
+                    -- (cheaper than headers but still network I/O on Exchange).
+                    set headerReadCap to {REPLIED_HEADER_READ_CAP}
                     set headerReadCount to 0
+                    set subjectReadCap to {REPLIED_SUBJECT_READ_CAP}
+                    set subjectReadCount to 0
                     if sentUpperBound > 0 then
                         set sentMessages to messages 1 thru sentUpperBound of sentMailbox
                     end if
@@ -692,12 +705,16 @@ def replied_ids_script(
                                     end if
                                 end repeat
                             end if
-                            -- Fallback subject collection
-                            try
-                                set sentSubj to subject of aSentMessage
-                                set baseSent to my {strip_prefixes_handler}(sentSubj)
-                                set end of {subjects_var} to baseSent
-                            end try
+                            -- Fallback subject collection (capped to avoid unbounded
+                            -- IMAP round-trips on Exchange for remaining messages).
+                            if subjectReadCount < subjectReadCap then
+                                try
+                                    set sentSubj to subject of aSentMessage
+                                    set baseSent to my {strip_prefixes_handler}(sentSubj)
+                                    set end of {subjects_var} to baseSent
+                                    set subjectReadCount to subjectReadCount + 1
+                                end try
+                            end if
                         end try
                     end repeat
                 end if

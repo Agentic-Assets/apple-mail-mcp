@@ -291,7 +291,13 @@ def _build_list_inbox_json_script(
                     set messageSender to sender of aMessage
                     set messageDate to date received of aMessage
                     set messageRead to read status of aMessage
-                    set mailAppId to id of aMessage
+                    -- Wrap id read in its own try so a transient failure during
+                    -- sync doesn't drop the entire row (matches search_emails
+                    -- sanitize_field fallback behaviour).
+                    set mailAppId to ""
+                    try
+                        set mailAppId to id of aMessage
+                    end try
                     {content_field}
                     {message_id_field}
                     set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailAppId{message_id_suffix}{content_suffix}
@@ -985,27 +991,28 @@ def get_mailbox_unread_counts(
                     repeat with aMailbox in accountMailboxes
                         try
                             set mailboxName to name of aMailbox
+                            -- Always emit the parent row with its own unread count
+                            -- (bare name as key, NOT prefixed).  Exchange INBOX has
+                            -- messages AND children — skipping the parent silently
+                            -- drops its own unread count.
+                            set unreadCount to unread count of aMailbox
+                            if {str(include_zero).lower()} or unreadCount > 0 then
+                                set end of resultList to accountName & "|||" & mailboxName & "|||" & unreadCount
+                            end if
+                            -- Also emit child mailboxes under parent/child paths so
+                            -- each child's own count is visible without double-counting
+                            -- the parent (different keys: "Inbox" vs "Inbox/Sub").
                             set subMailboxes to {{}}
                             try
                                 set subMailboxes to every mailbox of aMailbox
                             end try
-                            if (count of subMailboxes) is 0 then
-                                -- Leaf mailbox: emit bare name
-                                set unreadCount to unread count of aMailbox
-                                if {str(include_zero).lower()} or unreadCount > 0 then
-                                    set end of resultList to accountName & "|||" & mailboxName & "|||" & unreadCount
+                            repeat with subBox in subMailboxes
+                                set subName to name of subBox
+                                set subUnread to unread count of subBox
+                                if {str(include_zero).lower()} or subUnread > 0 then
+                                    set end of resultList to accountName & "|||" & mailboxName & "/" & subName & "|||" & subUnread
                                 end if
-                            else
-                                -- Parent with children: emit only the child paths
-                                -- to avoid double-emitting the same logical mailbox.
-                                repeat with subBox in subMailboxes
-                                    set subName to name of subBox
-                                    set subUnread to unread count of subBox
-                                    if {str(include_zero).lower()} or subUnread > 0 then
-                                        set end of resultList to accountName & "|||" & mailboxName & "/" & subName & "|||" & subUnread
-                                    end if
-                                end repeat
-                            end if
+                            end repeat
                         end try
                     end repeat
                 end try
@@ -1367,13 +1374,17 @@ def _list_mailboxes_json(
         return json.dumps(mailboxes, indent=2)
 
     total = len(mailboxes)
-    # If the AppleScript returned exactly max_mailboxes items the cap likely
-    # fired and there may be more; mark truncated conservatively.
+    # If the AppleScript emitted more rows than the cap (fence-post: parent row
+    # appended before the post-parent cap_check fires) truncate here so the
+    # returned contract (len <= max_mailboxes) is always satisfied.
     truncated = total >= max_mailboxes
+    if total > max_mailboxes:
+        mailboxes = mailboxes[:max_mailboxes]
+    returned = len(mailboxes)
     payload = {
         "mailboxes": mailboxes,
         "total": total,
-        "returned": total,
+        "returned": returned,
         "truncated": truncated,
     }
     return json.dumps(payload, indent=2)

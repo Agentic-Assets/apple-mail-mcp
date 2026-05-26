@@ -379,14 +379,24 @@ def get_awaiting_reply(
         days_back=days_back,
     )
     effective_timeout = timeout if timeout is not None else 120
+    # Split budget so the two sequential calls cannot exceed the total wall time.
+    # Inbox scan gets 60 % (min 30 s); sent scan gets the remaining 40 % (min 30 s).
+    inbox_timeout = max(30, int(effective_timeout * 0.6))
+    sent_timeout = max(30, int(effective_timeout * 0.4))
 
     try:
-        inbox_raw = run_applescript(inbox_script, timeout=effective_timeout)
-        sent_raw = run_applescript(sent_script, timeout=effective_timeout)
+        inbox_raw = run_applescript(inbox_script, timeout=inbox_timeout)
     except AppleScriptTimeout:
         return (
-            f"Error: get_awaiting_reply timed out on account '{account}' after "
-            f"{effective_timeout}s — try increasing timeout or reducing days_back"
+            f"Error: get_awaiting_reply timed out during inbox scan on account '{account}' "
+            f"after {inbox_timeout}s — try increasing timeout or reducing days_back"
+        )
+    try:
+        sent_raw = run_applescript(sent_script, timeout=sent_timeout)
+    except AppleScriptTimeout:
+        return (
+            f"Error: get_awaiting_reply timed out during sent scan on account '{account}' "
+            f"after {sent_timeout}s — try increasing timeout or reducing days_back"
         )
 
     for raw in (inbox_raw, sent_raw):

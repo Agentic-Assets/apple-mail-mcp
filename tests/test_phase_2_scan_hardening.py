@@ -538,5 +538,248 @@ class HeavyScanGuardTests(unittest.TestCase):
         self.assertIn("id is 888", captured["script"])
 
 
+class FixAUnreadCountsExchangeParentTests(unittest.TestCase):
+    """Fix A: parent mailbox with unread + children must all appear."""
+
+    def _make_output(self):
+        # Simulate Exchange INBOX with 50 own unreads + 3 children with 10 each
+        lines = [
+            "Exchange|||Inbox|||50",
+            "Exchange|||Inbox/Subfolder1|||10",
+            "Exchange|||Inbox/Subfolder2|||10",
+            "Exchange|||Inbox/Subfolder3|||10",
+        ]
+        return "\n".join(lines)
+
+    def test_parent_and_children_all_emitted(self):
+        """Parent row must appear alongside child rows — 4 distinct keys."""
+        with patch(
+            "apple_mail_mcp.tools.inbox.run_applescript",
+            return_value=self._make_output(),
+        ):
+            result = inbox_tools.get_mailbox_unread_counts(
+                account="Exchange",
+                include_zero=False,
+            )
+
+        exchange = result.get("Exchange", {})
+        self.assertEqual(len(exchange), 4, f"Expected 4 keys, got {list(exchange.keys())}")
+        self.assertEqual(exchange["Inbox"], 50)
+        self.assertEqual(exchange["Inbox/Subfolder1"], 10)
+        self.assertEqual(exchange["Inbox/Subfolder2"], 10)
+        self.assertEqual(exchange["Inbox/Subfolder3"], 10)
+
+    def test_script_emits_parent_row_before_children(self):
+        """Generated AppleScript must emit the parent row without the leaf-only guard."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            inbox_tools.get_mailbox_unread_counts(account="Exchange")
+
+        script = captured["script"]
+        # The old guard skipped parents; new code should not have it
+        self.assertNotIn("(count of subMailboxes) is 0", script)
+        # Parent row is emitted before iterating subMailboxes
+        self.assertIn("set unreadCount to unread count of aMailbox", script)
+
+
+class FixBListInboxIdFallbackTests(unittest.IsolatedAsyncioTestCase):
+    """Fix B: list_inbox_emails row must survive when id of aMessage fails."""
+
+    def test_script_wraps_id_read_in_try(self):
+        """Generated AppleScript must have inner try around id of aMessage."""
+        from apple_mail_mcp.tools.inbox import _build_list_inbox_json_script
+
+        script = _build_list_inbox_json_script(
+            account="Work",
+            max_emails=10,
+            include_read=True,
+        )
+        self.assertIn("set mailAppId to", script)
+        # The id read must be wrapped in its own try block with a fallback
+        self.assertIn('set mailAppId to ""', script)
+        self.assertIn("try\n                        set mailAppId to id of aMessage", script)
+
+    async def test_row_emitted_when_id_fails(self):
+        """Parser must include a row even when mail_app_id is empty string."""
+        # Build a raw output line with empty id field (6th field)
+        raw_line = 'Hello|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||'
+
+        call_count = [0]
+
+        def fake_run(script, timeout=120):
+            call_count[0] += 1
+            # First call is account validation, second is the actual inbox fetch
+            return raw_line
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            result = await inbox_tools.list_inbox_emails(
+                account="Work", max_emails=5, output_format="json"
+            )
+
+        import json as _json
+        data = _json.loads(result)
+        # Single-account JSON path returns a list directly
+        emails = data if isinstance(data, list) else data.get("emails", [])
+        self.assertEqual(len(emails), 1)
+        # Row must be present — the parser exposes the id field as "message_id"
+        self.assertIn("message_id", emails[0])
+        # Value must be empty string fallback (not missing entirely)
+        self.assertEqual(emails[0]["message_id"], "")
+
+
+class FixCAccountOverviewInboxCaseFallbackTests(unittest.TestCase):
+    """Fix C: account_overview must try 'Inbox' and 'inbox' when 'INBOX' fails."""
+
+    def test_script_contains_inbox_and_INBOX_lookups(self):
+        """Generated AppleScript must attempt both 'INBOX' and 'Inbox' name forms."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            analytics_tools.get_statistics(
+                account="Work",
+                scope="account_overview",
+                days_back=2,
+            )
+
+        script = captured["script"]
+        self.assertIn('mailbox "INBOX"', script)
+        self.assertIn('mailbox "Inbox"', script)
+        # fallback loop uses ignoring case
+        self.assertIn("ignoring case", script)
+
+
+class FixDRepliedIdsSubjectCapTests(unittest.TestCase):
+    """Fix D: replied_ids_script must cap subject-fallback reads."""
+
+    def test_script_contains_both_caps_as_literals(self):
+        from apple_mail_mcp.core import replied_ids_script, REPLIED_HEADER_READ_CAP, REPLIED_SUBJECT_READ_CAP
+
+        script = replied_ids_script()
+        self.assertIn(f"set headerReadCap to {REPLIED_HEADER_READ_CAP}", script)
+        self.assertIn(f"set subjectReadCap to {REPLIED_SUBJECT_READ_CAP}", script)
+
+    def test_subject_read_is_guarded_by_cap(self):
+        from apple_mail_mcp.core import replied_ids_script
+
+        script = replied_ids_script()
+        # Subject read must be inside a cap check
+        self.assertIn("subjectReadCount < subjectReadCap", script)
+        self.assertIn("set subjectReadCount to subjectReadCount + 1", script)
+
+    def test_constants_are_positive_integers(self):
+        from apple_mail_mcp.core import REPLIED_HEADER_READ_CAP, REPLIED_SUBJECT_READ_CAP
+
+        self.assertIsInstance(REPLIED_HEADER_READ_CAP, int)
+        self.assertGreater(REPLIED_HEADER_READ_CAP, 0)
+        self.assertIsInstance(REPLIED_SUBJECT_READ_CAP, int)
+        self.assertGreater(REPLIED_SUBJECT_READ_CAP, REPLIED_HEADER_READ_CAP)
+
+
+class FixEAwaitingReplyTimeoutSubdivisionTests(unittest.TestCase):
+    """Fix E: get_awaiting_reply must split timeout between inbox/sent calls."""
+
+    def test_two_different_timeouts_passed(self):
+        timeouts = []
+
+        def fake_run(script, timeout=120):
+            timeouts.append(timeout)
+            return ""
+
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
+            smart_inbox_tools.get_awaiting_reply(account="Work", timeout=120)
+
+        self.assertEqual(len(timeouts), 2)
+        inbox_t, sent_t = timeouts
+        self.assertNotEqual(inbox_t, sent_t, "Timeouts must differ (60/40 split)")
+        self.assertLessEqual(inbox_t + sent_t, 120, "Sum must not exceed configured budget")
+
+    def test_timeouts_sum_does_not_exceed_budget(self):
+        timeouts = []
+
+        def fake_run(script, timeout=120):
+            timeouts.append(timeout)
+            return ""
+
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
+            smart_inbox_tools.get_awaiting_reply(account="Work", timeout=200)
+
+        self.assertEqual(len(timeouts), 2)
+        self.assertLessEqual(sum(timeouts), 200)
+
+    def test_inbox_timeout_named_in_error_on_inbox_fail(self):
+        call_count = [0]
+
+        def fake_run(script, timeout=120):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise AppleScriptTimeout("inbox slow")
+            return ""
+
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
+            result = smart_inbox_tools.get_awaiting_reply(account="Work", timeout=120)
+
+        self.assertIn("inbox scan", result.lower())
+
+
+class FixFListMailboxesCapFencepostTests(unittest.TestCase):
+    """Fix F: list_mailboxes must return exactly max_mailboxes rows even when
+    AppleScript emits N+1 due to the fence-post in the AppleScript cap_check."""
+
+    def test_python_truncates_over_emission(self):
+        """When AppleScript returns N+1 rows and cap=N, result has exactly N."""
+        cap = 3
+        # Simulate N+1 rows returned by AppleScript
+        lines = "\n".join(
+            f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(cap + 1)
+        )
+
+        with patch(
+            "apple_mail_mcp.tools.inbox.run_applescript",
+            return_value=lines,
+        ):
+            raw = inbox_tools.list_mailboxes(
+                account="Work",
+                output_format="json",
+                max_mailboxes=cap,
+            )
+
+        import json as _json
+        data = _json.loads(raw)
+        self.assertEqual(len(data["mailboxes"]), cap)
+        self.assertTrue(data["truncated"])
+        self.assertEqual(data["returned"], cap)
+
+    def test_exact_cap_rows_still_truncated_flag(self):
+        """When AppleScript returns exactly max_mailboxes rows, truncated=True."""
+        cap = 2
+        lines = "\n".join(
+            f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(cap)
+        )
+
+        with patch(
+            "apple_mail_mcp.tools.inbox.run_applescript",
+            return_value=lines,
+        ):
+            raw = inbox_tools.list_mailboxes(
+                account="Work",
+                output_format="json",
+                max_mailboxes=cap,
+            )
+
+        import json as _json
+        data = _json.loads(raw)
+        self.assertEqual(len(data["mailboxes"]), cap)
+        self.assertTrue(data["truncated"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -480,20 +480,46 @@ def get_statistics(
                 set allMailboxes to every mailbox of targetAccount
                 -- Always include INBOX first so it isn't sliced out on Exchange
                 -- accounts where alphabetical ordering pushes it past the cap.
+                -- Try several common name forms before falling back to a
+                -- case-insensitive scan (handles "Inbox", localized names, etc.).
                 set inboxMailboxRef to missing value
                 try
                     set inboxMailboxRef to mailbox "INBOX" of targetAccount
                 end try
+                if inboxMailboxRef is missing value then
+                    try
+                        set inboxMailboxRef to mailbox "Inbox" of targetAccount
+                    end try
+                end if
+                if inboxMailboxRef is missing value then
+                    try
+                        set inboxMailboxRef to mailbox "inbox" of targetAccount
+                    end try
+                end if
+                if inboxMailboxRef is missing value then
+                    repeat with mb in allMailboxes
+                        set mbNameLower to name of mb
+                        ignoring case
+                            if mbNameLower is "inbox" then
+                                set inboxMailboxRef to mb
+                                exit repeat
+                            end if
+                        end ignoring
+                    end repeat
+                end if
                 if (count of allMailboxes) > {max_mailboxes} then
                     set allMailboxes to items 1 thru {max_mailboxes} of allMailboxes
                 end if
                 if inboxMailboxRef is not missing value then
                     set hasInbox to false
+                    set inboxRefName to name of inboxMailboxRef
                     repeat with mb in allMailboxes
-                        if name of mb is "INBOX" then
-                            set hasInbox to true
-                            exit repeat
-                        end if
+                        ignoring case
+                            if name of mb is inboxRefName then
+                                set hasInbox to true
+                                exit repeat
+                            end if
+                        end ignoring
                     end repeat
                     if not hasInbox then
                         set allMailboxes to {{inboxMailboxRef}} & allMailboxes
