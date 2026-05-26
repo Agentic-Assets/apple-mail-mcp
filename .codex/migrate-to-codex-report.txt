@@ -1,0 +1,23 @@
+Migration inventory:
+  active: instruction files - 2 found
+    - CLAUDE.md
+    - AGENTS.md
+  active: skills - 8 found
+    - finalize-apple-mail-mcp
+    - mcp-builder
+    - plugin-creator
+    - plugin-settings
+    - plugin-structure
+    - python-performance-optimization
+    - reviewing-code
+    - testing-python
+  inactive: command sources - none found
+  inactive: subagents - none found
+Migration surfaces:
+  active: AGENTS.md - 1 instruction file(s) found.
+  inactive: skills - Not selected by CLI flags.
+  inactive: MCP config - No settings or MCP config found.
+  inactive: subagents - Not selected by CLI flags.
+Migration report:
+  manual_fix_required: AGENTS.md - Generated copy contains Claude-only instruction semantics.
+  manual_fix_required: .claude-plugin/marketplace.json - Manual review required for Claude Code plugin marketplace; not converted by this tool.

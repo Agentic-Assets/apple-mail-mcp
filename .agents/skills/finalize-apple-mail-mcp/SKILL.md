@@ -1,6 +1,6 @@
 ---
-name: finalize-apple-mail-mcp
-description: Final codebase review and doc/manifest sync for apple-mail-mcp after feature work. Starts with plugin-validator to fix manifest and doc drift, then pytest, CLAUDE.md/README/skills/MCPB sync, and commit/push when the user asks. Use when finishing a change, before release, when the user says finalize, sync docs, update manifests, or ship the branch.
+name: "finalize-apple-mail-mcp"
+description: "Final codebase review and doc/manifest sync for apple-mail-mcp after feature work. Starts with plugin-validator to fix manifest and doc drift, then pytest, CLAUDE.md/README/skills/MCPB sync, and commit/push when the user asks. Use when finishing a change, before release, when the user says finalize, sync docs, update manifests, or ship the branch."
 ---
 
 # Finalize apple-mail-mcp
