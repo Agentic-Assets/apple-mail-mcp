@@ -33,7 +33,7 @@ A change here lands in all three. Treat tool source as a public API.
   it orchestrates plugin-validator, doc sync, artifact rebuild, and
   commit/push.
 
-### Python skill cheat sheet for common change types
+### Quick-pick by change type
 
 | Working on… | Reach for |
 |-------------|-----------|
@@ -44,6 +44,53 @@ A change here lands in all three. Treat tool source as a public API.
 | Async/asyncio (`asyncio.run()`-in-loop class) | async-python-patterns |
 | Code review pass before ship | reviewing-code · code-review · python-anti-patterns |
 | Live confirmation a change actually works | verify · run |
+
+### Full Python-development skill index — use these PROACTIVELY, not as last resort
+
+A 5-second skill invocation prevents a 5-minute debug loop. Most edits
+to `tools/*.py` should trigger at least one of these. Touch them often;
+they are cheap.
+
+| Skill | Use when |
+|-------|----------|
+| `python-anti-patterns`            | Pre-PR checklist — fast scan for common bad practices |
+| `python-code-style`               | Naming, docstrings, lint/format config, ruff rules |
+| `python-design-patterns`          | Adding abstractions; KISS / SRP / composition trade-offs |
+| `python-error-handling`           | try/except design, validation, partial-failure `errors[]` |
+| `python-resilience`               | Retries, exponential backoff, timeouts, fault-tolerant decorators |
+| `python-performance-optimization` | Hot paths — `cProfile`, O(N²) loops, AppleScript→Python lifts |
+| `python-type-safety`              | Type hints, generics, `Protocol`, mypy/pyright config |
+| `python-configuration`            | env vars, `pydantic-settings`, secret externalization |
+| `python-resource-management`      | Context managers, streaming responses, deterministic cleanup |
+| `python-observability`            | Structured logging, metrics, distributed tracing |
+| `python-packaging`                | `pyproject.toml`, PyPI distribution (this repo ships `mcp-apple-mail`) |
+| `python-project-structure`        | Module layout, `__all__`, public-API surface design |
+| `python-testing-patterns`         | pytest patterns — fixtures, parameterization, mocking |
+| `testing-python`                  | Broader test design; pair with `python-testing-patterns` |
+| `async-python-patterns`           | asyncio, async/await, `asyncio.run()`-in-loop class of bugs |
+| `python-background-jobs`          | Async workers / queues (rare in this repo — flag for future) |
+| `uv-package-manager`              | `uv` workflows (this repo uses pip/venv; note for greenfield) |
+
+### Other skills worth invoking frequently in this repo
+
+| Skill / Agent | Use when |
+|---------------|----------|
+| `reviewing-code`                         | Second-pass review focused on API + pattern clarity |
+| `code-review`                            | Run review on current git diff at chosen effort level |
+| `security-review`                        | Touching auth, file IO, secrets, destructive operations |
+| `verify`                                 | Confirming a change actually works in the running app |
+| `run`                                    | Launching the project (`apple-mail` CLI or MCP server) |
+| `mcp-builder`                            | New MCP tool design — schema, error contract, naming |
+| `plugin-dev:plugin-validator` (agent)    | After tool-count or manifest changes |
+| `plugin-dev:skill-reviewer` (agent)      | After editing `plugin/skills/*/SKILL.md` |
+| `finalize-apple-mail-mcp`                | Wrapping up any non-trivial change before commit/push |
+
+**Heuristic:** if you are about to edit a Python file in `plugin/` and
+have NOT thought about which skill applies, that is the cue to invoke
+one. Default picks for this repo: `python-anti-patterns` +
+`python-performance-optimization` for any `smart_inbox.py` /
+`analytics.py` edit; `python-error-handling` + `python-resilience` for
+anything touching `core.run_applescript()` callers.
 
 If you are NOT editing this source — i.e. you just want to USE the plugin
 to read Mail — this reminder does not apply; look at your installed
