@@ -2,26 +2,26 @@
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from apple_mail_mcp import server as _server
-from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.core import (
-    AppleScriptTimeout,
-    fetch_replied_ids,
-    inject_preferences,
-    escape_applescript,
-    run_applescript,
-    inbox_mailbox_script,
-    date_cutoff_script,
-    validate_account_name,
-)
 from apple_mail_mcp.constants import (
-    NEWSLETTER_PLATFORM_PATTERNS,
     NEWSLETTER_KEYWORD_PATTERNS,
+    NEWSLETTER_PLATFORM_PATTERNS,
     SCAN_BOUNDS,
 )
+from apple_mail_mcp.core import (
+    AppleScriptTimeout,
+    date_cutoff_script,
+    escape_applescript,
+    fetch_replied_ids,
+    inbox_mailbox_script,
+    inject_preferences,
+    run_applescript,
+    validate_account_name,
+)
+from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 
 
 def _newsletter_filter_condition(sender_var: str = "messageSender") -> str:
@@ -32,26 +32,21 @@ def _newsletter_filter_condition(sender_var: str = "messageSender") -> str:
     job, not a per-message shell-out.
     """
     platform_checks = " or ".join(
-        f'{sender_var} contains "{escape_applescript(p)}"'
-        for p in NEWSLETTER_PLATFORM_PATTERNS
+        f'{sender_var} contains "{escape_applescript(p)}"' for p in NEWSLETTER_PLATFORM_PATTERNS
     )
     keyword_checks = " or ".join(
-        f'{sender_var} contains "{escape_applescript(k)}"'
-        for k in NEWSLETTER_KEYWORD_PATTERNS
+        f'{sender_var} contains "{escape_applescript(k)}"' for k in NEWSLETTER_KEYWORD_PATTERNS
     )
     return f"({platform_checks} or {keyword_checks})"
 
 
 def _is_noreply_recipient(address: str) -> bool:
     lower = address.casefold()
-    return any(
-        token in lower
-        for token in ("noreply", "no-reply", "do-not-reply", "donotreply")
-    )
+    return any(token in lower for token in ("noreply", "no-reply", "do-not-reply", "donotreply"))
 
 
 def _sent_mailbox_script(var_name: str, account_var: str) -> str:
-    return f'''
+    return f"""
             set {var_name} to missing value
             try
                 set {var_name} to mailbox "Sent Messages" of {account_var}
@@ -66,7 +61,7 @@ def _sent_mailbox_script(var_name: str, account_var: str) -> str:
                     end try
                 end try
             end try
-    '''
+    """
 
 
 @dataclass(frozen=True)
@@ -106,7 +101,6 @@ def _parse_inbox_replied_ids(raw: str) -> set[str]:
         parts = line.split("|||", 2)
         if len(parts) < 3:
             continue
-        field = parts[1]  # "in-reply-to" or "references"
         value = parts[2].strip()
         if not value:
             continue
@@ -144,11 +138,7 @@ def _filter_awaiting_reply(
             break
         if exclude_noreply and _is_noreply_recipient(sent_row.recipient_address):
             continue
-        mid = (
-            _normalize_message_id(sent_row.internet_message_id)
-            if sent_row.internet_message_id
-            else ""
-        )
+        mid = _normalize_message_id(sent_row.internet_message_id) if sent_row.internet_message_id else ""
         if mid and mid in replied_to_ids:
             continue
         awaiting.append(sent_row)
@@ -195,7 +185,7 @@ def _build_awaiting_reply_json(
     sent_rows: list[_AwaitingReplySentRow],
     replied_to_ids: set[str],
     exclude_noreply: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     awaiting = _filter_awaiting_reply(
         sent_rows=sent_rows,
         replied_to_ids=replied_to_ids,
@@ -232,9 +222,7 @@ def _build_awaiting_reply_inbox_script(
     (no full RFC822 blob). ``header value of header named "..."`` is *not*
     valid Mail.app dictionary syntax and fails to parse with osascript -2740.
     """
-    inbox_date_check = (
-        "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
-    )
+    inbox_date_check = "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
     return f'''
     tell application "Mail"
         try
@@ -298,9 +286,7 @@ def _build_awaiting_reply_sent_script(
 
     Shape: SENT|||mail_app_id|||internet_message_id|||subject|||recipient|||date_sent
     """
-    sent_date_check = (
-        "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
-    )
+    sent_date_check = "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
     return f'''
     tell application "Mail"
         try
@@ -356,7 +342,7 @@ def _build_awaiting_reply_sent_script(
     '''
 
 
-def _awaiting_reply_error(message: str, *, output_format: str) -> Union[str, Dict[str, Any]]:
+def _awaiting_reply_error(message: str, *, output_format: str) -> str | dict[str, Any]:
     if output_format == "json":
         return {"error": message, "errors": [message], "awaiting": []}
     return f"Error: {message}"
@@ -365,13 +351,13 @@ def _awaiting_reply_error(message: str, *, output_format: str) -> Union[str, Dic
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def get_awaiting_reply(
-    account: Optional[str] = None,
+    account: str | None = None,
     days_back: int = 7,
     exclude_noreply: bool = True,
     max_results: int = 20,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
     output_format: str = "text",
-) -> Union[str, Dict[str, Any]]:
+) -> str | dict[str, Any]:
     """Find sent emails that haven't received a reply yet.
 
     Scans the Sent mailbox for outgoing emails and cross-references with
@@ -757,9 +743,7 @@ def _build_needs_response_inbox_script(
     '''
 
 
-def _needs_response_error(
-    message: str, *, output_format: str
-) -> Union[str, Dict[str, Any]]:
+def _needs_response_error(message: str, *, output_format: str) -> str | dict[str, Any]:
     if output_format == "json":
         return {
             "error": message,
@@ -773,16 +757,16 @@ def _needs_response_error(
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def get_needs_response(
-    account: Optional[str] = None,
+    account: str | None = None,
     mailbox: str = "INBOX",
     days_back: int = 7,
     max_results: int = 20,
     scan_body: bool = False,
     include_already_replied: bool = False,
     check_already_replied: bool = False,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
     output_format: str = "text",
-) -> Union[str, Dict[str, Any]]:
+) -> str | dict[str, Any]:
     """Identify unread emails that likely need a response from you.
 
     Filters out newsletters, automated emails, and noreply senders.
@@ -949,15 +933,15 @@ def _top_senders_error(
     message: str,
     *,
     output_format: str,
-    account: Optional[str] = None,
-    mailbox: Optional[str] = None,
-    days_back: Optional[int] = None,
-    top_n: Optional[int] = None,
-    group_by_domain: Optional[bool] = None,
+    account: str | None = None,
+    mailbox: str | None = None,
+    days_back: int | None = None,
+    top_n: int | None = None,
+    group_by_domain: bool | None = None,
     error_code: str = "error",
-) -> Union[str, Dict[str, Any]]:
+) -> str | dict[str, Any]:
     if output_format == "json":
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "error": error_code,
             "errors": [message],
             "senders": [],
@@ -979,14 +963,14 @@ def _top_senders_error(
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def get_top_senders(
-    account: Optional[str] = None,
+    account: str | None = None,
     mailbox: str = "INBOX",
     days_back: int = 30,
     top_n: int = 10,
     group_by_domain: bool = False,
     output_format: str = "text",
-    timeout: Optional[int] = None,
-) -> Union[str, Dict[str, Any]]:
+    timeout: int | None = None,
+) -> str | dict[str, Any]:
     """Analyse a mailbox to find the most frequent senders.
 
     Useful for identifying key contacts, high-volume senders to filter,
@@ -1020,10 +1004,7 @@ def get_top_senders(
     if days_back <= 0:
         err = ToolError(
             code="UNBOUNDED_SCAN_REQUIRED",
-            message=(
-                "get_top_senders refuses to scan without days_back; "
-                "pass days_back=7 or 30"
-            ),
+            message=("get_top_senders refuses to scan without days_back; pass days_back=7 or 30"),
             remediation={
                 "preferred": "Pass days_back=7 or 30",
                 "fallback_tool": "full_inbox_export",
@@ -1087,7 +1068,7 @@ def get_top_senders(
     # Build the extraction key: either full sender or domain.
     if group_by_domain:
         # Extract domain from email address
-        extract_key = '''
+        extract_key = """
                             -- Extract domain from sender address
                             set senderKey to ""
                             set atPos to 0
@@ -1110,12 +1091,12 @@ def get_top_senders(
                             else
                                 set senderKey to messageSender
                             end if
-'''
+"""
         title_label = "TOP SENDER DOMAINS"
     else:
-        extract_key = '''
+        extract_key = """
                             set senderKey to messageSender
-'''
+"""
         title_label = "TOP SENDERS"
 
     # Return one ROW|||sender per message; Python aggregates with Counter.
@@ -1231,9 +1212,9 @@ def get_top_senders(
     top_entries = sender_counts.most_common(top_n)
 
     if output_format == "json":
-        sender_records: List[Dict[str, Any]] = []
+        sender_records: list[dict[str, Any]] = []
         for key, cnt in top_entries:
-            entry: Dict[str, Any] = {
+            entry: dict[str, Any] = {
                 "key": key,
                 "count": cnt,
             }

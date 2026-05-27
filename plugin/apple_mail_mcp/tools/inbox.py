@@ -2,35 +2,36 @@
 
 import asyncio
 import json
-from typing import Optional, List, Dict, Any, Tuple, Union
+from typing import Any, cast
 
 from apple_mail_mcp import server as _server
-from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
-from apple_mail_mcp.core import (
-    AppleScriptTimeout,
-    inject_preferences,
-    escape_applescript,
-    fetch_replied_ids as _core_fetch_replied_ids,
-    run_applescript,
-    inbox_mailbox_script,
-    content_preview_script,
-    sanitize_pipe_delimited_field,
-    validate_account_name,
-    account_not_found_json,
-)
 from apple_mail_mcp.backend.base import ToolError
 from apple_mail_mcp.bounded_scan import (
-    build_bounded_message_scan,
     build_bounded_filtered_scan,
+    build_bounded_message_scan,
 )
 from apple_mail_mcp.constants import SCAN_BOUNDS
-
+from apple_mail_mcp.core import (
+    AppleScriptTimeout,
+    account_not_found_json,
+    content_preview_script,
+    escape_applescript,
+    inbox_mailbox_script,
+    inject_preferences,
+    run_applescript,
+    sanitize_pipe_delimited_field,
+    validate_account_name,
+)
+from apple_mail_mcp.core import (
+    fetch_replied_ids as _core_fetch_replied_ids,
+)
+from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 
 _VALID_READ_FILTERS = ("all", "read", "unread")
 
 
 def _resolve_read_filter(
-    read_status: Optional[str],
+    read_status: str | None,
     include_read: bool,
 ) -> str:
     """Map the public ``read_status``/``include_read`` pair to an internal filter.
@@ -42,14 +43,12 @@ def _resolve_read_filter(
     """
     if read_status is not None:
         if read_status not in _VALID_READ_FILTERS:
-            raise ValueError(
-                f"read_status must be one of {_VALID_READ_FILTERS}; got {read_status!r}"
-            )
+            raise ValueError(f"read_status must be one of {_VALID_READ_FILTERS}; got {read_status!r}")
         return read_status
     return "all" if include_read else "unread"
 
 
-def _read_filter_condition(read_filter: str) -> Optional[str]:
+def _read_filter_condition(read_filter: str) -> str | None:
     """Return the per-message AppleScript predicate for *read_filter*.
 
     Returns ``None`` for the no-filter case (``"all"``). The predicate
@@ -64,7 +63,7 @@ def _read_filter_condition(read_filter: str) -> Optional[str]:
     return None
 
 
-def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: Optional[int] = 60) -> set:
+def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: int | None = 60) -> set[str]:
     """Fetch replied Message-ID set using this module's ``run_applescript``.
 
     Wraps the core helper so tests that patch
@@ -78,9 +77,10 @@ def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: Optional[int] 
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _list_accounts_script() -> str:
     """Tiny AppleScript that returns one Mail account name per line."""
-    return '''
+    return """
     tell application "Mail"
         set acctNames to {}
         repeat with anAccount in (every account)
@@ -89,18 +89,16 @@ def _list_accounts_script() -> str:
         set AppleScript's text item delimiters to linefeed
         return acctNames as string
     end tell
-    '''
+    """
 
 
-def _list_mail_accounts(timeout: Optional[int] = 30) -> List[str]:
+def _list_mail_accounts(timeout: int | None = 30) -> list[str]:
     """Return the list of Mail account names (cheap; under 1s)."""
     raw = run_applescript(_list_accounts_script(), timeout=timeout)
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
-def _parse_pipe_delimited_emails(
-    raw: str, *, has_message_id: bool = False
-) -> List[Dict[str, Any]]:
+def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> list[dict[str, Any]]:
     """Parse '|||'-delimited AppleScript output into a list of email dicts.
 
     Current schema (6 or 7 or 8 fields):
@@ -121,7 +119,7 @@ def _parse_pipe_delimited_emails(
     column and a subsequent ``manage_trash(action="delete_permanent")``
     could delete the wrong message. Rows that don't validate are dropped.
     """
-    emails: List[Dict[str, Any]] = []
+    emails: list[dict[str, Any]] = []
     if not raw:
         return emails
     # Fields: subject(0) sender(1) date(2) read(3) account(4) mail_app_id(5)
@@ -149,7 +147,7 @@ def _parse_pipe_delimited_emails(
         # mapping the wrong id onto a downstream destructive op.
         if not mail_app_id or not mail_app_id.isdigit():
             continue
-        item: Dict[str, Any] = {
+        item: dict[str, Any] = {
             "subject": parts[0].strip(),
             "sender": parts[1].strip(),
             "date": parts[2].strip(),
@@ -172,6 +170,7 @@ def _parse_pipe_delimited_emails(
 # ---------------------------------------------------------------------------
 # list_inbox_emails — async, per-account dispatch
 # ---------------------------------------------------------------------------
+
 
 def _build_inbox_collection_block(max_emails: int, read_filter: str) -> str:
     """Build the AppleScript that sets ``inboxMessages`` to a bounded slice.
@@ -198,10 +197,7 @@ def _build_inbox_collection_block(max_emails: int, read_filter: str) -> str:
             output_var="inboxMessages",
         )
     bounded = build_bounded_message_scan("inboxMailbox", max_emails)
-    return (
-        f'{bounded}\n'
-        f'            set inboxMessages to candidateMessages'
-    )
+    return f"{bounded}\n            set inboxMessages to candidateMessages"
 
 
 def _build_list_inbox_text_script(
@@ -321,14 +317,14 @@ def _build_list_inbox_json_script(
 
     if include_content:
         content_field = (
-            "set contentPreview to \"\"\n"
+            'set contentPreview to ""\n'
             "                    try\n"
             "                        set msgContent to content of aMessage\n"
             "                        set AppleScript's text item delimiters to {return, linefeed, tab}\n"
             "                        set contentParts to text items of msgContent\n"
-            "                        set AppleScript's text item delimiters to \" \"\n"
+            '                        set AppleScript\'s text item delimiters to " "\n'
             "                        set contentPreview to contentParts as string\n"
-            "                        set AppleScript's text item delimiters to \"\"\n"
+            '                        set AppleScript\'s text item delimiters to ""\n'
             "                        if length of contentPreview > 200 then\n"
             "                            set contentPreview to text 1 thru 200 of contentPreview\n"
             "                        end if\n"
@@ -341,7 +337,7 @@ def _build_list_inbox_json_script(
 
     if include_message_id:
         message_id_field = (
-            "set internetMessageId to \"\"\n"
+            'set internetMessageId to ""\n'
             "                    try\n"
             "                        set internetMessageId to message id of aMessage\n"
             "                    end try"
@@ -392,7 +388,7 @@ def _build_list_inbox_json_script(
     """
 
 
-def _strip_count_marker(raw: str) -> Tuple[str, int]:
+def _strip_count_marker(raw: str) -> tuple[str, int]:
     """Split out the `__COUNT__|||N` marker line if present.
 
     Returns (clean_text_without_marker, count). Count defaults to 0 when
@@ -402,7 +398,7 @@ def _strip_count_marker(raw: str) -> Tuple[str, int]:
         return "", 0
     lines = raw.splitlines()
     count = 0
-    kept: List[str] = []
+    kept: list[str] = []
     for line in lines:
         if line.startswith("__COUNT__|||"):
             try:
@@ -417,19 +413,19 @@ def _strip_count_marker(raw: str) -> Tuple[str, int]:
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 async def list_inbox_emails(
-    account: Optional[str] = None,
+    account: str | None = None,
     all_accounts: bool = False,
     max_emails: int = 50,
-    read_status: Optional[str] = None,
+    read_status: str | None = None,
     include_read: bool = True,
     include_content: bool = False,
     output_format: str = "text",
     exclude_replied: bool = False,
     flag_replied: bool = False,
-    timeout: Optional[int] = None,
-    limit: Optional[int] = None,
-    unread_only: Optional[bool] = None,
-) -> Union[str, Dict[str, Any]]:
+    timeout: int | None = None,
+    limit: int | None = None,
+    unread_only: bool | None = None,
+) -> str | dict[str, Any]:
     """Defaults to 50 most-recent emails from the default account.
 
     List all emails from inbox across all accounts or a specific account.
@@ -526,12 +522,11 @@ async def list_inbox_emails(
     # the right names.
     import warnings as _warnings_module
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     if limit is not None:
         if max_emails != 50:
             return (
-                "Error: pass either `max_emails` or `limit`, not both. "
-                "`limit` is a deprecated alias for `max_emails`."
+                "Error: pass either `max_emails` or `limit`, not both. `limit` is a deprecated alias for `max_emails`."
             )
         max_emails = limit
         warnings.append(
@@ -549,9 +544,7 @@ async def list_inbox_emails(
                 "`read_status='unread'`."
             )
         read_status = "unread" if bool(unread_only) else "all"
-        warnings.append(
-            "WARNING: 'unread_only' is a deprecated alias — please use read_status='unread'."
-        )
+        warnings.append("WARNING: 'unread_only' is a deprecated alias — please use read_status='unread'.")
         _warnings_module.warn(
             "list_inbox_emails: 'unread_only' is deprecated; use read_status='unread'.",
             DeprecationWarning,
@@ -559,14 +552,10 @@ async def list_inbox_emails(
         )
     elif explicit_include_read:
         if read_status is not None:
-            return (
-                "Error: pass either `read_status` or `include_read`, not both. "
-                "`include_read` is a deprecated alias."
-            )
+            return "Error: pass either `read_status` or `include_read`, not both. `include_read` is a deprecated alias."
         read_status = "all" if include_read else "unread"
         warnings.append(
-            "WARNING: 'include_read' is a deprecated alias — please use "
-            "read_status='all' or read_status='unread'."
+            "WARNING: 'include_read' is a deprecated alias — please use read_status='all' or read_status='unread'."
         )
         _warnings_module.warn(
             "list_inbox_emails: 'include_read' is deprecated; use read_status.",
@@ -582,10 +571,7 @@ async def list_inbox_emails(
     if max_emails <= 0:
         err = ToolError(
             code="UNBOUNDED_SCAN_REQUIRED",
-            message=(
-                "list_inbox_emails refuses to walk the full inbox; "
-                "use full_inbox_export instead"
-            ),
+            message=("list_inbox_emails refuses to walk the full inbox; use full_inbox_export instead"),
             remediation={
                 "preferred": "Pass max_emails=50 or 200",
                 "fallback_tool": "full_inbox_export",
@@ -610,9 +596,7 @@ async def list_inbox_emails(
                 # ``account_not_found_json`` returns a JSON-encoded string for
                 # back-compat with other tools; parse to a dict for JSON-mode
                 # callers so they receive the same shape as success paths.
-                return json.loads(
-                    account_not_found_json(account, timeout=validation_timeout)
-                )
+                return cast(dict[str, Any], json.loads(account_not_found_json(account, timeout=validation_timeout)))
             return account_err
 
     # When replied-detection is requested we need the Message-ID per row.
@@ -646,9 +630,7 @@ async def list_inbox_emails(
     return text_body
 
 
-def _attach_warnings_to_json(
-    body: Dict[str, Any], warnings: List[str]
-) -> Dict[str, Any]:
+def _attach_warnings_to_json(body: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
     """Attach a ``warnings`` list to the JSON-mode inbox response dict.
 
     Returns *body* unchanged when *warnings* is empty so the stable shape
@@ -671,13 +653,11 @@ def _run_text_one(
     max_emails: int,
     read_filter: str,
     include_content: bool,
-    timeout: Optional[int],
+    timeout: int | None,
     include_message_id: bool = False,
 ) -> str:
     """Synchronously run one account's text inbox script."""
-    script = _build_list_inbox_text_script(
-        account, max_emails, read_filter, include_content, include_message_id
-    )
+    script = _build_list_inbox_text_script(account, max_emails, read_filter, include_content, include_message_id)
     return run_applescript(script, timeout=timeout if timeout is not None else 120)
 
 
@@ -695,7 +675,7 @@ def _normalize_message_id_token(raw: str) -> str:
 
 def _filter_text_body_by_replied(
     body: str,
-    replied_ids: set,
+    replied_ids: set[str],
     *,
     exclude_replied: bool,
     flag_replied: bool,
@@ -710,7 +690,7 @@ def _filter_text_body_by_replied(
     ``[REPLIED] ``.
     """
     lines = body.splitlines()
-    out: List[str] = []
+    out: list[str] = []
     skipped = 0
     i = 0
     while i < len(lines):
@@ -764,11 +744,11 @@ def _filter_text_body_by_replied(
 
 
 async def _list_inbox_emails_text(
-    account: Optional[str],
+    account: str | None,
     max_emails: int,
     read_filter: str,
     include_content: bool,
-    timeout: Optional[int],
+    timeout: int | None,
     *,
     exclude_replied: bool = False,
     flag_replied: bool = False,
@@ -777,9 +757,7 @@ async def _list_inbox_emails_text(
     """Async text-format implementation, dispatching one script per account."""
     header = "INBOX EMAILS - ALL ACCOUNTS\n\n"
     footer_template = (
-        "========================================\n"
-        "TOTAL EMAILS: {total}\n"
-        "========================================\n"
+        "========================================\nTOTAL EMAILS: {total}\n========================================\n"
     )
 
     if account:
@@ -794,11 +772,7 @@ async def _list_inbox_emails_text(
                 include_message_id,
             )
         except AppleScriptTimeout:
-            return (
-                header
-                + footer_template.format(total=0)
-                + f"\nPARTIAL: 1 account(s) timed out: {account}\n"
-            )
+            return header + footer_template.format(total=0) + f"\nPARTIAL: 1 account(s) timed out: {account}\n"
         clean, count = _strip_count_marker(body)
         if include_message_id and (exclude_replied or flag_replied):
             replied = await asyncio.to_thread(fetch_replied_ids, account, 200, timeout)
@@ -819,7 +793,7 @@ async def _list_inbox_emails_text(
     if not accounts:
         return header + footer_template.format(total=0)
 
-    async def run_one(acct: str):
+    async def run_one(acct: str) -> tuple[str, str | AppleScriptTimeout]:
         try:
             return acct, await asyncio.to_thread(
                 _run_text_one,
@@ -836,16 +810,16 @@ async def _list_inbox_emails_text(
     results = await asyncio.gather(*(run_one(a) for a in accounts))
 
     # Pre-fetch per-account replied sets in parallel when needed.
-    replied_sets: Dict[str, set] = {}
+    replied_sets: dict[str, set[str]] = {}
     if include_message_id and (exclude_replied or flag_replied):
         replied_results = await asyncio.gather(
             *(asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts)
         )
-        replied_sets = dict(zip(accounts, replied_results))
+        replied_sets = dict(zip(accounts, replied_results, strict=True))
 
-    pieces: List[str] = [header]
+    pieces: list[str] = [header]
     total = 0
-    errors: List[str] = []
+    errors: list[str] = []
     for acct, outcome in results:
         if isinstance(outcome, AppleScriptTimeout):
             errors.append(acct)
@@ -873,7 +847,7 @@ def _run_json_one(
     max_emails: int,
     read_filter: str,
     include_content: bool | int | None = False,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
     include_message_id: bool = False,
 ) -> str:
     """Synchronously run one account's JSON inbox script."""
@@ -894,16 +868,16 @@ def _run_json_one(
 
 
 def _apply_replied_to_emails(
-    emails: List[Dict[str, Any]],
-    replied_set: set,
+    emails: list[dict[str, Any]],
+    replied_set: set[str],
     *,
     exclude_replied: bool,
     flag_replied: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Filter or flag email dicts based on a replied Message-ID set."""
     if not (exclude_replied or flag_replied):
         return emails
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for em in emails:
         token = _normalize_message_id_token(em.get("internet_message_id", ""))
         is_replied = bool(token) and token in replied_set
@@ -917,16 +891,16 @@ def _apply_replied_to_emails(
 
 
 async def _list_inbox_emails_json(
-    account: Optional[str],
+    account: str | None,
     max_emails: int,
     read_filter: str,
     include_content: bool,
-    timeout: Optional[int],
+    timeout: int | None,
     *,
     exclude_replied: bool = False,
     flag_replied: bool = False,
     include_message_id: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return inbox emails as a structured dict.
 
     Stable shape: ``{"emails": [...], "errors": [...]}`` for both the
@@ -977,7 +951,7 @@ async def _list_inbox_emails_json(
     if not accounts:
         return {"emails": [], "errors": []}
 
-    async def run_one(acct: str):
+    async def run_one(acct: str) -> tuple[str, str | AppleScriptTimeout]:
         try:
             return acct, await asyncio.to_thread(
                 _run_json_one,
@@ -994,15 +968,15 @@ async def _list_inbox_emails_json(
     results = await asyncio.gather(*(run_one(a) for a in accounts))
 
     # Pre-fetch per-account replied sets in parallel when needed.
-    replied_sets: Dict[str, set] = {}
+    replied_sets: dict[str, set[str]] = {}
     if include_message_id and (exclude_replied or flag_replied):
         replied_results = await asyncio.gather(
             *(asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts)
         )
-        replied_sets = dict(zip(accounts, replied_results))
+        replied_sets = dict(zip(accounts, replied_results, strict=True))
 
-    combined: List[Dict[str, Any]] = []
-    errors: List[str] = []
+    combined: list[dict[str, Any]] = []
+    errors: list[str] = []
     for acct, outcome in results:
         if isinstance(outcome, AppleScriptTimeout):
             errors.append(acct)
@@ -1024,15 +998,16 @@ async def _list_inbox_emails_json(
 # get_mailbox_unread_counts and other tools (unchanged)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def get_mailbox_unread_counts(
-    account: Optional[str] = None,
+    account: str | None = None,
     include_zero: bool = False,
     summary_only: bool = False,
     max_mailboxes: int = 100,
-    timeout: Optional[int] = None,
-) -> Dict[str, Any]:
+    timeout: int | None = None,
+) -> dict[str, Any]:
     """
     Get unread counts per mailbox for one account or all accounts.
 
@@ -1060,9 +1035,7 @@ def get_mailbox_unread_counts(
         account = _server.DEFAULT_MAIL_ACCOUNT
 
     if account:
-        account_err = validate_account_name(
-            account, timeout=30 if timeout is None else min(timeout, 30)
-        )
+        account_err = validate_account_name(account, timeout=30 if timeout is None else min(timeout, 30))
         if account_err:
             return {"error": "account_not_found", "account": account}
 
@@ -1111,11 +1084,10 @@ def get_mailbox_unread_counts(
             return {
                 "error": "timed_out",
                 "message": (
-                    "AppleScript timed out while fetching inbox unread counts. "
-                    "Try again or pass a larger `timeout`."
+                    "AppleScript timed out while fetching inbox unread counts. Try again or pass a larger `timeout`."
                 ),
             }
-        flat_counts: Dict[str, int] = {}
+        flat_counts: dict[str, int] = {}
         for item in result.split("|"):
             if ":" in item:
                 acct_name, count_str = item.split(":", 1)
@@ -1208,12 +1180,11 @@ def get_mailbox_unread_counts(
         return {
             "error": "timed_out",
             "message": (
-                "AppleScript timed out while fetching mailbox unread counts. "
-                "Try again or pass a larger `timeout`."
+                "AppleScript timed out while fetching mailbox unread counts. Try again or pass a larger `timeout`."
             ),
         }
-    nested_counts: Dict[str, Dict[str, int]] = {}
-    truncated_accounts: set = set()
+    nested_counts: dict[str, dict[str, int | bool]] = {}
+    truncated_accounts: set[str] = set()
     if not result:
         return nested_counts
 
@@ -1231,14 +1202,14 @@ def get_mailbox_unread_counts(
     for acct in truncated_accounts:
         if acct not in nested_counts:
             nested_counts[acct] = {}
-        nested_counts[acct]["__truncated__"] = True  # type: ignore[assignment]
+        nested_counts[acct]["__truncated__"] = True
 
     return nested_counts
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
-def list_accounts(timeout: Optional[int] = 30) -> List[str]:
+def list_accounts(timeout: int | None = 30) -> list[str]:
     """
     List all available Mail accounts.
 
@@ -1270,7 +1241,7 @@ def list_accounts(timeout: Optional[int] = 30) -> List[str]:
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
-def list_account_addresses(timeout: Optional[int] = 30) -> Dict[str, List[str]]:
+def list_account_addresses(timeout: int | None = 30) -> dict[str, list[str]]:
     """
     List all configured email addresses for each Mail account.
 
@@ -1316,7 +1287,7 @@ def list_account_addresses(timeout: Optional[int] = 30) -> Dict[str, List[str]]:
     """
 
     result = run_applescript(script, timeout=timeout)
-    out: Dict[str, List[str]] = {}
+    out: dict[str, list[str]] = {}
     if not result:
         return out
     for line in result.splitlines():
@@ -1330,11 +1301,11 @@ def list_account_addresses(timeout: Optional[int] = 30) -> Dict[str, List[str]]:
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def list_mailboxes(
-    account: Optional[str] = None,
+    account: str | None = None,
     include_counts: bool = False,
     output_format: str = "text",
-    max_mailboxes: Optional[int] = None,
-    timeout: Optional[int] = None,
+    max_mailboxes: int | None = None,
+    timeout: int | None = None,
 ) -> str:
     """
     List all mailboxes (folders) for a specific account or all accounts.
@@ -1471,25 +1442,22 @@ def list_mailboxes(
 
 
 def _list_mailboxes_json(
-    account: Optional[str],
+    account: str | None,
     include_counts: bool = True,
     *,
-    max_mailboxes: Optional[int] = None,
-    timeout: Optional[int] = None,
+    max_mailboxes: int | None = None,
+    timeout: int | None = None,
 ) -> str:
     """Return mailboxes as JSON."""
     escaped_account = escape_applescript(account) if account else None
-    account_filter = (
-        f'if accountName is "{escaped_account}" then'
-        if account
-        else ""
-    )
+    account_filter = f'if accountName is "{escaped_account}" then' if account else ""
     account_filter_end = "end if" if account else ""
     cap_check = ""
     if max_mailboxes is not None and max_mailboxes > 0:
         cap_check = f"""
             if mailboxIndex > {max_mailboxes} then exit repeat
         """
+
     def count_fields(var_name: str) -> str:
         if not include_counts:
             return """
@@ -1564,7 +1532,7 @@ def _list_mailboxes_json(
             continue
         msg_count = int(parts[3]) if parts[3].lstrip("-").isdigit() else -1
         unread_count = int(parts[4]) if parts[4].lstrip("-").isdigit() else -1
-        item: Dict[str, Any] = {
+        item: dict[str, Any] = {
             "account": parts[0],
             "name": parts[1],
             "path": parts[2],
@@ -1597,6 +1565,7 @@ def _list_mailboxes_json(
 # ---------------------------------------------------------------------------
 # get_inbox_overview — async, per-account parallel
 # ---------------------------------------------------------------------------
+
 
 def _build_overview_one_account_script(
     account: str,
@@ -1702,7 +1671,7 @@ def _build_overview_one_account_script(
 
 def _run_overview_one(
     account: str,
-    timeout: Optional[int],
+    timeout: int | None,
     include_mailboxes: bool = True,
     include_recent: bool = True,
     max_recent: int = 10,
@@ -1721,18 +1690,18 @@ def _run_overview_one(
     )
 
 
-def _parse_overview_account(raw: str) -> Dict[str, Any]:
+def _parse_overview_account(raw: str) -> dict[str, Any]:
     """Parse one account's overview payload."""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "account": None,
         "unread": None,
         "total": None,
         "error": None,
         "mailboxes": [],  # list of (name, unread_count) tuples
-        "recent": [],     # list of dicts
+        "recent": [],  # list of dicts
         "mailboxes_truncated": False,
     }
-    parse_errors: List[str] = []
+    parse_errors: list[str] = []
     if not raw:
         return result
     for line in raw.splitlines():
@@ -1749,25 +1718,23 @@ def _parse_overview_account(raw: str) -> Dict[str, Any]:
                     result["unread"] = int(parts[2])
                     result["total"] = int(parts[3])
                 except ValueError:
-                    parse_errors.append(
-                        f"Invalid HEADER counts for {parts[1]!r}: {parts[2]!r}, {parts[3]!r}"
-                    )
+                    parse_errors.append(f"Invalid HEADER counts for {parts[1]!r}: {parts[2]!r}, {parts[3]!r}")
         elif tag in ("MAILBOX", "SUBMAILBOX") and len(parts) >= 3:
             try:
                 result["mailboxes"].append((parts[1], int(parts[2])))
             except ValueError:
-                parse_errors.append(
-                    f"Invalid {tag} unread count for {parts[1]!r}: {parts[2]!r}"
-                )
+                parse_errors.append(f"Invalid {tag} unread count for {parts[1]!r}: {parts[2]!r}")
         elif tag == "MAILBOX_CAPPED" and len(parts) >= 2:
             result["mailboxes_truncated"] = True
         elif tag == "RECENT" and len(parts) >= 5:
-            result["recent"].append({
-                "subject": parts[1],
-                "sender": parts[2],
-                "date": parts[3],
-                "is_read": parts[4].strip().lower() == "true",
-            })
+            result["recent"].append(
+                {
+                    "subject": parts[1],
+                    "sender": parts[2],
+                    "date": parts[3],
+                    "is_read": parts[4].strip().lower() == "true",
+                }
+            )
         elif tag == "FATAL" and len(parts) >= 2:
             result["error"] = parts[1]
     if parse_errors:
@@ -1776,8 +1743,8 @@ def _parse_overview_account(raw: str) -> Dict[str, Any]:
 
 
 def _format_overview(
-    accounts: List[Dict[str, Any]],
-    errors: List[str],
+    accounts: list[dict[str, Any]],
+    errors: list[str],
     *,
     include_mailboxes: bool = True,
     include_recent: bool = True,
@@ -1786,7 +1753,7 @@ def _format_overview(
     compact: bool = False,
 ) -> str:
     """Format combined per-account overview payloads into the legacy text shape."""
-    lines: List[str] = []
+    lines: list[str] = []
     if not compact:
         lines.append("╔══════════════════════════════════════════╗")
         lines.append("║      EMAIL INBOX OVERVIEW                ║")
@@ -1831,7 +1798,7 @@ def _format_overview(
                     else:
                         lines.append(f"  📂 {mb_name}")
             if acct.get("mailboxes_truncated"):
-                lines.append(f"  ⚠ Mailbox list truncated — account has more mailboxes than the cap allows.")
+                lines.append("  ⚠ Mailbox list truncated — account has more mailboxes than the cap allows.")
 
     if include_recent:
         lines.append("")
@@ -1871,7 +1838,9 @@ def _format_overview(
         lines.append("")
         if total_unread > 0:
             lines.append("1. 📧 Review unread emails - Use list_inbox_emails to show recent unread messages")
-            lines.append("2. 🔍 Search for action items - Look for keywords like 'urgent', 'action required', 'deadline'")
+            lines.append(
+                "2. 🔍 Search for action items - Look for keywords like 'urgent', 'action required', 'deadline'"
+            )
             lines.append("3. 📤 Move processed emails - Suggest moving read emails to appropriate folders")
         else:
             lines.append("1. ✅ Inbox is clear! No unread emails.")
@@ -1891,7 +1860,7 @@ def _format_overview(
     return "\n".join(lines)
 
 
-def _overview_suggestions(total_unread: int) -> List[str]:
+def _overview_suggestions(total_unread: int) -> list[str]:
     """Action suggestions mirrored from the text-mode overview footer."""
     if total_unread > 0:
         return [
@@ -1915,15 +1884,15 @@ def _overview_suggestions(total_unread: int) -> List[str]:
 def _overview_json_error(
     error: str,
     *,
-    account: Optional[str] = None,
+    account: str | None = None,
     include_mailboxes: bool = True,
     include_recent: bool = True,
     include_suggestions: bool = True,
     max_recent: int = 10,
-    message: Optional[str] = None,
-    errors: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+    message: str | None = None,
+    errors: list[str] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "error": error,
         "output_format": "json",
         "include_mailboxes": include_mailboxes,
@@ -1943,20 +1912,20 @@ def _overview_json_error(
 
 
 def _format_overview_json(
-    accounts: List[Dict[str, Any]],
-    errors: List[str],
+    accounts: list[dict[str, Any]],
+    errors: list[str],
     *,
-    account: Optional[str] = None,
+    account: str | None = None,
     include_mailboxes: bool = True,
     include_recent: bool = True,
     include_suggestions: bool = True,
     max_recent: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return structured overview payload for JSON mode."""
     total_unread = 0
-    account_rows: List[Dict[str, Any]] = []
+    account_rows: list[dict[str, Any]] = []
     for acct in accounts:
-        row: Dict[str, Any] = {"account": acct.get("account")}
+        row: dict[str, Any] = {"account": acct.get("account")}
         if acct.get("error"):
             row["error"] = acct["error"]
         else:
@@ -1964,17 +1933,14 @@ def _format_overview_json(
             row["total"] = acct.get("total") or 0
             total_unread += row["unread"]
             if include_mailboxes:
-                row["mailboxes"] = [
-                    {"path": name, "unread": unread}
-                    for name, unread in acct.get("mailboxes", [])
-                ]
+                row["mailboxes"] = [{"path": name, "unread": unread} for name, unread in acct.get("mailboxes", [])]
                 if acct.get("mailboxes_truncated"):
                     row["mailboxes_truncated"] = True
             if include_recent:
                 row["recent"] = acct.get("recent", [])[:max_recent]
         account_rows.append(row)
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "output_format": "json",
         "include_mailboxes": include_mailboxes,
         "include_recent": include_recent,
@@ -1993,15 +1959,15 @@ def _format_overview_json(
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 async def get_inbox_overview(
-    account: Optional[str] = None,
+    account: str | None = None,
     output_format: str = "text",
     include_mailboxes: bool = True,
     include_recent: bool = True,
     include_suggestions: bool = True,
     max_recent: int = 10,
     max_mailboxes: int = 100,
-    timeout: Optional[int] = None,
-) -> Union[str, Dict[str, Any]]:
+    timeout: int | None = None,
+) -> str | dict[str, Any]:
     """
     Get a comprehensive overview of your email inbox status across all accounts.
 
@@ -2079,7 +2045,7 @@ async def get_inbox_overview(
             )
         return _format_overview([], [], compact=output_format == "compact")
 
-    async def run_one(acct: str):
+    async def run_one(acct: str) -> tuple[str, str | AppleScriptTimeout]:
         try:
             return acct, await asyncio.to_thread(
                 _run_overview_one,
@@ -2095,8 +2061,8 @@ async def get_inbox_overview(
 
     results = await asyncio.gather(*(run_one(a) for a in accounts_to_query))
 
-    parsed: List[Dict[str, Any]] = []
-    errors: List[str] = []
+    parsed: list[dict[str, Any]] = []
+    errors: list[str] = []
     for acct, outcome in results:
         if isinstance(outcome, AppleScriptTimeout):
             errors.append(acct)

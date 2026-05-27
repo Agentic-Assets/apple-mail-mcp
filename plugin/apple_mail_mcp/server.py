@@ -1,11 +1,43 @@
 """FastMCP server instance and user preferences."""
 
 import os
+from collections.abc import Callable
+from typing import Any, ParamSpec, Protocol, TypeVar, cast
+
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+class _AppleMailMCP(Protocol):
+    """Typed subset of FastMCP used by this package.
+
+    The installed FastMCP runtime has a typed ``tool`` method, but mypy treats
+    it as untyped through the dependency boundary in strict mode. This protocol
+    keeps the package strict without changing the runtime object or the
+    ``@mcp.tool`` source pattern that manifest validators inspect.
+    """
+
+    def tool(
+        self,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        annotations: ToolAnnotations | None = None,
+        icons: list[Any] | None = None,
+        meta: dict[str, Any] | None = None,
+        structured_output: bool | None = None,
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+
+    def remove_tool(self, name: str) -> None: ...
+
+    def run(self) -> None: ...
+
+
 # Initialize FastMCP server
-mcp = FastMCP("Apple Mail MCP")
+mcp = cast(_AppleMailMCP, FastMCP("Apple Mail MCP"))
 
 # Shared MCP tool annotations (see tasks/phase-3-annotation-matrix.md).
 READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(

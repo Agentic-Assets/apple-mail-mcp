@@ -11,10 +11,11 @@ import asyncio
 import json
 import sys
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 NO_HIT_SUBJECT = "NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231"
 INVALID_ACCOUNT = "__INVALID_APPLE_MAIL_CLI_ACCOUNT__"
@@ -54,9 +55,7 @@ def resolve_perf_thresholds(profile: str = DEFAULT_PERF_PROFILE) -> dict[str, in
 def _mailbox_count(account: str) -> int:
     from apple_mail_mcp.tools.inbox import list_mailboxes
 
-    raw = list_mailboxes(
-        account=account, include_counts=False, output_format="json"
-    )
+    raw = list_mailboxes(account=account, include_counts=False, output_format="json")
     parsed = _parse_tool_result(_await_if_coro(raw))
     return len(parsed) if isinstance(parsed, list) else 0
 
@@ -209,18 +208,13 @@ def _timed_call(fn: Callable[[], Any]) -> tuple[Any, float]:
     return result, elapsed_ms
 
 
-def _evaluate_perf_case(
-    case: PerfCase, *, verbose_sensitive: bool = False
-) -> dict[str, Any]:
+def _evaluate_perf_case(case: PerfCase, *, verbose_sensitive: bool = False) -> dict[str, Any]:
     try:
         result, duration_ms = _timed_call(case.runner)
         parsed = _parse_tool_result(result)
         error = _result_is_error(parsed)
         if case.expect_error:
-            passed = (
-                duration_ms < case.threshold_ms
-                and _is_expected_account_not_found(parsed)
-            )
+            passed = duration_ms < case.threshold_ms and _is_expected_account_not_found(parsed)
         else:
             passed = duration_ms < case.threshold_ms and not error
         entry: dict[str, Any] = {
@@ -232,9 +226,7 @@ def _evaluate_perf_case(
             "sample": _redact(parsed, verbose_sensitive=verbose_sensitive),
         }
         if error or case.expect_error:
-            entry["error"] = (
-                parsed if isinstance(parsed, str) else parsed.get("error", "tool_error")
-            )
+            entry["error"] = parsed if isinstance(parsed, str) else parsed.get("error", "tool_error")
         return entry
     except Exception as exc:  # pragma: no cover - live safety path
         return {
@@ -499,10 +491,7 @@ def run_perf_battery(
         profile=profile,
         mailbox_count=mailbox_count,
     )
-    results = [
-        _evaluate_perf_case(case, verbose_sensitive=verbose_sensitive)
-        for case in cases
-    ]
+    results = [_evaluate_perf_case(case, verbose_sensitive=verbose_sensitive) for case in cases]
     ok = all(item["pass"] for item in results)
     total_ms = sum(item["duration_ms"] or 0 for item in results)
     return {
@@ -531,9 +520,7 @@ def _build_parser() -> argparse.ArgumentParser:
     accounts = subparsers.add_parser("accounts", help="List Mail accounts")
     _add_json_flag(accounts)
 
-    addresses = subparsers.add_parser(
-        "addresses", help="List configured email addresses by account"
-    )
+    addresses = subparsers.add_parser("addresses", help="List configured email addresses by account")
     _add_json_flag(addresses)
 
     inbox = subparsers.add_parser("inbox", help="List inbox emails")
@@ -545,9 +532,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="max_emails",
         help="Maximum emails per account; alias for --limit",
     )
-    inbox.add_argument(
-        "--unread-only", action="store_true", help="Only include unread emails"
-    )
+    inbox.add_argument("--unread-only", action="store_true", help="Only include unread emails")
     inbox.add_argument("--content", action="store_true", help="Include content preview")
     _add_json_flag(inbox)
 
@@ -569,9 +554,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_account_flag(show, required=True)
     show.add_argument("--id", required=True, dest="message_id", help="Mail message id")
     show.add_argument("--mailbox", default="INBOX", help="Mailbox path")
-    show.add_argument(
-        "--no-content", action="store_true", help="Do not include message content"
-    )
+    show.add_argument("--no-content", action="store_true", help="Do not include message content")
     show.add_argument(
         "--max-content-length",
         type=int,
@@ -617,29 +600,19 @@ def _build_parser() -> argparse.ArgumentParser:
         default="text",
         help="Output format (default: text)",
     )
-    overview.add_argument(
-        "--no-mailboxes", action="store_true", help="Omit mailbox breakdown"
-    )
-    overview.add_argument(
-        "--no-recent", action="store_true", help="Omit recent email preview"
-    )
-    overview.add_argument(
-        "--no-suggestions", action="store_true", help="Omit suggested actions"
-    )
+    overview.add_argument("--no-mailboxes", action="store_true", help="Omit mailbox breakdown")
+    overview.add_argument("--no-recent", action="store_true", help="Omit recent email preview")
+    overview.add_argument("--no-suggestions", action="store_true", help="Omit suggested actions")
     _add_json_flag(overview)
 
-    needs = subparsers.add_parser(
-        "needs-response", help="Unread emails that likely need a response"
-    )
+    needs = subparsers.add_parser("needs-response", help="Unread emails that likely need a response")
     _add_account_flag(needs)
     needs.add_argument("--mailbox", default="INBOX", help="Mailbox to scan")
     needs.add_argument("--days", type=int, default=7, dest="days_back")
     needs.add_argument("--limit", type=int, default=20, dest="max_results")
     _add_json_flag(needs)
 
-    awaiting = subparsers.add_parser(
-        "awaiting-reply", help="Sent emails still awaiting a reply"
-    )
+    awaiting = subparsers.add_parser("awaiting-reply", help="Sent emails still awaiting a reply")
     _add_account_flag(awaiting)
     awaiting.add_argument("--days", type=int, default=7, dest="days_back")
     awaiting.add_argument("--limit", type=int, default=20, dest="max_results")
@@ -650,9 +623,7 @@ def _build_parser() -> argparse.ArgumentParser:
     top.add_argument("--mailbox", default="INBOX")
     top.add_argument("--days", type=int, default=30, dest="days_back")
     top.add_argument("--limit", type=int, default=10, dest="top_n")
-    top.add_argument(
-        "--by-domain", action="store_true", dest="group_by_domain", help="Group by domain"
-    )
+    top.add_argument("--by-domain", action="store_true", dest="group_by_domain", help="Group by domain")
     _add_json_flag(top)
 
     stats = subparsers.add_parser("statistics", help="Email statistics for an account")
@@ -667,9 +638,7 @@ def _build_parser() -> argparse.ArgumentParser:
     stats.add_argument("--days", type=int, default=30, dest="days_back")
     _add_json_flag(stats)
 
-    move_dry = subparsers.add_parser(
-        "move-dry-run", help="Preview emails that would be moved (no changes)"
-    )
+    move_dry = subparsers.add_parser("move-dry-run", help="Preview emails that would be moved (no changes)")
     _add_account_flag(move_dry, required=True)
     move_dry.add_argument("--to", required=True, dest="to_mailbox")
     move_dry.add_argument("--from", default="INBOX", dest="from_mailbox")
@@ -678,9 +647,7 @@ def _build_parser() -> argparse.ArgumentParser:
     move_dry.add_argument("--limit", type=int, default=10, dest="max_moves")
     _add_json_flag(move_dry)
 
-    trash_dry = subparsers.add_parser(
-        "trash-dry-run", help="Preview emails that would be trashed (no changes)"
-    )
+    trash_dry = subparsers.add_parser("trash-dry-run", help="Preview emails that would be trashed (no changes)")
     _add_account_flag(trash_dry, required=True)
     trash_dry.add_argument("--mailbox", default="INBOX")
     trash_dry.add_argument("--subject", default=NO_HIT_SUBJECT)
@@ -718,9 +685,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_json_flag(draft)
 
-    config = subparsers.add_parser(
-        "mcp-config", help="Print Claude/OpenClaw MCP config JSON"
-    )
+    config = subparsers.add_parser("mcp-config", help="Print Claude/OpenClaw MCP config JSON")
     config.add_argument(
         "--repo",
         default=str(Path(__file__).resolve().parents[2]),
@@ -997,9 +962,7 @@ def _cmd_draft(args: argparse.Namespace) -> int:
 
     try:
         body = _read_text_arg(args.body, args.body_file)
-        body_html = (
-            Path(args.html_file).expanduser().read_text() if args.html_file else None
-        )
+        body_html = Path(args.html_file).expanduser().read_text() if args.html_file else None
     except OSError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -1154,19 +1117,13 @@ def _print_perf_report(payload: dict[str, Any], *, json_mode: bool) -> None:
     profile = payload.get("profile", DEFAULT_PERF_PROFILE)
     mailbox_count = payload.get("mailbox_count")
     mailbox_note = f" mailboxes={mailbox_count}" if mailbox_count is not None else ""
-    print(
-        f"perf-test ({mode}{analysis}, profile={profile}) "
-        f"account={payload.get('account')}{mailbox_note}"
-    )
+    print(f"perf-test ({mode}{analysis}, profile={profile}) account={payload.get('account')}{mailbox_note}")
     for item in payload.get("cases", []):
         status = "pass" if item.get("pass") else "FAIL"
         duration = item.get("duration_ms")
         threshold = item.get("threshold_ms")
         duration_text = f"{duration:.1f}ms" if duration is not None else "n/a"
-        print(
-            f"  {status} {item['name']} ({item['category']}): "
-            f"{duration_text} / {threshold}ms"
-        )
+        print(f"  {status} {item['name']} ({item['category']}): {duration_text} / {threshold}ms")
         if item.get("error"):
             print(f"         error: {item['error']}")
     total = payload.get("total_duration_ms")
