@@ -54,6 +54,33 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(captured["limit"], 3)
         self.assertEqual(captured["output_format"], "json")
 
+    def test_inbox_accepts_max_emails_alias(self):
+        captured = {}
+
+        def fake_inbox(**kwargs):
+            captured.update(kwargs)
+            return '{"emails":[]}'
+
+        with (
+            patch("apple_mail_mcp.tools.inbox.list_inbox_emails", side_effect=fake_inbox),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "inbox",
+                    "--account",
+                    "Work",
+                    "--max-emails",
+                    "3",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["account"], "Work")
+        self.assertEqual(captured["max_emails"], 3)
+        self.assertEqual(captured["output_format"], "json")
+
     def test_show_calls_exact_id_tool(self):
         captured = {}
 
