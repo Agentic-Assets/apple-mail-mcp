@@ -392,6 +392,9 @@ def _tracked_plugin_files(plugin_root: Path) -> list[Path] | None:
     except (OSError, subprocess.CalledProcessError):
         return None
 
+    if not result.stdout:
+        return None
+
     rels: list[Path] = []
     for raw in result.stdout.split(b"\0"):
         if not raw:

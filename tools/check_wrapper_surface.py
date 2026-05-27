@@ -86,8 +86,8 @@ def main(argv: list[str] | None = None) -> int:
             "  cd ~/.local/share/apple-mail-cli\n"
             "  rsync -a --delete --exclude venv "
             "/path/to/apple-mail-mcp/plugin/ ./plugin/\n"
-            "  npx mcporter@0.11.3 generate-cli --from apple-mail-cli.mjs "
-            "--bundle apple-mail-cli.mjs\n"
+            "  npx mcporter@0.11.3 generate-cli --from ./apple-mail-cli.cjs "
+            "--bundle apple-mail-cli.cjs\n"
             "  ./install.sh",
             file=sys.stderr,
         )
