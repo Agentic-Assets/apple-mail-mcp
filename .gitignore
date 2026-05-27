@@ -46,3 +46,10 @@ archive/
 
 # Personal configuration examples (keep templates only)
 claude_desktop_config.json
+
+# Live-test scratch — contains real mailbox data, never commit
+tasks/.apple-mail-live-test-*
+tasks/mcporter-*-test-*.md
+*.tmp
+*.tmp.stdout
+*.tmp.stderr
