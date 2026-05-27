@@ -211,7 +211,7 @@ If `HEAD` is on a protected branch (e.g. `main` with branch-protection rules), s
 
 ## Release note
 
-If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/dev-check.sh release` (which rebuilds both artifacts and runs the structural mcpb-unpack smoke).
+If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/dev-check.sh release` (which rebuilds all three artifacts — `apple-mail-plugin.zip`, `apple-mail.plugin`, and the `.mcpb` — and runs the structural mcpb-unpack smoke plus the byte-parity check between the zip and `.plugin`).
 
 ## Additional resources
 

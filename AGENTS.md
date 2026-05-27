@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**28 tools**, **355 tests + 30 subtests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Codex plugin (`plugin/`), and Codex Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.Codex-plugin/marketplace.json`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**28 tools**, **674 tests + 30 subtests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Codex plugin (`plugin/`), and Codex Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.Codex-plugin/marketplace.json`.
 
 ## Agent orchestration (required)
 
@@ -51,7 +51,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/pytest tests/                    # 355 tests + 30 subtests
+.venv/bin/pytest tests/                    # 674 tests + 30 subtests
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```
