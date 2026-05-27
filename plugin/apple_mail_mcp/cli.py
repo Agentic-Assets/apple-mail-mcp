@@ -540,6 +540,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_account_flag(inbox)
     inbox.add_argument("--limit", type=int, default=10, help="Maximum emails per account")
     inbox.add_argument(
+        "--max-emails",
+        type=int,
+        dest="max_emails",
+        help="Maximum emails per account; alias for --limit",
+    )
+    inbox.add_argument(
         "--unread-only", action="store_true", help="Only include unread emails"
     )
     inbox.add_argument("--content", action="store_true", help="Include content preview")
@@ -796,11 +802,12 @@ def _cmd_addresses(args: argparse.Namespace) -> int:
 def _cmd_inbox(args: argparse.Namespace) -> int:
     from apple_mail_mcp.tools.inbox import list_inbox_emails
 
+    max_emails = args.max_emails if args.max_emails is not None else args.limit
     return _run_tool(
         list_inbox_emails,
         args.json,
         account=args.account,
-        max_emails=args.limit,
+        max_emails=max_emails,
         include_read=not args.unread_only,
         include_content=args.content,
         output_format="json" if args.json else "text",
