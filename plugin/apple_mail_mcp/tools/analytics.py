@@ -1255,8 +1255,8 @@ _FULL_EXPORT_ALLOWED_FIELDS = (
     "message_id",
     "mailbox",
 )
-_FULL_EXPORT_FIELD_SEP = "\x1f"  # ASCII unit separator — safe vs subject text
-_FULL_EXPORT_ROW_SEP = "\x1e"  # ASCII record separator — safe vs newlines
+_FULL_EXPORT_FIELD_SEP = "__APPLE_MAIL_MCP_FIELD__"
+_FULL_EXPORT_ROW_SEP = "__APPLE_MAIL_MCP_ROW__"
 _FULL_EXPORT_ERROR_PREFIX = "__APPLE_MAIL_MCP_FULL_EXPORT_ERROR__|||"
 
 
@@ -1280,6 +1280,20 @@ def _full_export_field_script(field: str) -> str:
         raise ValueError(f"Unsupported field: {field}") from None
 
 
+def _normalize_full_export_fields(fields: Optional[Any]) -> List[str]:
+    """Normalize MCP/CLI field input to a list of field names.
+
+    mcporter named flags pass ``--fields subject,sender`` as a string even
+    though the MCP schema advertises a list. Accept both forms here so the
+    tool remains usable through generated wrappers.
+    """
+    if fields is None:
+        return list(_FULL_EXPORT_DEFAULT_FIELDS)
+    if isinstance(fields, str):
+        return [part.strip() for part in fields.split(",") if part.strip()]
+    return [str(field).strip() for field in fields if str(field).strip()]
+
+
 def _full_export_batch_script(
     *,
     account: str,
@@ -1300,19 +1314,25 @@ def _full_export_batch_script(
     safe_account = escape_applescript(account)
     safe_mailbox = escape_applescript(mailbox)
 
-    # Wrap each field expression in a `try` so a single bad message doesn't
-    # abort the entire batch, then concatenate them with the field separator.
-    field_exprs = [
-        (
-            "(try\n"
-            f"        {_full_export_field_script(field)}\n"
-            "    on error\n"
-            '        ""\n'
-            "    end try)"
+    # AppleScript has no inline `try` expression. Build one assignment per
+    # requested field, then concatenate the variables into the output row.
+    field_assignments = []
+    field_vars = []
+    for idx, field in enumerate(fields):
+        var_name = f"fieldValue{idx}"
+        field_vars.append(var_name)
+        field_assignments.append(
+            f'''
+                    set {var_name} to ""
+                    try
+                        set {var_name} to {_full_export_field_script(field)}
+                    on error
+                        set {var_name} to ""
+                    end try
+            '''
         )
-        for field in fields
-    ]
-    row_expr = f' & "{_FULL_EXPORT_FIELD_SEP}" & '.join(field_exprs)
+    row_expr = f' & "{_FULL_EXPORT_FIELD_SEP}" & '.join(field_vars) if field_vars else '""'
+    field_assignment_script = "".join(field_assignments)
 
     return f'''
     tell application "Mail"
@@ -1343,6 +1363,7 @@ def _full_export_batch_script(
             set batchMessages to messages startIndex thru endIndex of targetMailbox
             repeat with aMessage in batchMessages
                 try
+                    {field_assignment_script}
                     set rowText to {row_expr}
                     set end of outputRows to rowText
                 end try
@@ -1388,7 +1409,7 @@ def _full_export_parse_batch(
 async def full_inbox_export(
     account: Optional[str] = None,
     mailbox: str = "INBOX",
-    fields: Optional[List[str]] = None,
+    fields: Optional[Union[List[str], str]] = None,
     max_emails: int = 10_000,
     batch_size: int = 500,
     output_format: str = "json",
@@ -1445,9 +1466,7 @@ async def full_inbox_export(
     if max_emails <= 0:
         return "Error: max_emails must be a positive integer"
 
-    resolved_fields: List[str] = (
-        list(fields) if fields else list(_FULL_EXPORT_DEFAULT_FIELDS)
-    )
+    resolved_fields = _normalize_full_export_fields(fields)
     invalid = [f for f in resolved_fields if f not in _FULL_EXPORT_ALLOWED_FIELDS]
     if invalid:
         allowed = ", ".join(_FULL_EXPORT_ALLOWED_FIELDS)

@@ -284,22 +284,36 @@ def _build_search_script(
     # We floor at base_cap so callers paginating past the helper's cap still
     # get a slice large enough to honor their offset+limit.
     if recent_days and recent_days > 0:
-        scan_cap = max(base_cap, compute_scan_upper_bound(recent_days))
+        window_cap = compute_scan_upper_bound(recent_days)
+        # Narrow header searches are usually "needle" lookups. On large
+        # Exchange accounts, binding hundreds of recent messages just to prove
+        # a no-hit subject does not exist can exceed wrapper timeouts. Keep the
+        # scan bounded by the caller's requested page, and only widen as the
+        # requested recent window widens.
+        if (
+            subject_terms
+            and not sender
+            and body_text is None
+            and has_attachments is None
+            and read_status == "all"
+        ):
+            scan_cap = base_cap
+        else:
+            scan_cap = max(base_cap, window_cap)
     else:
         scan_cap = base_cap
 
     bounded_candidate_script = f'''
                             set matchingMessages to {{}}
                             set candidateMessages to {{}}
-                            set messageCount to count of messages of currentMailbox
-                            if messageCount > {scan_cap} then
-                                set scanUpperBound to {scan_cap}
-                            else
-                                set scanUpperBound to messageCount
-                            end if
-                            if scanUpperBound > 0 then
+                            set scanUpperBound to {scan_cap}
+                            try
                                 set candidateMessages to messages 1 thru scanUpperBound of currentMailbox
-                            end if
+                            on error
+                                try
+                                    set candidateMessages to messages of currentMailbox
+                                end try
+                            end try
     '''
 
     if mailbox == "All":
@@ -334,6 +348,15 @@ def _build_search_script(
     # Build per-message filter block. Avoid broad `every message ... whose`
     # filters because Mail.app can materialize remote mailboxes before applying
     # them. We bind a bounded newest-first slice, then filter in that slice.
+    #
+    # Date lower bounds need a special fast path: Exchange inboxes can have
+    # tens of thousands of messages, and even a bounded 300-message slice is
+    # too slow if we read subject/sender/body for every no-hit query. Mail
+    # returns mailbox messages newest-first, so once a message is older than
+    # fromDate the rest of the slice is outside the requested window.
+    early_date_break = (
+        "if messageDate < fromDate then exit repeat" if date_from and not date_to else ""
+    )
     escaped_body = escape_applescript(body_text) if body_text else ""
     per_msg_conditions: List[str] = []
     if subject_terms:
@@ -342,6 +365,12 @@ def _build_search_script(
             for t in subject_terms
         )
         per_msg_conditions.append(f"({subject_checks})")
+        candidate_subject_checks = " or ".join(
+            f'subject contains "{escape_applescript(t)}"'
+            for t in subject_terms
+        )
+    else:
+        candidate_subject_checks = ""
     if sender:
         per_msg_conditions.append(
             f'messageSender contains "{escaped_sender}"'
@@ -361,7 +390,35 @@ def _build_search_script(
     if use_body_search:
         per_msg_conditions.append(f'msgContent contains "{escaped_body}"')
 
-    if per_msg_conditions:
+    if (
+        subject_terms
+        and not sender
+        and has_attachments is None
+        and read_status == "all"
+        and not use_body_search
+        and not date_to
+    ):
+        # Fast no-hit/needle path: filter the already-bounded newest slice
+        # with the cheapest possible per-message reads. Avoid `whose` here:
+        # AppleScript does not reliably apply it to a list of message objects
+        # returned by `messages 1 thru N`. The slice is deliberately tiny for
+        # default subject lookups, so a subject-only loop is fast and avoids
+        # date/sender/read-status/body fetches on large Exchange inboxes.
+        message_collection = f'''
+                                {bounded_candidate_script}
+                            ignoring case
+                                repeat with aMessage in candidateMessages
+                                    if (count of matchingMessages) >= {scan_cap} then exit repeat
+                                    try
+                                        set messageSubject to subject of aMessage
+                                        if {candidate_subject_checks} then
+                                            set end of matchingMessages to aMessage
+                                        end if
+                                    end try
+                                end repeat
+                            end ignoring
+        '''
+    elif per_msg_conditions:
         combined_condition = " and ".join(per_msg_conditions)
         content_read_block = """
                                         set msgContent to ""
@@ -375,10 +432,11 @@ def _build_search_script(
                                 repeat with aMessage in candidateMessages
                                     if (count of matchingMessages) >= {scan_cap} then exit repeat
                                     try
+                                        set messageDate to date received of aMessage
+                                        {early_date_break}
                                         set messageSubject to subject of aMessage
                                         set messageSender to sender of aMessage
                                         set messageRead to read status of aMessage
-                                        set messageDate to date received of aMessage
                                         {content_read_block}
                                         if {combined_condition} then
                                             set end of matchingMessages to aMessage
@@ -390,7 +448,13 @@ def _build_search_script(
     else:
         message_collection = f'''
                                 {bounded_candidate_script}
-                            set matchingMessages to candidateMessages
+                            repeat with aMessage in candidateMessages
+                                try
+                                    set messageDate to date received of aMessage
+                                    {early_date_break}
+                                    set end of matchingMessages to aMessage
+                                end try
+                            end repeat
         '''
 
     script = f'''

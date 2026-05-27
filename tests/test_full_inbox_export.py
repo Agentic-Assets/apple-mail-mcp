@@ -44,6 +44,42 @@ def _make_batch(start_id: int, count: int) -> str:
 
 
 class FullInboxExportTests(unittest.TestCase):
+    def test_full_inbox_export_accepts_comma_separated_fields(self):
+        """mcporter named flags pass --fields as a comma-separated string."""
+
+        calls = []
+
+        def fake_run(script, timeout=120):
+            calls.append(script)
+            return _FULL_EXPORT_FIELD_SEP.join(
+                ["Subject 1", "sender1@example.com", "1"]
+            )
+
+        with patch(
+            "apple_mail_mcp.tools.analytics.run_applescript",
+            side_effect=fake_run,
+        ):
+            raw = _run(
+                analytics_tools.full_inbox_export(
+                    account="Work",
+                    fields="subject,sender,message_id",
+                    max_emails=1,
+                    batch_size=1,
+                )
+            )
+
+        self.assertEqual(
+            json.loads(raw),
+            [
+                {
+                    "subject": "Subject 1",
+                    "sender": "sender1@example.com",
+                    "message_id": "1",
+                }
+            ],
+        )
+        self.assertIn("set fieldValue0", calls[0])
+
     def test_full_inbox_export_default_params(self):
         """Three batches of 500 + 500 + 200 -> 1200 messages, JSON output."""
 
@@ -191,6 +227,9 @@ class FullExportFieldScriptTests(unittest.TestCase):
         # No inline `if ( ... ) then "..." else "..."` should remain for
         # the bool-typed field branches.
         self.assertNotIn('then "true" else "false"', script)
+        self.assertNotIn("(try", script)
+        self.assertIn("set fieldValue0", script)
+        self.assertIn("on error\n                        set fieldValue0 to \"\"", script)
         self.assertIn("(read status of aMessage) as string", script)
         self.assertIn("(flagged status of aMessage) as string", script)
 
