@@ -482,6 +482,48 @@ def _compare_zip_members(
         errors.append(f"{label}: {archive.name} is not a valid zip archive")
 
 
+def _check_plugin_file_parity(
+    root: Path,
+    errors: list[str],
+    *,
+    require_present: bool = False,
+) -> None:
+    """Enforce that apple-mail.plugin is the byte-identical twin of the zip.
+
+    Cowork's "Customize → Add plugin → Upload plugin" UI accepts the .plugin
+    extension; the same payload bytes must ship under both names so the
+    Claude Code marketplace zip and the Cowork upload stay in lock-step.
+    Drift between the two has been a real installer-confusion bug.
+    """
+    zip_path = root / "apple-mail-plugin.zip"
+    plugin_path = root / "apple-mail.plugin"
+
+    if not plugin_path.exists():
+        if require_present:
+            errors.append(
+                "apple-mail.plugin: missing artifact; rebuild via "
+                "tools/build-artifacts.sh (Cowork upload needs the .plugin "
+                "extension alongside apple-mail-plugin.zip)"
+            )
+        return
+
+    _check_no_directory_entries(plugin_path, "apple-mail.plugin", errors)
+
+    if not zip_path.exists():
+        errors.append(
+            "apple-mail.plugin: present but apple-mail-plugin.zip is missing; "
+            "both must ship together — rebuild via tools/build-artifacts.sh"
+        )
+        return
+
+    if zip_path.read_bytes() != plugin_path.read_bytes():
+        errors.append(
+            "apple-mail.plugin: bytes diverge from apple-mail-plugin.zip; "
+            "rebuild via tools/build-artifacts.sh (the .plugin file must be a "
+            "byte-identical copy of the .zip artifact)"
+        )
+
+
 def _check_no_directory_entries(
     archive: Path,
     label: str,
@@ -595,6 +637,7 @@ def _check_artifact_freshness(
         exact_members=True,
     )
     _check_no_directory_entries(ROOT / "apple-mail-plugin.zip", "apple-mail-plugin.zip", errors)
+    _check_plugin_file_parity(ROOT, errors, require_present=require_artifacts)
 
     mcpb = ROOT / f"apple-mail-mcp-v{expected_version}.mcpb"
     mcpb_expected: list[tuple[Path, str]] = [

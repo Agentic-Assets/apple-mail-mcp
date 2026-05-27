@@ -37,6 +37,7 @@ docs/superpowers/plans/
 # Build artifacts
 apple-mail-mcpb/build/
 *.mcpb
+apple-mail.plugin
 
 # Archive
 archive/

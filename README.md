@@ -58,15 +58,17 @@ Then restart Claude Code.
 
 Cowork uses Anthropic's **remote marketplace backend** (`remoteMarketplaceClient`), which currently rejects most third-party GitHub marketplaces with a generic **"Failed to add marketplace"** even when the repo is valid. This is a [known Cowork/Desktop bug](https://github.com/anthropics/claude-code/issues/41653), not a problem with this fork's manifest. Claude Code CLI install (above) works; Cowork's GitHub sync often does not.
 
-**Workaround — upload the plugin directly (recommended for Cowork):**
+**Workaround — upload the `.plugin` file directly (recommended for Cowork):**
 
-1. Zip the `plugin/` folder (must contain `.claude-plugin/plugin.json`, `skills/`, `start_mcp.sh`, etc.)
-2. Cowork → **Customize** → **Add plugin** → **Upload plugin**
-3. Select the zip and enable **Apple Mail**
+1. Build the artifacts: `bash tools/build-artifacts.sh` — produces `apple-mail.plugin`, `apple-mail-plugin.zip`, and `apple-mail-mcp-v{VERSION}.mcpb` at the repo root.
+2. Cowork → **Customize** → **Add plugin** → **Upload plugin**.
+3. Select `apple-mail.plugin` and enable **Apple Mail**.
+
+`apple-mail.plugin` and `apple-mail-plugin.zip` are byte-identical — both work, the `.plugin` extension is the canonical Cowork upload format.
 
 ```bash
 cd /path/to/apple-mail-mcp
-bash tools/build-artifacts.sh   # produces apple-mail-plugin.zip + .mcpb (manifest at zip root)
+bash tools/build-artifacts.sh   # produces apple-mail.plugin, apple-mail-plugin.zip, and .mcpb
 ```
 
 If you must build the zip by hand, zip from **inside** `plugin/` so `.claude-plugin/plugin.json` sits at the zip root — Cowork rejects uploads where it is nested under `plugin/`:
@@ -149,11 +151,16 @@ claude mcp add apple-mail -- mcp-apple-mail
 </details>
 
 <details>
-<summary><strong>Claude Desktop MCPB</strong></summary>
+<summary><strong>Claude Desktop MCPB / DXT bundle</strong></summary>
 
-1. Download the latest `apple-mail-mcp-*.mcpb` from [Releases](https://github.com/Agentic-Assets/apple-mail-mcp/releases)
-2. Open Claude Desktop → Settings → Developer → MCP Servers → Install from file
-3. Select the `.mcpb` file and grant Mail.app permissions
+For Claude Desktop chat (outside of Cowork mode):
+
+1. Download `apple-mail-mcp-v{VERSION}.mcpb` from [Releases](https://github.com/Agentic-Assets/apple-mail-mcp/releases) or build locally with `bash tools/build-artifacts.sh`.
+2. In Claude Desktop, open Settings → **Extensions** (or **Developer → MCP Servers → Install from file** depending on app version), pick **Add Custom Plugin / Install from file**, and select the `.mcpb`.
+3. Grant the Automation + Mail Data Access prompts macOS surfaces on first run.
+4. Restart Claude Desktop so the extension registers across chat and Cowork sessions. Cowork projects may need to enable the extension explicitly in the project's plugin settings.
+
+The bundle bootstraps a per-install Python venv via `start_mcp.sh` on first run, so `python3` must be on PATH for the Claude Desktop process. For pure Cowork use, prefer the `.plugin` upload above (same MCP server, no Developer mode required).
 
 </details>
 

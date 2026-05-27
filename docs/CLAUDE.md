@@ -12,7 +12,7 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 | Doc | Audience | Purpose |
 |-----|----------|---------|
 | [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md) | Coding agents, maintainers | Live Mail verification via repo `.venv/bin/apple-mail` CLI |
-| [`CLAUDE-conventions.md`](CLAUDE-conventions.md) | All agents editing Python/tools/skills | Deep rules: perf, escaping, versioning, skill authoring, plugin-dev agents |
+| [`CLAUDE-conventions.md`](CLAUDE-conventions.md) | All agents editing Python/tools/skills | Deep rules: perf, escaping, versioning, skill authoring, plugin-dev agents, **distribution channels** (3-artifact map) |
 
 ## Who reads what
 

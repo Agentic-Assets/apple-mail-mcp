@@ -50,7 +50,7 @@ Finalize progress:
 - [ ] 4. code-simplifier — pass over the diff (REQUIRED for any non-trivial change)
 - [ ] 5. Docs, CLAUDE.md, skills, manifests synced (remaining drift)
 - [ ] 6. skill-reviewer (if plugin/skills touched)
-- [ ] 7. Rebuild release artifacts — `bash tools/dev-check.sh release` (rebuilds apple-mail-plugin.zip + .mcpb, runs full validators, runs mcpb unpack smoke). NEVER skip this step.
+- [ ] 7. Rebuild release artifacts — `bash tools/dev-check.sh release` (rebuilds **all three** artifacts: `apple-mail-plugin.zip` + `apple-mail.plugin` + `apple-mail-mcp-v{VERSION}.mcpb`, runs full validators including byte-parity check, runs mcpb unpack smoke). NEVER skip this step.
 - [ ] 8. Final review checklist
 - [ ] 9. Commit (default: yes, after release tier is green)
 - [ ] 10. Push (default: yes, to current branch — open PR if branch is protected)
@@ -150,7 +150,13 @@ If step 5 edited any `plugin/skills/*/SKILL.md`, delegate to `plugin-dev:skill-r
 
 ### 7. Rebuild release artifacts (required — never skip)
 
-`apple-mail-plugin.zip` (Claude Code) and `apple-mail-mcp-v{VERSION}.mcpb` (Claude Desktop) must be regenerated from current sources before commit. Both ship with the repo and stale artifacts have caused real installer failures (e.g. Claude Desktop rejecting an MCPB built without `mcpb pack`).
+**Three artifacts must regenerate together** from current sources before commit. All three ship with the repo, and drift between any of them has caused real installer failures.
+
+| Artifact | Install path | Why drift breaks users |
+|----------|--------------|------------------------|
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace | Stale bytes → users get an older tool surface than the manifest claims |
+| `apple-mail.plugin` | Cowork → Customize → Add plugin → Upload plugin | Missing or diverged from the `.zip` → Cowork upload silently fails or installs stale code |
+| `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop chat "Add Custom Plugin" | Wrong version filename or directory entries → Desktop installer aborts |
 
 ```bash
 bash tools/dev-check.sh release
@@ -159,18 +165,20 @@ bash tools/dev-check.sh release
 That tier runs `validate_manifests` + `pytest` + the wrapper-surface check, then invokes `tools/build-artifacts.sh` to:
 
 1. Rebuild `apple-mail-plugin.zip` with the README exclusion list (`venv`, `__pycache__`, `*.pyc`, `.DS_Store`, `CLAUDE.md`, `.env*`, logs, temp/backup files).
-2. Rebuild `apple-mail-mcp-v{VERSION}.mcpb` via `apple-mail-mcpb/build-mcpb.sh` (which prefers official `mcpb pack`).
-3. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh`.
-4. Run `mcpb unpack` + `mcpb validate` as a final structural smoke (if `mcpb` CLI present).
+2. Copy the zip bytes to `apple-mail.plugin` so the Cowork artifact stays byte-identical to the marketplace zip.
+3. Rebuild `apple-mail-mcp-v{VERSION}.mcpb` via `apple-mail-mcpb/build-mcpb.sh` (which prefers official `mcpb pack`).
+4. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh` — fails if any of the three artifacts is missing or the `.plugin` bytes diverge from the `.zip`.
+5. Run `mcpb unpack` + `mcpb validate` as a final structural smoke (if `mcpb` CLI present).
 
-If any step fails, fix the underlying issue — do not commit stale artifacts.
+If any step fails, fix the underlying issue — do not commit stale artifacts. **Never delete `apple-mail.plugin` or build it manually** — it must come from the build script's byte-copy, not a hand-zip, or the parity check rejects it.
 
 ### 8. Final review checklist
 
 - [ ] plugin-validator PASS after fixes
 - [ ] code-simplifier pass complete (or explicitly skipped per step 4 exceptions); pytest still green afterward
 - [ ] `tools/dev-check.sh release` finished green (artifacts rebuilt, `mcpb unpack` smoke OK, `claude plugin validate --strict` OK when CLI is available)
-- [ ] `apple-mail-plugin.zip` and `apple-mail-mcp-v{VERSION}.mcpb` modified time newer than every changed plugin source
+- [ ] `apple-mail-plugin.zip`, `apple-mail.plugin`, and `apple-mail-mcp-v{VERSION}.mcpb` modified time newer than every changed plugin source
+- [ ] `apple-mail.plugin` bytes == `apple-mail-plugin.zip` bytes (validator enforces; manual check: `cmp apple-mail-plugin.zip apple-mail.plugin`)
 - [ ] Behavior described in docs matches `compose.py` / other tool defaults
 - [ ] No stale "open by default" or subject-matching guidance where `message_id` is preferred
 - [ ] No skill suggests `compose_email` / `create_rich_email_draft` / `manage_drafts(action="create")` for replies; `standalone_confirmed=True` is documented where standalone-with-Re: is legitimate

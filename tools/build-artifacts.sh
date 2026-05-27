@@ -15,10 +15,11 @@ PY
 )"
 
 ZIP_OUT="apple-mail-plugin.zip"
+PLUGIN_OUT="apple-mail.plugin"
 MCPB_OUT="apple-mail-mcp-v${VERSION}.mcpb"
 
 echo "→ Building ${ZIP_OUT} (Claude Code plugin)"
-rm -f "${ZIP_OUT}"
+rm -f "${ZIP_OUT}" "${PLUGIN_OUT}"
 # Zip from INSIDE plugin/ so `.claude-plugin/plugin.json` sits at the zip root.
 # Cowork's plugin uploader and `claude plugin validate` both look for the
 # manifest at the unzip root — a `plugin/` prefix causes "No manifest found".
@@ -33,6 +34,12 @@ rm -f "${ZIP_OUT}"
     -x 'venv/*' '*/__pycache__/*' '*.pyc' '*.DS_Store' 'CLAUDE.md' '*/CLAUDE.md' \
        '.env' '.env.*' '*.log' '*.tmp' '*.bak' '*.swp'
 )
+
+# Mirror the same bytes as apple-mail.plugin for Claude Desktop "Add Custom
+# Plugin" UI (and Cowork chat-attach install). The Desktop installer accepts
+# the .plugin extension as a synonym for the Claude Code plugin zip; keeping
+# byte-identical contents lets validate_manifests treat them as one artifact.
+cp "${ZIP_OUT}" "${PLUGIN_OUT}"
 
 echo "→ Building ${MCPB_OUT} (Claude Desktop bundle)"
 bash apple-mail-mcpb/build-mcpb.sh >/dev/null
@@ -68,4 +75,4 @@ fi
 
 echo
 echo "Artifacts ready:"
-ls -lh "${ZIP_OUT}" "${MCPB_OUT}"
+ls -lh "${ZIP_OUT}" "${PLUGIN_OUT}" "${MCPB_OUT}"

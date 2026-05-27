@@ -623,6 +623,108 @@ packages = ["plugin/apple_mail_mcp"]
             msg=f"zip must not wrap files under plugin/ — found {len(nested)} such entries",
         )
 
+    def test_plugin_file_parity_passes_when_bytes_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = b"PK\x03\x04 fake-zip-bytes for parity test"
+            (tmp_path / "apple-mail-plugin.zip").write_bytes(payload)
+            (tmp_path / "apple-mail.plugin").write_bytes(payload)
+
+            errors: list[str] = []
+            validate_manifests._check_plugin_file_parity(
+                tmp_path, errors, require_present=True
+            )
+
+        self.assertEqual(errors, [])
+
+    def test_plugin_file_parity_rejects_byte_divergence(self):
+        # Regression: silently shipping `.zip` and `.plugin` with different
+        # bytes confuses installers and breaks reproducibility — the .plugin
+        # must always be a byte-identical copy of the .zip artifact.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "apple-mail-plugin.zip").write_bytes(b"zip-bytes")
+            (tmp_path / "apple-mail.plugin").write_bytes(b"diverged-bytes")
+
+            errors: list[str] = []
+            validate_manifests._check_plugin_file_parity(
+                tmp_path, errors, require_present=True
+            )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("bytes diverge", errors[0])
+        self.assertIn("byte-identical", errors[0])
+
+    def test_plugin_file_parity_requires_artifact_when_flagged(self):
+        # Regression: shipping a release without `.plugin` would silently
+        # break the Cowork upload path. The release gate must reject this.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "apple-mail-plugin.zip").write_bytes(b"zip-bytes")
+
+            errors: list[str] = []
+            validate_manifests._check_plugin_file_parity(
+                tmp_path, errors, require_present=True
+            )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("apple-mail.plugin: missing artifact", errors[0])
+        self.assertIn("Cowork upload", errors[0])
+
+    def test_plugin_file_parity_skips_when_absent_and_optional(self):
+        # Default (non-release) developer runs should not fail when only
+        # the zip has been built — only `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS`
+        # promotes a missing .plugin to a hard error.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "apple-mail-plugin.zip").write_bytes(b"zip-bytes")
+
+            errors: list[str] = []
+            validate_manifests._check_plugin_file_parity(
+                tmp_path, errors, require_present=False
+            )
+
+        self.assertEqual(errors, [])
+
+    def test_plugin_file_parity_flags_orphan_plugin_without_zip(self):
+        # If somebody manually drops a .plugin file without the .zip, the
+        # build is inconsistent — both artifacts ship from the same build
+        # step and one without the other is broken state.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "apple-mail.plugin").write_bytes(b"plugin-bytes")
+
+            errors: list[str] = []
+            validate_manifests._check_plugin_file_parity(
+                tmp_path, errors, require_present=False
+            )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn(
+            "apple-mail-plugin.zip is missing",
+            errors[0],
+        )
+
+    def test_plugin_file_artifact_matches_zip_in_repo(self):
+        # Smoke test against the actually-built artifacts. The byte parity
+        # is enforced inside the validator, but tying the test to the
+        # on-disk file gives a clearer failure message when a build forgets
+        # to update `.plugin` after a zip-only rebuild.
+        zip_path = ROOT / "apple-mail-plugin.zip"
+        plugin_path = ROOT / "apple-mail.plugin"
+        if not zip_path.exists() or not plugin_path.exists():
+            self.skipTest(
+                "Run tools/build-artifacts.sh to produce both artifacts"
+            )
+        self.assertEqual(
+            plugin_path.read_bytes(),
+            zip_path.read_bytes(),
+            msg=(
+                "apple-mail.plugin must be a byte-identical copy of "
+                "apple-mail-plugin.zip — rebuild with tools/build-artifacts.sh"
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

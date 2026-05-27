@@ -92,6 +92,26 @@ Tool-count claims drift. Description fields in `plugin.json`, `marketplace.json`
 
 ---
 
+## Distribution channels — three artifacts, one source
+
+The repo ships from **one source tree** to **three install surfaces**. All three artifacts rebuild in one shot via [`tools/build-artifacts.sh`](../tools/build-artifacts.sh); the validator and CI tests enforce parity between them.
+
+| Artifact | Target | How users install |
+|----------|--------|-------------------|
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin install apple-mail@apple-mail-mcp` (uses `.claude-plugin/marketplace.json`) |
+| `apple-mail.plugin` | Claude Desktop **Cowork** | Customize → Add plugin → **Upload plugin**. The Cowork UI accepts the `.plugin` extension; without it the upload silently fails. |
+| `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
+
+**`.zip` and `.plugin` must be byte-identical** — `tools/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/test_validate_manifests.py::test_plugin_file_parity_*`.
+
+**Never** ship a release where any of the three artifacts is missing or stale. Real installer failures we have hit and now guard against:
+
+- MCPB built with raw `zip -r .` emitting zero-byte directory entries → Claude Desktop installer aborts with `ENOENT`. Build with `mcpb pack` or `zip -X -D`. Guard: `_check_no_directory_entries`.
+- Plugin zip wrapping files under `plugin/` prefix → Cowork rejects with "No manifest found". Build from inside `plugin/`. Guard: `test_plugin_zip_has_manifest_at_root_not_nested`.
+- `.plugin` extension missing → Cowork "Upload plugin" rejects the `.zip` silently. Guard: `_check_plugin_file_parity`.
+
+---
+
 ## Marketplace vs plugin.json — component ownership
 
 Claude Code rejects the install with *"conflicting manifests: both plugin.json and marketplace entry specify components"* when both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while `strict` is not `true` on the marketplace entry.

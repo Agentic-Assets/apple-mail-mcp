@@ -2,6 +2,18 @@
 
 Navigation hub for **apple-mail-mcp**: one Python MCP server (**28 tools**, **367 tests + 30 subtests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Claude Code plugin (`plugin/`), and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.claude-plugin/marketplace.json`.
 
+## Distribution channels (three artifacts from one source tree)
+
+A single `bash tools/build-artifacts.sh` emits all three. Drift between them has caused real installer failures; `tools/validate_manifests.py` enforces parity and the release gate refuses to ship with any artifact missing or stale.
+
+| Artifact | Install target | Format |
+|----------|----------------|--------|
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace (`claude plugin install`) | Plain zip, `.claude-plugin/plugin.json` at zip root |
+| `apple-mail.plugin` | Claude Desktop **Cowork → Customize → Add plugin → Upload plugin** | Byte-identical copy of the `.zip`, `.plugin` extension is what the Cowork UI accepts |
+| `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop chat extension via "Add Custom Plugin" / "Install from file" | DXT bundle (`mcpb pack`), `manifest.json` at zip root |
+
+If you change distribution, version, or filenames: re-run `bash tools/dev-check.sh release` and verify `tests/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and CI tests treat that as a hard error.
+
 ## Agent orchestration (required)
 
 **Always use subagents** for both **research and implementation** — not just exploration. Delegate real fixes, tests, docs, and live verification to subagents; the lead agent orchestrates and reviews.
@@ -64,7 +76,7 @@ python3 -m venv .venv && .venv/bin/pip install -e . pytest
 - `server.json` → top-level + `packages[0].version`
 - `apple-mail-mcpb/manifest.json` → `version`
 
-Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. Before shipping, run `bash tools/dev-check.sh release`; the validator enforces exact plugin zip/MCPB payloads, package deps/packages, install contracts, source syntax, and artifact freshness. No repo lint config — don't add without asking.
+Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. Before shipping, run `bash tools/dev-check.sh release`; the validator enforces exact plugin zip/MCPB payloads, byte parity between `apple-mail-plugin.zip` and `apple-mail.plugin`, package deps/packages, install contracts, source syntax, and artifact freshness. No repo lint config — don't add without asking.
 
 ## Related folders
 

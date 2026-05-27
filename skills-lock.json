@@ -13,6 +13,18 @@
       "skillPath": "plugins/plugin-dev/skills/plugin-structure/SKILL.md",
       "computedHash": "c4e9b3ea36efad4ab599465aaac71f81dc3320a183920678fe1587181c446b07"
     },
+    "cowork-plugin-customizer": {
+      "source": "anthropics/knowledge-work-plugins",
+      "sourceType": "github",
+      "skillPath": "cowork-plugin-management/skills/cowork-plugin-customizer/SKILL.md",
+      "computedHash": "8b5c76dd06878d38a13173bed522ce9a35e0030e0ea443928e090fef97e30085"
+    },
+    "create-cowork-plugin": {
+      "source": "anthropics/knowledge-work-plugins",
+      "sourceType": "github",
+      "skillPath": "cowork-plugin-management/skills/create-cowork-plugin/SKILL.md",
+      "computedHash": "226fbccc6232171c2073ff57e58ca62410a06976dd685f3319cfa0c2adc9cb49"
+    },
     "find-skills": {
       "source": "vercel-labs/skills",
       "sourceType": "github",

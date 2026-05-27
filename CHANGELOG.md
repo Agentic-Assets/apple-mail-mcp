@@ -8,6 +8,18 @@ here. The plugin/MCPB/marketplace versions track this file.
 Mcporter wrapper + large-mailbox hardening on top of 3.4.0. No tool signatures
 or return shapes changed.
 
+### Distribution
+
+- **New `apple-mail.plugin` build artifact**: `tools/build-artifacts.sh` now
+  emits `apple-mail.plugin` (byte-identical to `apple-mail-plugin.zip`)
+  alongside the existing `.zip` and `.mcpb`. The `.plugin` extension is the
+  canonical upload format for Claude Desktop's **Customize → Add plugin →
+  Upload plugin** flow (Cowork), which was previously documented only as a
+  generic `.zip` upload. Stale `.mcpb` files from 3.2.1 / 3.3.0 / 3.3.1
+  cleaned from repo root; `.gitignore` covers the new `.plugin` artifact.
+
+### Documentation
+
 - **`search_emails` subject-only fast path**: narrow subject lookups (no sender,
   body, attachment, or read-status filters) now scan only the requested page
   size and skip per-message date/sender/read-status reads. No-hit lookups on
