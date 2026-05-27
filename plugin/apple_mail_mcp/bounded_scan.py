@@ -3,7 +3,31 @@
 Phase A of the ``whose``-elimination refactor. See
 ``tasks/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`` and
 ``05-codebase-whose-map.md`` § 7 for the helper signatures and the
-bounded-slice-before-``whose`` pattern these helpers encode.
+bounded-slice-then-loop-filter pattern these helpers encode.
+
+FORBIDDEN PATTERNS — lint-enforced by ``tests/test_no_unbounded_whose.py``:
+
+1.  ``<sliceVar> whose <predicate>`` where ``<sliceVar>`` is bound via
+    ``messages 1 thru N of MB``. AppleScript's ``whose`` over a list
+    re-resolves the predicate against each ref's underlying physical
+    folder; on Gmail that folder is ``[Gmail]/All Mail`` and Mail
+    rejects the call with ``Can't get {message id N of mailbox
+    "[Gmail]/All Mail" ...} whose ...``. This was the v3.4.x Gmail
+    crash. The slice-binding variable names the lint watches are listed
+    in ``tests/test_no_unbounded_whose.SLICE_BIND_VARS``.
+
+2.  ``build_bounded_message_scan(..., whose_condition=...)`` — the
+    helper raises ``ToolError(code="UNSAFE_WHOSE_ON_LIST")`` at
+    construction time so the bug is unrepresentable, not just
+    discouraged.
+
+3.  ``every message of MB whose <non-id-predicate>`` without a
+    downstream bounded slice. Use ``build_bounded_message_scan`` plus
+    in-loop filtering.
+
+USE INSTEAD: ``build_bounded_filtered_scan(mailbox_var, scan_cap,
+target_max, condition_expr)`` — emits the safe bounded-slice + in-loop
+``repeat ... if`` pattern by construction.
 """
 
 from __future__ import annotations

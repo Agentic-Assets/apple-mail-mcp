@@ -196,6 +196,30 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
             build_whose_id_list([])
         self.assertEqual(ctx.exception.code, "INVALID_SCAN_WINDOW")
 
+    def test_draft_lookup_uses_safe_pattern(self):
+        """The Drafts subject lookup must use the in-loop pattern.
+
+        The historical form pre-filtered with `every message of
+        draftsMailbox whose subject contains "..."` and sliced after.
+        On Gmail accounts the Drafts mailbox is `[Gmail]/Drafts` and the
+        unfiltered `whose` carries the same evaluation risk as the inbox
+        unread crash. This contract test fails if the regression returns.
+        """
+        from apple_mail_mcp.tools.compose import _build_draft_lookup
+
+        snippet = _build_draft_lookup("invoice question")
+        # Safe primitives must be present.
+        self.assertIn("messages 1 thru", snippet)
+        self.assertIn("repeat with aMessage in candidateMessages", snippet)
+        self.assertIn(
+            '(subject of aMessage) contains "invoice question"', snippet
+        )
+        # The unsafe forms must NEVER appear.
+        self.assertNotIn(
+            "every message of draftsMailbox whose subject contains", snippet
+        )
+        self.assertNotIn("draftMessages whose subject contains", snippet)
+
 
 # ---------------------------------------------------------------------------
 # Per-tool structured-error contract

@@ -14,7 +14,10 @@ from apple_mail_mcp import server as _server
 from apple_mail_mcp import server  # public alias used by tests
 from apple_mail_mcp.server import mcp, WRITE_TOOL_ANNOTATIONS, DESTRUCTIVE_TOOL_ANNOTATIONS
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.bounded_scan import build_bounded_message_scan
+from apple_mail_mcp.bounded_scan import (
+    build_bounded_message_scan,
+    build_bounded_filtered_scan,
+)
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
@@ -135,21 +138,28 @@ def _build_found_message_lookup(
 
 
 def _build_draft_lookup(subject_keyword: str) -> str:
-    """Build capped AppleScript to find one draft by subject keyword."""
-    safe_draft_subject = escape_applescript(subject_keyword)
-    return f"""
-                set draftMessages to items 1 thru {DRAFT_LIST_CAP} of (every message of draftsMailbox whose subject contains "{safe_draft_subject}")
-                set foundDraft to missing value
+    """Build capped AppleScript to find one draft by subject keyword.
 
-                repeat with aDraft in draftMessages
-                    try
-                        set draftSubject to subject of aDraft
-                        if draftSubject contains "{safe_draft_subject}" then
-                            set foundDraft to aDraft
-                            exit repeat
-                        end if
-                    end try
-                end repeat
+    Emits the bounded-slice + in-loop ``if`` pattern via
+    ``build_bounded_filtered_scan``. The historical pre-filter-then-slice
+    form materialized the entire Drafts folder before slicing and carried
+    the same Gmail-list-eval risk as the v3.4.x inbox unread crash; see
+    ``tests/test_no_unbounded_whose.py`` for the lint that forbids it.
+    """
+    safe_draft_subject = escape_applescript(subject_keyword)
+    bounded_filter = build_bounded_filtered_scan(
+        mailbox_var="draftsMailbox",
+        scan_cap=DRAFT_LIST_CAP,
+        target_max=1,
+        condition_expr=f'(subject of aMessage) contains "{safe_draft_subject}"',
+        output_var="draftMessages",
+    )
+    return f"""
+                {bounded_filter}
+                set foundDraft to missing value
+                if (count of draftMessages) > 0 then
+                    set foundDraft to item 1 of draftMessages
+                end if
     """
 
 

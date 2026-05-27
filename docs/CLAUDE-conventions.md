@@ -21,6 +21,21 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 - **`ignoring case … end ignoring`** for case-insensitive comparisons. Never call out to `do shell script "echo … | tr '[:upper:]' '[:lower:]'"` per message — the deprecated `LOWERCASE_HANDLER` was removed in 3.1.5 for that exact reason.
 - **Push date filters unconditionally** into the `whose` clause when the caller provides `date_from`/`date_to`. Don't gate them on the presence of other filters.
 
+### Forbidden AppleScript patterns (lint-enforced)
+
+The patterns below are catalogued failure modes from real production crashes. **Each is enforced by `tests/test_no_unbounded_whose.py` — adding one of them to tool source breaks CI.** Use the named safe alternative.
+
+| Forbidden | Why it fails | Use instead |
+|-----------|--------------|-------------|
+| `<sliceVar> whose <predicate>` where `<sliceVar>` is `candidateMessages` / `mailboxMessages` / `inboxMessages` / `draftMessages` / etc. — i.e. a variable bound via `messages 1 thru N of MB` followed by a `whose` clause. | AppleScript's `whose` over a list re-resolves the predicate against each ref's underlying physical folder. On Gmail that folder is `[Gmail]/All Mail`; Mail rejects the call with `Can't get {message id N of mailbox "[Gmail]/All Mail" ...} whose ...`. This is the 2026-05-27 Gmail crash. | `bounded_scan.build_bounded_filtered_scan(mailbox_var, scan_cap, target_max, condition_expr)` — emits a bounded slice plus an in-AppleScript `repeat ... if` loop by construction. Predicates of the form `<prop> of aMessage` work safely here. |
+| `every message of MB whose <non-id-predicate>` (subject contains, sender contains, date received, read status, …) without a downstream slice. | Mail materializes the entire remote mailbox to evaluate the predicate. Hangs/times out on 24K-message Exchange inboxes and large Gmail folders. | Bind a bounded newest-first slice via `build_bounded_message_scan(mailbox_var, limit)`, then filter per-message in a `repeat with aMessage in candidateMessages` loop. For ID-only lookups use `build_whose_id_list(ids)`. |
+| `every message of MB` with no `whose` (raw enumeration). | Same materialization cost as above, with no filter to limit work. | `messages 1 thru N of MB`. |
+| `build_bounded_message_scan(..., whose_condition=...)`. | The helper raises `ToolError(code="UNSAFE_WHOSE_ON_LIST")` to prevent the slice-then-whose bug at construction time. | `build_bounded_filtered_scan(...)`. |
+| `do shell script "echo X \| tr '[:upper:]' '[:lower:]'"` per message. | Hundreds of subprocess spawns per scan; killed the 3.1.4 search path. | `ignoring case … end ignoring` AppleScript blocks. |
+| Tool kwarg `allow_full_scan`. | Retired in v3.2.0 in favor of structured `UNBOUNDED_SCAN_REQUIRED` errors with `remediation.fallback_tool = "full_inbox_export"`. | Refuse with a structured error and point at `full_inbox_export`. |
+
+The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules via source regex (with an empty `KNOWN_DANGEROUS_WHOSE` allowlist — add to it only with a tracking note and a follow-up PR planned). The builder-output contract `tests/test_bounded_scan_contract.py` asserts that the safe helpers emit the in-loop pattern, not the unsafe one. The Gmail-crash regression suite `tests/test_gmail_unread_crash_regression.py` simulates Mail's rejection to confirm the fix end-to-end.
+
 ### Account scoping
 
 - **`DEFAULT_MAIL_ACCOUNT`**: every tool that takes an `account` parameter must (a) default it to `Optional[str] = None`, (b) at the top fall back to `_server.DEFAULT_MAIL_ACCOUNT` if `account is None`, (c) return a structured error if neither is set. Exception: `synchronize_account` requires `confirm_sync=True` and additionally requires `all_accounts=True` for all-account sync.

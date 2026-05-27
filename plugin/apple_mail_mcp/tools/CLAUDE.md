@@ -24,6 +24,19 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 - Pass `timeout` through to `run_applescript`; catch `AppleScriptTimeout` → structured error with account name.
 - Mutations: `normalize_message_ids` / `message_ids` for targeted ops. Detail: `docs/CLAUDE-conventions.md`.
 
+## Forbidden AppleScript patterns
+
+**Lint-enforced** by `tests/test_no_unbounded_whose.py` — these are the catalogued crash modes. Detail + safe alternatives: [`docs/CLAUDE-conventions.md § Forbidden AppleScript patterns`](../../../docs/CLAUDE-conventions.md#forbidden-applescript-patterns-lint-enforced).
+
+| Don't write | Failure mode | Write instead |
+|-------------|--------------|---------------|
+| `<sliceVar> whose <pred>` (slice-bound list + `whose`) | Gmail crash: `Can't get {message id N of mailbox "[Gmail]/All Mail" ...} whose ...` | `build_bounded_filtered_scan(...)` from `bounded_scan` |
+| `every message of MB whose <non-id-pred>` (unbounded `whose`) | Materializes whole mailbox; hangs on 24K+ inboxes | `build_bounded_message_scan(...)` + in-loop `repeat ... if` |
+| `every message of MB` (no `whose`) | Raw enumeration | `messages 1 thru N of MB` |
+| `build_bounded_message_scan(..., whose_condition=...)` | Raises `UNSAFE_WHOSE_ON_LIST` at runtime | `build_bounded_filtered_scan(...)` |
+
+When in doubt, copy the pattern from `search.py`'s per-message loop — it has been audited as Gmail-safe and Exchange-bounded.
+
 ## Account scoping
 
 `account: Optional[str] = None` → `server.DEFAULT_MAIL_ACCOUNT`; error if unset. Exceptions: `synchronize_account` (None = all accounts, but requires `confirm_sync=True`). `inbox_dashboard` also respects `DEFAULT_MAIL_ACCOUNT` and only fans out across all accounts when no account/default is configured. `all_accounts=True` overrides default scoping.
