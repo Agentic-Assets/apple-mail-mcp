@@ -1,40 +1,39 @@
 """Management tools: moving, status updates, trash, and attachments."""
 
-import os
 import re
 import shutil
 from datetime import datetime, timedelta
-from typing import Optional, List
+from pathlib import Path
+from typing import Any
 
 from apple_mail_mcp import server as _server
-from apple_mail_mcp.server import (
-    mcp,
-    WRITE_TOOL_ANNOTATIONS,
-    IDEMPOTENT_WRITE_TOOL_ANNOTATIONS,
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
-)
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
+from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
+    build_mailbox_ref,
     contains_any_condition,
-    inject_preferences,
     escape_applescript,
+    inbox_mailbox_script,
+    inject_preferences,
     list_mail_account_names,
     normalize_message_ids,
     normalize_search_terms,
     run_applescript,
-    inbox_mailbox_script,
-    build_mailbox_ref,
-    build_filter_condition,
     validate_account_name,
     validate_save_path,
 )
-from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
-from apple_mail_mcp.constants import SCAN_BOUNDS
+from apple_mail_mcp.server import (
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
+    IDEMPOTENT_WRITE_TOOL_ANNOTATIONS,
+    WRITE_TOOL_ANNOTATIONS,
+    mcp,
+)
 from apple_mail_mcp.tools.search import _search_mail_records_sync as _search_mail_records
 
 
-def _check_message_ids_cap(normalized_ids: List[str], tool_name: str) -> Optional[str]:
+def _check_message_ids_cap(normalized_ids: list[str], tool_name: str) -> str | None:
     """Return a structured error string if *normalized_ids* exceeds the whose-id cap.
 
     Mail's AppleScript parser rejects or hangs on `id is X or id is Y or ...`
@@ -46,6 +45,7 @@ def _check_message_ids_cap(normalized_ids: List[str], tool_name: str) -> Optiona
     if len(normalized_ids) <= MAX_WHOSE_IDS:
         return None
     import json as _json
+
     err = ToolError(
         code="WHOSE_ID_LIST_TOO_LARGE",
         message=(
@@ -56,8 +56,7 @@ def _check_message_ids_cap(normalized_ids: List[str], tool_name: str) -> Optiona
         ),
         remediation={
             "preferred": (
-                f"Split message_ids into batches of {MAX_WHOSE_IDS} or "
-                f"fewer and call {tool_name} once per batch"
+                f"Split message_ids into batches of {MAX_WHOSE_IDS} or fewer and call {tool_name} once per batch"
             ),
             "helper": "apple_mail_mcp.bounded_scan.iter_id_chunks",
         },
@@ -65,21 +64,26 @@ def _check_message_ids_cap(normalized_ids: List[str], tool_name: str) -> Optiona
     return _json.dumps(err.to_dict(), indent=2)
 
 
-def _date_to_for_older_than(days: Optional[int]) -> Optional[str]:
+def _date_to_for_older_than(days: int | None) -> str | None:
     """Return YYYY-MM-DD cutoff date for older-than filters."""
     if days is None or days <= 0:
         return None
     return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-def _date_from_for_recent_days(days: Optional[float]) -> Optional[str]:
+def _date_from_for_recent_days(days: float | None) -> str | None:
     """Return YYYY-MM-DD cutoff date for recent-window filters."""
     if days is None or days <= 0:
         return None
     return (datetime.now() - timedelta(days=float(days))).strftime("%Y-%m-%d")
 
 
-def _format_dry_run_records(title: str, records, result_prefix: str, limit: int) -> str:
+def _format_dry_run_records(
+    title: str,
+    records: list[dict[str, Any]],
+    result_prefix: str,
+    limit: int,
+) -> str:
     """Format structured search records as existing dry-run text."""
     lines = [title, ""]
     for record in records[:limit]:
@@ -99,14 +103,14 @@ def _search_message_ids(
     *,
     account: str,
     mailbox: str,
-    subject_terms: Optional[List[str]] = None,
-    sender: Optional[str] = None,
+    subject_terms: list[str] | None = None,
+    sender: str | None = None,
     read_status: str = "all",
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     limit: int,
-    timeout: Optional[int] = None,
-) -> List[str]:
+    timeout: int | None = None,
+) -> list[str]:
     """Resolve message IDs through the bounded search helper."""
     records = _search_mail_records(
         account=account,
@@ -121,7 +125,7 @@ def _search_message_ids(
         limit=limit,
         timeout=timeout,
     )
-    ids: List[str] = []
+    ids: list[str] = []
     for record in records:
         message_id = record.get("message_id")
         if message_id is None:
@@ -137,7 +141,7 @@ def _move_email_by_message_ids(
     account: str,
     from_mailbox: str,
     to_mailbox: str,
-    message_ids: List[str],
+    message_ids: list[str],
     max_moves: int,
     dry_run: bool,
     timeout: int,
@@ -161,8 +165,12 @@ def _move_email_by_message_ids(
     )
     move_action = "" if dry_run else "move aMessage to destMailbox"
     result_prefix = "Would move" if dry_run else "Moved"
-    dest_setup = "" if dry_run else f"""
+    dest_setup = (
+        ""
+        if dry_run
+        else f"""
                 set destMailbox to {dest_ref}"""
+    )
 
     script = f'''
     tell application "Mail"
@@ -229,19 +237,19 @@ _INVALID_MAILBOX_CHARS = re.compile(r"[\\\"<>|?*:\x00-\x1f]")
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def move_email(
-    account: Optional[str] = None,
+    account: str | None = None,
     to_mailbox: str = "",
-    message_ids: Optional[List[str]] = None,
-    subject_keyword: Optional[str] = None,
+    message_ids: list[str] | None = None,
+    subject_keyword: str | None = None,
     from_mailbox: str = "INBOX",
     max_moves: int = 50,
-    subject_keywords: Optional[List[str]] = None,
-    sender: Optional[str] = None,
-    older_than_days: Optional[int] = None,
+    subject_keywords: list[str] | None = None,
+    sender: str | None = None,
+    older_than_days: int | None = None,
     dry_run: bool = False,
     only_read: bool = False,
     recent_days: float = 2.0,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
 ) -> str:
     """
     Move email(s) matching filters from one mailbox to another.
@@ -285,8 +293,6 @@ def move_email(
     if not to_mailbox:
         return "Error: to_mailbox is required."
 
-    safe_account = escape_applescript(account)
-    safe_from = escape_applescript(from_mailbox)
     safe_to = escape_applescript(to_mailbox)
     effective_timeout = timeout if timeout is not None else 300
 
@@ -381,15 +387,10 @@ def move_email(
             timeout=search_timeout,
         )
     except AppleScriptTimeout:
-        return (
-            f"Error: move_email timed out on account '{account}'. "
-            "Retry with a larger timeout or tighter filters."
-        )
+        return f"Error: move_email timed out on account '{account}'. Retry with a larger timeout or tighter filters."
 
     if not resolved_ids:
-        return (
-            f"No matching emails found in {from_mailbox} for account '{account}'."
-        )
+        return f"No matching emails found in {from_mailbox} for account '{account}'."
 
     return _move_email_by_message_ids(
         account=account,
@@ -406,12 +407,12 @@ def move_email(
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def save_email_attachment(
-    account: Optional[str] = None,
+    account: str | None = None,
     subject_keyword: str = "",
     attachment_name: str = "",
     save_path: str = "",
-    message_ids: Optional[List[str]] = None,
-    timeout: Optional[int] = None,
+    message_ids: list[str] | None = None,
+    timeout: int | None = None,
     max_size_bytes: int = 100 * 1024 * 1024,
 ) -> str:
     """
@@ -441,9 +442,7 @@ def save_email_attachment(
     if not account:
         return "Error: account is required (and no DEFAULT_MAIL_ACCOUNT configured)."
 
-    account_err = validate_account_name(
-        account, timeout=30 if timeout is None else min(timeout, 30)
-    )
+    account_err = validate_account_name(account, timeout=30 if timeout is None else min(timeout, 30))
     if account_err:
         return account_err
 
@@ -475,11 +474,7 @@ def save_email_attachment(
                 f"Email keyword: {escape_applescript(subject_keyword)}\n"
                 f"Attachment name: {escape_applescript(attachment_name)}"
             )
-        resolved_ids = [
-            str(record.get("message_id"))
-            for record in records
-            if record.get("message_id") is not None
-        ]
+        resolved_ids = [str(record.get("message_id")) for record in records if record.get("message_id") is not None]
         if not resolved_ids:
             return (
                 "⚠ Attachment not found\n"
@@ -495,14 +490,12 @@ def save_email_attachment(
         cap_error = _check_message_ids_cap(normalized_ids, "save_email_attachment")
         if cap_error:
             return cap_error
-        message_filter_script = (
-            f"set inboxMessages to every message of inboxMailbox whose "
-            f"{build_whose_id_list(normalized_ids)}"
-        )
+        id_condition = build_whose_id_list(normalized_ids)
+        message_filter_script = f"set inboxMessages to every message of inboxMailbox whose {id_condition}"
         not_found_detail = f"Message ids: {', '.join(normalized_ids)}"
 
     # Expand tilde in save_path (POSIX file in AppleScript does not expand ~)
-    expanded_path = os.path.expanduser(save_path)
+    expanded_path = str(Path(save_path).expanduser())
 
     # Path validation: use shared helper for home-dir + sensitive-dir checks
     path_err = validate_save_path(
@@ -513,12 +506,12 @@ def save_email_attachment(
     if path_err:
         return path_err
 
-    expanded_path = os.path.realpath(expanded_path)
-    save_dir = os.path.dirname(expanded_path)
+    save_path_obj = Path(expanded_path).resolve()
+    expanded_path = str(save_path_obj)
+    save_dir = save_path_obj.parent
 
     # Escape for AppleScript
     escaped_account = escape_applescript(account)
-    escaped_keyword = escape_applescript(subject_keyword) if subject_keyword else ""
     escaped_attachment = escape_applescript(attachment_name)
     escaped_path = escape_applescript(expanded_path)
 
@@ -570,14 +563,11 @@ def save_email_attachment(
                 code="ATTACHMENT_TOO_LARGE",
                 message=(
                     f"Attachment '{attachment_name}' is {_attachment_size:,} bytes "
-                    f"({_attachment_size / (1024*1024):.1f} MB), which exceeds the "
-                    f"cap of {max_size_bytes:,} bytes ({max_size_bytes / (1024*1024):.0f} MB)."
+                    f"({_attachment_size / (1024 * 1024):.1f} MB), which exceeds the "
+                    f"cap of {max_size_bytes:,} bytes ({max_size_bytes / (1024 * 1024):.0f} MB)."
                 ),
                 remediation={
-                    "preferred": (
-                        f"Pass max_size_bytes={_attachment_size + 1} to raise the cap "
-                        f"for this attachment"
-                    ),
+                    "preferred": (f"Pass max_size_bytes={_attachment_size + 1} to raise the cap for this attachment"),
                     "alternative": "Use Mail UI to save the attachment manually",
                     "actual_size_bytes": _attachment_size,
                     "cap_bytes": max_size_bytes,
@@ -589,7 +579,7 @@ def save_email_attachment(
         _disk_buffer = 100 * 1024 * 1024
         _required_free = _attachment_size + _disk_buffer
         try:
-            os.makedirs(save_dir, exist_ok=True)
+            save_dir.mkdir(parents=True, exist_ok=True)
             _free_bytes = shutil.disk_usage(save_dir).free
         except OSError:
             _free_bytes = None
@@ -675,9 +665,7 @@ def save_email_attachment(
     '''
 
     try:
-        result = run_applescript(
-            script, timeout=timeout if timeout is not None else 120
-        )
+        result = run_applescript(script, timeout=timeout if timeout is not None else 120)
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out while saving attachment from account "
@@ -689,17 +677,17 @@ def save_email_attachment(
 @mcp.tool(annotations=IDEMPOTENT_WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def update_email_status(
-    account: Optional[str] = None,
+    account: str | None = None,
     action: str = "mark_read",
-    subject_keyword: Optional[str] = None,
-    subject_keywords: Optional[List[str]] = None,
-    sender: Optional[str] = None,
+    subject_keyword: str | None = None,
+    subject_keywords: list[str] | None = None,
+    sender: str | None = None,
     mailbox: str = "INBOX",
     max_updates: int = 10,
     apply_to_all: bool = False,
-    message_ids: Optional[List[str]] = None,
-    older_than_days: Optional[int] = None,
-    timeout: Optional[int] = None,
+    message_ids: list[str] | None = None,
+    older_than_days: int | None = None,
+    timeout: int | None = None,
 ) -> str:
     """
     Update email status - mark as read/unread or flag/unflag emails.
@@ -823,18 +811,13 @@ def update_email_status(
         try:
             return run_applescript(script, timeout=effective_timeout)
         except AppleScriptTimeout:
-            return (
-                f"Error: update_email_status timed out after {effective_timeout}s "
-                f"on account '{account}'."
-            )
+            return f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
 
     # --- Filter-based path ---
     subject_terms = normalize_search_terms(subject_keyword, subject_keywords)
 
     # Safety check: require at least one filter or explicit apply_to_all
-    has_filter = bool(subject_terms) or bool(sender) or (
-        older_than_days is not None and older_than_days > 0
-    )
+    has_filter = bool(subject_terms) or bool(sender) or (older_than_days is not None and older_than_days > 0)
     if not has_filter and not apply_to_all:
         return (
             "Error: No filter provided. Provide subject_keyword, sender, or older_than_days "
@@ -857,10 +840,7 @@ def update_email_status(
                 timeout=search_timeout,
             )
         except AppleScriptTimeout:
-            return (
-                f"Error: update_email_status timed out after {effective_timeout}s "
-                f"on account '{account}'."
-            )
+            return f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
         if not resolved_ids:
             return f"No matching emails found in {mailbox} for account '{account}'."
         return update_email_status(
@@ -873,21 +853,16 @@ def update_email_status(
         )
 
     scan_cap = min(500, max(max_updates * 10, 50))
-    per_msg_checks: List[str] = []
+    per_msg_checks: list[str] = []
     if action == "flag":
         per_msg_checks.append("flagged status of aMessage is false")
     else:
         per_msg_checks.append("flagged status of aMessage is true")
     if subject_terms:
-        subject_checks = " or ".join(
-            f'messageSubject contains "{escape_applescript(term)}"'
-            for term in subject_terms
-        )
+        subject_checks = " or ".join(f'messageSubject contains "{escape_applescript(term)}"' for term in subject_terms)
         per_msg_checks.append(f"({subject_checks})")
     if sender:
-        per_msg_checks.append(
-            f'messageSender contains "{escape_applescript(sender)}"'
-        )
+        per_msg_checks.append(f'messageSender contains "{escape_applescript(sender)}"')
     date_setup = ""
     if older_than_days and older_than_days > 0:
         date_setup = f"set cutoffDate to (current date) - ({older_than_days} * days)"
@@ -960,29 +935,26 @@ def update_email_status(
     try:
         return run_applescript(script, timeout=effective_timeout)
     except AppleScriptTimeout:
-        return (
-            f"Error: update_email_status timed out after {effective_timeout}s "
-            f"on account '{account}'."
-        )
+        return f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
 
 
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def manage_trash(
-    account: Optional[str] = None,
+    account: str | None = None,
     action: str = "move_to_trash",
-    message_ids: Optional[List[str]] = None,
-    subject_keyword: Optional[str] = None,
-    subject_keywords: Optional[List[str]] = None,
-    sender: Optional[str] = None,
+    message_ids: list[str] | None = None,
+    subject_keyword: str | None = None,
+    subject_keywords: list[str] | None = None,
+    sender: str | None = None,
     mailbox: str = "INBOX",
     max_deletes: int = 5,
     confirm_empty: bool = False,
     apply_to_all: bool = False,
-    older_than_days: Optional[int] = None,
+    older_than_days: int | None = None,
     dry_run: bool = True,
     recent_days: float = 2.0,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
 ) -> str:
     """
     Manage trash operations - delete emails or empty trash.
@@ -1027,7 +999,6 @@ def manage_trash(
 
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
-    safe_mailbox = escape_applescript(mailbox)
     subject_terms = normalize_search_terms(subject_keyword, subject_keywords)
     effective_timeout = timeout if timeout is not None else 300
     effective_recent_days = recent_days if older_than_days is None else 0
@@ -1046,33 +1017,26 @@ def manage_trash(
         id_condition = build_whose_id_list(normalized_ids)
 
         if action == "move_to_trash":
-            mode_label = (
-                "DRY RUN - PREVIEW TRASH BY IDS"
-                if dry_run
-                else "MOVING EMAILS TO TRASH BY IDS"
-            )
+            mode_label = "DRY RUN - PREVIEW TRASH BY IDS" if dry_run else "MOVING EMAILS TO TRASH BY IDS"
             move_script = "" if dry_run else "move aMessage to trashMailbox"
             result_verb = "Would trash" if dry_run else "Moved to trash"
-            trash_setup = "" if dry_run else """
+            trash_setup = (
+                ""
+                if dry_run
+                else """
                     set trashMailbox to mailbox "Trash" of targetAccount"""
+            )
             mailbox_ref = build_mailbox_ref(mailbox, var_name="sourceMailbox")
         elif action == "delete_permanent":
             mode_label = (
-                "DRY RUN - PREVIEW PERMANENT DELETE BY IDS"
-                if dry_run
-                else "PERMANENTLY DELETING EMAILS BY IDS"
+                "DRY RUN - PREVIEW PERMANENT DELETE BY IDS" if dry_run else "PERMANENTLY DELETING EMAILS BY IDS"
             )
             move_script = "" if dry_run else "delete aMessage"
-            result_verb = (
-                "Would permanently delete" if dry_run else "Permanently deleted"
-            )
+            result_verb = "Would permanently delete" if dry_run else "Permanently deleted"
             trash_setup = ""
             mailbox_ref = 'set sourceMailbox to mailbox "Trash" of targetAccount'
         else:
-            return (
-                f"Error: Invalid action '{action}'. Use: move_to_trash, "
-                "delete_permanent, empty_trash"
-            )
+            return f"Error: Invalid action '{action}'. Use: move_to_trash, delete_permanent, empty_trash"
 
         script = f'''
         tell application "Mail"
@@ -1122,10 +1086,7 @@ def manage_trash(
         try:
             return run_applescript(script, timeout=effective_timeout)
         except AppleScriptTimeout:
-            return (
-                f"Error: manage_trash timed out after {effective_timeout}s on "
-                f"account '{account}'."
-            )
+            return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
 
     # Refuse unbounded scans on destructive filter paths (move_to_trash and
     # delete_permanent). The id-direct path and empty_trash are exempt.
@@ -1151,8 +1112,7 @@ def manage_trash(
     if action == "empty_trash":
         if not confirm_empty:
             return (
-                "Error: empty_trash permanently deletes ALL messages in the trash. "
-                "Set confirm_empty=True to proceed."
+                "Error: empty_trash permanently deletes ALL messages in the trash. Set confirm_empty=True to proceed."
             )
         script = f'''
         tell application "Mail"
@@ -1217,10 +1177,7 @@ def manage_trash(
                     timeout=search_timeout,
                 )
             except AppleScriptTimeout:
-                return (
-                    f"Error: manage_trash timed out after {effective_timeout}s on "
-                    f"account '{account}'."
-                )
+                return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
             if not resolved_ids:
                 return f"No matching emails found in Trash for account '{account}'."
             return manage_trash(
@@ -1240,11 +1197,7 @@ def manage_trash(
             f"                    end if"
         )
 
-        mode_label = (
-            "DRY RUN - PREVIEW PERMANENT DELETE"
-            if dry_run
-            else "PERMANENTLY DELETING EMAILS"
-        )
+        mode_label = "DRY RUN - PREVIEW PERMANENT DELETE" if dry_run else "PERMANENTLY DELETING EMAILS"
         delete_script = "" if dry_run else "delete aMessage"
         result_verb = "Would permanently delete" if dry_run else "Permanently deleted"
         total_label = "TOTAL WOULD DELETE" if dry_run else "TOTAL DELETED"
@@ -1296,9 +1249,7 @@ def manage_trash(
         '''
     else:  # move_to_trash
         # Safety check: require at least one filter or explicit apply_to_all
-        has_filter = bool(subject_terms) or bool(sender) or (
-            older_than_days is not None and older_than_days > 0
-        )
+        has_filter = bool(subject_terms) or bool(sender) or (older_than_days is not None and older_than_days > 0)
         if not has_filter and not apply_to_all:
             return (
                 "Error: No filter provided. Provide subject_keyword, sender, or older_than_days "
@@ -1344,10 +1295,7 @@ def manage_trash(
                 timeout=search_timeout,
             )
         except AppleScriptTimeout:
-            return (
-                f"Error: manage_trash timed out after {effective_timeout}s on "
-                f"account '{account}'."
-            )
+            return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
         if not resolved_ids:
             return f"No matching emails found in {mailbox} for account '{account}'."
         return manage_trash(
@@ -1363,19 +1311,16 @@ def manage_trash(
     try:
         return run_applescript(script, timeout=effective_timeout)
     except AppleScriptTimeout:
-        return (
-            f"Error: manage_trash timed out after {effective_timeout}s on "
-            f"account '{account}'."
-        )
+        return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
 
 
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def create_mailbox(
-    account: Optional[str] = None,
+    account: str | None = None,
     name: str = "",
-    parent_mailbox: Optional[str] = None,
-    timeout: Optional[int] = None,
+    parent_mailbox: str | None = None,
+    timeout: int | None = None,
 ) -> str:
     """
     Create a new mailbox (folder) in the specified account.
@@ -1479,11 +1424,10 @@ def create_mailbox(
     return run_applescript(script, timeout=timeout if timeout is not None else 120)
 
 
-
 @mcp.tool(annotations=IDEMPOTENT_WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def synchronize_account(
-    account: Optional[str] = None,
+    account: str | None = None,
     confirm_sync: bool = False,
     all_accounts: bool = False,
 ) -> str:
@@ -1558,7 +1502,7 @@ def synchronize_account(
         account_count = max(len(account_names), 1)
         outer_timeout = PER_ACCOUNT_TIMEOUT_S * account_count + 5
 
-        script = f'''
+        script = f"""
         tell application "Mail"
             set acctNames to {{}}
             set queuedNames to {{}}
@@ -1582,7 +1526,7 @@ def synchronize_account(
                 return "Synchronized all accounts: " & (acctNames as string)
             end if
         end tell
-        '''
+        """
         return run_applescript(script, timeout=outer_timeout)
 
     account = account.strip()

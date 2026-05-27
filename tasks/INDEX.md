@@ -5,6 +5,9 @@
 | File | Purpose | Status |
 |------|---------|--------|
 | [`todo.md`](todo.md) | Tiny active pointer for the current branch/workstream | Active |
+| [`v4-performance-consolidation-2026-05-27/phase-plan.md`](v4-performance-consolidation-2026-05-27/phase-plan.md) | v4 performance/consolidation/FTS/strict-gate phase plan | Active; strict package gate green |
+| [`v4-performance-consolidation-2026-05-27/progress-log.md`](v4-performance-consolidation-2026-05-27/progress-log.md) | v4 recon evidence, blocker record, and next action log | Active; latest strict-gate evidence recorded |
+| [`v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`](v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md) | v4 competitor prior art, hot-path findings, and parked risks | Active sidecar |
 | [`whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`](whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md) | Phase A capability-token refactor (v3.2.0) + senior-review hardening pass (v3.2.1) shipped 2026-05-22; Envelope Index SQLite migration (Phase B v4.0.0) deferred | Shipped reference; Phase B deferred |
 | [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) | Whole-plugin robustness goal and completion contract | Active (parent goal) |
 | [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md) | Detailed backlog sidecar moved out of `todo.md` | Active sidecar |

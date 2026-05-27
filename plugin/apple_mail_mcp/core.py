@@ -5,11 +5,23 @@ import logging
 import os
 import re
 import subprocess
-from typing import Optional, List, Dict, Any, Tuple
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, ParamSpec, Protocol, TypeVar
 
 logger = logging.getLogger(__name__)
 
 from apple_mail_mcp.server import USER_PREFERENCES
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+class AppleScriptRunner(Protocol):
+    """Callable shape for injectable AppleScript runners."""
+
+    def __call__(self, script: str, timeout: int | None = 120) -> str: ...
+
 
 # ---------------------------------------------------------------------------
 # Performance caps for replied_ids_script
@@ -20,13 +32,11 @@ from apple_mail_mcp.server import USER_PREFERENCES
 REPLIED_HEADER_READ_CAP = 10
 
 
-def inject_preferences(func):
+def inject_preferences(func: Callable[P, R]) -> Callable[P, R]:
     """Decorator that appends user preferences to tool docstrings"""
     if USER_PREFERENCES:
         if func.__doc__:
-            func.__doc__ = (
-                func.__doc__.rstrip() + f"\n\nUser Preferences: {USER_PREFERENCES}"
-            )
+            func.__doc__ = func.__doc__.rstrip() + f"\n\nUser Preferences: {USER_PREFERENCES}"
         else:
             func.__doc__ = f"User Preferences: {USER_PREFERENCES}"
     return func
@@ -75,7 +85,7 @@ class AppleScriptTimeout(Exception):
     """Raised when an AppleScript invocation exceeds its per-call timeout."""
 
 
-def run_applescript(script: str, timeout: Optional[int] = 120) -> str:
+def run_applescript(script: str, timeout: int | None = 120) -> str:
     """Execute AppleScript via stdin pipe for reliable multi-line handling.
 
     Raises ``AppleScriptTimeout`` (subclass of Exception) on per-call timeout
@@ -94,25 +104,23 @@ def run_applescript(script: str, timeout: Optional[int] = 120) -> str:
             stderr = result.stderr.decode("utf-8", errors="replace").strip()
             if stderr:
                 raise Exception(f"AppleScript error: {stderr}")
-            raise Exception(
-                f"AppleScript exited with code {result.returncode} (no stderr)"
-            )
+            raise Exception(f"AppleScript exited with code {result.returncode} (no stderr)")
         output = result.stdout.decode("utf-8", errors="replace").strip()
         return _sanitize_for_json(output)
-    except subprocess.TimeoutExpired:
-        raise AppleScriptTimeout("AppleScript execution timed out")
+    except subprocess.TimeoutExpired as exc:
+        raise AppleScriptTimeout("AppleScript execution timed out") from exc
     except AppleScriptTimeout:
         raise
-    except (subprocess.SubprocessError, OSError) as e:
-        raise Exception(f"AppleScript execution failed: {str(e)}")
+    except (subprocess.SubprocessError, OSError) as exc:
+        raise Exception(f"AppleScript execution failed: {exc}") from exc
     except Exception:
         raise
 
 
 def normalize_search_terms(
-    search_term: Optional[str] = None,
-    search_terms: Optional[List[str]] = None,
-) -> List[str]:
+    search_term: str | None = None,
+    search_terms: list[str] | None = None,
+) -> list[str]:
     """Return de-duplicated, non-empty search terms preserving order."""
     normalized = []
 
@@ -132,7 +140,7 @@ def normalize_search_terms(
     return unique_terms
 
 
-def contains_any_condition(field_name: str, values: List[str]) -> str:
+def contains_any_condition(field_name: str, values: list[str]) -> str:
     """Return AppleScript OR conditions for substring matches."""
     if not values:
         return "true"
@@ -142,7 +150,7 @@ def contains_any_condition(field_name: str, values: List[str]) -> str:
     return "(" + " or ".join(parts) + ")"
 
 
-def normalize_message_ids(message_ids: Optional[List[Any]]) -> List[str]:
+def normalize_message_ids(message_ids: list[Any] | None) -> list[str]:
     """Return de-duplicated numeric Mail ids as strings preserving order."""
     if not message_ids:
         return []
@@ -156,9 +164,9 @@ def normalize_message_ids(message_ids: Optional[List[Any]]) -> List[str]:
     return normalized
 
 
-def list_mail_account_names(timeout: Optional[int] = 30) -> List[str]:
+def list_mail_account_names(timeout: int | None = 30) -> list[str]:
     """Return configured Mail account names. Cheap (<1s) on any setup."""
-    script = '''
+    script = """
     tell application "Mail"
         set acctNames to {}
         repeat with anAccount in (every account)
@@ -167,22 +175,19 @@ def list_mail_account_names(timeout: Optional[int] = 30) -> List[str]:
         set AppleScript's text item delimiters to linefeed
         return acctNames as string
     end tell
-    '''
+    """
     raw = run_applescript(script, timeout=timeout)
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
-def validate_account_name(account: str, timeout: Optional[int] = 30) -> Optional[str]:
+def validate_account_name(account: str, timeout: int | None = 30) -> str | None:
     """Return an error string when *account* is unknown, else None."""
     if not account or not str(account).strip():
         return "Error: account name is required"
     names = list_mail_account_names(timeout=timeout)
     if account not in names:
         available = ", ".join(names) if names else "(none configured)"
-        return (
-            f"Error: account_not_found — '{account}' is not configured in Mail. "
-            f"Available accounts: {available}"
-        )
+        return f"Error: account_not_found — '{account}' is not configured in Mail. Available accounts: {available}"
     return None
 
 
@@ -192,9 +197,9 @@ SENSITIVE_DIRS = (
     ".config",
     ".aws",
     ".claude",
-    os.path.join("Library", "LaunchAgents"),
-    os.path.join("Library", "LaunchDaemons"),
-    os.path.join("Library", "Keychains"),
+    "Library/LaunchAgents",
+    "Library/LaunchDaemons",
+    "Library/Keychains",
 )
 
 
@@ -203,7 +208,7 @@ def validate_save_path(
     *,
     path_label: str = "Save path",
     sensitive_action: str = "export emails to",
-) -> Optional[str]:
+) -> str | None:
     """Return an error string when *path* is outside home or under a sensitive dir."""
     # Guard against NUL bytes and other low control characters that cause
     # os.path.realpath to raise ValueError ("embedded null character in path").
@@ -216,24 +221,21 @@ def validate_save_path(
                 f"Error: {path_label} contains an invalid control character "
                 f"(U+{cp:04X}). Null bytes and control characters are not allowed in paths."
             )
-    home_dir = os.path.expanduser("~")
-    resolved = os.path.realpath(os.path.expanduser(path))
+    home_dir = str(Path.home().resolve())
+    resolved = str(Path(path).expanduser().resolve())
 
     if not resolved.startswith(home_dir + os.sep) and resolved != home_dir:
-        return (
-            f"Error: {path_label} must be under your home directory ({home_dir}). "
-            f"Got: {resolved}"
-        )
+        return f"Error: {path_label} must be under your home directory ({home_dir}). Got: {resolved}"
 
     for rel in SENSITIVE_DIRS:
-        sensitive_dir = os.path.join(home_dir, rel)
+        sensitive_dir = str(Path(home_dir) / rel)
         if resolved.startswith(sensitive_dir + os.sep) or resolved == sensitive_dir:
             return f"Error: Cannot {sensitive_action} sensitive directory: {sensitive_dir}"
 
     return None
 
 
-def account_not_found_json(account: str, timeout: Optional[int] = 30) -> str:
+def account_not_found_json(account: str, timeout: int | None = 30) -> str:
     """Structured JSON error for unknown account names."""
     names = list_mail_account_names(timeout=timeout)
     return json.dumps(
@@ -250,9 +252,9 @@ def account_not_found_json(account: str, timeout: Optional[int] = 30) -> str:
 def reject_unknown_account(
     account: str,
     *,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
     json_error: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """Return an error response string when *account* is unknown, else None."""
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
@@ -263,7 +265,7 @@ def reject_unknown_account(
     return account_err
 
 
-def equals_any_numeric_condition(field_name: str, values: List[str]) -> str:
+def equals_any_numeric_condition(field_name: str, values: list[str]) -> str:
     """Return AppleScript OR conditions for numeric equality matches."""
     if not values:
         return "false"
@@ -272,21 +274,15 @@ def equals_any_numeric_condition(field_name: str, values: List[str]) -> str:
     return "(" + " or ".join(parts) + ")"
 
 
-def parse_email_list(output: str) -> List[Dict[str, Any]]:
+def parse_email_list(output: str) -> list[dict[str, Any]]:
     """Parse the structured email output from AppleScript"""
-    emails: List[Dict[str, Any]] = []
+    emails: list[dict[str, Any]] = []
     lines = output.split("\n")
 
-    current_email: Dict[str, Any] = {}
+    current_email: dict[str, Any] = {}
     for line in lines:
         line = line.strip()
-        if (
-            not line
-            or line.startswith("=")
-            or line.startswith("━")
-            or line.startswith("📧")
-            or line.startswith("⚠")
-        ):
+        if not line or line.startswith("=") or line.startswith("━") or line.startswith("📧") or line.startswith("⚠"):
             continue
 
         if line.startswith("✉") or line.startswith("✓"):
@@ -324,23 +320,21 @@ def parse_email_list(output: str) -> List[Dict[str, Any]]:
 # try multiple names to find it. IMAP accounts (iCloud, Gmail) typically
 # expose 'INBOX' regardless of system language.
 INBOX_NAMES = [
-    "INBOX",                  # IMAP standard (iCloud, Gmail, Fastmail)
-    "Inbox",                  # English non-IMAP
-    "Boîte de réception",     # French (Exchange/Outlook on FR system)
-    "Boîte aux lettres",      # French alt
-    "Réception",              # French alt
-    "Posteingang",            # German
-    "Bandeja de entrada",     # Spanish
-    "Posta in arrivo",        # Italian
-    "Caixa de entrada",       # Portuguese
-    "Postvak IN",             # Dutch
-    "受信トレイ",             # Japanese
+    "INBOX",  # IMAP standard (iCloud, Gmail, Fastmail)
+    "Inbox",  # English non-IMAP
+    "Boîte de réception",  # French (Exchange/Outlook on FR system)
+    "Boîte aux lettres",  # French alt
+    "Réception",  # French alt
+    "Posteingang",  # German
+    "Bandeja de entrada",  # Spanish
+    "Posta in arrivo",  # Italian
+    "Caixa de entrada",  # Portuguese
+    "Postvak IN",  # Dutch
+    "受信トレイ",  # Japanese
 ]
 
 
-def inbox_mailbox_script(
-    var_name: str = "inboxMailbox", account_var: str = "anAccount"
-) -> str:
+def inbox_mailbox_script(var_name: str = "inboxMailbox", account_var: str = "anAccount") -> str:
     """Return AppleScript snippet to resolve the inbox mailbox.
 
     Iterates through INBOX_NAMES (localized variants) so non-English
@@ -463,7 +457,7 @@ def build_mailbox_ref(
     # localized fallback list so Exchange/non-English inboxes are found.
     if mailbox.upper() == "INBOX":
         name_list = ", ".join(f'"{n}"' for n in INBOX_NAMES)
-        return f'''set {var_name} to missing value
+        return f"""set {var_name} to missing value
             repeat with __mailboxLookupName in {{{name_list}}}
                 try
                     set {var_name} to mailbox (__mailboxLookupName as string) of {account_var}
@@ -472,7 +466,7 @@ def build_mailbox_ref(
             end repeat
             if {var_name} is missing value then
                 error "Mailbox not found: {escaped} (no localized inbox match)"
-            end if'''
+            end if"""
 
     return f'''try
                 set {var_name} to mailbox "{escaped}" of {account_var}
@@ -486,8 +480,8 @@ def build_mailbox_ref(
 
 
 def build_filter_condition(
-    subject: Optional[str] = None,
-    sender: Optional[str] = None,
+    subject: str | None = None,
+    sender: str | None = None,
     subject_var: str = "messageSubject",
     sender_var: str = "messageSender",
 ) -> str:
@@ -507,7 +501,7 @@ def build_filter_condition(
 def build_date_filter(
     days_back: int,
     var_name: str = "cutoffDate",
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Return (setup_script, condition_fragment) for a date-based cutoff.
 
     *setup_script* should be placed before the message loop.
@@ -594,9 +588,9 @@ def fetch_replied_ids_script(account: str, sent_cap: int = 200) -> str:
 def fetch_replied_ids(
     account: str,
     sent_cap: int = 200,
-    timeout: Optional[int] = 60,
-    runner=None,
-) -> set:
+    timeout: int | None = 60,
+    runner: AppleScriptRunner | None = None,
+) -> set[str]:
     """Return the set of Message-IDs the user has replied to for *account*.
 
     Wraps the AppleScript helper and turns the newline-delimited output
@@ -623,7 +617,7 @@ def fetch_replied_ids(
             exc,
         )
         return set()
-    ids: set = set()
+    ids: set[str] = set()
     for line in raw.splitlines():
         token = line.strip()
         if not token:
@@ -643,7 +637,7 @@ def sent_mailbox_resolve_script(var_name: str, account_var: str) -> str:
     Tries "Sent Messages" → "Sent" → "Sent Items"; sets *var_name* to
     ``missing value`` if none are found. Caller decides how to react.
     """
-    return f'''
+    return f"""
             set {var_name} to missing value
             try
                 set {var_name} to mailbox "Sent Messages" of {account_var}
@@ -656,7 +650,7 @@ def sent_mailbox_resolve_script(var_name: str, account_var: str) -> str:
                     end try
                 end try
             end try
-    '''
+    """
 
 
 def replied_ids_script(
@@ -687,7 +681,7 @@ def replied_ids_script(
           or transient error doesn't break the caller.
     """
     sent_resolve = sent_mailbox_resolve_script("sentMailbox", account_var)
-    return f'''
+    return f"""
             set {replied_var} to {{}}
             try
                 {sent_resolve}
@@ -757,4 +751,4 @@ def replied_ids_script(
                     end repeat
                 end if
             end try
-    '''
+    """

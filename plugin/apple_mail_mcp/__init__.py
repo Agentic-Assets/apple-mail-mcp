@@ -11,9 +11,13 @@ except ImportError:
     UI_AVAILABLE = False
 
 # Import all tool modules to register @mcp.tool() decorators
-from apple_mail_mcp.tools import inbox  # noqa: F401  (6 tools)
-from apple_mail_mcp.tools import search  # noqa: F401  (3 tools)
-from apple_mail_mcp.tools import compose  # noqa: F401  (5 tools)
-from apple_mail_mcp.tools import manage  # noqa: F401  (6 tools)
-from apple_mail_mcp.tools import analytics  # noqa: F401  (4 tools)
-from apple_mail_mcp.tools import smart_inbox  # noqa: F401  (3 tools)
+from apple_mail_mcp.tools import (
+    analytics,  # noqa: F401  (4 tools)
+    compose,  # noqa: F401  (5 tools)
+    inbox,  # noqa: F401  (6 tools)
+    manage,  # noqa: F401  (6 tools)
+    search,  # noqa: F401  (3 tools)
+    smart_inbox,  # noqa: F401  (3 tools)
+)
+
+__all__ = ["UI_AVAILABLE", "mcp"]

@@ -32,9 +32,11 @@ target_max, condition_expr)`` — emits the safe bounded-slice + in-loop
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import Any
+
 from apple_mail_mcp.backend.base import ScanWindow, ToolError
 from apple_mail_mcp.core import normalize_message_ids
-
 
 MAX_SCAN_DAYS = 365
 MAX_SCAN_LIMIT = 10_000
@@ -49,7 +51,7 @@ MAX_WHOSE_IDS = 50
 _ISSUER = "core.bounded_inbox_scan"
 
 
-def _unbounded_remediation(mailbox: str) -> dict:
+def _unbounded_remediation(mailbox: str) -> dict[str, Any]:
     return {
         "preferred": "Pass recent_days=7 or limit=200",
         "fallback_tool": "full_inbox_export",
@@ -84,10 +86,7 @@ def bounded_inbox_scan(
         if recent_days <= 0 or recent_days > MAX_SCAN_DAYS:
             raise ToolError(
                 code="UNBOUNDED_SCAN_REQUIRED",
-                message=(
-                    f"recent_days must be in (0, {MAX_SCAN_DAYS}]; got "
-                    f"{recent_days!r}."
-                ),
+                message=(f"recent_days must be in (0, {MAX_SCAN_DAYS}]; got {recent_days!r}."),
                 remediation=_unbounded_remediation(mailbox),
             )
         bounded = True
@@ -96,9 +95,7 @@ def bounded_inbox_scan(
         if limit <= 0 or limit > MAX_SCAN_LIMIT:
             raise ToolError(
                 code="UNBOUNDED_SCAN_REQUIRED",
-                message=(
-                    f"limit must be in (0, {MAX_SCAN_LIMIT}]; got {limit!r}."
-                ),
+                message=(f"limit must be in (0, {MAX_SCAN_LIMIT}]; got {limit!r}."),
                 remediation=_unbounded_remediation(mailbox),
             )
         bounded = True
@@ -115,10 +112,7 @@ def bounded_inbox_scan(
     if not bounded:
         raise ToolError(
             code="UNBOUNDED_SCAN_REQUIRED",
-            message=(
-                "bounded_inbox_scan requires at least one of recent_days, "
-                "limit, or since."
-            ),
+            message=("bounded_inbox_scan requires at least one of recent_days, limit, or since."),
             remediation=_unbounded_remediation(mailbox),
         )
 
@@ -284,8 +278,7 @@ def build_whose_id_list(message_ids: list[str]) -> str:
             ),
             remediation={
                 "preferred": (
-                    f"Chunk message_ids into batches of {MAX_WHOSE_IDS} "
-                    "or fewer and call the tool once per batch"
+                    f"Chunk message_ids into batches of {MAX_WHOSE_IDS} or fewer and call the tool once per batch"
                 ),
                 "helper": "apple_mail_mcp.bounded_scan.iter_id_chunks",
             },
@@ -296,7 +289,7 @@ def build_whose_id_list(message_ids: list[str]) -> str:
 def iter_id_chunks(
     message_ids: list[str],
     chunk_size: int = MAX_WHOSE_IDS,
-):
+) -> Iterator[list[str]]:
     """Yield successive chunks of normalized message ids, each ≤ ``chunk_size``.
 
     Callers that need to act on more than ``MAX_WHOSE_IDS`` messages must
@@ -313,10 +306,7 @@ def iter_id_chunks(
     if chunk_size <= 0 or chunk_size > MAX_WHOSE_IDS:
         raise ToolError(
             code="INVALID_SCAN_WINDOW",
-            message=(
-                f"iter_id_chunks requires 0 < chunk_size ≤ {MAX_WHOSE_IDS}; "
-                f"got {chunk_size!r}."
-            ),
+            message=(f"iter_id_chunks requires 0 < chunk_size ≤ {MAX_WHOSE_IDS}; got {chunk_size!r}."),
         )
     clean = normalize_message_ids(message_ids)
     for i in range(0, len(clean), chunk_size):

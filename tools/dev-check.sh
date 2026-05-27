@@ -3,7 +3,7 @@
 #
 # Tiers:
 #   default  — validate_manifests + pytest; wrapper check when staged tool surface changes
-#   lint     — ruff check + ruff format --check + mypy (warn-only on mypy)
+#   lint     — strict package gate: ruff check + ruff format --check + mypy --strict
 #   surface  — default + check_wrapper_surface.py (skips if no wrapper on PATH)
 #   manifest — validate_manifests.sh only
 #   live     — default + quick-check against Mail.app (macOS, explicit)
@@ -45,28 +45,24 @@ run_wrapper() {
 }
 
 run_lint() {
-  # Warn-only baseline: ruff has ~660 pre-existing UP0xx modernization issues
-  # (Optional[X] → X | None, List/Dict → builtin generics) that will be swept in a
-  # dedicated PR. mypy is at 0 errors and should stay there. Both are advisory
-  # here so the release gate doesn't block on style debt — graduate to fatal
-  # once the modernization sweep lands.
   if [[ ! -x "$RUFF" ]]; then
-    echo "warning: ruff not found in .venv — run: .venv/bin/pip install ruff" >&2
-  else
-    echo "→ ruff check (warn-only baseline)"
-    "$RUFF" check plugin/ tools/ tests/ || echo "warning: ruff reported errors (non-blocking — tighten baseline before making fatal)"
-    echo "→ ruff format --check (warn-only baseline)"
-    "$RUFF" format --check plugin/ tools/ tests/ || echo "warning: ruff format would reformat files (non-blocking — run 'ruff format' to apply)"
+    echo "error: ruff not found in .venv — run: .venv/bin/pip install -e '.[dev]'" >&2
+    exit 1
   fi
 
   if [[ ! -x "$MYPY" ]]; then
-    echo "warning: mypy not found in .venv — run: .venv/bin/pip install mypy" >&2
-  else
-    echo "→ mypy (warn-only baseline)"
-    "$MYPY" plugin/apple_mail_mcp/ || echo "warning: mypy reported errors (non-blocking — tighten baseline before making fatal)"
+    echo "error: mypy not found in .venv — run: .venv/bin/pip install -e '.[dev]'" >&2
+    exit 1
   fi
 
-  echo "lint: OK (warn-only baseline)"
+  echo "→ ruff check plugin/apple_mail_mcp/"
+  "$RUFF" check plugin/apple_mail_mcp/
+  echo "→ ruff format --check plugin/apple_mail_mcp/"
+  "$RUFF" format --check plugin/apple_mail_mcp/
+  echo "→ mypy --strict plugin/apple_mail_mcp/"
+  "$MYPY" --strict plugin/apple_mail_mcp/
+
+  echo "lint: OK"
 }
 
 staged_touches_tool_surface() {

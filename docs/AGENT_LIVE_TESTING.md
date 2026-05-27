@@ -34,12 +34,12 @@ If a command hangs or returns permission errors, open **System Settings → Priv
 | Profile | Account | Use |
 |---------|---------|-----|
 | **light** | `ai.openclaw` (~9 mailboxes) | Fast regression after edits |
-| **production** | `TU - Cayman` | Realistic large-mailbox perf gate before merge |
+| **production** | `Cayman - Agentic Assets` (`cayman@agenticassets.ai`) | Realistic large-mailbox perf gate before merge |
 
 Set the account once:
 
 ```bash
-export DEFAULT_MAIL_ACCOUNT="TU - Cayman"               # production gate
+export DEFAULT_MAIL_ACCOUNT="Cayman - Agentic Assets"   # production gate
 # export DEFAULT_MAIL_ACCOUNT="ai.openclaw"             # light smoke
 ```
 
@@ -239,6 +239,22 @@ tool-level `--timeout` still reaches Apple Mail tools as seconds.
 ```bash
 .venv/bin/apple-mail perf-test --account "$DEFAULT_MAIL_ACCOUNT" --profile production --json
 ```
+
+**Capture and compare perf baselines:**
+
+Use this before and after hot-path edits. The comparator is pure JSON and does
+not touch Mail.app; the only live work is the two explicit `perf-test` captures.
+
+```bash
+.venv/bin/apple-mail perf-test --account "$DEFAULT_MAIL_ACCOUNT" --profile production --json > /tmp/apple-mail-baseline.json
+.venv/bin/apple-mail perf-test --account "$DEFAULT_MAIL_ACCOUNT" --profile production --json > /tmp/apple-mail-current.json
+.venv/bin/python tools/compare_perf_results.py /tmp/apple-mail-baseline.json /tmp/apple-mail-current.json --max-regression-pct 0 --json
+```
+
+For routine local iteration, use a small positive budget such as
+`--max-regression-pct 5`. For v4 hot-tool work, treat any p95 or live-case
+regression as a redesign signal unless the phase plan explicitly records why
+the tradeoff is acceptable.
 
 **Honest analysis gate (expect failures until Phase 2 speed work):**
 

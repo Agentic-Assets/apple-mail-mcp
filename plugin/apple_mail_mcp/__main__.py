@@ -4,6 +4,8 @@ import argparse
 import os
 import threading
 import time
+from collections.abc import Callable
+from contextlib import suppress
 
 import apple_mail_mcp.server as server
 
@@ -19,8 +21,8 @@ import apple_mail_mcp.server as server
 # for unit testing.
 def _start_orphan_watcher(
     interval_sec: int = 10,
-    get_ppid=os.getppid,
-    exit_fn=os._exit,
+    get_ppid: Callable[[], int] = os.getppid,
+    exit_fn: Callable[[int], object] = os._exit,
 ) -> None:
     initial_ppid = get_ppid()
 
@@ -34,15 +36,14 @@ def _start_orphan_watcher(
     threading.Thread(target=_watch, daemon=True).start()
 
 
-def main():
+def main() -> None:
     _start_orphan_watcher()
 
     parser = argparse.ArgumentParser(description="Apple Mail MCP Server")
     parser.add_argument(
         "--read-only",
         action="store_true",
-        help="Disable tools that send email (compose, reply, forward). "
-             "Drafts can still be created and listed.",
+        help="Disable tools that send email (compose, reply, forward). Drafts can still be created and listed.",
     )
     parser.add_argument(
         "--draft-safe",
@@ -59,10 +60,8 @@ def main():
 
     if args.read_only:
         for name in SEND_TOOLS:
-            try:
+            with suppress(KeyError, ValueError):
                 mcp.remove_tool(name)
-            except (KeyError, ValueError):
-                pass
 
     mcp.run()
 

@@ -1,35 +1,34 @@
 """Composition tools: sending, replying, forwarding, and drafts."""
 
 import os
+import re
 import subprocess
 import tempfile
-import re
 import time
 from email.message import EmailMessage
 from html import escape as html_escape
 from pathlib import Path
-from typing import Optional, List, Tuple
 
-from apple_mail_mcp import server as _server
 from apple_mail_mcp import server  # public alias used by tests
-from apple_mail_mcp.server import mcp, WRITE_TOOL_ANNOTATIONS, DESTRUCTIVE_TOOL_ANNOTATIONS
+from apple_mail_mcp import server as _server
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import (
-    build_bounded_message_scan,
     build_bounded_filtered_scan,
+    build_bounded_message_scan,
 )
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
-    AppleScriptTimeout,
     SENSITIVE_DIRS,
-    inject_preferences,
+    AppleScriptTimeout,
     escape_applescript,
-    run_applescript,
     inbox_mailbox_script,
+    inject_preferences,
+    normalize_message_ids,
+    run_applescript,
     validate_account_name,
     validate_save_path,
-    normalize_message_ids,
 )
+from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
 
 # Backwards-compat aliases; centralized in constants.SCAN_BOUNDS so a single
 # edit retunes every tool. Tests assert literal "items 1 thru 100" /
@@ -42,9 +41,7 @@ MESSAGE_LOOKUP_CAP = SCAN_BOUNDS["MESSAGE_LOOKUP"]
 # counts NSWindowServer OOMs. Agents doing bulk drafting must use mode="draft".
 MAX_OPEN_COMPOSE_WINDOWS = 5
 _THREADED_SUBJECT_RE = re.compile(r"^\s*((re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
-_QUOTED_THREAD_MARKERS_RE = re.compile(
-    r"(?im)(^on .+ wrote:\s*$|^-{2,}\s*original message\s*-{2,}|^from:\s*.+$|^> .+)"
-)
+_QUOTED_THREAD_MARKERS_RE = re.compile(r"(?im)(^on .+ wrote:\s*$|^-{2,}\s*original message\s*-{2,}|^from:\s*.+$|^> .+)")
 
 
 def _count_open_outgoing_messages(timeout: int = 10) -> int:
@@ -54,7 +51,7 @@ def _count_open_outgoing_messages(timeout: int = 10) -> int:
     each compose window exactly. Returns -1 when the probe fails (AppleScript
     error or timeout), so callers can fail-open.
     """
-    script = '''
+    script = """
     tell application "Mail"
         try
             return count of outgoing messages
@@ -62,7 +59,7 @@ def _count_open_outgoing_messages(timeout: int = 10) -> int:
             return -1
         end try
     end tell
-    '''
+    """
     try:
         raw = run_applescript(script, timeout=timeout).strip()
         return int(raw) if raw.lstrip("-").isdigit() else -1
@@ -70,7 +67,7 @@ def _count_open_outgoing_messages(timeout: int = 10) -> int:
         return -1
 
 
-def _check_open_compose_window_cap(timeout: int = 10) -> "Optional[str]":
+def _check_open_compose_window_cap(timeout: int = 10) -> "str | None":
     """Return a serialized ToolError if the open-compose-window cap is reached.
 
     Returns None when it is safe to open another window. Fails open (returns
@@ -83,6 +80,7 @@ def _check_open_compose_window_cap(timeout: int = 10) -> "Optional[str]":
         return None
     if count >= MAX_OPEN_COMPOSE_WINDOWS:
         from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+
         err = ToolError(
             code="TOO_MANY_OPEN_DRAFTS",
             message=(
@@ -91,12 +89,8 @@ def _check_open_compose_window_cap(timeout: int = 10) -> "Optional[str]":
                 "running out of NSWindowServer resources."
             ),
             remediation={
-                "preferred": (
-                    "Use mode='draft' to save quietly to Drafts without opening a window"
-                ),
-                "alternative": (
-                    "Close some open compose windows in Mail, then retry with mode='open'"
-                ),
+                "preferred": ("Use mode='draft' to save quietly to Drafts without opening a window"),
+                "alternative": ("Close some open compose windows in Mail, then retry with mode='open'"),
                 "open_window_count": count,
                 "cap": MAX_OPEN_COMPOSE_WINDOWS,
             },
@@ -108,8 +102,8 @@ def _check_open_compose_window_cap(timeout: int = 10) -> "Optional[str]":
 def _build_found_message_lookup(
     mailbox_var: str,
     *,
-    message_id: Optional[str],
-    subject_keyword: Optional[str],
+    message_id: str | None,
+    subject_keyword: str | None,
     recent_days: float,
     found_var: str = "foundMessage",
     messages_var: str = "mailboxMessages",
@@ -129,14 +123,9 @@ def _build_found_message_lookup(
         if not normalized:
             return "", ToolError(
                 code="INVALID_MESSAGE_ID",
-                message=(
-                    "message_id must be a numeric Apple Mail message id."
-                ),
+                message=("message_id must be a numeric Apple Mail message id."),
                 remediation={
-                    "preferred": (
-                        "Pass a numeric Apple Mail message id from "
-                        "search_emails or list_inbox_emails"
-                    ),
+                    "preferred": ("Pass a numeric Apple Mail message id from search_emails or list_inbox_emails"),
                 },
             )
         numeric_id = normalized[0]
@@ -154,10 +143,7 @@ def _build_found_message_lookup(
     if recent_days <= 0:
         return "", ToolError(
             code="UNBOUNDED_SCAN_REQUIRED",
-            message=(
-                f"{tool_name} refuses to scan without recent_days; "
-                "pass recent_days=2 or message_id."
-            ),
+            message=(f"{tool_name} refuses to scan without recent_days; pass recent_days=2 or message_id."),
             remediation={
                 "preferred": "Pass recent_days=2 (default) or message_id directly",
                 "fallback_tool": "full_inbox_export",
@@ -172,9 +158,7 @@ def _build_found_message_lookup(
     # form mirrors the search_emails fast path and is safe on every account.
     # Mail returns messages newest-first, so once a message is older than
     # the cutoff the remainder of the slice is too — early exit.
-    date_setup = (
-        f"set recentCutoffDate to (current date) - ({float(recent_days)} * days)\n        "
-    )
+    date_setup = f"set recentCutoffDate to (current date) - ({float(recent_days)} * days)\n        "
     bounded_snippet = build_bounded_message_scan(mailbox_var, MESSAGE_LOOKUP_CAP)
 
     return (
@@ -225,9 +209,7 @@ def _build_draft_lookup(subject_keyword: str) -> str:
     """
 
 
-def _resolve_account(
-    account: Optional[str], timeout: Optional[int] = None
-) -> Tuple[Optional[str], Optional[str]]:
+def _resolve_account(account: str | None, timeout: int | None = None) -> tuple[str | None, str | None]:
     """Resolve an account argument against ``DEFAULT_MAIL_ACCOUNT``.
 
     Returns ``(resolved_account, error_message)``. Tools call this at the top
@@ -238,9 +220,7 @@ def _resolve_account(
     if account is None or account == "":
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
-        return None, (
-            "Error: No account specified and no DEFAULT_MAIL_ACCOUNT env var set."
-        )
+        return None, ("Error: No account specified and no DEFAULT_MAIL_ACCOUNT env var set.")
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
     if account_err:
@@ -248,9 +228,7 @@ def _resolve_account(
     return account, None
 
 
-def _resolve_signature_name(
-    include_signature: bool, signature_name: Optional[str]
-) -> Optional[str]:
+def _resolve_signature_name(include_signature: bool, signature_name: str | None) -> str | None:
     """Return the Mail signature name to apply, or None when disabled/unset."""
     if not include_signature:
         return None
@@ -261,7 +239,7 @@ def _resolve_signature_name(
     return default_signature.strip() if default_signature else None
 
 
-def _compose_signature_script(message_var: str, signature_name: Optional[str]) -> str:
+def _compose_signature_script(message_var: str, signature_name: str | None) -> str:
     """AppleScript fragment that applies a native Mail signature by name."""
     if not signature_name:
         return ""
@@ -269,7 +247,7 @@ def _compose_signature_script(message_var: str, signature_name: Optional[str]) -
     return f'set message signature of {message_var} to signature "{safe_signature}"'
 
 
-def _split_addresses(value):
+def _split_addresses(value: str | None) -> list[str]:
     """Return trimmed recipient addresses preserving order."""
     if not value:
         return []
@@ -277,13 +255,13 @@ def _split_addresses(value):
 
 
 def _build_recipient_loops(
-    cc: Optional[str],
-    bcc: Optional[str],
+    cc: str | None,
+    bcc: str | None,
     *,
-    message_var: Optional[str] = None,
+    message_var: str | None = None,
     compact: bool = False,
     indent: str = "            ",
-    trailing_indent: Optional[str] = None,
+    trailing_indent: str | None = None,
 ) -> tuple[str, str, list[str], list[str]]:
     """Build CC/BCC AppleScript loop fragments and parsed address lists."""
     recipients_cc = _split_addresses(cc)
@@ -297,7 +275,7 @@ def _build_recipient_loops(
             for addr in addresses:
                 safe_addr = escape_applescript(addr)
                 script += (
-                    f'make new {kind} recipient at end of {kind} recipients{of_msg} '
+                    f"make new {kind} recipient at end of {kind} recipients{of_msg} "
                     f'with properties {{address:"{safe_addr}"}}\n'
                 )
             return script
@@ -317,21 +295,21 @@ def _build_recipient_loops(
     )
 
 
-def _safe_eml_name(subject):
+def _safe_eml_name(subject: str | None) -> str:
     """Return a filesystem-safe filename stem for draft exports."""
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", (subject or "rich-email-draft").strip())
     cleaned = cleaned.strip("-._") or "rich-email-draft"
     return cleaned[:80]
 
 
-def _default_rich_draft_path(subject):
+def _default_rich_draft_path(subject: str | None) -> Path:
     """Return default output path for generated rich draft EML files."""
     drafts_dir = Path.home() / "Library" / "Caches" / "apple-mail-mcp" / "rich-drafts"
     drafts_dir.mkdir(parents=True, exist_ok=True)
     return drafts_dir / (_safe_eml_name(subject) + ".eml")
 
 
-def _account_default_alias_if_single(account, timeout=None):
+def _account_default_alias_if_single(account: str, timeout: int | None = None) -> str | None:
     """Return the sole alias of `account` when it has exactly one configured
     email address, else None. Used when no explicit sender is requested so
     that single-address accounts still send from their own alias rather than
@@ -359,7 +337,7 @@ def _account_default_alias_if_single(account, timeout=None):
     return result or None
 
 
-def _compose_sender_script(variable, account_ref, sender_override):
+def _compose_sender_script(variable: str, account_ref: str, sender_override: str | None) -> str:
     """Return AppleScript that sets the sender for a compose/reply/forward
     outgoing message variable, respecting Mail's account-level defaults.
 
@@ -380,7 +358,11 @@ def _compose_sender_script(variable, account_ref, sender_override):
     )
 
 
-def _validate_from_address(account, from_address, timeout=None):
+def _validate_from_address(
+    account: str,
+    from_address: str | None,
+    timeout: int | None = None,
+) -> tuple[str | None, str | None]:
     """Return (validated_address, error_message) for a sender override.
 
     When `from_address` is blank the override is skipped and both values
@@ -408,15 +390,10 @@ def _validate_from_address(account, from_address, timeout=None):
         end try
     end tell
     '''
-    if timeout is None:
-        raw = run_applescript(script) or ""
-    else:
-        raw = run_applescript(script, timeout=timeout) or ""
+    raw = (run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)) or ""
     aliases = [line.strip() for line in raw.splitlines() if line.strip()]
     if not aliases:
-        return None, (
-            f"Error: Could not read email addresses for account {account!r}."
-        )
+        return None, (f"Error: Could not read email addresses for account {account!r}.")
     lowered = {alias.lower(): alias for alias in aliases}
     match = lowered.get(candidate.lower())
     if not match:
@@ -430,7 +407,7 @@ def _validate_from_address(account, from_address, timeout=None):
 _CDATA_BLOCK_PATTERN = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.DOTALL)
 
 
-def _strip_cdata_wrappers(text):
+def _strip_cdata_wrappers(text: str | None) -> str | None:
     """Remove XML CDATA section markers from user-provided body content.
 
     LLM callers occasionally wrap email bodies in `<![CDATA[...]]>`. HTML
@@ -447,10 +424,10 @@ def _strip_cdata_wrappers(text):
 
 def _standalone_compose_thread_warning(
     subject: str,
-    body: Optional[str],
-    body_html: Optional[str],
+    body: str | None,
+    body_html: str | None,
     standalone_confirmed: bool,
-) -> Optional[str]:
+) -> str | None:
     """Return an error when a new compose looks like an accidental reply."""
     if standalone_confirmed:
         return None
@@ -459,9 +436,7 @@ def _standalone_compose_thread_warning(
     if _THREADED_SUBJECT_RE.search(subject or ""):
         signals.append("threaded subject prefix")
 
-    combined_body = "\n".join(
-        part for part in ((body or ""), (body_html or "")) if part
-    )
+    combined_body = "\n".join(part for part in ((body or ""), (body_html or "")) if part)
     if _QUOTED_THREAD_MARKERS_RE.search(combined_body):
         signals.append("quoted-thread markers")
 
@@ -478,38 +453,34 @@ def _standalone_compose_thread_warning(
     )
 
 
-def _build_html_from_text(text_body):
+def _build_html_from_text(text_body: str | None) -> str:
     """Return a simple HTML wrapper for plain text content."""
     safe_body = html_escape(text_body or "")
     return (
         '<html><body style="font-family: -apple-system, BlinkMacSystemFont, '
         "'Segoe UI', Arial, sans-serif; line-height: 1.45; color: #111111;\">"
-        '<pre style="white-space: pre-wrap; font: inherit; margin: 0;">'
-        + safe_body
-        + "</pre></body></html>"
+        '<pre style="white-space: pre-wrap; font: inherit; margin: 0;">' + safe_body + "</pre></body></html>"
     )
 
 
-def _prepare_rich_bodies(subject, text_body, html_body):
+def _prepare_rich_bodies(
+    subject: str,
+    text_body: str | None,
+    html_body: str | None,
+) -> tuple[str, str, list[str]]:
     """Return plain-text and HTML bodies, filling sensible placeholders."""
     plain_body = text_body or ""
     rich_body = html_body or ""
 
     if not plain_body and not rich_body:
-        plain_body = (
-            "Draft outline\n\n"
-            "- Add recipients\n"
-            "- Add the final rich-text content\n"
-            "- Review before sending"
-        )
+        plain_body = "Draft outline\n\n- Add recipients\n- Add the final rich-text content\n- Review before sending"
         rich_body = _build_html_from_text(plain_body)
         return plain_body, rich_body, ["body"]
 
     if rich_body and not plain_body:
         plain_body = (
-            (subject.strip() + "\n\n" if subject and subject.strip() else "")
-            + "This message contains rich HTML content. Open it in Mail for the rendered version."
-        )
+            subject.strip() + "\n\n" if subject and subject.strip() else ""
+        ) + "This message contains rich HTML content. Open it in Mail for the rendered version."
 
     if plain_body and not rich_body:
         rich_body = _build_html_from_text(plain_body)
@@ -517,7 +488,7 @@ def _prepare_rich_bodies(subject, text_body, html_body):
     return plain_body, rich_body, []
 
 
-def _send_blocked(mode: Optional[str]) -> Optional[str]:
+def _send_blocked(mode: str | None) -> str | None:
     """Return an error when the active server mode disallows sending."""
     if mode != "send":
         return None
@@ -530,11 +501,11 @@ def _send_blocked(mode: Optional[str]) -> Optional[str]:
 
 def _save_front_compose_window_as_draft(
     *,
-    close_after_save=False,
-    retries=10,
-    delay_seconds=0.5,
-    timeout=None,
-):
+    close_after_save: bool = False,
+    retries: int = 10,
+    delay_seconds: float = 0.5,
+    timeout: int | None = None,
+) -> bool:
     """Ask Mail to save the front compose window as a draft."""
     close_script = ""
     if close_after_save:
@@ -542,7 +513,7 @@ def _save_front_compose_window_as_draft(
             delay 0.2
             close window 1 saving yes
         """
-    script = f'''
+    script = f"""
     tell application "Mail"
         try
             activate
@@ -573,7 +544,7 @@ def _save_front_compose_window_as_draft(
             return "error: " & errMsg
         end try
     end tell
-    '''
+    """
 
     for _ in range(retries):
         if timeout is None:
@@ -591,19 +562,19 @@ def _save_front_compose_window_as_draft(
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def create_rich_email_draft(
-    account: Optional[str] = None,
+    account: str | None = None,
     subject: str = "",
-    to: Optional[str] = None,
-    text_body: Optional[str] = None,
-    html_body: Optional[str] = None,
-    cc: Optional[str] = None,
-    bcc: Optional[str] = None,
-    output_path: Optional[str] = None,
+    to: str | None = None,
+    text_body: str | None = None,
+    html_body: str | None = None,
+    cc: str | None = None,
+    bcc: str | None = None,
+    output_path: str | None = None,
     open_in_mail: bool = True,
     save_as_draft: bool = True,
     review_in_mail: bool = False,
-    from_address: Optional[str] = None,
-    timeout: Optional[int] = None,
+    from_address: str | None = None,
+    timeout: int | None = None,
     standalone_confirmed: bool = False,
 ) -> str:
     """
@@ -641,22 +612,16 @@ def create_rich_email_draft(
     text_body = _strip_cdata_wrappers(text_body)
     html_body = _strip_cdata_wrappers(html_body)
 
-    thread_warning = _standalone_compose_thread_warning(
-        subject, text_body, html_body, standalone_confirmed
-    )
+    thread_warning = _standalone_compose_thread_warning(subject, text_body, html_body, standalone_confirmed)
     if thread_warning:
         return thread_warning
 
     try:
-        sender_override, sender_error = _validate_from_address(
-            account, from_address, timeout=timeout
-        )
+        sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
         if sender_error:
             return sender_error
 
-        sender_address = sender_override or _account_default_alias_if_single(
-            account, timeout=timeout
-        )
+        sender_address = sender_override or _account_default_alias_if_single(account, timeout=timeout)
     except AppleScriptTimeout:
         return (
             "Error: AppleScript timed out while resolving sender for account "
@@ -666,9 +631,7 @@ def create_rich_email_draft(
     recipients_to = _split_addresses(to)
     recipients_cc = _split_addresses(cc)
     recipients_bcc = _split_addresses(bcc)
-    plain_body, rich_body, body_missing = _prepare_rich_bodies(
-        subject, text_body, html_body
-    )
+    plain_body, rich_body, body_missing = _prepare_rich_bodies(subject, text_body, html_body)
 
     missing_details = []
     if not subject or not subject.strip():
@@ -698,12 +661,12 @@ def create_rich_email_draft(
         # intentionally narrower here — we only guard sensitive dirs.
         try:
             draft_path = Path(output_path).expanduser()
-            _resolved = os.path.realpath(os.path.expanduser(output_path))
+            _resolved = str(draft_path.resolve())
         except (RuntimeError, ValueError, OSError) as exc:
             return f"Error: output_path is not a valid filesystem path: {exc}"
-        _home = os.path.expanduser("~")
+        _home = Path.home().resolve()
         for _rel in SENSITIVE_DIRS:
-            _sensitive = os.path.join(_home, _rel)
+            _sensitive = str(_home / _rel)
             if _resolved.startswith(_sensitive + os.sep) or _resolved == _sensitive:
                 return (
                     f"Error: output_path targets a sensitive directory and cannot be "
@@ -724,8 +687,7 @@ def create_rich_email_draft(
             subprocess.run(["open", "-a", "Mail", str(draft_path)], check=True)
         except (subprocess.CalledProcessError, FileNotFoundError) as exc:
             return (
-                f"Error: Failed to open draft in Mail.app: {exc}. "
-                "The .eml file was written but Mail could not open it."
+                f"Error: Failed to open draft in Mail.app: {exc}. The .eml file was written but Mail could not open it."
             )
         opened = True
         try:
@@ -752,10 +714,7 @@ def create_rich_email_draft(
         output_lines.append("CC: " + ", ".join(recipients_cc))
     if recipients_bcc:
         output_lines.append("BCC: " + ", ".join(recipients_bcc))
-    output_lines.append(
-        "Missing details: "
-        + (", ".join(missing_details) if missing_details else "none")
-    )
+    output_lines.append("Missing details: " + (", ".join(missing_details) if missing_details else "none"))
     output_lines.append(
         "Note: Prefer this `.eml` workflow for HTML email drafts; Mail renders it more reliably than raw HTML injected via AppleScript content."
     )
@@ -772,13 +731,13 @@ def _send_html_email(
     subject: str,
     body_plain: str,
     body_html: str,
-    cc: Optional[str] = None,
-    bcc: Optional[str] = None,
+    cc: str | None = None,
+    bcc: str | None = None,
     attachments_script: str = "",
     mode: str = "send",
-    sender_override: Optional[str] = None,
-    timeout: Optional[int] = None,
-    signature_name: Optional[str] = None,
+    sender_override: str | None = None,
+    timeout: int | None = None,
+    signature_name: str | None = None,
 ) -> str:
     """Send an HTML-formatted email via NSPasteboard clipboard injection.
 
@@ -792,13 +751,13 @@ def _send_html_email(
     # Build recipient scripts
     to_lines = ""
     for addr in _split_addresses(to):
-        to_lines += f'make new to recipient at end of to recipients with properties {{address:"{escape_applescript(addr)}"}}\n'
+        to_lines += (
+            f'make new to recipient at end of to recipients with properties {{address:"{escape_applescript(addr)}"}}\n'
+        )
 
     cc_lines, bcc_lines, _, _ = _build_recipient_loops(cc, bcc, compact=True)
 
-    sender_script = _compose_sender_script(
-        "newMsg", f'account "{safe_account}"', sender_override
-    )
+    sender_script = _compose_sender_script("newMsg", f'account "{safe_account}"', sender_override)
     signature_script = _compose_signature_script("newMsg", signature_name)
 
     # Mode-specific behaviour after paste
@@ -828,22 +787,19 @@ def _send_html_email(
                 save newMsg
             end tell
         """
-        success_text = (
-            "Email opened in Mail for review (HTML). Edit and send when ready."
-        )
+        success_text = "Email opened in Mail for review (HTML). Edit and send when ready."
 
     # Write HTML to temp file so the AppleScript can read it without
     # worrying about escaping quotes/special chars in the HTML string.
-    tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".html",
         prefix="mail_html_",
         delete=False,
         encoding="utf-8",
-    )
-    tmp.write(body_html)
-    tmp.close()
-    html_temp_path = tmp.name
+    ) as tmp:
+        tmp.write(body_html)
+        html_temp_path = tmp.name
 
     script = f'''
 use framework "Foundation"
@@ -912,9 +868,7 @@ return "{success_text}"
 '''
 
     try:
-        output = run_applescript(
-            script, timeout=timeout if timeout is not None else 30
-        )
+        output = run_applescript(script, timeout=timeout if timeout is not None else 30)
         # Build confirmation message
         confirm = f"{output}\n\nFrom: {account}\nTo: {to}\nSubject: {subject}"
         if cc:
@@ -927,16 +881,17 @@ return "{success_text}"
     except Exception as e:
         err = str(e)
         if err.startswith("AppleScript error: "):
-            err = err[len("AppleScript error: "):]
+            err = err[len("AppleScript error: ") :]
         elif err.startswith("AppleScript execution failed: "):
-            err = err[len("AppleScript execution failed: "):]
+            err = err[len("AppleScript execution failed: ") :]
         return f"Error: HTML email send failed: {err}"
     finally:
-        if os.path.exists(html_temp_path):
-            os.unlink(html_temp_path)
+        temp_path = Path(html_temp_path)
+        if temp_path.exists():
+            temp_path.unlink()
 
 
-def _validate_attachment_paths(attachments: str) -> Tuple[List[str], Optional[str]]:
+def _validate_attachment_paths(attachments: str) -> tuple[list[str], str | None]:
     """Validate and resolve attachment file paths.
 
     Splits comma-separated paths, expands tildes, resolves symlinks,
@@ -947,7 +902,7 @@ def _validate_attachment_paths(attachments: str) -> Tuple[List[str], Optional[st
         A tuple of (resolved_paths, error_message).
         If error_message is not None, resolved_paths should be ignored.
     """
-    resolved_paths: List[str] = []
+    resolved_paths: list[str] = []
     raw_paths = [p.strip() for p in attachments.split(",")]
 
     for raw_path in raw_paths:
@@ -955,8 +910,8 @@ def _validate_attachment_paths(attachments: str) -> Tuple[List[str], Optional[st
             continue
 
         # Expand tilde and resolve symlinks
-        expanded = os.path.expanduser(raw_path)
-        resolved = os.path.realpath(expanded)
+        resolved_path = Path(raw_path).expanduser().resolve()
+        resolved = str(resolved_path)
 
         path_err = validate_save_path(
             resolved,
@@ -967,7 +922,7 @@ def _validate_attachment_paths(attachments: str) -> Tuple[List[str], Optional[st
             return [], path_err
 
         # File must exist
-        if not os.path.isfile(resolved):
+        if not resolved_path.is_file():
             return [], f"Error: Attachment file does not exist: {resolved}"
 
         resolved_paths.append(resolved)
@@ -981,22 +936,22 @@ def _validate_attachment_paths(attachments: str) -> Tuple[List[str], Optional[st
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def reply_to_email(
-    account: Optional[str] = None,
+    account: str | None = None,
     subject_keyword: str = "",
     reply_body: str = "",
     reply_to_all: bool = False,
-    cc: Optional[str] = None,
-    bcc: Optional[str] = None,
+    cc: str | None = None,
+    bcc: str | None = None,
     send: bool = False,
-    mode: Optional[str] = None,
-    attachments: Optional[str] = None,
-    body_html: Optional[str] = None,
-    from_address: Optional[str] = None,
-    message_id: Optional[str] = None,
+    mode: str | None = None,
+    attachments: str | None = None,
+    body_html: str | None = None,
+    from_address: str | None = None,
+    message_id: str | None = None,
     recent_days: float = 2.0,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
     include_signature: bool = True,
-    signature_name: Optional[str] = None,
+    signature_name: str | None = None,
 ) -> str:
     """
     Reply to an email by message_id (preferred) or subject keyword.
@@ -1047,9 +1002,7 @@ def reply_to_email(
     body_html = _strip_cdata_wrappers(body_html)
 
     try:
-        sender_override, sender_error = _validate_from_address(
-            account, from_address, timeout=timeout
-        )
+        sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
     except AppleScriptTimeout:
         return (
             "Error: AppleScript timed out while validating sender for account "
@@ -1070,16 +1023,15 @@ def reply_to_email(
 
     # Write reply body to a temp file to avoid AppleScript string escaping
     # issues with special characters (em dashes, curly quotes, colons, etc.)
-    body_tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".txt",
         prefix="mail_reply_",
         delete=False,
         encoding="utf-8",
-    )
-    body_tmp.write(reply_body)
-    body_tmp.close()
-    body_temp_path = body_tmp.name
+    ) as body_tmp:
+        body_tmp.write(reply_body)
+        body_temp_path = body_tmp.name
 
     # If body_html provided, write it to a temp file for the AppleScript to read.
     # If plain text only, wrap it in basic HTML so the clipboard paste renders
@@ -1095,16 +1047,15 @@ def reply_to_email(
         escaped_plain = html_escape(reply_body)
         escaped_plain = escaped_plain.replace("\n", "<br>")
         html_content = f"<div>{escaped_plain}</div>{gap_html}"
-    html_tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".html",
         prefix="mail_reply_html_",
         delete=False,
         encoding="utf-8",
-    )
-    html_tmp.write(html_content)
-    html_tmp.close()
-    html_temp_path = html_tmp.name
+    ) as html_tmp:
+        html_tmp.write(html_content)
+        html_temp_path = html_tmp.name
 
     # Build the reply command based on reply_to_all flag
     if reply_to_all:
@@ -1112,9 +1063,7 @@ def reply_to_email(
     else:
         reply_command = "set replyMessage to reply foundMessage with opening window"
 
-    cc_script, bcc_script, _, _ = _build_recipient_loops(
-        cc, bcc, message_var="replyMessage"
-    )
+    cc_script, bcc_script, _, _ = _build_recipient_loops(cc, bcc, message_var="replyMessage")
 
     # Build attachment script if provided
     attachment_script = ""
@@ -1134,9 +1083,7 @@ def reply_to_email(
 
     safe_cc = escape_applescript(cc) if cc else ""
     safe_bcc = escape_applescript(bcc) if bcc else ""
-    safe_attachment_info = (
-        escape_applescript(attachment_info) if attachment_info else ""
-    )
+    safe_attachment_info = escape_applescript(attachment_info) if attachment_info else ""
 
     # Resolve delivery mode: mode parameter takes precedence over send boolean
     if mode is not None:
@@ -1193,9 +1140,7 @@ def reply_to_email(
     cleanup_script = f'do shell script "rm -f " & quoted form of "{body_temp_path}"'
     html_cleanup_script = f'do shell script "rm -f " & quoted form of "{html_temp_path}"'
 
-    sender_script = _compose_sender_script(
-        "replyMessage", "targetAccount", sender_override
-    )
+    sender_script = _compose_sender_script("replyMessage", "targetAccount", sender_override)
     signature_script = _compose_signature_script("replyMessage", resolved_signature_name)
 
     script = f'''
@@ -1315,40 +1260,42 @@ tell application "Mail"
         return run_applescript(script, timeout=timeout)
     except AppleScriptTimeout:
         return (
-            f"Error: AppleScript timed out while replying on account "
-            f"{account!r}. Try again or pass a larger `timeout`."
+            f"Error: AppleScript timed out while replying on account {account!r}. Try again or pass a larger `timeout`."
         )
     except Exception as e:
         err = str(e)
         if err.startswith("AppleScript error: "):
-            err = err[len("AppleScript error: "):]
+            err = err[len("AppleScript error: ") :]
         elif err.startswith("AppleScript execution failed: "):
-            err = err[len("AppleScript execution failed: "):]
+            err = err[len("AppleScript execution failed: ") :]
         return f"Error: Reply failed: {err}"
     finally:
         # Belt-and-suspenders cleanup in case AppleScript didn't run
-        if os.path.exists(body_temp_path):
-            os.unlink(body_temp_path)
-        if html_temp_path and os.path.exists(html_temp_path):
-            os.unlink(html_temp_path)
+        body_path = Path(body_temp_path)
+        if body_path.exists():
+            body_path.unlink()
+        if html_temp_path:
+            html_path = Path(html_temp_path)
+            if html_path.exists():
+                html_path.unlink()
 
 
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def compose_email(
-    account: Optional[str] = None,
+    account: str | None = None,
     to: str = "",
     subject: str = "",
     body: str = "",
-    cc: Optional[str] = None,
-    bcc: Optional[str] = None,
-    attachments: Optional[str] = None,
+    cc: str | None = None,
+    bcc: str | None = None,
+    attachments: str | None = None,
     mode: str = "draft",
-    body_html: Optional[str] = None,
-    from_address: Optional[str] = None,
-    timeout: Optional[int] = None,
+    body_html: str | None = None,
+    from_address: str | None = None,
+    timeout: int | None = None,
     include_signature: bool = True,
-    signature_name: Optional[str] = None,
+    signature_name: str | None = None,
     standalone_confirmed: bool = False,
 ) -> str:
     """
@@ -1399,17 +1346,13 @@ def compose_email(
     body = _strip_cdata_wrappers(body) or ""
     body_html = _strip_cdata_wrappers(body_html)
 
-    thread_warning = _standalone_compose_thread_warning(
-        subject, body, body_html, standalone_confirmed
-    )
+    thread_warning = _standalone_compose_thread_warning(subject, body, body_html, standalone_confirmed)
     if thread_warning:
         return thread_warning
 
     # Validate optional sender override
     try:
-        sender_override, sender_error = _validate_from_address(
-            account, from_address, timeout=timeout
-        )
+        sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
     except AppleScriptTimeout:
         return (
             "Error: AppleScript timed out while validating sender for account "
@@ -1475,13 +1418,9 @@ def compose_email(
     safe_to = escape_applescript(to)
     safe_cc = escape_applescript(cc) if cc else ""
     safe_bcc = escape_applescript(bcc) if bcc else ""
-    safe_attachment_info = (
-        escape_applescript(attachment_info) if attachment_info else ""
-    )
+    safe_attachment_info = escape_applescript(attachment_info) if attachment_info else ""
 
-    sender_script = _compose_sender_script(
-        "newMessage", "targetAccount", sender_override
-    )
+    sender_script = _compose_sender_script("newMessage", "targetAccount", sender_override)
     signature_script = _compose_signature_script("newMessage", resolved_signature_name)
 
     # Determine behavior per mode
@@ -1549,7 +1488,7 @@ def compose_email(
             set outputText to outputText & "Attachments:" & return & "{safe_attachment_info}" & return
     '''
 
-    script += f'''
+    script += """
 
         on error errMsg
             return "Error: " & errMsg & return & "Please check that the account name and email addresses are correct."
@@ -1557,13 +1496,10 @@ def compose_email(
 
         return outputText
     end tell
-    '''
+    """
 
     try:
-        if timeout is None:
-            result = run_applescript(script)
-        else:
-            result = run_applescript(script, timeout=timeout)
+        result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out while composing email for account "
@@ -1575,20 +1511,20 @@ def compose_email(
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def forward_email(
-    account: Optional[str] = None,
+    account: str | None = None,
     subject_keyword: str = "",
     to: str = "",
-    message: Optional[str] = None,
+    message: str | None = None,
     mailbox: str = "INBOX",
-    cc: Optional[str] = None,
-    bcc: Optional[str] = None,
-    from_address: Optional[str] = None,
+    cc: str | None = None,
+    bcc: str | None = None,
+    from_address: str | None = None,
     mode: str = "draft",
-    message_id: Optional[str] = None,
+    message_id: str | None = None,
     recent_days: float = 2.0,
-    timeout: Optional[int] = None,
+    timeout: int | None = None,
     include_signature: bool = True,
-    signature_name: Optional[str] = None,
+    signature_name: str | None = None,
 ) -> str:
     """
     Forward an email to one or more recipients.
@@ -1649,9 +1585,7 @@ def forward_email(
             return cap_err
 
     try:
-        sender_override, sender_error = _validate_from_address(
-            account, from_address, timeout=timeout
-        )
+        sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
     except AppleScriptTimeout:
         return (
             "Error: AppleScript timed out while validating sender for account "
@@ -1666,21 +1600,16 @@ def forward_email(
     safe_subject_keyword = escape_applescript(subject_keyword) if subject_keyword else ""
     safe_to = escape_applescript(to)
     safe_mailbox = escape_applescript(mailbox)
-    escaped_message = escape_applescript(message) if message else ""
     not_found_message = (
         f"Error: No email found for message_id={message_id}"
         if message_id
         else f"Error: No email found matching: {safe_subject_keyword}"
     )
 
-    sender_script = _compose_sender_script(
-        "forwardMessage", "targetAccount", sender_override
-    )
+    sender_script = _compose_sender_script("forwardMessage", "targetAccount", sender_override)
     signature_script = _compose_signature_script("forwardMessage", resolved_signature_name)
 
-    cc_script, bcc_script, _, _ = _build_recipient_loops(
-        cc, bcc, message_var="forwardMessage"
-    )
+    cc_script, bcc_script, _, _ = _build_recipient_loops(cc, bcc, message_var="forwardMessage")
 
     safe_cc = escape_applescript(cc) if cc else ""
     safe_bcc = escape_applescript(bcc) if bcc else ""
@@ -1702,16 +1631,15 @@ def forward_email(
         escaped_plain = html_escape(message)
         escaped_plain = escaped_plain.replace("\n", "<br>")
         fwd_html_content = f"{escaped_plain}<br><br>"
-        fwd_html_tmp = tempfile.NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".html",
             prefix="mail_fwd_html_",
             delete=False,
             encoding="utf-8",
-        )
-        fwd_html_tmp.write(fwd_html_content)
-        fwd_html_tmp.close()
-        fwd_html_temp_path = fwd_html_tmp.name
+        ) as fwd_html_tmp:
+            fwd_html_tmp.write(fwd_html_content)
+            fwd_html_temp_path = fwd_html_tmp.name
         fwd_html_cleanup_script = f'do shell script "rm -f " & quoted form of "{fwd_html_temp_path}"'
         fwd_html_paste_script = f"""
                 set visible of forwardMessage to true
@@ -1751,7 +1679,9 @@ use scripting additions
         success_text = "Email forwarded successfully."
     elif mode == "open":
         header_text = "OPENING FORWARD FOR REVIEW"
-        post_forward_action = "set visible of forwardMessage to true\n            save forwardMessage\n            activate"
+        post_forward_action = (
+            "set visible of forwardMessage to true\n            save forwardMessage\n            activate"
+        )
         success_text = "Forward opened in Mail for review. Edit and send when ready."
     else:
         header_text = "SAVING FORWARD AS DRAFT"
@@ -1849,28 +1779,30 @@ tell application "Mail"
             raise
         err = str(e)
         if err.startswith("AppleScript error: "):
-            err = err[len("AppleScript error: "):]
+            err = err[len("AppleScript error: ") :]
         elif err.startswith("AppleScript execution failed: "):
-            err = err[len("AppleScript execution failed: "):]
+            err = err[len("AppleScript execution failed: ") :]
         return f"Error: Forward failed: {err}"
     finally:
-        if fwd_html_temp_path and os.path.exists(fwd_html_temp_path):
-            os.unlink(fwd_html_temp_path)
+        if fwd_html_temp_path:
+            fwd_html_path = Path(fwd_html_temp_path)
+            if fwd_html_path.exists():
+                fwd_html_path.unlink()
 
 
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def manage_drafts(
-    account: Optional[str] = None,
+    account: str | None = None,
     action: str = "list",
-    subject: Optional[str] = None,
-    to: Optional[str] = None,
-    body: Optional[str] = None,
-    cc: Optional[str] = None,
-    bcc: Optional[str] = None,
-    draft_subject: Optional[str] = None,
-    from_address: Optional[str] = None,
-    timeout: Optional[int] = None,
+    subject: str | None = None,
+    to: str | None = None,
+    body: str | None = None,
+    cc: str | None = None,
+    bcc: str | None = None,
+    draft_subject: str | None = None,
+    from_address: str | None = None,
+    timeout: int | None = None,
     standalone_confirmed: bool = False,
 ) -> str:
     """
@@ -1938,16 +1870,12 @@ def manage_drafts(
         if not subject or not to or not body:
             return "Error: 'subject', 'to', and 'body' are required for creating drafts"
 
-        thread_warning = _standalone_compose_thread_warning(
-            subject, body, None, standalone_confirmed
-        )
+        thread_warning = _standalone_compose_thread_warning(subject, body, None, standalone_confirmed)
         if thread_warning:
             return thread_warning
 
         try:
-            sender_override, sender_error = _validate_from_address(
-                account, from_address, timeout=timeout
-            )
+            sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
         except AppleScriptTimeout:
             return (
                 "Error: AppleScript timed out while validating sender for account "
@@ -1960,9 +1888,7 @@ def manage_drafts(
         escaped_body = escape_applescript(body)
         safe_to = escape_applescript(to)
 
-        sender_script = _compose_sender_script(
-            "newDraft", "targetAccount", sender_override
-        )
+        sender_script = _compose_sender_script("newDraft", "targetAccount", sender_override)
 
         # Build TO recipients (split comma-separated)
         to_script = ""
@@ -2142,15 +2068,10 @@ def manage_drafts(
         '''
 
     else:
-        return (
-            f"Error: Invalid action '{action}'. Use: list, create, send, open, delete"
-        )
+        return f"Error: Invalid action '{action}'. Use: list, create, send, open, delete"
 
     try:
-        if timeout is None:
-            result = run_applescript(script)
-        else:
-            result = run_applescript(script, timeout=timeout)
+        result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out for manage_drafts action {action!r} on "

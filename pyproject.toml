@@ -90,7 +90,9 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RET", "PTH"]
 # E402: module-level import not at top — analytics.py intentionally sets up
 #       logging before local imports; tests/test_validate_manifests.py uses
 #       sys.path manipulation. Suppress globally; revisit per-file below.
-ignore = ["E402"]
+# E501: embedded AppleScript/docstring literals intentionally keep source
+#       structure; ruff format owns ordinary wrapping.
+ignore = ["E402", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
 # __init__.py re-exports are intentional; UI import is a try/except guard.
@@ -101,14 +103,14 @@ ignore = ["E402"]
 "tests/*" = ["F401", "F811"]
 
 # ---------------------------------------------------------------------------
-# Mypy — permissive baseline; tighten per-module over time
+# Mypy — strict package gate
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-disallow_untyped_defs = false
+strict = true
 # Do not type-check test suite or the mcpb bundle
 exclude = ["tests/", "apple-mail-mcpb/", "plugin/venv/"]
 

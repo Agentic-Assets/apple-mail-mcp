@@ -13,7 +13,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-
 # ---------------------------------------------------------------------------
 # Value objects
 # ---------------------------------------------------------------------------
@@ -122,16 +121,14 @@ class MailReadBackend(Protocol):
             "read",
         ),
         include_read: bool = True,
-    ) -> list[dict[str, Any]]:
-        ...
+    ) -> list[dict[str, Any]]: ...
 
     def count_messages(
         self,
         window: ScanWindow,
         *,
         include_read: bool = True,
-    ) -> int:
-        ...
+    ) -> int: ...
 
     def search_messages(
         self,
@@ -140,26 +137,22 @@ class MailReadBackend(Protocol):
         query: str | None = None,
         sender: str | None = None,
         subject: str | None = None,
-    ) -> list[dict[str, Any]]:
-        ...
+    ) -> list[dict[str, Any]]: ...
 
     def get_message_by_id(
         self,
         *,
         mailbox: str,
         message_id: str,
-    ) -> dict[str, Any] | None:
-        ...
+    ) -> dict[str, Any] | None: ...
 
     def list_mailboxes(
         self,
         *,
         account: str | None = None,
-    ) -> list[dict[str, Any]]:
-        ...
+    ) -> list[dict[str, Any]]: ...
 
-    def list_accounts(self) -> list[dict[str, Any]]:
-        ...
+    def list_accounts(self) -> list[dict[str, Any]]: ...
 
 
 class MailWriteBackend(Protocol):
@@ -171,8 +164,7 @@ class MailWriteBackend(Protocol):
         source_mailbox: str,
         target_mailbox: str,
         message_ids: list[str],
-    ) -> WriteResult:
-        ...
+    ) -> WriteResult: ...
 
     def update_status(
         self,
@@ -181,8 +173,7 @@ class MailWriteBackend(Protocol):
         message_ids: list[str],
         read: bool | None = None,
         flagged: bool | None = None,
-    ) -> WriteResult:
-        ...
+    ) -> WriteResult: ...
 
     def empty_trash(
         self,
@@ -193,8 +184,7 @@ class MailWriteBackend(Protocol):
         """The only legitimate full-scan write path."""
         ...
 
-    def invalidate(self, scope: InvalidationScope) -> None:
-        ...
+    def invalidate(self, scope: InvalidationScope) -> None: ...
 
 
 class MailBackend(MailReadBackend, MailWriteBackend, Protocol):
