@@ -18,8 +18,49 @@ from apple_mail_mcp.core import (
     account_not_found_json,
 )
 from apple_mail_mcp.backend.base import ToolError
-from apple_mail_mcp.bounded_scan import build_bounded_message_scan
+from apple_mail_mcp.bounded_scan import (
+    build_bounded_message_scan,
+    build_bounded_filtered_scan,
+)
 from apple_mail_mcp.constants import SCAN_BOUNDS
+
+
+_VALID_READ_FILTERS = ("all", "read", "unread")
+
+
+def _resolve_read_filter(
+    read_status: Optional[str],
+    include_read: bool,
+) -> str:
+    """Map the public ``read_status``/``include_read`` pair to an internal filter.
+
+    Returns one of ``"all"``, ``"read"``, ``"unread"``. ``read_status``
+    wins when provided; otherwise ``include_read`` is interpreted as
+    ``True → "all"``, ``False → "unread"`` (the legacy bool semantics).
+    Raises ``ValueError`` for an unknown ``read_status``.
+    """
+    if read_status is not None:
+        if read_status not in _VALID_READ_FILTERS:
+            raise ValueError(
+                f"read_status must be one of {_VALID_READ_FILTERS}; got {read_status!r}"
+            )
+        return read_status
+    return "all" if include_read else "unread"
+
+
+def _read_filter_condition(read_filter: str) -> Optional[str]:
+    """Return the per-message AppleScript predicate for *read_filter*.
+
+    Returns ``None`` for the no-filter case (``"all"``). The predicate
+    references ``aMessage`` and is intended for use inside an in-loop
+    ``if`` — never as the body of a ``whose`` clause over a bound slice
+    (which crashes on Gmail; see ``bounded_scan.build_bounded_filtered_scan``).
+    """
+    if read_filter == "unread":
+        return "read status of aMessage is false"
+    if read_filter == "read":
+        return "read status of aMessage is true"
+    return None
 
 
 def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: Optional[int] = 60) -> set:
@@ -112,28 +153,29 @@ def _parse_pipe_delimited_emails(
 # list_inbox_emails — async, per-account dispatch
 # ---------------------------------------------------------------------------
 
-def _build_inbox_collection_block(max_emails: int, include_read: bool) -> str:
+def _build_inbox_collection_block(max_emails: int, read_filter: str) -> str:
     """Build the AppleScript that sets ``inboxMessages`` to a bounded slice.
 
-    When ``include_read=False`` we bind a bounded newest-first window BEFORE
-    applying ``whose read status is false`` so Mail never materializes the
-    whole mailbox to evaluate the filter on a 24K-message inbox.
+    For the filtered modes (``read_filter`` ∈ ``"read"`` / ``"unread"``)
+    bind a bounded newest-first window via ``messages 1 thru N``, then
+    iterate in AppleScript with an ``if`` predicate via
+    ``build_bounded_filtered_scan``. The historical ``whose read status
+    is false`` over the bound slice crashed on Gmail (the slice's message
+    refs point at ``[Gmail]/All Mail``, which ``whose`` can't resolve as
+    a list query) — the in-loop pattern is the only safe form.
     """
-    if not include_read:
+    condition = _read_filter_condition(read_filter)
+    if condition is not None:
         scan_cap = min(
             max(max_emails * 10, SCAN_BOUNDS["INBOX_DEFAULT_CAP"] // 2),
             SCAN_BOUNDS["INBOX_MAX_CAP"],
         )
-        bounded = build_bounded_message_scan(
-            "inboxMailbox",
-            scan_cap,
-            whose_condition="read status is false",
-        )
-        return (
-            f'{bounded}\n'
-            f'            set inboxMessages to candidateMessages\n'
-            f'            if (count of inboxMessages) > {max_emails} then '
-            f'set inboxMessages to items 1 thru {max_emails} of inboxMessages'
+        return build_bounded_filtered_scan(
+            mailbox_var="inboxMailbox",
+            scan_cap=scan_cap,
+            target_max=max_emails,
+            condition_expr=condition,
+            output_var="inboxMessages",
         )
     bounded = build_bounded_message_scan("inboxMailbox", max_emails)
     return (
@@ -145,17 +187,17 @@ def _build_inbox_collection_block(max_emails: int, include_read: bool) -> str:
 def _build_list_inbox_text_script(
     account: str,
     max_emails: int,
-    include_read: bool,
+    read_filter: str,
     include_content: bool,
     include_message_id: bool = False,
 ) -> str:
     """Build a text-format inbox script for one account.
 
-    Caps the message scan via `messages 1 thru max_emails` (when
-    `max_emails > 0` and `include_read=True`). When `include_read=False`,
-    binds a bounded newest-first window (`scan_cap = min(max(max_emails*10, 100), 1000)`)
-    *before* applying `whose read status is false`, so Mail never materializes
-    a 24K-message Exchange inbox to evaluate the filter.
+    *read_filter* selects ``"all"`` (no filter), ``"unread"``, or
+    ``"read"``. The filtered modes bind a bounded newest-first window
+    (``scan_cap = min(max(max_emails*10, 100), 1000)``) and apply the
+    predicate via an in-loop ``if`` (``build_bounded_filtered_scan``) —
+    safe on Gmail and on 24K-message Exchange inboxes alike.
     """
     assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
@@ -169,7 +211,7 @@ def _build_list_inbox_text_script(
             '                        set outputText to outputText & "__MSG_ID__|||" & internetMessageId & return'
         )
 
-    collection = _build_inbox_collection_block(max_emails, include_read)
+    collection = _build_inbox_collection_block(max_emails, read_filter)
 
     return f"""
     tell application "Mail"
@@ -229,7 +271,7 @@ def _build_list_inbox_text_script(
 def _build_list_inbox_json_script(
     account: str,
     max_emails: int,
-    include_read: bool,
+    read_filter: str,
     include_content: bool = False,
     include_message_id: bool = False,
 ) -> str:
@@ -242,11 +284,15 @@ def _build_list_inbox_json_script(
     When *include_message_id* is True, an extra
     ``|||<internet-message-id>`` field (RFC 2822 Message-ID) is appended
     after the integer id for replied-detection.
+
+    *read_filter* selects ``"all"`` / ``"read"`` / ``"unread"``; the
+    filtered modes use the in-loop ``if`` pattern from
+    ``build_bounded_filtered_scan`` (safe on Gmail and large Exchange).
     """
     assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
 
-    collection = _build_inbox_collection_block(max_emails, include_read)
+    collection = _build_inbox_collection_block(max_emails, read_filter)
 
     if include_content:
         content_field = (
@@ -344,6 +390,7 @@ async def list_inbox_emails(
     account: Optional[str] = None,
     all_accounts: bool = False,
     max_emails: int = 50,
+    read_status: Optional[str] = None,
     include_read: bool = True,
     include_content: bool = False,
     output_format: str = "text",
@@ -356,9 +403,6 @@ async def list_inbox_emails(
     """Defaults to 50 most-recent emails from the default account.
 
     List all emails from inbox across all accounts or a specific account.
-
-    Replaces the former get_recent_emails tool — use account + max_emails to
-    get recent emails from a single account.
 
     If you need every message in the inbox, use ``full_inbox_export`` instead.
 
@@ -376,16 +420,25 @@ async def list_inbox_emails(
           passing an explicit `account` plus a small `max_emails` (e.g. 20)
           — multi-account calls now fan out in parallel, but the slowest
           account still bounds the wall time.
-        - `include_read=False` is now pushed into the AppleScript
-          `whose read status is false` clause, so it is dramatically faster
-          than scanning all messages and filtering Python-side.
+        - Read-status filtering binds a bounded newest-first slice and
+          applies the predicate in an AppleScript ``repeat`` loop (the
+          ``build_bounded_filtered_scan`` helper). This is the only safe
+          form on Gmail/IMAP accounts; the historical ``whose read status
+          is false`` clause crashed on Gmail because the slice's message
+          refs span ``[Gmail]/All Mail``.
         - When one account times out, the call returns partial data for the
           other accounts plus an `errors` field listing the slow account(s).
 
     Args:
         account: Optional account name to filter (e.g., "Gmail", "Work"). If None, shows all accounts.
         max_emails: Maximum number of emails to return per account.
-        include_read: Whether to include read emails (default: True)
+        read_status: ``"all"`` (default), ``"unread"``, or ``"read"`` — matches
+            the same parameter on ``search_emails``. Prefer this over the
+            legacy ``include_read`` bool.
+        include_read: Deprecated bool form of *read_status*. ``True`` ⇒
+            ``read_status="all"``, ``False`` ⇒ ``read_status="unread"``.
+            Kept for back-compat; emits a DeprecationWarning when passed
+            explicitly. Prefer ``read_status``.
         include_content: Whether to include a content preview for each email (slower, default: False)
         output_format: "text" (default, human-readable) or "json" (structured list of email dicts)
         exclude_replied: When True, filter out emails the user has already
@@ -406,9 +459,9 @@ async def list_inbox_emails(
         limit: Deprecated alias for `max_emails`. Accepted for backward
             compatibility with agents that misremember the param name; emits
             a warning in the response. Prefer `max_emails`.
-        unread_only: Deprecated alias for `include_read=not unread_only`.
+        unread_only: Deprecated alias mapping to ``read_status="unread"``.
             Accepted for backward compatibility; emits a warning. Prefer
-            `include_read=False`.
+            ``read_status="unread"``.
 
     Returns:
         Text mode: formatted list of emails with subject, sender, date, and
@@ -438,8 +491,11 @@ async def list_inbox_emails(
         return "Error: Invalid output_format. Use: text, json"
 
     # Tolerant alias handling: agents frequently misremember the param names
-    # as `limit` / `unread_only`. Accept them, map to canonical, and surface a
-    # warning so the agent learns the right names.
+    # as `limit` / `unread_only` / `include_read`. Accept them, map to the
+    # canonical `read_status`, and surface a warning so the agent learns
+    # the right names.
+    import warnings as _warnings_module
+
     warnings: List[str] = []
     if limit is not None:
         if max_emails != 50:
@@ -451,16 +507,47 @@ async def list_inbox_emails(
         warnings.append(
             "WARNING: 'limit' is a deprecated alias for 'max_emails' — please use 'max_emails' going forward."
         )
+
+    # Reconcile read_status / include_read / unread_only into a single
+    # 3-state read_filter that the script-builder layer understands.
+    explicit_include_read = include_read is not True  # was passed as False
     if unread_only is not None:
-        if include_read is not True:
+        if read_status is not None or explicit_include_read:
             return (
-                "Error: pass either `include_read` or `unread_only`, not both. "
-                "`unread_only` is a deprecated alias for `include_read=not unread_only`."
+                "Error: pass only one of `read_status`, `include_read`, or "
+                "`unread_only`. `unread_only` is a deprecated alias for "
+                "`read_status='unread'`."
             )
-        include_read = not bool(unread_only)
+        read_status = "unread" if bool(unread_only) else "all"
         warnings.append(
-            "WARNING: 'unread_only' is a deprecated alias — please use 'include_read=False' for unread-only listings."
+            "WARNING: 'unread_only' is a deprecated alias — please use read_status='unread'."
         )
+        _warnings_module.warn(
+            "list_inbox_emails: 'unread_only' is deprecated; use read_status='unread'.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    elif explicit_include_read:
+        if read_status is not None:
+            return (
+                "Error: pass either `read_status` or `include_read`, not both. "
+                "`include_read` is a deprecated alias."
+            )
+        read_status = "all" if include_read else "unread"
+        warnings.append(
+            "WARNING: 'include_read' is a deprecated alias — please use "
+            "read_status='all' or read_status='unread'."
+        )
+        _warnings_module.warn(
+            "list_inbox_emails: 'include_read' is deprecated; use read_status.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    try:
+        read_filter = _resolve_read_filter(read_status, include_read)
+    except ValueError as exc:
+        return f"Error: {exc}"
 
     if max_emails <= 0:
         err = ToolError(
@@ -505,7 +592,7 @@ async def list_inbox_emails(
         body = await _list_inbox_emails_json(
             account,
             max_emails,
-            include_read,
+            read_filter,
             include_content,
             timeout,
             exclude_replied=exclude_replied,
@@ -517,7 +604,7 @@ async def list_inbox_emails(
     text_body = await _list_inbox_emails_text(
         account,
         max_emails,
-        include_read,
+        read_filter,
         include_content,
         timeout,
         exclude_replied=exclude_replied,
@@ -552,14 +639,14 @@ def _attach_warnings_to_json(
 def _run_text_one(
     account: str,
     max_emails: int,
-    include_read: bool,
+    read_filter: str,
     include_content: bool,
     timeout: Optional[int],
     include_message_id: bool = False,
 ) -> str:
     """Synchronously run one account's text inbox script."""
     script = _build_list_inbox_text_script(
-        account, max_emails, include_read, include_content, include_message_id
+        account, max_emails, read_filter, include_content, include_message_id
     )
     return run_applescript(script, timeout=timeout if timeout is not None else 120)
 
@@ -649,7 +736,7 @@ def _filter_text_body_by_replied(
 async def _list_inbox_emails_text(
     account: Optional[str],
     max_emails: int,
-    include_read: bool,
+    read_filter: str,
     include_content: bool,
     timeout: Optional[int],
     *,
@@ -671,7 +758,7 @@ async def _list_inbox_emails_text(
                 _run_text_one,
                 account,
                 max_emails,
-                include_read,
+                read_filter,
                 include_content,
                 timeout,
                 include_message_id,
@@ -708,7 +795,7 @@ async def _list_inbox_emails_text(
                 _run_text_one,
                 acct,
                 max_emails,
-                include_read,
+                read_filter,
                 include_content,
                 timeout,
                 include_message_id,
@@ -754,14 +841,14 @@ async def _list_inbox_emails_text(
 def _run_json_one(
     account: str,
     max_emails: int,
-    include_read: bool,
+    read_filter: str,
     include_content: bool | int | None = False,
     timeout: Optional[int] = None,
     include_message_id: bool = False,
 ) -> str:
     """Synchronously run one account's JSON inbox script."""
     # Backward compatibility for older call sites that passed
-    # (account, max_emails, include_read, timeout) before content previews
+    # (account, max_emails, read_filter, timeout) before content previews
     # were added to the JSON path.
     if timeout is None and not isinstance(include_content, bool):
         timeout = include_content
@@ -769,7 +856,7 @@ def _run_json_one(
     script = _build_list_inbox_json_script(
         account,
         max_emails,
-        include_read,
+        read_filter,
         bool(include_content),
         include_message_id=include_message_id,
     )
@@ -802,7 +889,7 @@ def _apply_replied_to_emails(
 async def _list_inbox_emails_json(
     account: Optional[str],
     max_emails: int,
-    include_read: bool,
+    read_filter: str,
     include_content: bool,
     timeout: Optional[int],
     *,
@@ -834,7 +921,7 @@ async def _list_inbox_emails_json(
                 _run_json_one,
                 account,
                 max_emails,
-                include_read,
+                read_filter,
                 include_content,
                 timeout,
                 include_message_id,
@@ -866,7 +953,7 @@ async def _list_inbox_emails_json(
                 _run_json_one,
                 acct,
                 max_emails,
-                include_read,
+                read_filter,
                 include_content,
                 timeout,
                 include_message_id,

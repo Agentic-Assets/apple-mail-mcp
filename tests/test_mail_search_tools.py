@@ -740,9 +740,10 @@ class ListInboxEmailsTests(unittest.TestCase):
         self.assertIn("messages 1 thru 10 of inboxMailbox", captured["script"])
         self.assertNotIn("every message of inboxMailbox", captured["script"])
 
-    def test_list_inbox_emails_unread_only_uses_whose(self):
-        """A1: include_read=False must use `whose read status is false`
-        instead of a Python-side filter on every message."""
+    def test_list_inbox_emails_unread_only_uses_in_loop_filter(self):
+        """A1: include_read=False must use an in-loop `if read status` check
+        instead of the dangerous `whose read status is false` over a bound slice.
+        The safe pattern binds `messages 1 thru N` first, then filters in-loop."""
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -759,7 +760,12 @@ class ListInboxEmailsTests(unittest.TestCase):
                 )
             )
 
-        self.assertIn("whose read status is false", captured["script"])
+        script = captured["script"]
+        # Safe pattern: bounded slice first, then in-loop if filter.
+        self.assertIn("messages 1 thru", script)
+        self.assertIn("if read status of aMessage is false", script)
+        # The dangerous `whose` over a bound slice must NOT appear.
+        self.assertNotIn("candidateMessages whose read status is false", script)
 
     def test_list_inbox_emails_timeout_is_forwarded(self):
         captured = {}

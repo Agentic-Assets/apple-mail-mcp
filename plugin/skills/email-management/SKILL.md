@@ -159,7 +159,7 @@ Mindset:
 | Search by sender | `search_emails(sender="...")` | Same defaults apply |
 | Search email bodies | `search_emails(body_text="...", include_content=True)` | Slower; use when subject is unknown |
 | Cross-account search | `search_emails(account=None, all_accounts=True)` | Costly on Exchange; use sparingly |
-| Recent inbox listing | `list_inbox_emails(max_emails=50, include_read=False, include_content=False)` | Default cap is 50; `include_read=False` is the cheapest pass on a large inbox |
+| Recent inbox listing | `list_inbox_emails(max_emails=50, read_status="unread", include_content=False)` | Default cap is 50; `read_status="unread"` is the cheapest pass on a large inbox. Legacy `include_read=False` still works but deprecated. |
 | View a conversation | `get_email_thread(account="...", subject_keyword="...", mailbox="INBOX", recent_days=2)` — `account` required; widen `mailbox`/`recent_days` only when needed |
 | Move messages | `move_email(..., max_moves=N)` | Default cap is 50; set `max_moves=1` for precise single-message filing. When using `sender=`, always co-filter with `subject_keyword=` or a tight `recent_days` ceiling (≤30), OR pass `message_ids=[...]` from a prior bounded search. |
 | Flag / mark read | `update_email_status(action="...", max_updates=N)` | Default cap is 10 |

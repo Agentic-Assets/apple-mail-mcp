@@ -107,11 +107,11 @@ def build_bounded_message_scan(
 ) -> str:
     """Return an AppleScript snippet that binds ``candidateMessages``.
 
-    Mirrors the safe pattern used in ``tools/inbox.py:128-146``: slice a
-    bounded newest-first window FIRST, then optionally apply a ``whose``
-    filter against that small in-memory list. Mail.app must never be
-    asked to materialize an entire remote mailbox just to evaluate a
-    ``whose`` clause.
+    Slices a bounded newest-first window via ``messages 1 thru N``.
+    Filtering this slice with a property predicate must go through
+    ``build_bounded_filtered_scan`` — `whose` over the resulting list
+    crashes on remote IMAP accounts where the underlying message refs
+    span multiple physical folders (e.g. Gmail's ``[Gmail]/All Mail``).
     """
     if not isinstance(limit, int) or limit <= 0:
         raise ToolError(
@@ -119,7 +119,20 @@ def build_bounded_message_scan(
             message=f"build_bounded_message_scan requires limit > 0; got {limit!r}.",
         )
 
-    snippet = (
+    if whose_condition is not None:
+        raise ToolError(
+            code="UNSAFE_WHOSE_ON_LIST",
+            message=(
+                "build_bounded_message_scan no longer accepts whose_condition: "
+                "AppleScript's `whose` clause is unreliable on a list of message "
+                "references bound by `messages 1 thru N` (it crashes on Gmail "
+                "where the refs point at [Gmail]/All Mail). Use "
+                "build_bounded_filtered_scan(...) which emits an in-loop `if` "
+                "filter — the only safe pattern."
+            ),
+        )
+
+    return (
         f"set _mbCount to count of messages of {mailbox_var}\n"
         f"            if _mbCount > {limit} then\n"
         f"                set candidateMessages to messages 1 thru {limit} of {mailbox_var}\n"
@@ -128,13 +141,64 @@ def build_bounded_message_scan(
         f"            end if"
     )
 
-    if whose_condition:
-        snippet += (
-            f"\n            set candidateMessages to "
-            f"(candidateMessages whose {whose_condition})"
+
+def build_bounded_filtered_scan(
+    mailbox_var: str,
+    scan_cap: int,
+    target_max: int,
+    condition_expr: str,
+    *,
+    output_var: str = "inboxMessages",
+    candidate_var: str = "candidateMessages",
+) -> str:
+    """Return an AppleScript snippet that filters a bounded slice in-loop.
+
+    Emits the only safe filter-by-property pattern for Mail.app: bind a
+    bounded newest-first slice via ``messages 1 thru scan_cap``, then
+    iterate in AppleScript and append messages that satisfy
+    ``condition_expr`` to ``output_var``, stopping once ``target_max``
+    matches are collected.
+
+    ``condition_expr`` is an AppleScript expression evaluated per-message;
+    use ``aMessage`` as the loop variable, e.g. ``read status of aMessage
+    is false`` or ``(count of mail attachments of aMessage) > 0``. The
+    expression is interpolated verbatim — callers MUST NOT pass
+    user-controlled input.
+
+    This replaces the historical "bind slice then `whose`" pattern which
+    crashes on remote IMAP accounts (Gmail) because Mail evaluates the
+    `whose` against the message refs' underlying folder
+    (``[Gmail]/All Mail``) rather than the bound list.
+    """
+    if not isinstance(scan_cap, int) or scan_cap <= 0:
+        raise ToolError(
+            code="INVALID_SCAN_WINDOW",
+            message=f"build_bounded_filtered_scan requires scan_cap > 0; got {scan_cap!r}.",
+        )
+    if not isinstance(target_max, int) or target_max <= 0:
+        raise ToolError(
+            code="INVALID_SCAN_WINDOW",
+            message=f"build_bounded_filtered_scan requires target_max > 0; got {target_max!r}.",
+        )
+    if not condition_expr or not condition_expr.strip():
+        raise ToolError(
+            code="INVALID_SCAN_WINDOW",
+            message="build_bounded_filtered_scan requires a non-empty condition_expr.",
         )
 
-    return snippet
+    bounded = build_bounded_message_scan(mailbox_var, scan_cap)
+    return (
+        f"{bounded}\n"
+        f"            set {output_var} to {{}}\n"
+        f"            repeat with aMessage in {candidate_var}\n"
+        f"                try\n"
+        f"                    if {condition_expr} then\n"
+        f"                        set end of {output_var} to aMessage\n"
+        f"                        if (count of {output_var}) ≥ {target_max} then exit repeat\n"
+        f"                    end if\n"
+        f"                end try\n"
+        f"            end repeat"
+    )
 
 
 def compute_scan_upper_bound(
@@ -181,6 +245,7 @@ __all__ = [
     "MAX_SCAN_LIMIT",
     "bounded_inbox_scan",
     "build_bounded_message_scan",
+    "build_bounded_filtered_scan",
     "compute_scan_upper_bound",
     "build_whose_id_list",
 ]

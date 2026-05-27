@@ -808,7 +808,7 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         args.json,
         account=args.account,
         max_emails=max_emails,
-        include_read=not args.unread_only,
+        read_status="unread" if args.unread_only else "all",
         include_content=args.content,
         output_format="json" if args.json else "text",
     )

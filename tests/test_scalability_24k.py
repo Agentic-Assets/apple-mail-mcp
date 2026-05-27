@@ -186,11 +186,11 @@ class ListInboxAliasTests(unittest.TestCase):
         self.assertIn("limit", result)
         self.assertIn("max_emails", result)
 
-    def test_unread_only_alias_maps_to_include_read_false(self):
+    def test_unread_only_alias_maps_to_read_status_unread(self):
         captured = {}
 
-        async def fake_text(account, max_emails, include_read, *a, **k):
-            captured["include_read"] = include_read
+        async def fake_text(account, max_emails, read_filter, *a, **k):
+            captured["read_filter"] = read_filter
             return "listed"
 
         with patch(
@@ -199,7 +199,7 @@ class ListInboxAliasTests(unittest.TestCase):
         ):
             result = self._run(account="Work", unread_only=True)
 
-        self.assertEqual(captured["include_read"], False)
+        self.assertEqual(captured["read_filter"], "unread")
         self.assertIn("WARNING", result)
         self.assertIn("unread_only", result)
 
@@ -236,18 +236,18 @@ class ListInboxAliasTests(unittest.TestCase):
             "apple_mail_mcp.tools.inbox._list_inbox_emails_text",
             side_effect=fake_text,
         ):
-            result = self._run(account="Work", max_emails=5, include_read=False)
+            result = self._run(account="Work", max_emails=5, read_status="unread")
         self.assertNotIn("WARNING", result)
 
 
 class ListInboxUnreadFilterBoundedTests(unittest.TestCase):
-    """v3.1.10: unread filter must bind a bounded slice before `whose`."""
+    """v3.1.10: unread filter must bind a bounded slice before the in-loop filter."""
 
     def _text_script(self, max_emails: int) -> str:
         return inbox_tools._build_list_inbox_text_script(
             account="Work",
             max_emails=max_emails,
-            include_read=False,
+            read_filter="unread",
             include_content=False,
         )
 
@@ -255,29 +255,32 @@ class ListInboxUnreadFilterBoundedTests(unittest.TestCase):
         return inbox_tools._build_list_inbox_json_script(
             account="Work",
             max_emails=max_emails,
-            include_read=False,
+            read_filter="unread",
         )
 
-    def test_text_script_binds_slice_before_whose(self):
+    def test_text_script_binds_slice_before_in_loop_filter(self):
         script = self._text_script(max_emails=50)
         idx_slice = script.find("messages 1 thru ")
-        idx_whose = script.find("whose read status is false")
+        idx_filter = script.find("if read status of aMessage is false")
         self.assertGreater(idx_slice, 0, "expected bounded slice in script")
-        self.assertGreater(idx_whose, 0, "expected `whose read status is false` clause")
+        self.assertGreater(idx_filter, 0, "expected in-loop `if read status` filter")
         self.assertLess(
             idx_slice,
-            idx_whose,
-            "bounded slice must appear BEFORE the `whose` filter, "
+            idx_filter,
+            "bounded slice must appear BEFORE the in-loop filter, "
             "otherwise Mail materializes the entire 24K mailbox",
         )
+        # The dangerous `whose` over a bound slice must NOT appear.
+        self.assertNotIn("candidateMessages whose read status is false", script)
 
-    def test_json_script_binds_slice_before_whose(self):
+    def test_json_script_binds_slice_before_in_loop_filter(self):
         script = self._json_script(max_emails=50)
         idx_slice = script.find("messages 1 thru ")
-        idx_whose = script.find("whose read status is false")
+        idx_filter = script.find("if read status of aMessage is false")
         self.assertGreater(idx_slice, 0)
-        self.assertGreater(idx_whose, 0)
-        self.assertLess(idx_slice, idx_whose)
+        self.assertGreater(idx_filter, 0)
+        self.assertLess(idx_slice, idx_filter)
+        self.assertNotIn("candidateMessages whose read status is false", script)
 
     def test_scan_cap_scales_with_max_emails(self):
         # max_emails=50 → scan_cap = max(50*10, 100) = 500
@@ -295,11 +298,14 @@ class ListInboxUnreadFilterBoundedTests(unittest.TestCase):
         self.assertIn("messages 1 thru 1000", script)
 
     def test_candidate_messages_variable_present(self):
-        # The fix binds `candidateMessages` and then filters from it.
+        # The fix binds `candidateMessages` for the bounded slice and then
+        # iterates it with an in-loop if filter via build_bounded_filtered_scan.
         for builder in (self._text_script, self._json_script):
             script = builder(max_emails=50)
             self.assertIn("set candidateMessages to", script)
-            self.assertIn("candidateMessages whose read status is false", script)
+            # Safe in-loop filter — no `whose` over the bound slice.
+            self.assertIn("if read status of aMessage is false", script)
+            self.assertNotIn("candidateMessages whose read status is false", script)
 
 
 class SearchScanCapScalingTests(unittest.TestCase):

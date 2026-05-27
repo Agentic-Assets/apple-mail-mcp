@@ -101,20 +101,16 @@ def _build_found_message_lookup(
         )
 
     safe_keyword = escape_applescript(subject_keyword or "")
-    # Safe bounded-slice-then-filter: slice newest-first window FIRST
-    # (build_bounded_message_scan), THEN apply the subject/date filter
-    # against that small in-memory list. Never ask Mail to materialize an
-    # entire remote mailbox just to evaluate a whose clause.
-    whose_parts = [f'subject contains "{safe_keyword}"']
+    # Bind a bounded newest-first slice, then loop with in-AppleScript date
+    # + subject filters. The historical pre-filter via `whose` over the bound
+    # slice crashed on Gmail (refs point at [Gmail]/All Mail); the in-loop
+    # form mirrors the search_emails fast path and is safe on every account.
+    # Mail returns messages newest-first, so once a message is older than
+    # the cutoff the remainder of the slice is too — early exit.
     date_setup = (
         f"set recentCutoffDate to (current date) - ({float(recent_days)} * days)\n        "
     )
-    whose_parts.append("date received >= recentCutoffDate")
-    bounded_snippet = build_bounded_message_scan(
-        mailbox_var,
-        MESSAGE_LOOKUP_CAP,
-        whose_condition=" and ".join(whose_parts),
-    )
+    bounded_snippet = build_bounded_message_scan(mailbox_var, MESSAGE_LOOKUP_CAP)
 
     return (
         f"""
@@ -124,6 +120,8 @@ def _build_found_message_lookup(
 
         repeat with aMessage in {messages_var}
             try
+                set messageDate to date received of aMessage
+                if messageDate < recentCutoffDate then exit repeat
                 set messageSubject to subject of aMessage
                 if messageSubject contains "{safe_keyword}" then
                     set {found_var} to aMessage

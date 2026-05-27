@@ -41,8 +41,8 @@
 
 **Notes:**
 - **Id-filtered `whose`:** Lines 59, 139, 635, 937, 1109, 1419 — safe to leave; they select single/handful of messages.
-- **Status-filtered `whose`:** Lines 143, 246 — safe; pre-bounded by `messages 1 thru scan_cap` before the filter.
-- **Subject/sender `whose`:** Lines 86, 107 — already bounded (`items 1 thru 100`).
+- **Status-filtered `whose`:** Lines 143, 246 — ~~safe; pre-bounded~~ **UNSAFE on Gmail/IMAP — removed 2026-05-27.** The "pre-bounded then `whose` on the slice" pattern crashes on Gmail because Mail evaluates `whose` against the underlying `[Gmail]/All Mail` folder (where the slice refs physically live), producing `Can't get {message id N of ...} whose read status = false`. The fix replaces both sites with the in-loop `if` pattern via `bounded_scan.build_bounded_filtered_scan(...)`. `build_bounded_message_scan(whose_condition=...)` now raises `UNSAFE_WHOSE_ON_LIST`.
+- **Subject/sender `whose`:** Lines 86, 107 — line 86 (compose `_build_found_message_lookup`) also migrated to in-loop on 2026-05-27 (same Gmail risk). Line 107 (`_manage_drafts_list`) operates on the local Drafts mailbox so the failure mode is harder to trigger — left as-is, tracked in `tests/test_no_unbounded_whose.py::KNOWN_DANGEROUS_WHOSE`.
 - **Unbounded `whose`:** Line 431 (`manage_trash`) — complex filter on date/sender, no per-mailbox cap in nested loop.
 
 ---

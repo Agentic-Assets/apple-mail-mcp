@@ -421,7 +421,7 @@ class InboxJsonScriptBuilderTests(unittest.TestCase):
 
     def test_script_contains_account_reference(self):
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=10, include_read=True
+            "Work", max_emails=10, read_filter="all"
         )
         self.assertIn('account "Work"', script)
 
@@ -429,7 +429,7 @@ class InboxJsonScriptBuilderTests(unittest.TestCase):
         """The script must limit message reads via an upper-bound index
         so it never tries to fetch an unbounded list."""
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=25, include_read=True
+            "Work", max_emails=25, read_filter="all"
         )
         self.assertIn("25", script)
 
@@ -437,7 +437,7 @@ class InboxJsonScriptBuilderTests(unittest.TestCase):
         """The JSON script builds rows with '|||' delimiters that
         ``_parse_pipe_delimited_emails`` expects."""
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, include_read=True
+            "Work", max_emails=5, read_filter="all"
         )
         self.assertIn('"|||"', script)
 
@@ -445,31 +445,31 @@ class InboxJsonScriptBuilderTests(unittest.TestCase):
         """The mail_app_id (integer id property) must be fetched so the
         parsed dict can carry 'message_id' for targeted operations."""
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, include_read=True
+            "Work", max_emails=5, read_filter="all"
         )
         self.assertIn("id of aMessage", script)
 
     def test_script_with_content_includes_content_block(self):
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, include_read=True, include_content=True
+            "Work", max_emails=5, read_filter="all", include_content=True
         )
         self.assertIn("content of aMessage", script)
 
     def test_script_without_content_excludes_content_block(self):
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, include_read=True, include_content=False
+            "Work", max_emails=5, read_filter="all", include_content=False
         )
         self.assertNotIn("content of aMessage", script)
 
     def test_script_with_message_id_includes_internet_message_id_read(self):
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, include_read=True, include_message_id=True
+            "Work", max_emails=5, read_filter="all", include_message_id=True
         )
         self.assertIn("message id of aMessage", script)
 
     def test_script_without_message_id_excludes_internet_message_id_read(self):
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, include_read=True, include_message_id=False
+            "Work", max_emails=5, read_filter="all", include_message_id=False
         )
         # The plain "id of aMessage" (integer) is always present;
         # we're guarding against the RFC-2822 message-id probe being included
@@ -478,7 +478,7 @@ class InboxJsonScriptBuilderTests(unittest.TestCase):
 
     def test_script_is_complete_tell_block(self):
         script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, include_read=True
+            "Work", max_emails=5, read_filter="all"
         )
         stripped = script.strip()
         self.assertTrue(stripped.startswith('tell application "Mail"'), stripped[:60])
@@ -491,13 +491,13 @@ class InboxTextScriptBuilderTests(unittest.TestCase):
 
     def test_script_contains_account_reference(self):
         script = inbox_tools._build_list_inbox_text_script(
-            "Work", max_emails=10, include_read=True, include_content=False
+            "Work", max_emails=10, read_filter="all", include_content=False
         )
         self.assertIn('account "Work"', script)
 
     def test_script_is_complete_tell_block(self):
         script = inbox_tools._build_list_inbox_text_script(
-            "Work", max_emails=5, include_read=True, include_content=False
+            "Work", max_emails=5, read_filter="all", include_content=False
         )
         stripped = script.strip()
         self.assertTrue(stripped.startswith('tell application "Mail"'), stripped[:60])
@@ -507,7 +507,7 @@ class InboxTextScriptBuilderTests(unittest.TestCase):
         """The text script must emit a __COUNT__|||N marker so
         _strip_count_marker can extract the total."""
         script = inbox_tools._build_list_inbox_text_script(
-            "Work", max_emails=5, include_read=True, include_content=False
+            "Work", max_emails=5, read_filter="all", include_content=False
         )
         self.assertIn('"__COUNT__|||"', script)
 

@@ -8,6 +8,39 @@ here. The plugin/MCPB/marketplace versions track this file.
 Mcporter wrapper + large-mailbox hardening on top of 3.4.0. No tool signatures
 or return shapes changed.
 
+### Fixed (Gmail crash)
+
+- **`list_inbox_emails(include_read=False)` no longer crashes on Gmail / Google
+  Workspace accounts.** The historical AppleScript `(candidateMessages whose
+  read status is false)` evaluated `whose` against a list of message
+  references; on Gmail those refs point at `[Gmail]/All Mail`, which
+  Mail.app rejects with `Can't get {message id N of mailbox
+  "[Gmail]/All Mail" ...} whose read status = false`. Replaced with an
+  in-loop `if read status of aMessage is false` filter (the same pattern
+  `search_emails` already uses safely). Works on every account type
+  including 24K+ Exchange inboxes.
+- **`reply_to_email` / `forward_email` subject lookup hardened the same
+  way.** The historical `whose subject contains "X" and date received >=
+  cutoff` over a bound slice carried the same Gmail risk; the predicate is
+  now evaluated in an AppleScript `repeat` loop with an early-exit on the
+  date cutoff (slices are newest-first).
+- **`bounded_scan.build_bounded_message_scan(..., whose_condition=...)`
+  now raises `UNSAFE_WHOSE_ON_LIST`.** The footgun is gone — any future
+  caller that needs to filter a bounded slice must use the new
+  `build_bounded_filtered_scan(...)` helper, which emits the safe in-loop
+  pattern by construction.
+
+### Added
+
+- **`list_inbox_emails(read_status=...)`** — new public parameter with the
+  same vocabulary as `search_emails`: `"all"` (default), `"unread"`,
+  `"read"`. The legacy `include_read: bool` / `unread_only: bool` kwargs
+  continue to work but emit a `DeprecationWarning`.
+- **`bounded_scan.build_bounded_filtered_scan(mailbox_var, scan_cap,
+  target_max, condition_expr, ...)`** — new helper that emits the safe
+  bounded-slice + in-loop filter pattern. The only sanctioned way to
+  filter a bound slice by message property.
+
 ### Distribution
 
 - **New `apple-mail.plugin` build artifact**: `tools/build-artifacts.sh` now

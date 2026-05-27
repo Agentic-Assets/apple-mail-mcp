@@ -39,7 +39,7 @@ class ComposeScanCapTests(unittest.TestCase):
         self.assertIn("messages 1 thru 100", captured[0])
         self.assertNotIn("every message of draftsMailbox", captured[0])
 
-    def test_reply_to_email_subject_lookup_uses_whose_and_cap(self):
+    def test_reply_to_email_subject_lookup_uses_in_loop_filter_and_cap(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -57,14 +57,14 @@ class ComposeScanCapTests(unittest.TestCase):
             )
 
         # Bounded-slice-then-filter: bind a capped newest-first window
-        # FIRST (messages 1 thru 100), THEN apply the in-memory whose
-        # filter against `candidateMessages`.
+        # FIRST (messages 1 thru 100), THEN apply the in-loop if filter.
         self.assertIn("messages 1 thru 100 of inboxMailbox", captured[0])
-        self.assertIn(
-            "candidateMessages whose subject contains \"Invoice\"",
-            captured[0],
-        )
-        self.assertIn("date received >= recentCutoffDate", captured[0])
+        # Safe in-loop subject check (no `whose`).
+        self.assertIn("if messageSubject contains", captured[0])
+        # Early-exit date guard must be present.
+        self.assertIn("if messageDate < recentCutoffDate then exit repeat", captured[0])
+        # The old `candidateMessages whose subject contains` must NOT appear.
+        self.assertNotIn("candidateMessages whose subject contains", captured[0])
 
     def test_reply_to_email_message_id_skips_subject_scan(self):
         captured = []
@@ -86,7 +86,7 @@ class ComposeScanCapTests(unittest.TestCase):
         self.assertIn("whose id is 12345", captured[0])
         self.assertNotIn("messages 1 thru 100 of inboxMailbox", captured[0])
 
-    def test_forward_email_subject_lookup_uses_whose_and_cap(self):
+    def test_forward_email_subject_lookup_uses_in_loop_filter_and_cap(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -101,11 +101,12 @@ class ComposeScanCapTests(unittest.TestCase):
             )
 
         self.assertIn("messages 1 thru 100 of targetMailbox", captured[0])
-        self.assertIn(
-            "candidateMessages whose subject contains \"Invoice\"",
-            captured[0],
-        )
-        self.assertIn("date received >= recentCutoffDate", captured[0])
+        # Safe in-loop subject check (no `whose`).
+        self.assertIn("if messageSubject contains", captured[0])
+        # Early-exit date guard must be present.
+        self.assertIn("if messageDate < recentCutoffDate then exit repeat", captured[0])
+        # The old `candidateMessages whose subject contains` must NOT appear.
+        self.assertNotIn("candidateMessages whose subject contains", captured[0])
 
     def test_forward_email_forwards_timeout_to_run_applescript(self):
         captured = {}
@@ -597,7 +598,7 @@ class FixBListInboxIdFallbackTests(unittest.IsolatedAsyncioTestCase):
         script = _build_list_inbox_json_script(
             account="Work",
             max_emails=10,
-            include_read=True,
+            read_filter="all",
         )
         self.assertIn("set mailAppId to", script)
         # The id read must be wrapped in its own try block with a fallback

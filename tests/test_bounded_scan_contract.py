@@ -34,6 +34,7 @@ from apple_mail_mcp.bounded_scan import (
     MAX_SCAN_LIMIT,
     bounded_inbox_scan,
     build_bounded_message_scan,
+    build_bounded_filtered_scan,
     build_whose_id_list,
     compute_scan_upper_bound,
 )
@@ -125,21 +126,33 @@ class BoundedInboxScanTests(unittest.TestCase):
 
 class AppleScriptHelperEmissionTests(unittest.TestCase):
     def test_build_bounded_message_scan_emits_safe_pattern(self):
-        snippet = build_bounded_message_scan(
-            "inboxMailbox", 100, whose_condition="read status is false"
+        # build_bounded_message_scan no longer accepts whose_condition —
+        # callers must use build_bounded_filtered_scan instead.
+        # Verify it raises UNSAFE_WHOSE_ON_LIST when whose_condition is passed.
+        from apple_mail_mcp.backend.base import ToolError
+        with self.assertRaises(ToolError) as ctx:
+            build_bounded_message_scan(
+                "inboxMailbox", 100, whose_condition="read status is false"
+            )
+        self.assertEqual(ctx.exception.code, "UNSAFE_WHOSE_ON_LIST")
+
+        # The safe pattern is build_bounded_filtered_scan:
+        # it emits `messages 1 thru N`, an in-loop `if`, and set end of.
+        snippet = build_bounded_filtered_scan(
+            mailbox_var="inboxMailbox",
+            scan_cap=100,
+            target_max=50,
+            condition_expr="read status of aMessage is false",
         )
-        self.assertIn(
-            "messages 1 thru 100 of inboxMailbox",
-            snippet,
-            "Helper must emit a bounded slice before any whose filter.",
-        )
-        # The dangerous full-mailbox form must NEVER appear.
+        self.assertIn("messages 1 thru 100 of inboxMailbox", snippet)
+        # The dangerous full-mailbox whose must NEVER appear.
         self.assertNotIn("every message of inboxMailbox whose", snippet)
-        # The whose filter, when present, must apply to the *sliced* list
-        # via `candidateMessages whose ...`, not the full mailbox.
-        self.assertIn(
-            "candidateMessages whose read status is false", snippet
-        )
+        # The safe in-loop if pattern must be present.
+        self.assertIn("repeat with aMessage in", snippet)
+        self.assertIn("if read status of aMessage is false then", snippet)
+        self.assertIn("set end of", snippet)
+        # The old `candidateMessages whose` slice-then-whose is gone.
+        self.assertNotIn("candidateMessages whose read status is false", snippet)
 
     def test_build_bounded_message_scan_without_whose(self):
         snippet = build_bounded_message_scan("inboxMailbox", 50)

@@ -66,7 +66,7 @@ _SAMPLE_KWARGS: dict[str, object] = {
     "mailbox": "INBOX",
     "mailbox_name": "INBOX",
     "escaped_mailbox": "INBOX",
-    "include_read": True,
+    "read_filter": "all",
     "var_name": "myVar",
     "account_var": "targetAccount",
     "replied_var": "repliedIds",
