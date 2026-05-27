@@ -181,10 +181,9 @@ class SearchToolTests(unittest.TestCase):
             )
 
         self.assertEqual(response["items"], [])
-        # Phase A whose-elimination: scan_cap comes from
-        # bounded_scan.compute_scan_upper_bound(recent_days=2.0) → 300,
-        # floored at limit+1+offset (=51). max(51, 300) = 300.
-        self.assertIn("set scanUpperBound to 300", captured["script"])
+        # Narrow subject-only searches keep the scan to the requested page
+        # size so no-hit lookups on large Exchange inboxes stay fast.
+        self.assertIn("set scanUpperBound to 51", captured["script"])
         self.assertIn("messages 1 thru scanUpperBound of currentMailbox", captured["script"])
         # The old, unfiltered enumeration must not appear.
         self.assertNotIn(

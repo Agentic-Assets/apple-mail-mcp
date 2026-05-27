@@ -5,6 +5,35 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+Mcporter wrapper + large-mailbox hardening on top of 3.4.0. No tool signatures
+or return shapes changed.
+
+- **`search_emails` subject-only fast path**: narrow subject lookups (no sender,
+  body, attachment, or read-status filters) now scan only the requested page
+  size and skip per-message date/sender/read-status reads. No-hit lookups on
+  large Exchange mailboxes that previously took 48–115s now complete inside
+  the wrapper request ceiling. `recent_days` still controls the bounded slice
+  for searches that include other filters.
+- **`search_emails` recent-window early break**: bounded scans with a
+  `date_from` lower bound now read `date received` first and `exit repeat`
+  once messages cross the cutoff, avoiding subject/sender/read-status reads
+  on messages outside the window.
+- **`full_inbox_export` AppleScript syntax fix**: per-field `(try … end try)`
+  expressions were invalid AppleScript inside a concatenation and aborted the
+  tool with `-2741`. Replaced with per-field variable assignments inside a
+  `try` block, then concatenated. Repro: `max_emails=1` through `--raw`.
+- **`full_inbox_export` named-flag input**: `fields` now accepts a
+  comma-separated string in addition to a list, so generated mcporter wrappers
+  that flatten the list parameter still work without `--raw`.
+- **`tools/patch_mcporter_wrapper.py`**: post-generation patch renames the
+  mcporter global `--timeout <ms>` (which collides with per-tool `timeout`
+  seconds) to `--request-timeout-ms`, and optionally repoints embedded
+  `start_mcp.sh` paths for relocated plugin roots.
+- **`check_wrapper_surface.py`** now flags the global `--timeout <ms>` flag
+  in generated wrappers and reminds operators to run `patch_mcporter_wrapper.py`.
+- **`validate_manifests._tracked_plugin_files`** is more defensive when
+  `git ls-files` returns nothing while `plugin/` exists on disk.
+
 ## 3.4.0 — 2026-05-26
 
 Hardening release: 15 real bugs fixed (1 HIGH security, 8 type-safety / None-handling,

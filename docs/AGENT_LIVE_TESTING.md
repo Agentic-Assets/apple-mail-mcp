@@ -207,9 +207,15 @@ APPLE_MAIL_CLI_HOME="${APPLE_MAIL_CLI_HOME:-$HOME/.local/share/apple-mail-cli}"
 rsync -a --delete --exclude venv /path/to/apple-mail-mcp/plugin/ "$APPLE_MAIL_CLI_HOME/plugin/"
 cd "$APPLE_MAIL_CLI_HOME"
 npx mcporter@0.11.3 generate-cli --from ./apple-mail-cli.cjs --bundle apple-mail-cli.cjs
+python3 /path/to/apple-mail-mcp/tools/patch_mcporter_wrapper.py ./apple-mail-cli.cjs
 ./install.sh
 python3 /path/to/apple-mail-mcp/tools/check_wrapper_surface.py
 ```
+
+`patch_mcporter_wrapper.py` is required with mcporter 0.11.3 because the
+generated CLI otherwise reserves global `--timeout` for transport timeouts in
+milliseconds. The patch renames the request flag to `--request-timeout-ms`, so
+tool-level `--timeout` still reaches Apple Mail tools as seconds.
 
 **Repo CLI vs wrapper naming:**
 

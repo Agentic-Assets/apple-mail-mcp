@@ -407,6 +407,8 @@ def _tracked_plugin_files(plugin_root: Path) -> list[Path] | None:
         full_path = plugin_root / rel
         if full_path.is_file():
             rels.append(rel)
+    if not rels and plugin_root.exists():
+        return None
     return rels
 
 

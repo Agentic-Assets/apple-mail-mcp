@@ -28,6 +28,8 @@ CRITICAL_WRAPPER_COMMANDS = (
     "get-inbox-overview",
 )
 
+BAD_GLOBAL_TIMEOUT_FLAG = "--timeout <ms>"
+
 
 def _wrapper_help(wrapper: str) -> str:
     result = subprocess.run(
@@ -47,6 +49,8 @@ def check_wrapper_surface(wrapper: str) -> tuple[bool, list[str], list[str]]:
     help_text = _wrapper_help(wrapper)
     missing = [cmd for cmd in CRITICAL_WRAPPER_COMMANDS if cmd not in help_text]
     present = [cmd for cmd in CRITICAL_WRAPPER_COMMANDS if cmd in help_text]
+    if BAD_GLOBAL_TIMEOUT_FLAG in help_text:
+        missing.append("request-timeout-ms")
     return not missing, present, missing
 
 
@@ -88,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
             "/path/to/apple-mail-mcp/plugin/ ./plugin/\n"
             "  npx mcporter@0.11.3 generate-cli --from ./apple-mail-cli.cjs "
             "--bundle apple-mail-cli.cjs\n"
+            "  python3 /path/to/apple-mail-mcp/tools/patch_mcporter_wrapper.py "
+            "./apple-mail-cli.cjs\n"
             "  ./install.sh",
             file=sys.stderr,
         )

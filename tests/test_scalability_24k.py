@@ -328,28 +328,77 @@ class SearchScanCapScalingTests(unittest.TestCase):
         # bounded_scan.compute_scan_upper_bound(2.0) = 200 + 2*50 = 300,
         # floored at limit+1+offset (=21) → scan_cap=300.
         script = self._script(recent_days=2.0)
-        self.assertIn("> 300", script)
+        self.assertIn("set scanUpperBound to 300", script)
+
+    def test_recent_window_exits_before_subject_reads(self):
+        # Large Exchange no-hit subject searches were slow because we read
+        # subject/sender for every bounded candidate even after crossing the
+        # recent_days cutoff. The generated AppleScript must check the date
+        # and exit before expensive per-message metadata reads.
+        script = search_tools._build_search_script(
+            account="Work",
+            mailbox="INBOX",
+            subject_terms=None,
+            sender="person@example.com",
+            has_attachments=None,
+            read_status="all",
+            date_from="2026-05-24",
+            date_to=None,
+            include_content=False,
+            content_length=300,
+            offset=0,
+            limit=1,
+            body_text=None,
+            recent_days=2.0,
+        )
+        date_idx = script.index("set messageDate to date received of aMessage")
+        break_idx = script.index("if messageDate < fromDate then exit repeat")
+        subject_idx = script.index("set messageSender to sender of aMessage")
+        self.assertLess(date_idx, break_idx)
+        self.assertLess(break_idx, subject_idx)
+
+    def test_subject_only_search_filters_bounded_slice_without_date_reads(self):
+        script = search_tools._build_search_script(
+            account="Work",
+            mailbox="INBOX",
+            subject_terms=["NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231"],
+            sender=None,
+            has_attachments=None,
+            read_status="all",
+            date_from="2026-05-24",
+            date_to=None,
+            include_content=False,
+            content_length=300,
+            offset=0,
+            limit=1,
+            body_text=None,
+            recent_days=2.0,
+        )
+        self.assertIn("repeat with aMessage in candidateMessages", script)
+        self.assertIn("set messageSubject to subject of aMessage", script)
+        collection_block = script.split("set matchingCount to count of matchingMessages", 1)[0]
+        self.assertNotIn("set messageDate to date received of aMessage", collection_block)
 
     def test_recent_days_7_caps_at_500(self):
         # compute_scan_upper_bound(7.0) = 200 + 350 = 550, clamped to 500.
         script = self._script(recent_days=7.0)
-        self.assertIn("> 500", script)
+        self.assertIn("set scanUpperBound to 500", script)
 
     def test_recent_days_30_caps_at_500(self):
         # recent_days=30 → 200 + 1500 = 1700, clamped to 500.
         script = self._script(recent_days=30.0)
-        self.assertIn("> 500", script)
+        self.assertIn("set scanUpperBound to 500", script)
 
     def test_recent_days_zero_uses_floor(self):
         # recent_days=0 keeps base scan_cap = limit + 1 + offset = 21
         # (the recent_days>0 branch is skipped; compute_* helper is not consulted).
         script = self._script(recent_days=0.0)
-        self.assertIn("> 21", script)
+        self.assertIn("set scanUpperBound to 21", script)
 
     def test_floor_dominates_when_limit_is_huge(self):
         # limit=600 → base_cap=601 > compute(2.0)=300, scan_cap=601.
         script = self._script(recent_days=2.0, limit=600)
-        self.assertIn("> 601", script)
+        self.assertIn("set scanUpperBound to 601", script)
 
 
 if __name__ == "__main__":
