@@ -1048,5 +1048,97 @@ class GetEmailThreadTests(unittest.TestCase):
         self.assertIn("max_messages must be > 0", result)
 
 
+class MailboxAllCapTests(unittest.TestCase):
+    """Fix #5: search_emails(mailbox='All') must cap at MAX_MAILBOXES_PER_SEARCH."""
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def test_mailbox_all_script_contains_cap_guard(self):
+        """Generated AppleScript must truncate searchMailboxes when > 50."""
+        from apple_mail_mcp.constants import SCAN_BOUNDS
+        cap = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
+
+        captured = {}
+
+        def fake_run(script, timeout=180):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(search_tools.search_emails(
+                account="Work",
+                mailbox="All",
+                sender="test@example.com",
+                recent_days=7,
+            ))
+
+        script = captured.get("script", "")
+        self.assertIn(f"items 1 thru {cap} of searchMailboxes", script)
+        self.assertIn(f"(count of searchMailboxes) > {cap}", script)
+
+    def test_mailbox_all_json_response_contains_warning(self):
+        """JSON response for mailbox='All' must include a mailbox cap warning."""
+        def fake_run(script, timeout=180):
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            raw = self._run(search_tools.search_emails(
+                account="Work",
+                mailbox="All",
+                sender="test@example.com",
+                recent_days=7,
+                output_format="json",
+            ))
+
+        payload = json.loads(raw)
+        self.assertIn("warnings", payload)
+        self.assertTrue(len(payload["warnings"]) > 0)
+        self.assertIn("mailbox='All'", payload["warnings"][0])
+
+    def test_mailbox_inbox_script_has_no_cap_guard(self):
+        """For mailbox='INBOX' the cap guard must NOT appear in the script."""
+        from apple_mail_mcp.constants import SCAN_BOUNDS
+        cap = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
+
+        captured = {}
+
+        def fake_run(script, timeout=180):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(search_tools.search_emails(
+                account="Work",
+                mailbox="INBOX",
+                sender="test@example.com",
+                recent_days=7,
+            ))
+
+        script = captured.get("script", "")
+        self.assertNotIn(f"items 1 thru {cap} of searchMailboxes", script)
+
+    def test_mailbox_inbox_json_response_has_no_mailbox_warning(self):
+        """JSON response for mailbox='INBOX' must NOT include a mailbox cap warning."""
+        def fake_run(script, timeout=180):
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            raw = self._run(search_tools.search_emails(
+                account="Work",
+                mailbox="INBOX",
+                sender="test@example.com",
+                recent_days=7,
+                output_format="json",
+            ))
+
+        payload = json.loads(raw)
+        warnings = payload.get("warnings", [])
+        # No mailbox cap warnings for INBOX
+        for w in warnings:
+            self.assertNotIn("mailbox='All'", w)
+
+
 if __name__ == "__main__":
     unittest.main()

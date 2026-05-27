@@ -227,3 +227,213 @@ class OverviewParseTests(unittest.TestCase):
         parsed = inbox_tools._parse_overview_account(raw)
         self.assertIn("parse_errors", parsed)
         self.assertEqual(len(parsed["parse_errors"]), 2)
+
+
+class ListMailboxesTextModeCapTests(unittest.TestCase):
+    """Fix #6: list_mailboxes text mode must honor max_mailboxes with truncation banner."""
+
+    def test_text_mode_script_has_cap_counter(self):
+        """Generated AppleScript must include a counter and early-exit for max_mailboxes."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "MAILBOXES\n\n"
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            inbox_tools.list_mailboxes(account="Work", max_mailboxes=25)
+
+        script = captured.get("script", "")
+        # Must contain the counter and early-exit pattern
+        self.assertIn("mailboxCount", script)
+        self.assertIn("exit repeat", script)
+        self.assertIn("25", script)
+
+    def test_text_mode_default_cap_is_100(self):
+        """Default max_mailboxes for text mode must be 100."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "MAILBOXES\n\n"
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            inbox_tools.list_mailboxes(account="Work")
+
+        script = captured.get("script", "")
+        # Default cap of 100 must appear in the script
+        self.assertIn("100", script)
+        self.assertIn("mailboxCount", script)
+
+    def test_text_mode_truncation_banner_in_applescript_output(self):
+        """When AppleScript returns a truncation marker, the text response includes a banner."""
+        cap = 5
+        # Simulate AppleScript returning the truncation marker
+        fake_output = (
+            "MAILBOXES\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📁 ACCOUNT: Work\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "  📂 Inbox\n\n"
+            f"⚠ Truncated: list_mailboxes capped at {cap} mailboxes per account.\n"
+            "  Pass max_mailboxes=N to adjust the cap.\n"
+        )
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=fake_output):
+            result = inbox_tools.list_mailboxes(account="Work", max_mailboxes=cap)
+
+        # The response should contain the truncation banner from the script
+        self.assertIn("Truncated", result)
+        self.assertIn(str(cap), result)
+
+    def test_json_mode_still_works_with_max_mailboxes(self):
+        """JSON mode must still use max_mailboxes (regression guard)."""
+        lines = "\n".join([
+            f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(5)
+        ])
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=lines):
+            raw = inbox_tools.list_mailboxes(
+                account="Work",
+                output_format="json",
+                max_mailboxes=3,
+            )
+        data = json.loads(raw)
+        self.assertIn("truncated", data)
+        self.assertTrue(data["truncated"])
+
+
+class GetMailboxUnreadCountsCapTests(unittest.TestCase):
+    """Fix #7: get_mailbox_unread_counts must cap mailbox enumeration."""
+
+    def test_script_has_mailbox_index_cap(self):
+        """Generated AppleScript must include a mailbox counter and early exit."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            inbox_tools.get_mailbox_unread_counts(account="Work", max_mailboxes=50)
+
+        script = captured.get("script", "")
+        self.assertIn("mailboxIndex", script)
+        self.assertIn("exit repeat", script)
+        self.assertIn("50", script)
+
+    def test_default_max_mailboxes_is_100(self):
+        """Default max_mailboxes for get_mailbox_unread_counts must be 100."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            inbox_tools.get_mailbox_unread_counts(account="Work")
+
+        script = captured.get("script", "")
+        self.assertIn("100", script)
+
+    def test_truncated_marker_sets_truncated_flag(self):
+        """When script emits __TRUNCATED__ marker, account dict has truthy truncation key."""
+        # Simulate AppleScript output with truncation marker
+        fake_output = "\n".join([
+            "Work|||Inbox|||5",
+            "Work|||__TRUNCATED__|||100",
+        ])
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=fake_output):
+            result = inbox_tools.get_mailbox_unread_counts(account="Work", max_mailboxes=100)
+
+        # The account dict should have the truncation marker
+        work_data = result.get("Work", {})
+        self.assertEqual(work_data.get("Inbox"), 5)
+        self.assertTrue(work_data.get("__truncated__"))
+
+    def test_no_truncation_without_marker(self):
+        """When script does not emit __TRUNCATED__, account dict has no truncation key."""
+        fake_output = "Work|||Inbox|||3\nWork|||Archive|||0"
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=fake_output):
+            result = inbox_tools.get_mailbox_unread_counts(account="Work", max_mailboxes=100)
+
+        work_data = result.get("Work", {})
+        self.assertNotIn("__truncated__", work_data)
+
+
+class GetInboxOverviewMailboxCapTests(unittest.TestCase):
+    """Fix #7: get_inbox_overview must cap mailbox enumeration at max_mailboxes=100."""
+
+    def test_overview_script_has_mailbox_cap(self):
+        """Generated AppleScript must include a mailbox index cap."""
+        script = inbox_tools._build_overview_one_account_script(
+            "Work", include_mailboxes=True, max_mailboxes=100
+        )
+        self.assertIn("mailboxIndex", script)
+        self.assertIn("exit repeat", script)
+        self.assertIn("100", script)
+
+    def test_overview_custom_max_mailboxes_in_script(self):
+        """Custom max_mailboxes is reflected in the generated script."""
+        script = inbox_tools._build_overview_one_account_script(
+            "Work", include_mailboxes=True, max_mailboxes=25
+        )
+        self.assertIn("25", script)
+        self.assertIn("MAILBOX_CAPPED", script)
+
+    def test_overview_parse_account_handles_mailbox_capped(self):
+        """Parser sets mailboxes_truncated when MAILBOX_CAPPED tag is present."""
+        raw = "\n".join([
+            "HEADER|||Work|||3|||100",
+            "MAILBOX|||Inbox|||3",
+            "MAILBOX_CAPPED|||Work|||100",
+        ])
+        parsed = inbox_tools._parse_overview_account(raw)
+        self.assertTrue(parsed.get("mailboxes_truncated"))
+        self.assertEqual(parsed["unread"], 3)
+
+    def test_overview_parse_account_no_capped_by_default(self):
+        """Parser returns mailboxes_truncated=False when no MAILBOX_CAPPED tag."""
+        raw = "\n".join([
+            "HEADER|||Work|||3|||100",
+            "MAILBOX|||Inbox|||3",
+        ])
+        parsed = inbox_tools._parse_overview_account(raw)
+        self.assertFalse(parsed.get("mailboxes_truncated"))
+
+    def test_overview_json_includes_mailboxes_truncated_flag(self):
+        """JSON mode overview sets mailboxes_truncated on the account row."""
+        accounts = [
+            {
+                "account": "Work",
+                "unread": 3,
+                "total": 100,
+                "error": None,
+                "mailboxes": [("Inbox", 3)],
+                "recent": [],
+                "mailboxes_truncated": True,
+            }
+        ]
+        payload = inbox_tools._format_overview_json(accounts, [])
+        work_row = next(r for r in payload["accounts"] if r["account"] == "Work")
+        self.assertTrue(work_row.get("mailboxes_truncated"))
+
+    def test_overview_json_no_flag_when_not_truncated(self):
+        """JSON mode overview does not set mailboxes_truncated when not truncated."""
+        accounts = [
+            {
+                "account": "Work",
+                "unread": 1,
+                "total": 50,
+                "error": None,
+                "mailboxes": [("Inbox", 1)],
+                "recent": [],
+                "mailboxes_truncated": False,
+            }
+        ]
+        payload = inbox_tools._format_overview_json(accounts, [])
+        work_row = next(r for r in payload["accounts"] if r["account"] == "Work")
+        self.assertNotIn("mailboxes_truncated", work_row)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -58,4 +58,5 @@ SCAN_BOUNDS = {
     "INBOX_MAX_CAP": 1000,      # list_inbox_emails upper bound
     "SEARCH_BASE_CAP": 200,
     "SEARCH_WINDOW_CAP": 500,
+    "MAX_MAILBOXES_PER_SEARCH": 50,  # search_emails mailbox="All" cap
 }

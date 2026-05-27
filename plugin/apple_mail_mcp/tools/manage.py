@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -17,6 +18,7 @@ from apple_mail_mcp.core import (
     contains_any_condition,
     inject_preferences,
     escape_applescript,
+    list_mail_account_names,
     normalize_message_ids,
     normalize_search_terms,
     run_applescript,
@@ -26,9 +28,41 @@ from apple_mail_mcp.core import (
     validate_account_name,
     validate_save_path,
 )
-from apple_mail_mcp.bounded_scan import build_whose_id_list
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.tools.search import _search_mail_records_sync as _search_mail_records
+
+
+def _check_message_ids_cap(normalized_ids: List[str], tool_name: str) -> Optional[str]:
+    """Return a structured error string if *normalized_ids* exceeds the whose-id cap.
+
+    Mail's AppleScript parser rejects or hangs on `id is X or id is Y or ...`
+    predicates beyond ~200-500 terms (varies by macOS). We cap at
+    ``MAX_WHOSE_IDS`` (50) and surface a structured ``WHOSE_ID_LIST_TOO_LARGE``
+    so the caller knows to chunk the ids in Python and call the tool
+    once per batch. Returns ``None`` when the list is within the cap.
+    """
+    if len(normalized_ids) <= MAX_WHOSE_IDS:
+        return None
+    import json as _json
+    err = ToolError(
+        code="WHOSE_ID_LIST_TOO_LARGE",
+        message=(
+            f"{tool_name} received {len(normalized_ids)} message_ids; "
+            f"hard cap is {MAX_WHOSE_IDS} per call. Mail's AppleScript "
+            "parser rejects or hangs on very long `id is X or id is Y ...` "
+            "predicates."
+        ),
+        remediation={
+            "preferred": (
+                f"Split message_ids into batches of {MAX_WHOSE_IDS} or "
+                f"fewer and call {tool_name} once per batch"
+            ),
+            "helper": "apple_mail_mcp.bounded_scan.iter_id_chunks",
+        },
+    )
+    return _json.dumps(err.to_dict(), indent=2)
 
 
 def _date_to_for_older_than(days: Optional[int]) -> Optional[str]:
@@ -112,6 +146,9 @@ def _move_email_by_message_ids(
     normalized_ids = normalize_message_ids(message_ids)
     if not normalized_ids:
         return "Error: 'message_ids' must contain one or more numeric Mail ids"
+    cap_error = _check_message_ids_cap(normalized_ids, "move_email")
+    if cap_error:
+        return cap_error
 
     safe_account = escape_applescript(account)
     safe_from = escape_applescript(from_mailbox)
@@ -283,6 +320,26 @@ def move_email(
 
     effective_recent_days = recent_days if older_than_days is None else 0
 
+    # Refuse unbounded scans on destructive tools. The id-direct path (above)
+    # is always safe. older_than_days provides a date_to bound so it is safe
+    # even when recent_days=0; only refuse when BOTH are absent.
+    if older_than_days is None and recent_days <= 0:
+        tool_error = ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                "move_email refuses to scan without a date window; "
+                "pass recent_days=7 or older_than_days=30 or message_ids=[...]"
+            ),
+            remediation={
+                "preferred": "Pass recent_days=7 or older_than_days=30 or message_ids=[...]",
+                "fallback_tool": "full_inbox_export",
+                "fallback_tool_args": {
+                    "account": account,
+                },
+            },
+        )
+        return serialize_tool_error(tool_error)
+
     if dry_run:
         try:
             records = _search_mail_records(
@@ -355,6 +412,7 @@ def save_email_attachment(
     save_path: str = "",
     message_ids: Optional[List[str]] = None,
     timeout: Optional[int] = None,
+    max_size_bytes: int = 100 * 1024 * 1024,
 ) -> str:
     """
     Save a specific attachment from an email to disk.
@@ -369,6 +427,11 @@ def save_email_attachment(
         save_path: Full path where to save the attachment
         message_ids: Optional list of exact Mail message ids for precise targeting
         timeout: Optional AppleScript timeout in seconds (default: 120s).
+        max_size_bytes: Maximum attachment size in bytes (default: 100 MB). Refuses to
+            save attachments larger than this limit. Also checks that the target directory
+            has at least ``max_size_bytes + 100 MB`` of free disk space before saving.
+            Pass a larger value (e.g. ``max_size_bytes=500*1024*1024``) to raise the cap,
+            or save manually via Mail UI for very large attachments.
 
     Returns:
         Confirmation message with save location
@@ -429,6 +492,9 @@ def save_email_attachment(
         normalized_ids = normalize_message_ids(message_ids)
         if not normalized_ids:
             return "Error: 'message_ids' must contain one or more numeric Mail ids"
+        cap_error = _check_message_ids_cap(normalized_ids, "save_email_attachment")
+        if cap_error:
+            return cap_error
         message_filter_script = (
             f"set inboxMessages to every message of inboxMailbox whose "
             f"{build_whose_id_list(normalized_ids)}"
@@ -448,12 +514,103 @@ def save_email_attachment(
         return path_err
 
     expanded_path = os.path.realpath(expanded_path)
+    save_dir = os.path.dirname(expanded_path)
 
     # Escape for AppleScript
     escaped_account = escape_applescript(account)
     escaped_keyword = escape_applescript(subject_keyword) if subject_keyword else ""
     escaped_attachment = escape_applescript(attachment_name)
     escaped_path = escape_applescript(expanded_path)
+
+    # --- Attachment size probe ---
+    # Run a cheap AppleScript to get the attachment file size before saving.
+    # ``file size of anAttachment`` is available on macOS 10.15+. We wrap it in
+    # a try block so that if the property is absent on an older OS the probe
+    # returns -1 and we skip the cap (safe fail-open rather than blocking saves).
+    _probe_normalized_ids = normalize_message_ids(message_ids) if message_ids else []
+    if _probe_normalized_ids:
+        id_condition = build_whose_id_list(_probe_normalized_ids)
+        _probe_message_lookup = f"every message of inboxMailbox whose {id_condition}"
+    else:
+        _probe_message_lookup = "messages 1 thru 1 of inboxMailbox"
+    _escaped_att_probe = escape_applescript(attachment_name)
+    _probe_script = f'''
+    tell application "Mail"
+        try
+            set targetAccount to account "{escaped_account}"
+            {inbox_mailbox_script("inboxMailbox", "targetAccount")}
+            set probeMessages to {_probe_message_lookup}
+            repeat with aMessage in probeMessages
+                repeat with anAttachment in (mail attachments of aMessage)
+                    if (name of anAttachment) contains "{_escaped_att_probe}" then
+                        try
+                            return file size of anAttachment as integer
+                        on error
+                            return -1
+                        end try
+                    end if
+                end repeat
+            end repeat
+            return -1
+        on error
+            return -1
+        end try
+    end tell
+    '''
+    _probe_timeout = 30 if timeout is None else min(timeout, 30)
+    try:
+        _probe_raw = run_applescript(_probe_script, timeout=_probe_timeout).strip()
+        _attachment_size = int(_probe_raw) if _probe_raw.lstrip("-").isdigit() else -1
+    except (AppleScriptTimeout, ValueError, OSError):
+        _attachment_size = -1
+
+    if _attachment_size >= 0:
+        if _attachment_size > max_size_bytes:
+            err = ToolError(
+                code="ATTACHMENT_TOO_LARGE",
+                message=(
+                    f"Attachment '{attachment_name}' is {_attachment_size:,} bytes "
+                    f"({_attachment_size / (1024*1024):.1f} MB), which exceeds the "
+                    f"cap of {max_size_bytes:,} bytes ({max_size_bytes / (1024*1024):.0f} MB)."
+                ),
+                remediation={
+                    "preferred": (
+                        f"Pass max_size_bytes={_attachment_size + 1} to raise the cap "
+                        f"for this attachment"
+                    ),
+                    "alternative": "Use Mail UI to save the attachment manually",
+                    "actual_size_bytes": _attachment_size,
+                    "cap_bytes": max_size_bytes,
+                },
+            )
+            return serialize_tool_error(err)
+
+        # Disk-space guard: require attachment_size + 100 MB buffer free
+        _disk_buffer = 100 * 1024 * 1024
+        _required_free = _attachment_size + _disk_buffer
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+            _free_bytes = shutil.disk_usage(save_dir).free
+        except OSError:
+            _free_bytes = None
+
+        if _free_bytes is not None and _free_bytes < _required_free:
+            err = ToolError(
+                code="ATTACHMENT_TOO_LARGE",
+                message=(
+                    f"Insufficient disk space in '{save_dir}': "
+                    f"{_free_bytes:,} bytes free, need at least "
+                    f"{_required_free:,} bytes "
+                    f"(attachment {_attachment_size:,} bytes + 100 MB buffer)."
+                ),
+                remediation={
+                    "preferred": "Free up disk space and retry",
+                    "alternative": "Use Mail UI to save the attachment manually",
+                    "free_bytes": _free_bytes,
+                    "required_bytes": _required_free,
+                },
+            )
+            return serialize_tool_error(err)
 
     # Cap candidate set for subject search only — ID lookup is exact.
     # Sourced from ``constants.SCAN_BOUNDS["TRASH_SCAN"]`` so the cap is tunable
@@ -606,6 +763,9 @@ def update_email_status(
         normalized_ids = normalize_message_ids(message_ids)
         if not normalized_ids:
             return "Error: 'message_ids' must contain one or more numeric Mail ids"
+        cap_error = _check_message_ids_cap(normalized_ids, "update_email_status")
+        if cap_error:
+            return cap_error
 
         id_condition = build_whose_id_list(normalized_ids)
 
@@ -879,6 +1039,9 @@ def manage_trash(
         normalized_ids = normalize_message_ids(message_ids)
         if not normalized_ids:
             return "Error: 'message_ids' must contain one or more numeric Mail ids"
+        cap_error = _check_message_ids_cap(normalized_ids, "manage_trash")
+        if cap_error:
+            return cap_error
 
         id_condition = build_whose_id_list(normalized_ids)
 
@@ -963,6 +1126,27 @@ def manage_trash(
                 f"Error: manage_trash timed out after {effective_timeout}s on "
                 f"account '{account}'."
             )
+
+    # Refuse unbounded scans on destructive filter paths (move_to_trash and
+    # delete_permanent). The id-direct path and empty_trash are exempt.
+    # older_than_days provides a date_to bound so it is safe even when
+    # recent_days=0; only refuse when BOTH are absent.
+    if action != "empty_trash" and older_than_days is None and recent_days <= 0:
+        tool_error = ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                "manage_trash refuses to scan without a date window; "
+                "pass recent_days=7 or older_than_days=30 or message_ids=[...]"
+            ),
+            remediation={
+                "preferred": "Pass recent_days=7 or older_than_days=30 or message_ids=[...]",
+                "fallback_tool": "full_inbox_export",
+                "fallback_tool_args": {
+                    "account": account,
+                },
+            },
+        )
+        return serialize_tool_error(tool_error)
 
     if action == "empty_trash":
         if not confirm_empty:
@@ -1364,6 +1548,16 @@ def synchronize_account(
                 "Synchronizing can trigger Mail.app to download a large message backlog; "
                 "do not call it from routine tests."
             )
+        # Probe account count to compute a scaled outer timeout.
+        # Without scaling, a 4-account setup needs ~32s but the outer
+        # wrapper fires at 13s — SIGKILL mid-sync causes partial IMAP commits.
+        try:
+            account_names = list_mail_account_names(timeout=PER_ACCOUNT_TIMEOUT_S)
+        except AppleScriptTimeout:
+            account_names = []
+        account_count = max(len(account_names), 1)
+        outer_timeout = PER_ACCOUNT_TIMEOUT_S * account_count + 5
+
         script = f'''
         tell application "Mail"
             set acctNames to {{}}
@@ -1389,7 +1583,7 @@ def synchronize_account(
             end if
         end tell
         '''
-        return run_applescript(script, timeout=PER_ACCOUNT_TIMEOUT_S + 5)
+        return run_applescript(script, timeout=outer_timeout)
 
     account = account.strip()
     account_err = validate_account_name(account, timeout=PER_ACCOUNT_TIMEOUT_S)

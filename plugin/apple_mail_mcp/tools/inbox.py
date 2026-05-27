@@ -14,6 +14,7 @@ from apple_mail_mcp.core import (
     run_applescript,
     inbox_mailbox_script,
     content_preview_script,
+    sanitize_pipe_delimited_field,
     validate_account_name,
     account_not_found_json,
 )
@@ -110,12 +111,30 @@ def _parse_pipe_delimited_emails(
 
     Extended schema when *has_message_id* is True (7 or 8 fields):
         subject|||sender|||date|||read|||account|||mail_app_id|||internet_message_id[|||content_preview]
+
+    **Field-count validation:** the AppleScript side runs
+    ``sanitize_pipe_delimited_field`` on ``messageSubject`` and
+    ``messageSender`` to strip the ``|||`` sequence before emission. This
+    parser ALSO defensively checks the field count — if a row produces
+    too few fields (e.g. a hand-crafted test fixture or a Mail return
+    we didn't anticipate), the ``mail_app_id`` would land on the wrong
+    column and a subsequent ``manage_trash(action="delete_permanent")``
+    could delete the wrong message. Rows that don't validate are dropped.
     """
     emails: List[Dict[str, Any]] = []
     if not raw:
         return emails
     # Fields: subject(0) sender(1) date(2) read(3) account(4) mail_app_id(5)
     #         [internet_message_id(6)] [content_preview(7)]
+    # maxsplit = field_count - 1 so the LAST field (content_preview, or
+    # internet_message_id when content is absent) keeps any literal ||| inside
+    # it intact (content previews legitimately contain pipe sequences). The
+    # *earlier* user-controlled fields (subject, sender) are sanitized on the
+    # AppleScript side via `sanitize_pipe_delimited_field` before emission;
+    # any sanitizer escape that slipped through would land a non-numeric
+    # value in the mail_app_id slot (parts[5]) — the isdigit() check below
+    # rejects those rows rather than risk mapping the wrong id onto a
+    # downstream destructive op.
     maxsplit = 7 if has_message_id else 6
     for line in raw.split("\n"):
         if "|||" not in line:
@@ -124,10 +143,11 @@ def _parse_pipe_delimited_emails(
         if len(parts) < 6:
             continue
         mail_app_id = parts[5].strip()
-        # Filter rows with empty id — they cannot be used for targeted operations
-        # and are likely transient sync failures, matching search_emails's
-        # sanitize_field fallback behavior.
-        if not mail_app_id:
+        # mail_app_id must be a Mail integer id. If it's empty (transient sync
+        # failure) or not all digits (parser corruption from leaked ||| in a
+        # subject — sanitizer escape hatch), drop the row rather than risk
+        # mapping the wrong id onto a downstream destructive op.
+        if not mail_app_id or not mail_app_id.isdigit():
             continue
         item: Dict[str, Any] = {
             "subject": parts[0].strip(),
@@ -239,6 +259,11 @@ def _build_list_inbox_text_script(
                         set messageSender to sender of aMessage
                         set messageDate to date received of aMessage
                         set messageRead to read status of aMessage
+                        -- Strip ||| and embedded newlines from subject/sender so
+                        -- text-format parser markers (__MSG_ID__|||, __COUNT__|||)
+                        -- and the replied-detection line walk stay aligned.
+                        {sanitize_pipe_delimited_field("messageSubject")}
+                        {sanitize_pipe_delimited_field("messageSender")}
                         {message_id_text_block}
 
                         if messageRead then
@@ -350,6 +375,11 @@ def _build_list_inbox_json_script(
                     try
                         set mailAppId to id of aMessage
                     end try
+                    -- Strip ||| and embedded newlines from subject/sender so the
+                    -- Python parser can't be confused into mapping the wrong
+                    -- message_id onto an email (would lose data on delete).
+                    {sanitize_pipe_delimited_field("messageSubject")}
+                    {sanitize_pipe_delimited_field("messageSender")}
                     {content_field}
                     {message_id_field}
                     set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailAppId{message_id_suffix}{content_suffix}
@@ -1000,6 +1030,7 @@ def get_mailbox_unread_counts(
     account: Optional[str] = None,
     include_zero: bool = False,
     summary_only: bool = False,
+    max_mailboxes: int = 100,
     timeout: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
@@ -1013,6 +1044,12 @@ def get_mailbox_unread_counts(
         include_zero: Whether to include mailboxes with zero unread messages
         summary_only: If True, return only per-account inbox unread totals
                       (flat dict of account name -> unread count)
+        max_mailboxes: Maximum number of top-level mailboxes to enumerate per
+            account (default: 100). When the cap fires, the account's result
+            includes a ``truncated: true`` field. On Exchange accounts with
+            deep nested folder trees, or Gmail accounts with 200+ labels,
+            exceeding this cap can trigger the 120s timeout from sheer
+            property-read volume.
         timeout: Optional AppleScript timeout in seconds (default: 120s).
 
     Returns:
@@ -1111,8 +1148,15 @@ def get_mailbox_unread_counts(
             if shouldIncludeAccount then
                 try
                     set accountMailboxes to every mailbox of anAccount
+                    set mailboxIndex to 0
+                    set accountTruncated to false
 
                     repeat with aMailbox in accountMailboxes
+                        set mailboxIndex to mailboxIndex + 1
+                        if mailboxIndex > {max_mailboxes} then
+                            set accountTruncated to true
+                            exit repeat
+                        end if
                         try
                             set mailboxName to name of aMailbox
                             -- Always emit the parent row with its own unread count
@@ -1139,6 +1183,10 @@ def get_mailbox_unread_counts(
                             end repeat
                         end try
                     end repeat
+
+                    if accountTruncated then
+                        set end of resultList to accountName & "|||__TRUNCATED__|||{max_mailboxes}"
+                    end if
                 end try
             end if
         end repeat
@@ -1165,6 +1213,7 @@ def get_mailbox_unread_counts(
             ),
         }
     nested_counts: Dict[str, Dict[str, int]] = {}
+    truncated_accounts: set = set()
     if not result:
         return nested_counts
 
@@ -1173,7 +1222,16 @@ def get_mailbox_unread_counts(
         if len(parts) != 3:
             continue
         account_name, mailbox_name, unread_value = parts
+        if mailbox_name == "__TRUNCATED__":
+            truncated_accounts.add(account_name)
+            continue
         nested_counts.setdefault(account_name, {})[mailbox_name] = int(unread_value)
+
+    # Attach truncation marker to offending account records.
+    for acct in truncated_accounts:
+        if acct not in nested_counts:
+            nested_counts[acct] = {}
+        nested_counts[acct]["__truncated__"] = True  # type: ignore[assignment]
 
     return nested_counts
 
@@ -1286,14 +1344,18 @@ def list_mailboxes(
         include_counts: Whether to include message counts for each mailbox (default: False).
             Counts are expensive on large accounts — pass True only for folder audits.
         output_format: "text" (default, human-readable) or "json" (structured list of mailbox dicts)
-        max_mailboxes: Optional cap on mailboxes returned per account in JSON mode. When set,
-            the JSON payload includes ``total``, ``returned``, and ``truncated`` fields.
+        max_mailboxes: Cap on mailboxes returned per account. Defaults to 100. When the cap
+            fires, text mode appends a truncation banner and JSON mode includes
+            ``total``, ``returned``, and ``truncated`` fields.
         timeout: Optional AppleScript timeout in seconds (default: 120s).
 
     Returns:
         Formatted list of mailboxes with optional message counts.
         For nested mailboxes, shows both indented format and path format (e.g., "Projects/Amplify Impact")
     """
+    # Apply the default cap for both modes.
+    effective_max_mailboxes = max_mailboxes if max_mailboxes is not None else 100
+
     if account:
         validation_timeout = 30 if timeout is None else min(timeout, 30)
         account_err = validate_account_name(account, timeout=validation_timeout)
@@ -1306,7 +1368,7 @@ def list_mailboxes(
         return _list_mailboxes_json(
             account,
             include_counts,
-            max_mailboxes=max_mailboxes,
+            max_mailboxes=effective_max_mailboxes,
             timeout=timeout,
         )
 
@@ -1341,6 +1403,7 @@ def list_mailboxes(
     tell application "Mail"
         set outputText to "MAILBOXES" & return & return
         set allAccounts to every account
+        set wasCapped to false
 
         repeat with anAccount in allAccounts
             set accountName to name of anAccount
@@ -1352,8 +1415,14 @@ def list_mailboxes(
 
                 try
                     set accountMailboxes to every mailbox of anAccount
+                    set mailboxCount to 0
 
                     repeat with aMailbox in accountMailboxes
+                        set mailboxCount to mailboxCount + 1
+                        if mailboxCount > {effective_max_mailboxes} then
+                            set wasCapped to true
+                            exit repeat
+                        end if
                         set mailboxName to name of aMailbox
                         set outputText to outputText & "  📂 " & mailboxName
 
@@ -1381,6 +1450,11 @@ def list_mailboxes(
                 end try
             {account_filter_end}
         end repeat
+
+        if wasCapped then
+            set outputText to outputText & "⚠ Truncated: list_mailboxes capped at {effective_max_mailboxes} mailboxes per account." & return
+            set outputText to outputText & "  Pass max_mailboxes=N to adjust the cap." & return
+        end if
 
         return outputText
     end tell
@@ -1530,6 +1604,7 @@ def _build_overview_one_account_script(
     include_mailboxes: bool = True,
     include_recent: bool = True,
     max_recent: int = 10,
+    max_mailboxes: int = 100,
 ) -> str:
     """Build a script that returns one account's unread/total/recent slice.
 
@@ -1538,10 +1613,13 @@ def _build_overview_one_account_script(
         MAILBOX|||name|||unreadCount
         MAILBOX|||name/subName|||subUnread
         RECENT|||subject|||sender|||date|||read
+        MAILBOX_CAPPED|||accountName|||cap
         ...
 
     A1: caps recent-message enumeration to 10 via
     `messages 1 thru 10 of inboxMailbox`.
+    A2: caps mailbox enumeration at max_mailboxes (default 100) to prevent
+    Exchange deep-folder or Gmail many-labels timeouts.
     """
     escaped_account = escape_applescript(account)
     recent_block = ""
@@ -1566,11 +1644,17 @@ def _build_overview_one_account_script(
         """
     mailbox_block = ""
     if include_mailboxes:
-        mailbox_block = """
-            -- Mailbox structure with unread counts
+        mailbox_block = f"""
+            -- Mailbox structure with unread counts (capped at {max_mailboxes})
             try
                 set accountMailboxes to every mailbox of anAccount
+                set mailboxIndex to 0
                 repeat with aMailbox in accountMailboxes
+                    set mailboxIndex to mailboxIndex + 1
+                    if mailboxIndex > {max_mailboxes} then
+                        set end of resultLines to "MAILBOX_CAPPED|||" & accountName & "|||{max_mailboxes}"
+                        exit repeat
+                    end if
                     try
                         set mailboxName to name of aMailbox
                         set unreadCount to unread count of aMailbox
@@ -1622,6 +1706,7 @@ def _run_overview_one(
     include_mailboxes: bool = True,
     include_recent: bool = True,
     max_recent: int = 10,
+    max_mailboxes: int = 100,
 ) -> str:
     effective_timeout = timeout if timeout is not None else 180
     return run_applescript(
@@ -1630,6 +1715,7 @@ def _run_overview_one(
             include_mailboxes=include_mailboxes,
             include_recent=include_recent,
             max_recent=max_recent,
+            max_mailboxes=max_mailboxes,
         ),
         timeout=effective_timeout,
     )
@@ -1644,6 +1730,7 @@ def _parse_overview_account(raw: str) -> Dict[str, Any]:
         "error": None,
         "mailboxes": [],  # list of (name, unread_count) tuples
         "recent": [],     # list of dicts
+        "mailboxes_truncated": False,
     }
     parse_errors: List[str] = []
     if not raw:
@@ -1672,6 +1759,8 @@ def _parse_overview_account(raw: str) -> Dict[str, Any]:
                 parse_errors.append(
                     f"Invalid {tag} unread count for {parts[1]!r}: {parts[2]!r}"
                 )
+        elif tag == "MAILBOX_CAPPED" and len(parts) >= 2:
+            result["mailboxes_truncated"] = True
         elif tag == "RECENT" and len(parts) >= 5:
             result["recent"].append({
                 "subject": parts[1],
@@ -1741,6 +1830,8 @@ def _format_overview(
                         lines.append(f"  📂 {mb_name} ({mb_unread} unread)")
                     else:
                         lines.append(f"  📂 {mb_name}")
+            if acct.get("mailboxes_truncated"):
+                lines.append(f"  ⚠ Mailbox list truncated — account has more mailboxes than the cap allows.")
 
     if include_recent:
         lines.append("")
@@ -1877,6 +1968,8 @@ def _format_overview_json(
                     {"path": name, "unread": unread}
                     for name, unread in acct.get("mailboxes", [])
                 ]
+                if acct.get("mailboxes_truncated"):
+                    row["mailboxes_truncated"] = True
             if include_recent:
                 row["recent"] = acct.get("recent", [])[:max_recent]
         account_rows.append(row)
@@ -1906,6 +1999,7 @@ async def get_inbox_overview(
     include_recent: bool = True,
     include_suggestions: bool = True,
     max_recent: int = 10,
+    max_mailboxes: int = 100,
     timeout: Optional[int] = None,
 ) -> Union[str, Dict[str, Any]]:
     """
@@ -1923,6 +2017,12 @@ async def get_inbox_overview(
         include_recent: Include recent-email preview section (default: True).
         include_suggestions: Include assistant action suggestions (default: True).
         max_recent: Maximum recent emails to show across all accounts (default: 10).
+        max_mailboxes: Maximum top-level mailboxes to enumerate per account
+            (default: 100). When the cap fires, the affected account's data will
+            show ``mailboxes_truncated=True`` in JSON mode and a warning in the
+            errors field. On Exchange accounts with deep nested folders or Gmail
+            with many labels, uncapped mailbox enumeration can exceed the 120s
+            timeout from sheer property-read volume.
         timeout: Optional per-account AppleScript timeout in seconds
             (default: 180s).
 
@@ -1988,6 +2088,7 @@ async def get_inbox_overview(
                 include_mailboxes,
                 include_recent,
                 max_recent,
+                max_mailboxes,
             )
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)

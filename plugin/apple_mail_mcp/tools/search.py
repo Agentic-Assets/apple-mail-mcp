@@ -11,7 +11,7 @@ from apple_mail_mcp import server as _server
 from apple_mail_mcp.server import mcp, READ_ONLY_TOOL_ANNOTATIONS
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
-from apple_mail_mcp.constants import THREAD_PREFIXES
+from apple_mail_mcp.constants import SCAN_BOUNDS, THREAD_PREFIXES
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     build_mailbox_ref,
@@ -200,6 +200,8 @@ def _build_search_response(
     error_details: Optional[List[Dict[str, str]]] = None,
     recent_days_applied: Optional[float] = None,
     searched_from: Optional[str] = None,
+    body_search_capped: bool = False,
+    mailbox_count_capped: bool = False,
 ) -> str:
     """Return either JSON or text for search results."""
     sorted_records = _sort_search_records(records, sort)
@@ -207,6 +209,7 @@ def _build_search_response(
     items = sorted_records[:limit]
     next_offset = offset + len(items) if has_more else None
 
+    _max_mb = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
     if output_format == "json":
         payload: Dict[str, Any] = {
             "items": items,
@@ -219,19 +222,46 @@ def _build_search_response(
             "recent_days_applied": recent_days_applied if recent_days_applied is not None else 0.0,
             "searched_from": searched_from,
         }
+        if body_search_capped:
+            payload["body_search_capped"] = True
+            payload["body_search_cap_warning"] = (
+                "body_text scan was capped at 100 messages because no explicit date_from "
+                "was supplied. Pass date_from='YYYY-MM-DD' to search a larger window."
+            )
+        if mailbox_count_capped:
+            payload.setdefault("warnings", []).append(
+                f"mailbox='All' search was capped at {_max_mb} mailboxes per account "
+                "(SCAN_BOUNDS['MAX_MAILBOXES_PER_SEARCH']). Accounts with more than "
+                f"{_max_mb} labels/folders (e.g. Gmail with 200+ labels) may have "
+                "incomplete results. Pass mailbox='INBOX' or a specific folder name "
+                "for a complete search."
+            )
         if errors:
             payload["errors"] = errors
         if error_details:
             payload["error_details"] = error_details
         return json.dumps(payload)
 
-    return _format_search_records_text(
+    text_result = _format_search_records_text(
         items,
         subject_only=subject_only,
         errors=errors,
         error_details=error_details,
         recent_days_applied=recent_days_applied,
     )
+    if body_search_capped:
+        warning = (
+            "WARNING: body_text scan capped at 100 messages (no explicit date_from). "
+            "Pass date_from='YYYY-MM-DD' to search a larger window.\n"
+        )
+        text_result = warning + text_result
+    if mailbox_count_capped:
+        mb_warning = (
+            f"WARNING: mailbox='All' search capped at {_max_mb} mailboxes per account. "
+            "Accounts with many labels (e.g. Gmail 200+ labels) may have incomplete results.\n"
+        )
+        text_result = mb_warning + text_result
+    return text_result
 
 
 def _search_error_detail(account: str, exc: Exception) -> Dict[str, str]:
@@ -259,6 +289,8 @@ def _build_search_script(
     limit: int,
     body_text: Optional[str],
     recent_days: float = 0.0,
+    timeout: Optional[int] = None,
+    date_from_explicit: bool = False,
 ) -> str:
     """Build the AppleScript for a single account's search.
 
@@ -273,6 +305,15 @@ def _build_search_script(
     would only inspect the 21 newest messages and silently miss matches
     further back. Floor stays at ``collect_limit + offset`` and ceiling
     caps at 500 to keep Mail bounded on remote IMAP/Exchange mailboxes.
+
+    Performance guidance — body_text:
+        When ``body_text`` is set without an explicit ``date_from``, the
+        scan_cap is further capped at 100 to prevent hundreds of cold-cache
+        IMAP body fetches (each can take ~1s on large Exchange inboxes).
+        When the caller passes an explicit ``date_from`` (``date_from_explicit=True``),
+        the cap is left as-is because the caller has explicitly bounded the window.
+        A ``body_search_capped`` key is returned in structured responses when the
+        cap fires to help callers understand why results may be incomplete.
     """
     escaped_sender = escape_applescript(sender) if sender else None
     use_body_search = body_text is not None
@@ -303,6 +344,24 @@ def _build_search_script(
     else:
         scan_cap = base_cap
 
+    # Body-search cap: reading ``content of aMessage`` for every candidate is
+    # O(N × message-size) and triggers cold-cache IMAP fetches on large remote
+    # mailboxes. When the caller has not explicitly bounded the window with
+    # ``date_from``, cap at 100 to keep wall time reasonable. When an explicit
+    # ``date_from`` is passed the caller has intentionally bounded the scan, so
+    # we leave the cap as-is.
+    BODY_SEARCH_AUTO_CAP = 100
+    body_search_capped = False
+    if use_body_search and not date_from_explicit and scan_cap > BODY_SEARCH_AUTO_CAP:
+        scan_cap = min(scan_cap, BODY_SEARCH_AUTO_CAP)
+        body_search_capped = True
+
+    # Track whether the mailbox-count cap is active (mailbox="All" path).
+    # The AppleScript guard caps at MAX_MAILBOXES_PER_SEARCH; we surface this
+    # to callers via a warnings field so they know results may be incomplete on
+    # accounts with many labels (e.g. Gmail with 200+ labels).
+    mailbox_count_capped = mailbox == "All"
+
     bounded_candidate_script = f'''
                             set matchingMessages to {{}}
                             set candidateMessages to {{}}
@@ -316,9 +375,13 @@ def _build_search_script(
                             end try
     '''
 
+    _max_mailboxes_per_search = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
     if mailbox == "All":
-        mailbox_script = """
+        mailbox_script = f"""
                 set searchMailboxes to every mailbox of targetAccount
+                if (count of searchMailboxes) > {_max_mailboxes_per_search} then
+                    set searchMailboxes to items 1 thru {_max_mailboxes_per_search} of searchMailboxes
+                end if
         """
         skip_script = """
                         set skipFolders to {"Trash", "Junk", "Junk Email", "Deleted Items", "Sent", "Sent Items", "Sent Messages", "Drafts", "Spam", "Deleted Messages"}
@@ -457,6 +520,12 @@ def _build_search_script(
                             end repeat
         '''
 
+    # Template the inner AppleScript timeout from the same value the outer
+    # run_applescript wrapper will use, minus 10 s so the AS timeout fires
+    # before SIGKILL and Mail.app can clean up gracefully. Floor at 30 s to
+    # keep the script meaningful on very tight timeouts.
+    inner_timeout = max(30, (timeout if timeout is not None else 180) - 10)
+
     script = f'''
     on sanitize_field(value)
         try
@@ -505,7 +574,7 @@ def _build_search_script(
     end iso_datetime
 
     tell application "Mail"
-        with timeout of 180 seconds
+        with timeout of {inner_timeout} seconds
             try
                 set recordLines to {{}}
                 set offsetRemaining to {offset}
@@ -615,7 +684,7 @@ def _build_search_script(
     end tell
     '''
 
-    return script
+    return script, body_search_capped, mailbox_count_capped
 
 
 def _list_accounts_script() -> str:
@@ -654,15 +723,21 @@ def _search_one_account(
     body_text: Optional[str],
     timeout: Optional[int],
     recent_days: float = 0.0,
-) -> "tuple[List[Dict[str, Any]], List[Dict[str, str]]]":
+    date_from_explicit: bool = False,
+) -> "tuple[List[Dict[str, Any]], List[Dict[str, str]], bool]":
     """Run the search AppleScript for a single account synchronously.
 
-    Returns (records, mailbox_errors). *mailbox_errors* is a list of dicts
-    with ``mailbox`` and ``message`` keys for Exchange mailboxes that could
-    not be searched (e.g. restricted folders). Callers surface these via
-    ``error_details`` so agents know which mailboxes were skipped.
+    Returns (records, mailbox_errors, body_search_capped, mailbox_count_capped).
+    *mailbox_errors* is a list of dicts with ``mailbox`` and ``message`` keys for
+    Exchange mailboxes that could not be searched (e.g. restricted folders).
+    Callers surface these via ``error_details`` so agents know which mailboxes were
+    skipped.
+    *body_search_capped* is True when the body-search auto-cap fired (100 messages
+    when no explicit date_from was supplied).
+    *mailbox_count_capped* is True when mailbox="All" and the AppleScript guard
+    capped the search at MAX_MAILBOXES_PER_SEARCH mailboxes.
     """
-    script = _build_search_script(
+    script, body_search_capped, mailbox_count_capped = _build_search_script(
         account=account,
         mailbox=mailbox,
         subject_terms=subject_terms,
@@ -677,12 +752,14 @@ def _search_one_account(
         limit=limit,
         body_text=body_text,
         recent_days=recent_days,
+        timeout=timeout,
+        date_from_explicit=date_from_explicit,
     )
     result = run_applescript(script, timeout=timeout if timeout is not None else 180)
     if result.startswith("ERROR|||"):
         raise ValueError(result.split("|||", 1)[1])
     records, mailbox_errors = _parse_search_records(result)
-    return records, mailbox_errors
+    return records, mailbox_errors, body_search_capped, mailbox_count_capped
 
 
 async def _search_mail_records(
@@ -702,19 +779,23 @@ async def _search_mail_records(
     body_text: Optional[str] = None,
     timeout: Optional[int] = None,
     recent_days: float = 0.0,
-) -> tuple[List[Dict[str, Any]], List[str], List[Dict[str, str]]]:
-    """Return (records, error_account_names, error_details) from Apple Mail.
+    date_from_explicit: bool = False,
+) -> "tuple[List[Dict[str, Any]], List[str], List[Dict[str, str]], bool]":
+    """Return (records, error_account_names, error_details, body_search_capped) from Apple Mail.
 
     When account is None, dispatches one AppleScript per account in parallel
     via ``asyncio.to_thread`` so wall time is bounded by the slowest single
     account rather than the sum. A per-account ``AppleScriptTimeout`` becomes
     an entry in the returned errors list — the call still returns whatever
     other accounts produced.
+
+    ``body_search_capped`` is True when the body-search auto-cap (100 messages)
+    fired because no explicit ``date_from`` was passed.
     """
     if offset < 0:
         raise ValueError("offset must be >= 0")
     if limit <= 0:
-        return [], [], []
+        return [], [], [], False
     if sort not in {"date_desc", "date_asc"}:
         raise ValueError("Invalid sort. Use: date_desc, date_asc")
     if read_status not in {"all", "read", "unread"}:
@@ -723,7 +804,7 @@ async def _search_mail_records(
     # Single-account: short-circuit, no gather overhead.
     if account:
         try:
-            records, mb_errors = await asyncio.to_thread(
+            records, mb_errors, body_capped, mb_count_capped = await asyncio.to_thread(
                 _search_one_account,
                 account,
                 mailbox,
@@ -740,14 +821,15 @@ async def _search_mail_records(
                 body_text,
                 timeout,
                 recent_days,
+                date_from_explicit,
             )
             mb_error_details = [
                 {"account": account, "mailbox": e["mailbox"], "type": "mailbox_error", "message": e["message"]}
                 for e in mb_errors
             ]
-            return records, [], mb_error_details
+            return records, [], mb_error_details, body_capped
         except AppleScriptTimeout as exc:
-            return [], [account], [_search_error_detail(account, exc)]
+            return [], [account], [_search_error_detail(account, exc)], False
 
     # Multi-account: fetch account list cheaply, then dispatch in parallel.
     try:
@@ -756,11 +838,11 @@ async def _search_mail_records(
         raise ValueError("Mail account listing timed out")
 
     if not accounts:
-        return [], [], []
+        return [], [], [], False
 
     async def run_one(acct: str) -> tuple[str, Any]:
         try:
-            recs, mb_errs = await asyncio.to_thread(
+            recs, mb_errs, body_capped, mb_count_capped = await asyncio.to_thread(
                 _search_one_account,
                 acct,
                 mailbox,
@@ -777,8 +859,9 @@ async def _search_mail_records(
                 body_text,
                 timeout,
                 recent_days,
+                date_from_explicit,
             )
-            return acct, (recs, mb_errs)
+            return acct, (recs, mb_errs, body_capped, mb_count_capped)
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
         except Exception as exc:
@@ -789,13 +872,16 @@ async def _search_mail_records(
     combined: List[Dict[str, Any]] = []
     errors: List[str] = []
     error_details: List[Dict[str, str]] = []
+    any_body_capped = False
     for acct, outcome in results:
         if isinstance(outcome, Exception):
             errors.append(acct)
             error_details.append(_search_error_detail(acct, outcome))
         else:
-            recs, mb_errs = outcome
+            recs, mb_errs, body_capped, _mb_count_capped = outcome
             combined.extend(recs)
+            if body_capped:
+                any_body_capped = True
             for e in mb_errs:
                 error_details.append({
                     "account": acct,
@@ -804,7 +890,7 @@ async def _search_mail_records(
                     "message": e["message"],
                 })
 
-    return combined, errors, error_details
+    return combined, errors, error_details, any_body_capped
 
 
 def _search_mail_records_sync(**kwargs) -> List[Dict[str, Any]]:
@@ -819,7 +905,7 @@ def _search_mail_records_sync(**kwargs) -> List[Dict[str, Any]]:
     account = kwargs.get("account")
     if account:
         try:
-            records, _mb_errors = _search_one_account(
+            records, _mb_errors, _body_capped, _mb_count_capped = _search_one_account(
                 account=account,
                 mailbox=kwargs.get("mailbox", "INBOX"),
                 subject_terms=kwargs.get("subject_terms"),
@@ -839,7 +925,7 @@ def _search_mail_records_sync(**kwargs) -> List[Dict[str, Any]]:
         except AppleScriptTimeout:
             raise
 
-    records, errors, error_details = asyncio.run(_search_mail_records(**kwargs))
+    records, errors, error_details, _body_capped = asyncio.run(_search_mail_records(**kwargs))
     if errors and not records:
         non_timeout = [
             item for item in error_details if item.get("type") != "timeout"
@@ -1015,6 +1101,7 @@ async def search_emails(
 
     # Smart default: 48h window when no explicit start date was passed.
     searched_from: Optional[str] = None
+    _date_from_explicit = False
     if date_from is None and effective_recent_days > 0:
         cutoff = datetime.now() - timedelta(days=effective_recent_days)
         date_from = cutoff.strftime("%Y-%m-%d")
@@ -1023,11 +1110,12 @@ async def search_emails(
         # Explicit caller override — effective window is 0 for reporting purposes.
         effective_recent_days = 0.0
         searched_from = date_from
+        _date_from_explicit = True
 
     subject_terms = normalize_search_terms(subject_keyword, subject_keywords)
 
     try:
-        records, errors, error_details = await _search_mail_records(
+        records, errors, error_details, body_search_capped = await _search_mail_records(
             account=account,
             mailbox=mailbox,
             subject_terms=subject_terms,
@@ -1044,6 +1132,7 @@ async def search_emails(
             body_text=body_text,
             timeout=timeout,
             recent_days=effective_recent_days,
+            date_from_explicit=_date_from_explicit,
         )
 
         # Replied-detection: build the replied-Message-ID set once and
@@ -1097,6 +1186,8 @@ async def search_emails(
             error_details=error_details or None,
             recent_days_applied=effective_recent_days,
             searched_from=searched_from,
+            body_search_capped=body_search_capped,
+            mailbox_count_capped=(mailbox == "All"),
         )
     except ValueError as exc:
         return f"Error: {exc}"

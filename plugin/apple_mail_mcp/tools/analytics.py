@@ -963,6 +963,10 @@ def get_statistics(
     return result
 
 
+_EXPORT_ENTIRE_MAILBOX_DEFAULT = 100
+_EXPORT_ENTIRE_MAILBOX_WARN_THRESHOLD = 500
+
+
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def export_emails(
@@ -972,7 +976,7 @@ def export_emails(
     mailbox: str = "INBOX",
     save_directory: str = "~/Desktop",
     format: str = "txt",
-    max_emails: int = 1000,
+    max_emails: Optional[int] = None,
     timeout: Optional[int] = None,
 ) -> str:
     """
@@ -982,6 +986,12 @@ def export_emails(
     ``max_emails`` messages (``items 1 thru max_emails``) so the full message
     list of a 24K-message Exchange mailbox is never materialized.
 
+    **Exchange / Gmail cold-cache warning:** ``entire_mailbox`` reads
+    ``content of aMessage`` for every exported message. On an Exchange account
+    that has not recently synced, each body read can take 1–3 seconds — 100
+    emails is already 2–5 minutes of wall time. For larger metadata-only walks
+    use ``full_inbox_export`` instead, which skips body reads entirely.
+
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
             ``DEFAULT_MAIL_ACCOUNT`` when None.
@@ -990,7 +1000,11 @@ def export_emails(
         mailbox: Mailbox to export from (default: "INBOX")
         save_directory: Directory to save exports (default: "~/Desktop")
         format: Export format: "txt", "html" (default: "txt")
-        max_emails: Maximum number of emails to export for entire_mailbox (default: 1000, safety cap)
+        max_emails: Maximum number of emails to export for entire_mailbox.
+            Defaults to 100 for entire_mailbox scope. Values above 500 are
+            accepted but will emit a performance warning — each message
+            requires a body read from Mail which is expensive on Exchange
+            cold-cache accounts. For large exports prefer ``full_inbox_export``.
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
 
     Returns:
@@ -1010,6 +1024,23 @@ def export_emails(
     path_err = validate_save_path(save_directory)
     if path_err:
         return path_err
+
+    # Apply scope-specific max_emails default and emit a performance warning
+    # when the caller requests an unusually large body-read export.
+    export_warning: Optional[str] = None
+    if scope == "entire_mailbox":
+        if max_emails is None:
+            max_emails = _EXPORT_ENTIRE_MAILBOX_DEFAULT
+        elif max_emails > _EXPORT_ENTIRE_MAILBOX_WARN_THRESHOLD:
+            export_warning = (
+                f"⚠ Performance warning: max_emails={max_emails} will read the body of "
+                f"{max_emails} messages from Mail.app. On an Exchange or Gmail account "
+                "with a cold cache each body read can take 1–3 seconds, making this "
+                f"export potentially {max_emails * 2 // 60}–{max_emails * 3 // 60} minutes long. "
+                "For metadata-only walks over large mailboxes, use full_inbox_export instead."
+            )
+    elif max_emails is None:
+        max_emails = 1000  # legacy default for future scopes
 
     save_dir = os.path.realpath(os.path.expanduser(save_directory))
 
@@ -1235,6 +1266,8 @@ def export_emails(
         )
     except AppleScriptTimeout:
         return f"Error: AppleScript timed out while exporting emails for '{account}'"
+    if export_warning:
+        return export_warning + "\n\n" + result
     return result
 
 

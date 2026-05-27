@@ -166,3 +166,67 @@ class SingleEmailExportCloseTest(unittest.TestCase):
         end_try_pos = script.find("end try", on_error_pos)
         error_block = script[on_error_pos:end_try_pos]
         self.assertIn("close access", error_block)
+
+
+class ExportEmailsDefaultsAndWarningTests(unittest.TestCase):
+    """Fix #4: entire_mailbox default max_emails=100; warn above 500."""
+
+    def _export(self, **kwargs):
+        """Drive export_emails and return (result_text, captured_script)."""
+        capture = _ScriptCapture(
+            return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!"
+        )
+        import os
+        defaults = dict(
+            account="Work",
+            scope="entire_mailbox",
+            save_directory=os.path.expanduser("~/Desktop"),
+            mailbox="INBOX",
+            format="txt",
+        )
+        defaults.update(kwargs)
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture):
+            result = analytics_tools.export_emails(**defaults)
+        return result, capture.last_script
+
+    def test_entire_mailbox_default_max_emails_is_100(self):
+        """When max_emails is omitted, entire_mailbox scope uses 100."""
+        _result, script = self._export()
+        # The generated AppleScript must cap at 100
+        self.assertIn("1 thru 100", script)
+        self.assertNotIn("1 thru 1000", script)
+
+    def test_entire_mailbox_explicit_max_emails_respected(self):
+        """Explicit max_emails is passed through to the generated script."""
+        _result, script = self._export(max_emails=50)
+        self.assertIn("1 thru 50", script)
+
+    def test_entire_mailbox_no_warning_at_default(self):
+        """Default export (max_emails=100) must not emit a performance warning."""
+        result, _script = self._export()
+        self.assertNotIn("Performance warning", result)
+
+    def test_entire_mailbox_no_warning_at_500(self):
+        """max_emails=500 is at the threshold — no warning expected."""
+        result, _script = self._export(max_emails=500)
+        self.assertNotIn("Performance warning", result)
+
+    def test_entire_mailbox_warning_at_501(self):
+        """max_emails=501 exceeds the threshold — warning must be present."""
+        result, _script = self._export(max_emails=501)
+        self.assertIn("Performance warning", result)
+        self.assertIn("full_inbox_export", result)
+
+    def test_entire_mailbox_warning_at_1000(self):
+        """Legacy max_emails=1000 exceeds the threshold — warning must be present."""
+        result, _script = self._export(max_emails=1000)
+        self.assertIn("Performance warning", result)
+
+    def test_entire_mailbox_warning_preserves_export_result(self):
+        """When a warning is emitted the actual export result is still present."""
+        result, _script = self._export(max_emails=600)
+        self.assertIn("✓ Mailbox exported successfully!", result)
+
+
+if __name__ == "__main__":
+    unittest.main()

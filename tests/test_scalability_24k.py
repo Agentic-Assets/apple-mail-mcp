@@ -327,7 +327,7 @@ class SearchScanCapScalingTests(unittest.TestCase):
             limit=limit,
             body_text=None,
             recent_days=recent_days,
-        )
+        )[0]
 
     def test_default_recent_days_2_scales_to_300(self):
         # Phase A: window cap comes from
@@ -356,7 +356,7 @@ class SearchScanCapScalingTests(unittest.TestCase):
             limit=1,
             body_text=None,
             recent_days=2.0,
-        )
+        )[0]
         date_idx = script.index("set messageDate to date received of aMessage")
         break_idx = script.index("if messageDate < fromDate then exit repeat")
         subject_idx = script.index("set messageSender to sender of aMessage")
@@ -379,7 +379,7 @@ class SearchScanCapScalingTests(unittest.TestCase):
             limit=1,
             body_text=None,
             recent_days=2.0,
-        )
+        )[0]
         self.assertIn("repeat with aMessage in candidateMessages", script)
         self.assertIn("set messageSubject to subject of aMessage", script)
         collection_block = script.split("set matchingCount to count of matchingMessages", 1)[0]

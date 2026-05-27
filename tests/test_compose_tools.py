@@ -578,6 +578,9 @@ class ComposeEmailSenderOverrideTests(unittest.TestCase):
 
         def fake_run(script, timeout=120):
             captured.append(script)
+            # First call is the window-count probe (Fix #12); return 0 open windows.
+            if "count of outgoing messages" in script:
+                return "0"
             return "✓ Email opened in Mail for review."
 
         with patch(
@@ -592,9 +595,11 @@ class ComposeEmailSenderOverrideTests(unittest.TestCase):
                 mode="open",
             )
 
-        self.assertIn("OPENING EMAIL FOR REVIEW", captured[0])
-        self.assertIn("save newMessage", captured[0])
-        self.assertIn("activate", captured[0])
+        # captured[0] is the window-count probe; find the main compose script.
+        main_scripts = [s for s in captured if "OPENING EMAIL FOR REVIEW" in s]
+        self.assertEqual(len(main_scripts), 1)
+        self.assertIn("save newMessage", main_scripts[0])
+        self.assertIn("activate", main_scripts[0])
         self.assertIn("review", result)
 
     def test_draft_safe_blocks_explicit_send(self):
@@ -837,6 +842,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         def fake_run(script, timeout=120):
             captured.append(script)
+            # First call is the window-count probe (Fix #12); return 0 open windows.
+            if "count of outgoing messages" in script:
+                return "0"
             return "Reply opened in Mail for review."
 
         with patch(
@@ -850,9 +858,10 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 mode="open",
             )
 
-        script = captured[0]
-        self.assertIn("OPENING REPLY FOR REVIEW", script)
-        self.assertIn("save replyMessage", script)
+        # captured[0] is the window-count probe; find the main reply script.
+        reply_scripts = [s for s in captured if "OPENING REPLY FOR REVIEW" in s]
+        self.assertEqual(len(reply_scripts), 1)
+        self.assertIn("save replyMessage", reply_scripts[0])
         self.assertIn("review", result)
 
     def test_default_emits_single_alias_fallback_for_reply_message(self):
@@ -960,9 +969,14 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
 
     def test_forward_open_mode_saves_before_leaving_open_for_review(self):
         captured = []
+        call_count = [0]
 
         def fake_run(script, timeout=120):
             captured.append(script)
+            call_count[0] += 1
+            # First call is the window-count probe (Fix #12); return 0 open windows.
+            if "count of outgoing messages" in script:
+                return "0"
             return "Forward opened in Mail for review."
 
         with patch(
@@ -976,9 +990,10 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
                 mode="open",
             )
 
-        self.assertEqual(len(captured), 1)
-        self.assertIn("OPENING FORWARD FOR REVIEW", captured[0])
-        self.assertIn("save forwardMessage", captured[0])
+        # captured[0] is the window-count probe; captured[1] is the forward script.
+        forward_scripts = [s for s in captured if "OPENING FORWARD FOR REVIEW" in s]
+        self.assertEqual(len(forward_scripts), 1)
+        self.assertIn("save forwardMessage", forward_scripts[0])
         self.assertIn("review", result)
 
     def test_default_emits_single_alias_fallback_for_forward_message(self):

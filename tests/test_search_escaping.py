@@ -35,7 +35,7 @@ def _extract_sender_fragment(script: str) -> Optional[str]:
 
 def _script_for_sender(sender: str) -> str:
     """Build the AppleScript for a single-account search filtered by sender."""
-    return _build_search_script(
+    result = _build_search_script(
         account="Work",
         mailbox="INBOX",
         subject_terms=None,
@@ -51,6 +51,8 @@ def _script_for_sender(sender: str) -> str:
         body_text=None,
         recent_days=2.0,
     )
+    # _build_search_script returns (script, body_search_capped[, ...]) — unpack first element.
+    return result[0]
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +142,7 @@ def test_none_sender_produces_no_sender_filter() -> None:
         limit=20,
         body_text=None,
         recent_days=2.0,
-    )
+    )[0]
     assert 'messageSender contains "' not in script, (
         "messageSender contains filter should not appear when sender=None"
     )

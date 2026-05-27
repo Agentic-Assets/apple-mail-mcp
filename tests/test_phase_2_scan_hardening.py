@@ -789,5 +789,189 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
         self.assertTrue(data["truncated"])
 
 
+class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
+    """Fix #3: move_email must refuse recent_days=0 without older_than_days."""
+
+    def test_move_email_recent_days_zero_returns_unbounded_scan_error(self):
+        """recent_days=0, no older_than_days, no message_ids -> UNBOUNDED_SCAN_REQUIRED."""
+        import json
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.move_email(
+                account="Work",
+                sender="newsletter@example.com",
+                to_mailbox="Archive",
+                recent_days=0,
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertTrue(payload.get("error"))
+        self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("recent_days=7", payload["remediation"]["preferred"])
+        self.assertEqual(payload["remediation"]["fallback_tool"], "full_inbox_export")
+
+    def test_move_email_recent_days_zero_with_older_than_days_is_allowed(self):
+        """older_than_days overrides the recent_days window — should proceed."""
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return ""
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            with patch(
+                "apple_mail_mcp.tools.manage._search_mail_records",
+                return_value=[],
+            ):
+                result = manage_tools.move_email(
+                    account="Work",
+                    sender="newsletter@example.com",
+                    to_mailbox="Archive",
+                    recent_days=0,
+                    older_than_days=30,
+                )
+
+        # Should NOT return a structured error
+        import json
+        try:
+            payload = json.loads(result)
+            self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        except (json.JSONDecodeError, TypeError):
+            pass  # Plain text response is fine — no structured error
+
+    def test_move_email_message_ids_skips_unbounded_guard(self):
+        """message_ids path is always safe — no UNBOUNDED_SCAN_REQUIRED."""
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "MOVING EMAILS BY IDS: INBOX -> Archive\n\nTOTAL: 0 email(s) moved"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            result = manage_tools.move_email(
+                account="Work",
+                to_mailbox="Archive",
+                message_ids=["42"],
+                recent_days=0,
+            )
+
+        import json
+        try:
+            payload = json.loads(result)
+            self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        except (json.JSONDecodeError, TypeError):
+            pass  # Plain text result is fine
+
+
+class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
+    """Fix #3: manage_trash must refuse recent_days=0 without older_than_days."""
+
+    def test_manage_trash_move_to_trash_recent_days_zero_returns_error(self):
+        """move_to_trash with recent_days=0, no older_than_days -> UNBOUNDED_SCAN_REQUIRED."""
+        import json
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="move_to_trash",
+                sender="newsletter@example.com",
+                recent_days=0,
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertTrue(payload.get("error"))
+        self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("recent_days=7", payload["remediation"]["preferred"])
+        self.assertEqual(payload["remediation"]["fallback_tool"], "full_inbox_export")
+
+    def test_manage_trash_delete_permanent_recent_days_zero_returns_error(self):
+        """delete_permanent with recent_days=0, no older_than_days -> UNBOUNDED_SCAN_REQUIRED."""
+        import json
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="delete_permanent",
+                sender="newsletter@example.com",
+                apply_to_all=True,
+                recent_days=0,
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertTrue(payload.get("error"))
+        self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
+
+    def test_manage_trash_empty_trash_exempt_from_unbounded_guard(self):
+        """empty_trash does not use recent_days scan — guard must not fire."""
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "EMPTYING TRASH\n\n✓ Emptied trash for account: Work"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="empty_trash",
+                confirm_empty=True,
+                recent_days=0,
+            )
+
+        import json
+        try:
+            payload = json.loads(result)
+            self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        except (json.JSONDecodeError, TypeError):
+            pass  # Plain text result is fine
+
+    def test_manage_trash_message_ids_skips_unbounded_guard(self):
+        """message_ids path is always safe — no UNBOUNDED_SCAN_REQUIRED."""
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "MOVING EMAILS TO TRASH BY IDS\n\nTOTAL: 0 email(s) moved to trash"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="move_to_trash",
+                message_ids=["42"],
+                recent_days=0,
+            )
+
+        import json
+        try:
+            payload = json.loads(result)
+            self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        except (json.JSONDecodeError, TypeError):
+            pass  # Plain text result is fine
+
+    def test_manage_trash_older_than_days_allows_zero_recent_days(self):
+        """older_than_days overrides recent_days window — should proceed."""
+        with patch(
+            "apple_mail_mcp.tools.manage._search_mail_records",
+            return_value=[],
+        ):
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="move_to_trash",
+                sender="newsletter@example.com",
+                recent_days=0,
+                older_than_days=30,
+                dry_run=True,
+            )
+
+        import json
+        try:
+            payload = json.loads(result)
+            self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
+        except (json.JSONDecodeError, TypeError):
+            pass  # Plain text dry-run result is fine
+
+
 if __name__ == "__main__":
     unittest.main()

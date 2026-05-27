@@ -39,6 +39,13 @@ from apple_mail_mcp.core import normalize_message_ids
 MAX_SCAN_DAYS = 365
 MAX_SCAN_LIMIT = 10_000
 
+# Mail.app's AppleScript parser rejects `id is X or id is Y or ...` predicates
+# beyond ~200-500 OR-terms (it varies by macOS version and is undocumented).
+# Cap conservatively so a caller passing a runaway message_ids list gets a
+# clear ToolError instead of a Mail crash or hang. Callers that need to act
+# on >50 messages at once must chunk in Python (`iter_id_chunks` helper).
+MAX_WHOSE_IDS = 50
+
 _ISSUER = "core.bounded_inbox_scan"
 
 
@@ -254,6 +261,11 @@ def build_whose_id_list(message_ids: list[str]) -> str:
     numeric Mail message ids ever reach AppleScript — this is the safe
     write-path use of ``whose`` (small, in-process id list, no remote
     materialization).
+
+    Hard-capped at ``MAX_WHOSE_IDS`` (50): Mail's AppleScript parser
+    rejects or hangs on very long ``or``-chained predicates. Callers
+    needing to act on more messages at once must chunk via
+    ``iter_id_chunks`` and loop the AppleScript invocation.
     """
     clean = normalize_message_ids(message_ids)
     if not clean:
@@ -261,15 +273,64 @@ def build_whose_id_list(message_ids: list[str]) -> str:
             code="INVALID_SCAN_WINDOW",
             message="build_whose_id_list requires at least one numeric message id.",
         )
+    if len(clean) > MAX_WHOSE_IDS:
+        raise ToolError(
+            code="WHOSE_ID_LIST_TOO_LARGE",
+            message=(
+                f"build_whose_id_list received {len(clean)} message ids; "
+                f"hard cap is {MAX_WHOSE_IDS}. Mail's AppleScript parser "
+                "rejects or hangs on very long `id is X or id is Y ...` "
+                "predicates."
+            ),
+            remediation={
+                "preferred": (
+                    f"Chunk message_ids into batches of {MAX_WHOSE_IDS} "
+                    "or fewer and call the tool once per batch"
+                ),
+                "helper": "apple_mail_mcp.bounded_scan.iter_id_chunks",
+            },
+        )
     return " or ".join(f"id is {mid}" for mid in clean)
+
+
+def iter_id_chunks(
+    message_ids: list[str],
+    chunk_size: int = MAX_WHOSE_IDS,
+):
+    """Yield successive chunks of normalized message ids, each ≤ ``chunk_size``.
+
+    Callers that need to act on more than ``MAX_WHOSE_IDS`` messages must
+    drive the AppleScript helper once per chunk:
+
+        for chunk in iter_id_chunks(message_ids):
+            condition = build_whose_id_list(chunk)
+            run_applescript(script_using(condition), ...)
+
+    Ids are normalized (non-numeric and empty entries dropped) before
+    chunking, so the yielded chunks are safe to pass directly to
+    ``build_whose_id_list``.
+    """
+    if chunk_size <= 0 or chunk_size > MAX_WHOSE_IDS:
+        raise ToolError(
+            code="INVALID_SCAN_WINDOW",
+            message=(
+                f"iter_id_chunks requires 0 < chunk_size ≤ {MAX_WHOSE_IDS}; "
+                f"got {chunk_size!r}."
+            ),
+        )
+    clean = normalize_message_ids(message_ids)
+    for i in range(0, len(clean), chunk_size):
+        yield clean[i : i + chunk_size]
 
 
 __all__ = [
     "MAX_SCAN_DAYS",
     "MAX_SCAN_LIMIT",
+    "MAX_WHOSE_IDS",
     "bounded_inbox_scan",
     "build_bounded_message_scan",
     "build_bounded_filtered_scan",
     "compute_scan_upper_bound",
     "build_whose_id_list",
+    "iter_id_chunks",
 ]

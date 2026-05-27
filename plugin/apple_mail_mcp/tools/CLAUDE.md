@@ -34,6 +34,8 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | `every message of MB whose <non-id-pred>` (unbounded `whose`) | Materializes whole mailbox; hangs on 24K+ inboxes | `build_bounded_message_scan(...)` + in-loop `repeat ... if` |
 | `every message of MB` (no `whose`) | Raw enumeration | `messages 1 thru N of MB` |
 | `build_bounded_message_scan(..., whose_condition=...)` | Raises `UNSAFE_WHOSE_ON_LIST` at runtime | `build_bounded_filtered_scan(...)` |
+| `build_whose_id_list(ids)` with > 50 ids | Mail parser crash/hang; raises `WHOSE_ID_LIST_TOO_LARGE` | `iter_id_chunks(ids)` + loop |
+| Pipe-row emit without `sanitize_pipe_delimited_field` on user fields | Subject containing `&#124;&#124;&#124;` corrupts `message_id` → wrong-email delete | `core.sanitize_pipe_delimited_field("messageSubject")` etc. |
 
 When in doubt, copy the pattern from `search.py`'s per-message loop — it has been audited as Gmail-safe and Exchange-bounded.
 

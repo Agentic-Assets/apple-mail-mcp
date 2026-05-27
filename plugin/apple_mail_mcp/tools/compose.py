@@ -37,10 +37,72 @@ from apple_mail_mcp.core import (
 # updates in tests/test_phase_2_scan_hardening.py.
 DRAFT_LIST_CAP = SCAN_BOUNDS["DRAFT_LOOKUP"]
 MESSAGE_LOOKUP_CAP = SCAN_BOUNDS["MESSAGE_LOOKUP"]
+# Maximum number of Mail compose windows that may be open simultaneously when
+# mode="open" is used. Each call in mode="open" leaves a window open; at high
+# counts NSWindowServer OOMs. Agents doing bulk drafting must use mode="draft".
+MAX_OPEN_COMPOSE_WINDOWS = 5
 _THREADED_SUBJECT_RE = re.compile(r"^\s*((re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
 _QUOTED_THREAD_MARKERS_RE = re.compile(
     r"(?im)(^on .+ wrote:\s*$|^-{2,}\s*original message\s*-{2,}|^from:\s*.+$|^> .+)"
 )
+
+
+def _count_open_outgoing_messages(timeout: int = 10) -> int:
+    """Return the current count of open outgoing messages (compose windows) in Mail.
+
+    Uses ``count of outgoing messages of application "Mail"`` which reflects
+    each compose window exactly. Returns -1 when the probe fails (AppleScript
+    error or timeout), so callers can fail-open.
+    """
+    script = '''
+    tell application "Mail"
+        try
+            return count of outgoing messages
+        on error
+            return -1
+        end try
+    end tell
+    '''
+    try:
+        raw = run_applescript(script, timeout=timeout).strip()
+        return int(raw) if raw.lstrip("-").isdigit() else -1
+    except Exception:  # noqa: BLE001 — probe must never propagate; fail-open
+        return -1
+
+
+def _check_open_compose_window_cap(timeout: int = 10) -> "Optional[str]":
+    """Return a serialized ToolError if the open-compose-window cap is reached.
+
+    Returns None when it is safe to open another window. Fails open (returns
+    None) when the probe itself errors, so a transient Mail.app glitch does
+    not permanently block mode='open' calls.
+    """
+    count = _count_open_outgoing_messages(timeout=timeout)
+    if count < 0:
+        # Probe failed — fail open to avoid blocking legitimate calls.
+        return None
+    if count >= MAX_OPEN_COMPOSE_WINDOWS:
+        from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+        err = ToolError(
+            code="TOO_MANY_OPEN_DRAFTS",
+            message=(
+                f"Mail already has {count} compose window(s) open "
+                f"(cap: {MAX_OPEN_COMPOSE_WINDOWS}). Opening more windows risks "
+                "running out of NSWindowServer resources."
+            ),
+            remediation={
+                "preferred": (
+                    "Use mode='draft' to save quietly to Drafts without opening a window"
+                ),
+                "alternative": (
+                    "Close some open compose windows in Mail, then retry with mode='open'"
+                ),
+                "open_window_count": count,
+                "cap": MAX_OPEN_COMPOSE_WINDOWS,
+            },
+        )
+        return serialize_tool_error(err)
+    return None
 
 
 def _build_found_message_lookup(
@@ -1088,6 +1150,11 @@ def reply_to_email(
     if blocked:
         return blocked
 
+    if effective_mode == "open":
+        cap_err = _check_open_compose_window_cap()
+        if cap_err:
+            return cap_err
+
     # Read body from temp file in AppleScript (avoids all string escaping issues)
     read_body_script = f'set replyBodyText to do shell script "cat " & quoted form of "{body_temp_path}"'
 
@@ -1316,6 +1383,11 @@ def compose_email(
     blocked = _send_blocked(mode)
     if blocked:
         return blocked
+
+    if mode == "open":
+        cap_err = _check_open_compose_window_cap()
+        if cap_err:
+            return cap_err
 
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
@@ -1570,6 +1642,11 @@ def forward_email(
     blocked = _send_blocked(mode)
     if blocked:
         return blocked
+
+    if mode == "open":
+        cap_err = _check_open_compose_window_cap()
+        if cap_err:
+            return cap_err
 
     try:
         sender_override, sender_error = _validate_from_address(
