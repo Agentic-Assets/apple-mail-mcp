@@ -511,7 +511,7 @@ def _save_front_compose_window_as_draft(
     if close_after_save:
         close_script = """
             delay 0.2
-            close window 1 saving yes
+            close window 1 saving no
         """
     script = f"""
     tell application "Mail"
@@ -769,12 +769,11 @@ def _send_html_email(
         success_text = "Email sent successfully (HTML)"
     elif mode == "draft":
         post_paste_script = """
-            -- Save as draft: Cmd+S then close
-            keystroke "s" using command down
+            -- Save as draft: save then close (one persist only)
             delay 0.5
             tell application "Mail"
                 save newMsg
-                close window 1 saving yes
+                close window 1 saving no
             end tell
         """
         success_text = "Email saved as draft (HTML)"
@@ -1133,7 +1132,7 @@ def reply_to_email(
                 delay 0.5
                 tell application "Mail"
                     save replyMessage
-                    close window 1 saving yes
+                    close window 1 saving no
                 end tell"""
         success_text = "Reply saved as draft!"
 
@@ -1685,7 +1684,7 @@ use scripting additions
         success_text = "Forward opened in Mail for review. Edit and send when ready."
     else:
         header_text = "SAVING FORWARD AS DRAFT"
-        post_forward_action = "save forwardMessage\n            close window 1 saving yes"
+        post_forward_action = "save forwardMessage\n            close window 1 saving no"
         success_text = "Forward saved as draft."
 
     script = f'''{use_frameworks}
@@ -1804,13 +1803,16 @@ def manage_drafts(
     from_address: str | None = None,
     timeout: int | None = None,
     standalone_confirmed: bool = False,
+    hide_empty: bool = False,
+    dry_run: bool = True,
+    max_deletes: int = 20,
 ) -> str:
     """
-    Manage draft emails - list, create, send, open, or delete drafts.
+    Manage draft emails - list, create, send, open, delete, or cleanup_empty drafts.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
-        action: Action to perform: "list", "create", "send", "open", "delete". Use "open" to open a draft in a visible compose window for review before sending.
+        action: Action to perform: "list", "create", "send", "open", "delete", "cleanup_empty". Use "open" to open a draft in a visible compose window for review before sending. Use "cleanup_empty" to remove orphaned blank drafts (preview-only by default).
         subject: Email subject (required for create)
         to: Recipient email(s) for create (comma-separated)
         body: Email body (required for create)
@@ -1820,9 +1822,14 @@ def manage_drafts(
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
+        hide_empty: For action="list", skip drafts whose subject AND body are both blank (orphaned compose windows). Default False (show everything).
+        dry_run: For action="cleanup_empty", when True (default) only previews which blank drafts would be removed without deleting. Set False to actually delete. Ignored by other actions.
+        max_deletes: For action="cleanup_empty", maximum number of blank drafts to delete in one call (safety cap). Default 20. Ignored by other actions.
 
     Returns:
-        Formatted output based on action
+        Formatted output based on action. For action="list" each draft now reports
+        its message id, To recipients, and a short body snippet so the list is
+        directly triageable; verify full threading with `get_email_by_id`.
     """
 
     account, account_error = _resolve_account(account, timeout=timeout)
@@ -1836,25 +1843,64 @@ def manage_drafts(
     safe_account = escape_applescript(account)
 
     if action == "list":
+        hide_empty_flag = "true" if hide_empty else "false"
         script = f'''
         tell application "Mail"
-            set outputText to "DRAFT EMAILS - {safe_account}" & return & return
+            set hideEmpty to {hide_empty_flag}
+            set draftLines to ""
+            set shownCount to 0
 
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
                 set draftMessages to messages 1 thru {DRAFT_LIST_CAP} of draftsMailbox
-                set draftCount to count of draftMessages
-
-                set outputText to outputText & "Found " & draftCount & " draft(s)" & return & return
 
                 repeat with aDraft in draftMessages
                     try
                         set draftSubject to subject of aDraft
+                        set draftId to (id of aDraft) as string
                         set draftDate to date sent of aDraft
 
-                        set outputText to outputText & "✉ " & draftSubject & return
-                        set outputText to outputText & "   Created: " & (draftDate as string) & return & return
+                        -- Body snippet (first 140 chars, whitespace collapsed)
+                        set draftBody to ""
+                        try
+                            set draftBody to content of aDraft
+                        end try
+                        set AppleScript's text item delimiters to {{return, linefeed, tab}}
+                        set bodyParts to text items of draftBody
+                        set AppleScript's text item delimiters to " "
+                        set bodySnippet to bodyParts as string
+                        set AppleScript's text item delimiters to ""
+                        if length of bodySnippet > 140 then
+                            set bodySnippet to (text 1 thru 140 of bodySnippet) & "..."
+                        end if
+
+                        if hideEmpty and draftSubject is "" and bodySnippet is "" then
+                            -- skip orphaned blank draft
+                        else
+                            -- Recipients (Drafts is a small, bounded mailbox)
+                            set draftTo to ""
+                            try
+                                set toAddrs to {{}}
+                                repeat with aRecip in (to recipients of aDraft)
+                                    try
+                                        set end of toAddrs to (address of aRecip)
+                                    end try
+                                end repeat
+                                set AppleScript's text item delimiters to ", "
+                                set draftTo to toAddrs as string
+                                set AppleScript's text item delimiters to ""
+                            end try
+
+                            set shownCount to shownCount + 1
+                            set draftLines to draftLines & "✉ " & draftSubject & return
+                            set draftLines to draftLines & "   Id: " & draftId & "   To: " & draftTo & return
+                            set draftLines to draftLines & "   Created: " & (draftDate as string) & return
+                            if bodySnippet is not "" then
+                                set draftLines to draftLines & "   " & bodySnippet & return
+                            end if
+                            set draftLines to draftLines & return
+                        end if
                     end try
                 end repeat
 
@@ -1862,7 +1908,7 @@ def manage_drafts(
                 return "Error: " & errMsg
             end try
 
-            return outputText
+            return "DRAFT EMAILS - {safe_account}" & return & return & "Found " & shownCount & " draft(s)" & return & return & draftLines
         end tell
         '''
 
@@ -2067,8 +2113,76 @@ def manage_drafts(
         end tell
         '''
 
+    elif action == "cleanup_empty":
+        if max_deletes < 1:
+            return "Error: 'max_deletes' must be >= 1 for cleanup_empty"
+        dry_run_flag = "true" if dry_run else "false"
+        mode_label = "PREVIEW (dry run)" if dry_run else "DELETING"
+        script = f'''
+        tell application "Mail"
+            set isDryRun to {dry_run_flag}
+            set maxDeletes to {max_deletes}
+            set reportLines to ""
+            set emptyCount to 0
+            set actedCount to 0
+
+            try
+                set targetAccount to account "{safe_account}"
+                set draftsMailbox to mailbox "Drafts" of targetAccount
+                set draftMessages to messages 1 thru {DRAFT_LIST_CAP} of draftsMailbox
+
+                -- Collect empty drafts first (subject blank AND body empty), then
+                -- act on them by reference so deletion does not shift indices.
+                set emptyDrafts to {{}}
+                repeat with aDraft in draftMessages
+                    try
+                        set draftSubject to subject of aDraft
+                        set draftBody to ""
+                        try
+                            set draftBody to content of aDraft
+                        end try
+                        set AppleScript's text item delimiters to {{return, linefeed, tab, space}}
+                        set bodyParts to text items of draftBody
+                        set AppleScript's text item delimiters to ""
+                        set bodyStripped to bodyParts as string
+                        if draftSubject is "" and bodyStripped is "" then
+                            set end of emptyDrafts to aDraft
+                        end if
+                    end try
+                end repeat
+
+                set emptyCount to count of emptyDrafts
+                repeat with aDraft in emptyDrafts
+                    if actedCount >= maxDeletes then exit repeat
+                    try
+                        set draftId to (id of aDraft) as string
+                        if isDryRun then
+                            set reportLines to reportLines & "   • would delete blank draft id " & draftId & return
+                        else
+                            delete aDraft
+                            set reportLines to reportLines & "   • deleted blank draft id " & draftId & return
+                        end if
+                        set actedCount to actedCount + 1
+                    end try
+                end repeat
+
+            on error errMsg
+                return "Error: " & errMsg
+            end try
+
+            set reportHeader to "DRAFT CLEANUP - {safe_account} ({mode_label})" & return & return
+            set reportSummary to "Found " & emptyCount & " blank draft(s); "
+            if isDryRun then
+                set reportSummary to reportSummary & "would remove " & actedCount & " (cap " & maxDeletes & "). Re-run with dry_run=False to delete."
+            else
+                set reportSummary to reportSummary & "deleted " & actedCount & " (cap " & maxDeletes & ")."
+            end if
+            return reportHeader & reportSummary & return & return & reportLines
+        end tell
+        '''
+
     else:
-        return f"Error: Invalid action '{action}'. Use: list, create, send, open, delete"
+        return f"Error: Invalid action '{action}'. Use: list, create, send, open, delete, cleanup_empty"
 
     try:
         result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)

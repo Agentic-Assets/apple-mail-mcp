@@ -3,10 +3,68 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
-## Unreleased
+## 3.5.0 — 2026-06-05
 
-Mcporter wrapper + large-mailbox hardening on top of 3.4.0. No tool signatures
-or return shapes changed.
+Live field-report hardening (draft QA workflow on a 24K Exchange account) plus
+the previously-unreleased mcporter wrapper + large-mailbox work. Tool count is
+unchanged (28); changes are additive params/actions/fields, all backward
+compatible.
+
+### Fixed (draft QA field report)
+
+- **Reply / forward / rich drafts no longer create duplicate drafts.** The
+  draft paths persisted twice — an explicit `save <message>` *then*
+  `close window 1 saving yes` — which committed a second, byte-identical copy
+  to Drafts (observed as same-second duplicate pairs). Every draft path now
+  persists exactly once (`save` then `close window 1 saving no`; the rich-draft
+  helper keeps its single `Cmd+S` and closes with `saving no`). Verified live:
+  one reply call yields exactly one threaded draft.
+- **`search_emails` no longer hangs on Exchange when a per-mailbox scan is
+  slow.** A per-mailbox `with timeout` wrapper (added during the unreleased
+  work) fired on the 24K-message Exchange INBOX, and the inner candidate-fetch
+  `try` swallowed the timeout into a silent **0-row** result. The wrapper is
+  removed; per-folder failures are still isolated by the existing
+  `on error → ERROR_MAILBOX` handler, and the whole call is bounded by the
+  single outer timeout budget.
+- **`get_email_by_id` header parsing tolerates value-less headers.** A bare
+  `In-Reply-To:` / `References:` line (no value) would make the `text N thru -1`
+  slice raise and the surrounding `on error` wipe *both* fields — discarding a
+  sibling header that had already parsed cleanly. Length guards now skip empty
+  header values so threading metadata survives.
+
+### Added (draft QA field report)
+
+- **`get_email_by_id` now returns threading + recipient metadata** so an agent
+  can confirm a draft is a correctly-addressed reply without opening Mail:
+  `to`, `cc`, `bcc`, `in_reply_to`, `references` (parsed from `all headers`),
+  and a computed `has_quoted_original` flag. Single-message, bounded, fast.
+- **`search_emails(mailboxes=[...])`** — new optional parameter to search an
+  explicit list of folders (e.g. `["Archive", "Sent"]`) instead of one mailbox
+  or paying for `mailbox="All"`. Missing folders degrade to a structured
+  per-mailbox error rather than failing the call. Recommended over `"All"` on
+  large Exchange/Gmail accounts.
+- **`manage_drafts(action="list")` is now triageable** — each draft reports its
+  `Id`, `To` recipients, and a short body snippet; new `hide_empty=True` skips
+  orphaned blank drafts.
+- **`manage_drafts(action="cleanup_empty")`** — removes orphaned blank drafts
+  (blank subject **and** empty body). Preview-only by default (`dry_run=True`)
+  with a `max_deletes` safety cap, matching the repo's destructive-op
+  conventions.
+- **CLI parity for the new draft/search surfaces.** `apple-mail search` gains
+  `--mailboxes a,b,c` (comma-separated targeted-folder search); `apple-mail
+  drafts list` gains `--hide-empty`; and a new `apple-mail drafts cleanup-empty`
+  subcommand previews orphaned blanks by default and only deletes with
+  `--execute` (`--limit` caps the batch). The repo CLI is the live-test harness,
+  so these mirror the MCP params 1:1.
+
+### Changed (draft QA field report)
+
+- **Bulk `search_emails` no longer resolves per-message recipients.** Resolving
+  `to recipients`/`address of` inside the bulk scan can *hang* (uncatchable by
+  `on error`) on large remote mailboxes. Recipients are now fetched per message
+  via `get_email_by_id` (and shown in `manage_drafts` list over the small local
+  Drafts mailbox). The record layout reserves the fields, so they still surface
+  wherever a tool populates them.
 
 ### Fixed (Gmail crash)
 

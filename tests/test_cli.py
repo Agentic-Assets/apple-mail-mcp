@@ -54,6 +54,103 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(captured["limit"], 3)
         self.assertEqual(captured["output_format"], "json")
 
+    def test_search_mailboxes_splits_into_list(self):
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured.update(kwargs)
+            return '{"items":[]}'
+
+        with (
+            patch("apple_mail_mcp.tools.search.search_emails", side_effect=fake_search),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "search",
+                    "--account",
+                    "Work",
+                    "--query",
+                    "invoice",
+                    "--mailboxes",
+                    "INBOX, Sent ,Archive",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["mailboxes"], ["INBOX", "Sent", "Archive"])
+
+    def test_search_without_mailboxes_passes_none(self):
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured.update(kwargs)
+            return '{"items":[]}'
+
+        with (
+            patch("apple_mail_mcp.tools.search.search_emails", side_effect=fake_search),
+            patch("builtins.print"),
+        ):
+            code = cli.main(["search", "--account", "Work", "--query", "x", "--json"])
+
+        self.assertEqual(code, 0)
+        self.assertIsNone(captured["mailboxes"])
+
+    def test_drafts_list_forwards_hide_empty(self):
+        captured = {}
+
+        def fake_drafts(**kwargs):
+            captured.update(kwargs)
+            return "DRAFT EMAILS"
+
+        with (
+            patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_drafts),
+            patch("builtins.print"),
+        ):
+            code = cli.main(["drafts", "list", "--account", "Work", "--hide-empty"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["action"], "list")
+        self.assertTrue(captured["hide_empty"])
+
+    def test_drafts_cleanup_empty_defaults_to_dry_run(self):
+        captured = {}
+
+        def fake_drafts(**kwargs):
+            captured.update(kwargs)
+            return "DRAFT CLEANUP"
+
+        with (
+            patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_drafts),
+            patch("builtins.print"),
+        ):
+            code = cli.main(["drafts", "cleanup-empty", "--account", "Work"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["action"], "cleanup_empty")
+        self.assertTrue(captured["dry_run"])
+        self.assertEqual(captured["max_deletes"], 20)
+
+    def test_drafts_cleanup_empty_execute_clears_dry_run(self):
+        captured = {}
+
+        def fake_drafts(**kwargs):
+            captured.update(kwargs)
+            return "DRAFT CLEANUP"
+
+        with (
+            patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_drafts),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                ["drafts", "cleanup-empty", "--account", "Work", "--execute", "--limit", "5"]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertFalse(captured["dry_run"])
+        self.assertEqual(captured["max_deletes"], 5)
+
     def test_inbox_accepts_max_emails_alias(self):
         captured = {}
 

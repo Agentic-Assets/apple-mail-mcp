@@ -76,6 +76,9 @@ Add `--verbose-sensitive` to `perf-test` / `quick-check` to include account name
 .venv/bin/apple-mail move-dry-run --account "$DEFAULT_MAIL_ACCOUNT" --to Archive --subject NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231
 .venv/bin/apple-mail trash-dry-run --account "$DEFAULT_MAIL_ACCOUNT" --subject NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231
 .venv/bin/apple-mail drafts list --account "$DEFAULT_MAIL_ACCOUNT"
+.venv/bin/apple-mail drafts list --account "$DEFAULT_MAIL_ACCOUNT" --hide-empty
+.venv/bin/apple-mail drafts cleanup-empty --account "$DEFAULT_MAIL_ACCOUNT"   # dry-run preview; add --execute to delete
+.venv/bin/apple-mail search --account "$DEFAULT_MAIL_ACCOUNT" --mailboxes "INBOX,Sent" --query NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231 --json
 ```
 
 ### Generated MCP wrapper probes
