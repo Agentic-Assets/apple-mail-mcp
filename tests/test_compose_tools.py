@@ -839,11 +839,14 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         script = captured[0]
         self.assertIn("SAVING REPLY AS DRAFT", script)
-        # FIX #1(a): single persist — save replyMessage then close saving no
-        _assert_ordered(self, script, "save replyMessage", "close window 1 saving no")
-        self.assertIn("close window 1 saving no", script)
-        self.assertNotIn("close window 1 saving yes", script)
+        # Object-model reply: race-free `make new outgoing message`, single
+        # `save replyMessage`, NO GUI window, NO clipboard, NO System Events.
+        self.assertIn("make new outgoing message", script)
         self.assertEqual(script.count("save replyMessage"), 1)
+        self.assertNotIn("close window 1 saving no", script)
+        self.assertNotIn('keystroke "v"', script)
+        self.assertNotIn("NSPasteboard", script)
+        self.assertNotIn("reply foundMessage with opening window", script)
         self.assertNotIn("send replyMessage", script)
 
     def test_reply_open_mode_saves_before_leaving_open_for_review(self):
@@ -898,6 +901,60 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             "set sender of replyMessage to item 1 of emailAddrs", script
         )
         self.assertNotIn('set sender of replyMessage to "', script)
+
+    def test_reply_to_all_emits_original_party_cc_loop(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                reply_to_all=True,
+            )
+
+        self.assertEqual(len(captured), 1)
+        script = captured[0]
+        # reply_to_all copies every other party (To + Cc of the original) as Cc,
+        # excluding the sender and the user's own addresses.
+        self.assertIn("to recipients of foundMessage", script)
+        self.assertIn("cc recipients of foundMessage", script)
+        self.assertIn("if rAddr is not senderAddr and rAddr is not in myAddrs", script)
+        # Object-model, not the old GUI reply.
+        self.assertNotIn("reply to all", script)
+
+    def test_reply_without_all_omits_original_party_cc_loop(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                reply_to_all=False,
+            )
+
+        self.assertEqual(len(captured), 1)
+        script = captured[0]
+        # A plain reply only addresses the original sender — no fan-out loop.
+        self.assertNotIn("cc recipients of foundMessage", script)
+        self.assertIn(
+            "make new to recipient at end of to recipients of replyMessage", script
+        )
 
     def test_injects_sender_when_from_address_is_valid(self):
         scripts = []
@@ -969,15 +1026,17 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
             )
 
         self.assertEqual(len(captured), 1)
-        self.assertIn("SAVING FORWARD AS DRAFT", captured[0])
-        # FIX #1(b): single persist — save forwardMessage then close saving no
-        _assert_ordered(
-            self, captured[0], "save forwardMessage", "close window 1 saving no"
-        )
-        self.assertIn("close window 1 saving no", captured[0])
-        self.assertNotIn("close window 1 saving yes", captured[0])
-        self.assertEqual(captured[0].count("save forwardMessage"), 1)
-        self.assertNotIn("send forwardMessage", captured[0])
+        script = captured[0]
+        self.assertIn("SAVING FORWARD AS DRAFT", script)
+        # Object-model forward: race-free `make new outgoing message`, single
+        # `save forwardMessage`, NO GUI window, NO clipboard, NO System Events.
+        self.assertIn("make new outgoing message", script)
+        self.assertEqual(script.count("save forwardMessage"), 1)
+        self.assertNotIn("close window 1 saving no", script)
+        self.assertNotIn('keystroke "v"', script)
+        self.assertNotIn("NSPasteboard", script)
+        self.assertNotIn("forward foundMessage with opening window", script)
+        self.assertNotIn("send forwardMessage", script)
 
     def test_forward_open_mode_saves_before_leaving_open_for_review(self):
         captured = []
@@ -1202,6 +1261,71 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
         self.assertTrue(result.startswith("Error: 'from_address'"))
 
 
+class ManageDraftsListTests(unittest.TestCase):
+    def test_list_uses_newest_first_slice(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "Found 0 draft(s)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.manage_drafts(account="Work", action="list")
+
+        self.assertEqual(len(captured), 1)
+        script = captured[0]
+        # Newest-first slice: tail window + reverse iteration so just-created
+        # drafts are never missed even past the cap.
+        self.assertIn("set totalDrafts to count of messages of draftsMailbox", script)
+        self.assertIn("messages startIdx thru totalDrafts of draftsMailbox", script)
+        self.assertIn("if totalDrafts > 100 then set startIdx to totalDrafts - 100 + 1", script)
+        self.assertNotIn("messages 1 thru 100 of draftsMailbox", script)
+        self.assertNotIn("every message of draftsMailbox", script)
+
+    def test_list_subject_contains_adds_case_insensitive_filter_only(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "Found 0 draft(s)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.manage_drafts(
+                account="Work", action="list", subject_contains="Q3 Report"
+            )
+
+        self.assertEqual(len(captured), 1)
+        script = captured[0]
+        # In-loop, case-insensitive subject filter.
+        self.assertIn("ignoring case", script)
+        self.assertIn('does not contain "Q3 Report"', script)
+        # No date filter is ever added (would drop null-date new drafts).
+        self.assertNotIn("recentCutoffDate", script)
+        self.assertNotIn("current date", script)
+
+    def test_list_without_subject_contains_omits_filter(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "Found 0 draft(s)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.manage_drafts(account="Work", action="list")
+
+        self.assertEqual(len(captured), 1)
+        self.assertNotIn("ignoring case", captured[0])
+
+
 class ComposeRunApplescriptMigrationTests(unittest.TestCase):
     def test_reply_to_email_forwards_timeout_to_run_applescript(self):
         captured = {}
@@ -1247,9 +1371,12 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
 
         self.assertIn("use framework", captured["script"])
         self.assertEqual(captured["timeout"], 90)
-        # FIX #1(c): single persist — save newMsg then close saving no (no redundant keystroke)
+        # FIX #1(c): single persist — save newMsg then close the CORRECT window
+        # (window of newMsg, not positional window 1) and no redundant keystroke.
         self.assertIn("save newMsg", captured["script"])
-        self.assertIn("close window 1 saving no", captured["script"])
+        self.assertIn("close (window of newMsg) saving no", captured["script"])
+        self.assertNotIn("close window 1 saving no", captured["script"])
+        self.assertIn("set index of (window of newMsg) to 1", captured["script"])
         self.assertNotIn('keystroke "s" using command down', captured["script"])
         self.assertNotIn("close window 1 saving yes", captured["script"])
         self.assertIn("Email saved as draft (HTML)", result)
@@ -1297,7 +1424,14 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
             )
 
         self.assertEqual(len(captured), 1)
-        self.assertIn("use framework", captured[0])
+        script = captured[0]
+        # Forward with a lead message now uses the race-free object model: the
+        # message is read from a temp file and prepended as plain text — no
+        # NSPasteboard/use framework clipboard injection.
+        self.assertIn("make new outgoing message", script)
+        self.assertIn("set fwdLeadText to", script)
+        self.assertNotIn("use framework", script)
+        self.assertNotIn("NSPasteboard", script)
 
     def test_split_addresses_dedup_filters_empty_segments(self):
         self.assertEqual(

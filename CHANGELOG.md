@@ -3,6 +3,60 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
+## 3.6.0 — 2026-06-05
+
+Compose-path race elimination + reliable draft lookup, from a second live draft-QA
+session on the 24K Exchange account. The 3.5.0 `saving no` change was insufficient:
+the reply/forward path was driving Mail's GUI, which is inherently racy. Tool count
+unchanged (28); one additive optional param (`manage_drafts(subject_contains=...)`).
+
+### Fixed (compose GUI races — data-loss/corruption class)
+
+- **Reply/forward no longer leak a draft's body into the wrong thread, duplicate,
+  or save empty.** `reply_to_email` and `forward_email` previously opened a Mail
+  compose window (which auto-saves an empty draft *shell* → the duplicate), pasted
+  the body from the **system clipboard** via `keystroke "v"` into whatever window
+  had focus (→ body landing in an unrelated thread; or pasting nothing → empty
+  draft), and closed with the **positional** `close window 1` (→ wrong window).
+  Both tools now build the draft entirely through Mail's **object model**
+  (`make new outgoing message` + `make new to recipient`), exactly like
+  `compose_email`: **no window, no clipboard, no System Events, one `save`.** This
+  removes the entire race class.
+- **`reply_to_all=True` now includes every original party.** Instead of trusting
+  Mail's reply-to-all (which silently dropped recipients), the reply now sets
+  recipients **deterministically**: the original sender as To, and every other
+  To/Cc party as Cc, excluding the sender and the account's own addresses.
+- **Newly-created drafts are found reliably.** `manage_drafts(action="list")` and
+  the draft lookup behind `send`/`open`/`delete` now read the **newest** drafts
+  (a `messages startIdx thru totalDrafts` tail, newest-first) instead of the 100
+  *oldest* (`messages 1 thru 100`), so a just-created draft is never missed when a
+  mailbox holds >100 drafts. No date filter is used — fresh `outgoing message`
+  drafts have a null `date received`, which previously made date-filtered draft
+  searches silently drop them.
+- **`compose_email` HTML path hardened** — the rich-HTML compose (which still needs
+  the clipboard) now targets `window of newMsg` (and brings it to front before the
+  paste) instead of the positional `window 1`.
+
+### Added
+
+- **`manage_drafts(subject_contains=...)`** — optional case-insensitive, in-loop
+  subject filter for `action="list"`, giving a fast, bounded "find the draft I just
+  created" lookup over the small Drafts mailbox. Prefer this (or `get_email_by_id`)
+  over `search_emails` for draft verification — `search_emails` runs a date-filtered
+  scan that is slow on large accounts and drops null-date drafts.
+
+### Changed (behavior trade-off)
+
+- **Replies/forwards are now reliable plain-text "Re:"/"Fwd:" drafts.** Because the
+  clipboard was the only thing inserting rich HTML, eliminating it means reply and
+  forward bodies are plain text with a `> `-quoted copy of the original (bounded to
+  4000 chars) and a `Re:`/`Fwd:` subject. The draft is **correctly addressed and
+  always contains your text** — the priority after the cross-thread corruption.
+  `body_html` is still accepted on `reply_to_email` for backward compatibility but
+  is ignored. Trade-off: replies no longer carry native `In-Reply-To`/`References`
+  headers (they thread visually via subject + quote). `create_rich_email_draft` and
+  `compose_email` still produce rich HTML for genuinely standalone messages.
+
 ## 3.5.0 — 2026-06-05
 
 Live field-report hardening (draft QA workflow on a 24K Exchange account) plus
