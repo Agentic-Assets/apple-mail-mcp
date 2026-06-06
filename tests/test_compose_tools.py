@@ -227,12 +227,14 @@ class ComposeToolTests(unittest.TestCase):
                 ["open", "-a", "Mail", str(output_path)], check=True
             )
             self.assertNotIn("every outgoing message whose subject is", scripts[1])
+            # FIX #1: single persist — Cmd+S for UI save, then close saving no (no re-persist)
             _assert_ordered(
                 self,
                 scripts[1],
                 'keystroke "s" using command down',
-                "close window 1 saving yes",
+                "close window 1 saving no",
             )
+            self.assertNotIn("close window 1 saving yes", scripts[1])
 
     def test_create_rich_email_draft_default_saves_and_closes_mail_window(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -267,12 +269,14 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Saved in Drafts: yes", result)
             self.assertIn("Left open for review: no", result)
             self.assertNotIn("every outgoing message whose subject is", scripts[1])
+            # FIX #1: single persist — Cmd+S for UI save, then close saving no (no re-persist)
             _assert_ordered(
                 self,
                 scripts[1],
                 'keystroke "s" using command down',
-                "close window 1 saving yes",
+                "close window 1 saving no",
             )
+            self.assertNotIn("close window 1 saving yes", scripts[1])
 
     def test_create_rich_email_draft_allows_partial_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -371,12 +375,14 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(len(captured), 1)
         self.assertNotIn("every outgoing message whose subject is", captured[0])
+        # FIX #1: single persist — Cmd+S for UI save, then close saving no (no re-persist)
         _assert_ordered(
             self,
             captured[0],
             'keystroke "s" using command down',
-            "close window 1 saving yes",
+            "close window 1 saving no",
         )
+        self.assertNotIn("close window 1 saving yes", captured[0])
 
     def test_can_leave_front_compose_window_open_for_review(self):
         captured = []
@@ -833,8 +839,11 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         script = captured[0]
         self.assertIn("SAVING REPLY AS DRAFT", script)
-        _assert_ordered(self, script, "save replyMessage", "close window 1 saving yes")
-        self.assertIn("close window 1 saving yes", script)
+        # FIX #1(a): single persist — save replyMessage then close saving no
+        _assert_ordered(self, script, "save replyMessage", "close window 1 saving no")
+        self.assertIn("close window 1 saving no", script)
+        self.assertNotIn("close window 1 saving yes", script)
+        self.assertEqual(script.count("save replyMessage"), 1)
         self.assertNotIn("send replyMessage", script)
 
     def test_reply_open_mode_saves_before_leaving_open_for_review(self):
@@ -961,10 +970,13 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
 
         self.assertEqual(len(captured), 1)
         self.assertIn("SAVING FORWARD AS DRAFT", captured[0])
+        # FIX #1(b): single persist — save forwardMessage then close saving no
         _assert_ordered(
-            self, captured[0], "save forwardMessage", "close window 1 saving yes"
+            self, captured[0], "save forwardMessage", "close window 1 saving no"
         )
-        self.assertIn("close window 1 saving yes", captured[0])
+        self.assertIn("close window 1 saving no", captured[0])
+        self.assertNotIn("close window 1 saving yes", captured[0])
+        self.assertEqual(captured[0].count("save forwardMessage"), 1)
         self.assertNotIn("send forwardMessage", captured[0])
 
     def test_forward_open_mode_saves_before_leaving_open_for_review(self):
@@ -1235,12 +1247,11 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
 
         self.assertIn("use framework", captured["script"])
         self.assertEqual(captured["timeout"], 90)
-        _assert_ordered(
-            self,
-            captured["script"],
-            'keystroke "s" using command down',
-            "close window 1 saving yes",
-        )
+        # FIX #1(c): single persist — save newMsg then close saving no (no redundant keystroke)
+        self.assertIn("save newMsg", captured["script"])
+        self.assertIn("close window 1 saving no", captured["script"])
+        self.assertNotIn('keystroke "s" using command down', captured["script"])
+        self.assertNotIn("close window 1 saving yes", captured["script"])
         self.assertIn("Email saved as draft (HTML)", result)
 
     def test_send_html_email_open_mode_saves_before_leaving_open(self):

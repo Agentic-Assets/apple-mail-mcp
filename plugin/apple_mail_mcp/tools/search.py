@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -97,7 +98,7 @@ def _parse_search_records(
             mb, _, msg = tail.partition("|||")
             mailbox_errors.append({"mailbox": mb.strip(), "message": msg.strip()})
             continue
-        parts = line.split("|||", 8)
+        parts = line.split("|||", 13)
         if len(parts) < 8:
             continue
 
@@ -118,8 +119,18 @@ def _parse_search_records(
             # present or missing (AppleScript returns both forms).
             msg_id = internet_message_id.strip("<>")
             record["mail_link"] = f"message://%3C{quote(msg_id, safe='@')}%3E"
-        if len(parts) > 8 and parts[8].strip():
-            record["content_preview"] = parts[8].strip()
+        # Optional trailing fields, set only when present and non-empty.
+        optional_fields = (
+            (8, "content_preview"),
+            (9, "to"),
+            (10, "cc"),
+            (11, "in_reply_to"),
+            (12, "references"),
+            (13, "bcc"),
+        )
+        for idx, key in optional_fields:
+            if len(parts) > idx and parts[idx].strip():
+                record[key] = parts[idx].strip()
         records.append(record)
 
     return records, mailbox_errors
@@ -283,6 +294,7 @@ def _build_search_script(
     recent_days: float = 0.0,
     timeout: int | None = None,
     date_from_explicit: bool = False,
+    mailboxes: list[str] | None = None,
 ) -> tuple[str, bool, bool]:
     """Build the AppleScript for a single account's search.
 
@@ -362,7 +374,23 @@ def _build_search_script(
     """
 
     _max_mailboxes_per_search = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
-    if mailbox == "All":
+    if mailboxes:
+        # Explicit mailbox list: look up each named folder, degrade gracefully
+        # if a name doesn't exist (emits ERROR_MAILBOX instead of hard failure).
+        mailbox_lookups = "\n".join(
+            f"""                try
+                    set end of searchMailboxes to mailbox "{escape_applescript(mb)}" of targetAccount
+                on error
+                    set end of recordLines to "ERROR_MAILBOX|||{escape_applescript(mb)}|||mailbox not found"
+                end try"""
+            for mb in mailboxes
+        )
+        mailbox_script = f"""
+                set searchMailboxes to {{}}
+{mailbox_lookups}
+        """
+        skip_script = ""
+    elif mailbox == "All":
         mailbox_script = f"""
                 set searchMailboxes to every mailbox of targetAccount
                 if (count of searchMailboxes) > {_max_mailboxes_per_search} then
@@ -570,77 +598,93 @@ def _build_search_script(
                     repeat with currentMailbox in searchMailboxes
                         if collectLimit <= 0 then exit repeat
 
+                        -- NB: do NOT wrap this per-mailbox scan in `with timeout`.
+                        -- Materializing `messages 1 thru N` on a 24K+ Exchange
+                        -- mailbox routinely exceeds a short timeout; the inner
+                        -- candidate-fetch try/catch then swallows the timeout and
+                        -- the mailbox silently returns 0 rows. Per-mailbox failures
+                        -- are already isolated by the `on error -> ERROR_MAILBOX`
+                        -- handler below, and the whole call is bounded by the
+                        -- outer call-level timeout budget ({inner_timeout}s).
                         try
                             set mailboxName to my sanitize_field(name of currentMailbox)
                             set shouldSkip to false
                             {skip_script}
 
-                            if not shouldSkip then
-                                {message_collection}
-                                set matchingCount to count of matchingMessages
+                                if not shouldSkip then
+                                    {message_collection}
+                                    set matchingCount to count of matchingMessages
 
-                                if offsetRemaining >= matchingCount then
-                                    set offsetRemaining to offsetRemaining - matchingCount
-                                else
-                                    set startIndex to offsetRemaining + 1
-                                    set availableCount to matchingCount - offsetRemaining
-                                    if availableCount > collectLimit then
-                                        set endIndex to startIndex + collectLimit - 1
+                                    if offsetRemaining >= matchingCount then
+                                        set offsetRemaining to offsetRemaining - matchingCount
                                     else
-                                        set endIndex to startIndex + availableCount - 1
-                                    end if
+                                        set startIndex to offsetRemaining + 1
+                                        set availableCount to matchingCount - offsetRemaining
+                                        if availableCount > collectLimit then
+                                            set endIndex to startIndex + collectLimit - 1
+                                        else
+                                            set endIndex to startIndex + availableCount - 1
+                                        end if
 
-                                    if endIndex >= startIndex then
-                                        set targetMessages to items startIndex thru endIndex of matchingMessages
+                                        if endIndex >= startIndex then
+                                            set targetMessages to items startIndex thru endIndex of matchingMessages
 
-                                        repeat with aMessage in targetMessages
-                                            try
-                                                set messageId to my sanitize_field(id of aMessage)
-                                                set internetMessageId to ""
+                                            repeat with aMessage in targetMessages
                                                 try
-                                                    set internetMessageId to my sanitize_field(message id of aMessage)
-                                                end try
-                                                set messageSubject to my sanitize_field(subject of aMessage)
-                                                set messageSender to my sanitize_field(sender of aMessage)
-                                                set messageRead to read status of aMessage
-                                                set messageDate to date received of aMessage
-                                                set receivedAt to my iso_datetime(messageDate)
-                                                set contentPreview to ""
-
-                                                if {str(include_content).lower()} then
+                                                    set messageId to my sanitize_field(id of aMessage)
+                                                    set internetMessageId to ""
                                                     try
-                                                        set msgContent to content of aMessage
-                                                        set AppleScript's text item delimiters to {{return, linefeed, tab}}
-                                                        set contentParts to text items of msgContent
-                                                        set AppleScript's text item delimiters to " "
-                                                        set cleanText to contentParts as string
-                                                        set AppleScript's text item delimiters to ""
-                                                        if {content_length} > 0 and length of cleanText > {content_length} then
-                                                            set contentPreview to my sanitize_field(text 1 thru {content_length} of cleanText & "...")
-                                                        else
-                                                            set contentPreview to my sanitize_field(cleanText)
-                                                        end if
-                                                    on error
-                                                        set contentPreview to ""
+                                                        set internetMessageId to my sanitize_field(message id of aMessage)
                                                     end try
-                                                end if
+                                                    set messageSubject to my sanitize_field(subject of aMessage)
+                                                    set messageSender to my sanitize_field(sender of aMessage)
+                                                    set messageRead to read status of aMessage
+                                                    set messageDate to date received of aMessage
+                                                    set receivedAt to my iso_datetime(messageDate)
+                                                    set contentPreview to ""
+                                                    -- Recipients (to/cc) are intentionally NOT resolved here.
+                                                    -- Per-message `to recipients`/`address of` can HANG (not error,
+                                                    -- so `on error` cannot catch it) on large remote Exchange/Gmail
+                                                    -- mailboxes, blocking the whole bulk scan until timeout. Fetch
+                                                    -- recipients per message via get_email_by_id instead (single,
+                                                    -- bounded, fast). Emit empty placeholders to keep field alignment.
+                                                    set toRecips to ""
+                                                    set ccRecips to ""
 
-                                                set readValue to "false"
-                                                if messageRead then
-                                                    set readValue to "true"
-                                                end if
+                                                    if {str(include_content).lower()} then
+                                                        try
+                                                            set msgContent to content of aMessage
+                                                            set AppleScript's text item delimiters to {{return, linefeed, tab}}
+                                                            set contentParts to text items of msgContent
+                                                            set AppleScript's text item delimiters to " "
+                                                            set cleanText to contentParts as string
+                                                            set AppleScript's text item delimiters to ""
+                                                            if {content_length} > 0 and length of cleanText > {content_length} then
+                                                                set contentPreview to my sanitize_field(text 1 thru {content_length} of cleanText & "...")
+                                                            else
+                                                                set contentPreview to my sanitize_field(cleanText)
+                                                            end if
+                                                        on error
+                                                            set contentPreview to ""
+                                                        end try
+                                                    end if
 
-                                                set recordLine to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview
-                                                set end of recordLines to recordLine
-                                                set collectLimit to collectLimit - 1
-                                                if collectLimit <= 0 then exit repeat
-                                            end try
-                                        end repeat
+                                                    set readValue to "false"
+                                                    if messageRead then
+                                                        set readValue to "true"
+                                                    end if
+
+                                                    set recordLine to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & "" & "|||" & "" & "|||" & ""
+                                                    set end of recordLines to recordLine
+                                                    set collectLimit to collectLimit - 1
+                                                    if collectLimit <= 0 then exit repeat
+                                                end try
+                                            end repeat
+                                        end if
+
+                                        set offsetRemaining to 0
                                     end if
-
-                                    set offsetRemaining to 0
                                 end if
-                            end if
                         on error errMsg
                             -- Emit a structured marker so Python can surface it
                             -- in error_details instead of silently discarding it.
@@ -704,6 +748,7 @@ def _search_one_account(
     timeout: int | None,
     recent_days: float = 0.0,
     date_from_explicit: bool = False,
+    mailboxes: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]], bool, bool]:
     """Run the search AppleScript for a single account synchronously.
 
@@ -734,6 +779,7 @@ def _search_one_account(
         recent_days=recent_days,
         timeout=timeout,
         date_from_explicit=date_from_explicit,
+        mailboxes=mailboxes,
     )
     result = run_applescript(script, timeout=timeout if timeout is not None else 180)
     if result.startswith("ERROR|||"):
@@ -760,6 +806,7 @@ async def _search_mail_records(
     timeout: int | None = None,
     recent_days: float = 0.0,
     date_from_explicit: bool = False,
+    mailboxes: list[str] | None = None,
 ) -> "tuple[list[dict[str, Any]], list[str], list[dict[str, str]], bool]":
     """Return (records, error_account_names, error_details, body_search_capped) from Apple Mail.
 
@@ -802,6 +849,7 @@ async def _search_mail_records(
                 timeout,
                 recent_days,
                 date_from_explicit,
+                mailboxes,
             )
             mb_error_details = [
                 {"account": account, "mailbox": e["mailbox"], "type": "mailbox_error", "message": e["message"]}
@@ -840,6 +888,7 @@ async def _search_mail_records(
                 timeout,
                 recent_days,
                 date_from_explicit,
+                mailboxes,
             )
             return acct, (recs, mb_errs, body_capped, mb_count_capped)
         except AppleScriptTimeout:
@@ -942,6 +991,7 @@ async def search_emails(
     exclude_replied: bool = False,
     flag_replied: bool = False,
     timeout: int | None = None,
+    mailboxes: list[str] | None = None,
 ) -> str:
     """Defaults to the last 48 hours and the configured default account. Pass `recent_days=7` for the past week; ``recent_days=0`` without ``date_from`` is rejected — use ``full_inbox_export`` for audited full-mailbox sweeps.
 
@@ -1013,6 +1063,10 @@ async def search_emails(
         timeout: Optional per-account AppleScript timeout in seconds. Defaults
             to 180s. Raise this for known-slow accounts (e.g. large Exchange
             inboxes) when the default times out.
+        mailboxes: Optional explicit list of folder names to search (e.g.
+            ["Archive", "Sent"]). When provided and non-empty, overrides
+            ``mailbox`` and searches only those named folders for the account.
+            Missing folders emit a structured mailbox error and are skipped.
 
     Returns:
         Formatted list of matching emails or JSON payload with stable message
@@ -1104,6 +1158,7 @@ async def search_emails(
             timeout=timeout,
             recent_days=effective_recent_days,
             date_from_explicit=_date_from_explicit,
+            mailboxes=mailboxes if mailboxes else None,
         )
 
         # Replied-detection: build the replied-Message-ID set once and
@@ -1180,6 +1235,13 @@ def get_email_by_id(
     full message body or stable metadata without running another broad subject
     search.
 
+    Returned fields include ``to``, ``cc``, ``bcc`` (recipient addresses),
+    ``in_reply_to`` and ``references`` (thread-linking headers parsed from the
+    raw ``all headers`` of the message), and ``has_quoted_original`` (True when
+    the content contains a quoted prior message). When ``in_reply_to`` or
+    ``references`` are present, the message is confirmed to be part of a thread
+    — useful for verifying that a draft reply is correctly threaded.
+
     Args:
         account: Account name to search in (e.g., "Gmail", "Work").
         message_id: Exact numeric Apple Mail message id returned by search tools.
@@ -1191,7 +1253,9 @@ def get_email_by_id(
 
     Returns:
         One matching email as text, or JSON with {"item": ...}. If no message is
-        found, JSON returns {"item": null}.
+        found, JSON returns {"item": null}. JSON items include ``to``, ``cc``,
+        ``bcc``, ``in_reply_to``, ``references``, and ``has_quoted_original``
+        when available.
     """
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
@@ -1308,7 +1372,80 @@ def get_email_by_id(
                     set readValue to "true"
                 end if
 
-                return messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview
+                -- Fields 9-13: to, cc, in_reply_to, references, bcc
+                set toRecips to ""
+                try
+                    set toAddrs to {{}}
+                    repeat with aRecip in (to recipients of aMessage)
+                        try
+                            set end of toAddrs to (address of aRecip)
+                        end try
+                    end repeat
+                    set AppleScript's text item delimiters to ", "
+                    set toRecips to my sanitize_field(toAddrs as string)
+                    set AppleScript's text item delimiters to ""
+                on error
+                    set toRecips to ""
+                end try
+
+                set ccRecips to ""
+                try
+                    set ccAddrs to {{}}
+                    repeat with aRecip in (cc recipients of aMessage)
+                        try
+                            set end of ccAddrs to (address of aRecip)
+                        end try
+                    end repeat
+                    set AppleScript's text item delimiters to ", "
+                    set ccRecips to my sanitize_field(ccAddrs as string)
+                    set AppleScript's text item delimiters to ""
+                on error
+                    set ccRecips to ""
+                end try
+
+                set inReplyTo to ""
+                set refsValue to ""
+                try
+                    set msgHeaders to all headers of aMessage
+                    set AppleScript's text item delimiters to {{return, linefeed}}
+                    set headerLines to text items of msgHeaders
+                    set AppleScript's text item delimiters to ""
+                    -- NB: only the first physical line of a folded (RFC 2822
+                    -- continuation) References header is captured; that is
+                    -- sufficient to confirm the message is threaded. The length
+                    -- guards keep a value-less header (e.g. bare "In-Reply-To:")
+                    -- from raising and wiping an already-parsed sibling field.
+                    repeat with headerLine in headerLines
+                        set headerLineText to headerLine as string
+                        ignoring case
+                            if headerLineText starts with "In-Reply-To:" and length of headerLineText > 12 then
+                                set inReplyTo to my sanitize_field(text 13 thru -1 of headerLineText)
+                            else if headerLineText starts with "References:" and length of headerLineText > 11 then
+                                set refsValue to my sanitize_field(text 12 thru -1 of headerLineText)
+                            end if
+                        end ignoring
+                    end repeat
+                on error
+                    set inReplyTo to ""
+                    set refsValue to ""
+                end try
+
+                set bccRecips to ""
+                try
+                    set bccAddrs to {{}}
+                    repeat with aRecip in (bcc recipients of aMessage)
+                        try
+                            set end of bccAddrs to (address of aRecip)
+                        end try
+                    end repeat
+                    set AppleScript's text item delimiters to ", "
+                    set bccRecips to my sanitize_field(bccAddrs as string)
+                    set AppleScript's text item delimiters to ""
+                on error
+                    set bccRecips to ""
+                end try
+
+                return messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips
             on error errMsg
                 return "ERROR|||" & errMsg
             end try
@@ -1328,6 +1465,18 @@ def get_email_by_id(
 
     records, _mb_errors = _parse_search_records(result)
     item = records[0] if records else None
+    if item is not None and include_content:
+        # Compute has_quoted_original from the content preview (Python side).
+        # Patterns: "On <date> ... wrote:", lines starting with ">", or
+        # "-----Original Message-----" markers.
+        preview = item.get("content_preview", "") or ""
+        has_quoted = bool(
+            re.search(r"On .+wrote:", preview, re.DOTALL)
+            or re.search(r"(?m)^>", preview)
+            or "-----Original Message-----" in preview
+        )
+        item["has_quoted_original"] = has_quoted
+
     if output_format == "json":
         return json.dumps({"item": item})
 

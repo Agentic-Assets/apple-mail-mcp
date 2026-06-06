@@ -249,7 +249,17 @@ class SynchronizeAccountOuterTimeoutTests(unittest.TestCase):
             # list_mail_account_names probe
             return "AccountA\nAccountB\nAccountC\nAccountD"
 
-        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+        # synchronize_account imports list_mail_account_names directly into the
+        # manage namespace; that helper calls core.run_applescript, so patching
+        # manage.run_applescript alone leaks the account probe to real Mail.
+        # Patch the bound name so the 4-account count is deterministic.
+        with (
+            patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run),
+            patch(
+                "apple_mail_mcp.tools.manage.list_mail_account_names",
+                return_value=["AccountA", "AccountB", "AccountC", "AccountD"],
+            ),
+        ):
             result = manage_tools.synchronize_account(
                 all_accounts=True, confirm_sync=True
             )

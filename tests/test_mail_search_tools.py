@@ -1140,5 +1140,313 @@ class MailboxAllCapTests(unittest.TestCase):
             self.assertNotIn("mailbox='All'", w)
 
 
+class NewFieldsTests(unittest.TestCase):
+    """Tests for FIX #2 (to/cc on search_emails), FIX #3 (get_email_by_id
+    threading/recipient fields), and FIX #5 (mailboxes param + All timeout)."""
+
+    def _run(self, coro):  # type: ignore[override]
+        return asyncio.run(coro)
+
+    # ------------------------------------------------------------------
+    # FIX #2: bulk search does NOT resolve recipients (Exchange-safe).
+    # Per-message `to recipients`/`address of` can HANG on large remote
+    # mailboxes (uncatchable by `on error`) and stall the whole scan, so
+    # recipients are fetched per-message via get_email_by_id instead. The
+    # shared parser still surfaces to/cc when a line carries them.
+    # ------------------------------------------------------------------
+
+    def test_search_emails_does_not_resolve_recipients_in_bulk(self):
+        """The bulk scan script must NOT call `to recipients`/`cc recipients`
+        or `address of` — those can hang on large Exchange/Gmail mailboxes."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return _record_line(999, "Hello Subject")
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    include_content=True,
+                    output_format="json",
+                    limit=5,
+                )
+            )
+
+        self.assertNotIn("to recipients of aMessage", captured["script"])
+        self.assertNotIn("cc recipients of aMessage", captured["script"])
+        self.assertNotIn("address of aRecip", captured["script"])
+
+    def test_search_parser_surfaces_to_cc_when_line_carries_them(self):
+        """The shared record parser still exposes to/cc (fields 9,10) when a
+        line provides them — this is the path get_email_by_id relies on."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            parts = [
+                "999",                          # 0 message_id
+                "<msg@example.com>",            # 1 internet_message_id
+                "Hello Subject",                # 2 subject
+                "sender@example.com",           # 3 sender
+                "INBOX",                        # 4 mailbox
+                "Work",                         # 5 account
+                "false",                        # 6 read
+                "2026-06-01T10:00:00",          # 7 received_date
+                "Body preview",                 # 8 content_preview
+                "alice@example.com, bob@example.com",  # 9 to
+                "carol@example.com",            # 10 cc
+                "",                             # 11 in_reply_to
+                "",                             # 12 references
+                "",                             # 13 bcc
+            ]
+            return "|||".join(parts)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                self._run(
+                    search_tools.search_emails(
+                        account="Work",
+                        include_content=True,
+                        output_format="json",
+                        limit=5,
+                    )
+                )
+            )
+
+        item = response["items"][0]
+        self.assertEqual(item["to"], "alice@example.com, bob@example.com")
+        self.assertEqual(item["cc"], "carol@example.com")
+
+    # ------------------------------------------------------------------
+    # FIX #3: get_email_by_id threading/recipient fields
+    # ------------------------------------------------------------------
+
+    def _record_line_14(
+        self,
+        message_id: int,
+        subject: str,
+        content_preview: str = "",
+        to: str = "",
+        cc: str = "",
+        in_reply_to: str = "",
+        references: str = "",
+        bcc: str = "",
+    ) -> str:
+        parts = [
+            str(message_id),
+            "<abc@example.com>",
+            subject,
+            "sender@example.com",
+            "INBOX",
+            "Work",
+            "false",
+            "2026-06-01T10:00:00",
+            content_preview,
+            to,
+            cc,
+            in_reply_to,
+            references,
+            bcc,
+        ]
+        return "|||".join(parts)
+
+    def test_get_email_by_id_parses_threading_fields(self):
+        """A mocked 14-field line must parse into to/cc/in_reply_to/references/bcc."""
+        line = self._record_line_14(
+            12345,
+            "Re: Budget",
+            content_preview="Thanks for the update",
+            to="alice@example.com",
+            cc="bob@example.com",
+            in_reply_to=" <orig@example.com>",
+            references=" <orig@example.com>",
+            bcc="",
+        )
+
+        def fake_run(script, timeout=120):
+            return line
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_by_id(
+                    account="Work",
+                    message_id="12345",
+                    output_format="json",
+                )
+            )
+
+        item = response["item"]
+        self.assertEqual(item["to"], "alice@example.com")
+        self.assertEqual(item["cc"], "bob@example.com")
+        self.assertEqual(item["in_reply_to"], "<orig@example.com>")
+        self.assertEqual(item["references"], "<orig@example.com>")
+        self.assertNotIn("bcc", item)  # bcc was empty
+
+    def test_get_email_by_id_script_contains_all_headers(self):
+        """The generated AppleScript must read `all headers of aMessage`
+        to extract In-Reply-To and References."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return self._record_line_14(12345, "Test")
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            search_tools.get_email_by_id(
+                account="Work",
+                message_id="12345",
+                output_format="json",
+            )
+
+        self.assertIn("all headers of aMessage", captured["script"])
+        self.assertIn('starts with "In-Reply-To:"', captured["script"])
+        self.assertIn('starts with "References:"', captured["script"])
+
+    def test_get_email_by_id_has_quoted_original_true(self):
+        """has_quoted_original must be True when content contains 'On X wrote:'."""
+        # Note: content_preview must not contain raw newlines here because the
+        # mock line is split by splitlines() in _parse_search_records. Use a
+        # space-collapsed preview that still triggers the regex.
+        line = self._record_line_14(
+            12345,
+            "Re: Something",
+            content_preview="My reply. On Mon Jan 1 2026 Alice wrote: original text",
+        )
+
+        def fake_run(script, timeout=120):
+            return line
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_by_id(
+                    account="Work",
+                    message_id="12345",
+                    include_content=True,
+                    output_format="json",
+                )
+            )
+
+        self.assertTrue(response["item"]["has_quoted_original"])
+
+    def test_get_email_by_id_has_quoted_original_false(self):
+        """has_quoted_original must be False for plain new messages."""
+        line = self._record_line_14(
+            12346,
+            "New Topic",
+            content_preview="Just a plain message with no quotes.",
+        )
+
+        def fake_run(script, timeout=120):
+            return line
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_by_id(
+                    account="Work",
+                    message_id="12346",
+                    include_content=True,
+                    output_format="json",
+                )
+            )
+
+        self.assertFalse(response["item"]["has_quoted_original"])
+
+    # ------------------------------------------------------------------
+    # FIX #5a: mailboxes=[...] builds targeted script
+    # ------------------------------------------------------------------
+
+    def test_search_emails_mailboxes_param_targets_named_folders(self):
+        """mailboxes=['Archive','Sent'] must produce a script that looks up
+        those specific folders and does NOT use `every mailbox` enumeration."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailboxes=["Archive", "Sent"],
+                    output_format="json",
+                    limit=5,
+                    date_from="2026-01-01",
+                )
+            )
+
+        script = captured["script"]
+        self.assertIn('mailbox "Archive" of targetAccount', script)
+        self.assertIn('mailbox "Sent" of targetAccount', script)
+        self.assertNotIn("every mailbox of targetAccount", script)
+
+    # ------------------------------------------------------------------
+    # FIX #5b: All path isolates per-mailbox failures (partial results).
+    # The per-mailbox scan is deliberately NOT wrapped in a short
+    # `with timeout` — that fires on large Exchange mailboxes and the inner
+    # candidate-fetch try/catch swallows it into a silent 0-row result.
+    # Isolation comes from `on error -> ERROR_MAILBOX` instead.
+    # ------------------------------------------------------------------
+
+    def test_search_emails_all_path_isolates_per_mailbox_errors(self):
+        """mailbox='All' must isolate a failing folder via ERROR_MAILBOX and
+        must NOT wrap each scan in a short per-mailbox `with timeout`."""
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailbox="All",
+                    output_format="json",
+                    limit=5,
+                    date_from="2026-01-01",
+                )
+            )
+
+        script = captured["script"]
+        # Per-folder isolation handler is present.
+        self.assertIn("ERROR_MAILBOX", script)
+        self.assertIn("on error errMsg", script)
+        # No short per-mailbox timeout (only the single outer call budget remains).
+        self.assertEqual(script.count("with timeout of"), 1)
+
+    def test_search_emails_all_path_error_mailbox_yields_partial_results(self):
+        """An ERROR_MAILBOX marker in the output from the All path must
+        produce partial records plus a structured mailbox error in the JSON."""
+        good_line = _record_line(501, "Good Email", account="Work")
+        error_line = "ERROR_MAILBOX|||SlowFolder|||timed out"
+
+        def fake_run(script, timeout=120):
+            return good_line + "\n" + error_line
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                self._run(
+                    search_tools.search_emails(
+                        account="Work",
+                        mailbox="All",
+                        output_format="json",
+                        limit=10,
+                        date_from="2026-01-01",
+                    )
+                )
+            )
+
+        # Good record must be present
+        self.assertEqual(len(response["items"]), 1)
+        self.assertEqual(response["items"][0]["subject"], "Good Email")
+        # Error detail must surface the mailbox error
+        self.assertIn("error_details", response)
+        error_mailboxes = [e["mailbox"] for e in response["error_details"]]
+        self.assertIn("SlowFolder", error_mailboxes)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -63,7 +63,8 @@ See **[[email-drafting]]** for the required pre-draft verification step.
 
 - Run **narrow** queries first (`recent_days` small, explicit `account=`, `include_content=false`, tight `limit`).
 - Reserve `all_accounts=True` / cross-account scans for explicit user requests — large Exchange profiles may time out; partial JSON with `errors` is expected behavior.
-- After `list_inbox_emails` or `search_emails` returns `message_id`, always drill with `get_email_by_id` rather than fuzzy re-search.
+- Prefer `search_emails(mailboxes=["INBOX", "Sent", ...])` to scan a few named folders over `mailbox="All"` on large Exchange/Gmail accounts — it avoids the whole-profile fan-out and returns a structured per-folder error for any missing/slow mailbox instead of failing the call.
+- After `list_inbox_emails` or `search_emails` returns `message_id`, always drill with `get_email_by_id` rather than fuzzy re-search. `get_email_by_id` is also where per-message recipients (`to`/`cc`/`bcc`) and thread headers (`in_reply_to`/`references`) now come from — bulk `search_emails` no longer returns them.
 
 ## Operator Safety Patterns
 

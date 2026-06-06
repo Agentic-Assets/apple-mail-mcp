@@ -66,7 +66,8 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 | Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params — use plain compose tools when a named signature is required |
-| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope |
+| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching) and accepts `hide_empty=True` to suppress orphaned blanks |
+| Remove orphaned blank drafts | `manage_drafts(action="cleanup_empty")` | Deletes drafts with blank subject AND empty body; `dry_run=True` by default (preview first), capped by `max_deletes` (default 20). Confirm the preview count with the user before `dry_run=False` |
 
 ## Safety And Compliance
 
@@ -93,6 +94,14 @@ Summarize artifacts for the operator:
 1. Mailbox + identifiers (`message_id` if surfaced).
 2. Draft location and whether Mail was left open for explicit review.
 3. Next actions (edit, attachments, approvals).
+
+For reply/forward drafts, confirm the draft is genuinely threaded (not an
+accidental standalone wearing a `Re:` subject): fetch it with
+`get_email_by_id(message_id=..., mailbox="Drafts")` and verify `in_reply_to` /
+`references` are present and `to` is the intended recipient. `has_quoted_original`
+indicates the original thread is quoted inline. Bulk `search_emails` no longer
+returns per-message recipients — use `get_email_by_id` (or the `manage_drafts`
+list) to see `to`/`cc`/`bcc`.
 
 ## Related Skills
 

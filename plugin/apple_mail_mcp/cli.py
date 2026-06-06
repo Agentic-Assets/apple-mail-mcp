@@ -539,6 +539,11 @@ def _build_parser() -> argparse.ArgumentParser:
     search = subparsers.add_parser("search", help="Search emails")
     _add_account_flag(search)
     search.add_argument("--mailbox", default="INBOX", help="Mailbox path")
+    search.add_argument(
+        "--mailboxes",
+        help="Comma-separated folder names to search instead of --mailbox "
+        "(e.g. 'INBOX,Sent,Archive'); missing folders are reported and skipped",
+    )
     search.add_argument("--query", help="Subject keyword alias")
     search.add_argument("--subject", help="Subject keyword")
     search.add_argument("--sender", help="Sender substring")
@@ -659,7 +664,30 @@ def _build_parser() -> argparse.ArgumentParser:
     drafts_sub = drafts.add_subparsers(dest="drafts_action", required=True)
     drafts_list = drafts_sub.add_parser("list", help="List draft emails")
     _add_account_flag(drafts_list)
+    drafts_list.add_argument(
+        "--hide-empty",
+        action="store_true",
+        help="Skip orphaned drafts whose subject and body are both blank",
+    )
     _add_json_flag(drafts_list)
+    drafts_cleanup = drafts_sub.add_parser(
+        "cleanup-empty",
+        help="Remove orphaned blank drafts (preview-only unless --execute)",
+    )
+    _add_account_flag(drafts_cleanup)
+    drafts_cleanup.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually delete (default is a dry-run preview)",
+    )
+    drafts_cleanup.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        dest="max_deletes",
+        help="Maximum blank drafts to delete in one call (default 20)",
+    )
+    _add_json_flag(drafts_cleanup)
 
     draft = subparsers.add_parser("draft", help="Create a draft email")
     _add_account_flag(draft, required=True)
@@ -783,11 +811,13 @@ def _cmd_search(args: argparse.Namespace) -> int:
     from apple_mail_mcp.tools.search import search_emails
 
     subject = args.subject or args.query
+    mailboxes = [mb.strip() for mb in args.mailboxes.split(",") if mb.strip()] if args.mailboxes else None
     return _run_tool(
         search_emails,
         args.json,
         account=args.account,
         mailbox=args.mailbox,
+        mailboxes=mailboxes,
         subject_keyword=subject,
         sender=args.sender,
         body_text=args.body,
@@ -944,14 +974,24 @@ def _cmd_trash_dry_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_drafts(args: argparse.Namespace) -> int:
-    if args.drafts_action == "list":
-        from apple_mail_mcp.tools.compose import manage_drafts
+    from apple_mail_mcp.tools.compose import manage_drafts
 
+    if args.drafts_action == "list":
         return _run_tool(
             manage_drafts,
             args.json,
             account=args.account,
             action="list",
+            hide_empty=args.hide_empty,
+        )
+    if args.drafts_action == "cleanup-empty":
+        return _run_tool(
+            manage_drafts,
+            args.json,
+            account=args.account,
+            action="cleanup_empty",
+            dry_run=not args.execute,
+            max_deletes=args.max_deletes,
         )
     print(f"Unsupported drafts action: {args.drafts_action}", file=sys.stderr)
     return 2

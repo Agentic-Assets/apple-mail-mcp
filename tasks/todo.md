@@ -1,11 +1,11 @@
 # Active Pointer — apple-mail-mcp
 
-**Branch:** `feat/v4-performance-consolidation`
+**Branch:** `main` (3.5.0 field-report hardening staged, not yet committed)
 
-**Active workstream:** v4 performance, consolidation, strict-gate, and FTS planning: [`v4-performance-consolidation-2026-05-27/phase-plan.md`](v4-performance-consolidation-2026-05-27/phase-plan.md).
+**Active workstream:** v3.5.0 live-field-report hardening — draft-QA fixes from `LIVE_FIELD_REPORT_2026-06-04.md`. Duplicate-draft persist, Exchange search-hang/silent-0-row regressions, `get_email_by_id` threading+recipient metadata, `search_emails(mailboxes=[...])`, triageable `manage_drafts` list + `cleanup_empty`, plus CLI parity (`search --mailboxes`, `drafts list --hide-empty`, `drafts cleanup-empty`).
 
-**Next action:** review the strict package-gate cleanup, then start the pure JSON perf comparison harness (`tools/compare_perf_results.py` + `tests/test_compare_perf_results.py`) before MCP behavior changes.
+**Next action:** commit + push the 3.5.0 change set on a `fix/*` branch and open a PR (awaiting "Cayman approved this merge" before any merge to `main`).
 
-**Latest verification (2026-05-27):** `bash tools/dev-check.sh lint` passes with fatal `ruff check`, `ruff format --check`, and `mypy --strict` for `plugin/apple_mail_mcp/`; focused strict-cleanup pytest groups passed. Earlier recon reported `.venv/bin/pytest tests/ -q -p no:cacheprovider` OK with 4 deprecation warnings, `bash tools/dev-check.sh manifest` OK, and current collection is **763 tests**.
+**Latest verification (2026-06-05):** all draft/search/CLI changes live-verified against the 24K TU Exchange inbox (one reply → exactly one threaded draft; INBOX search returns rows again; targeted `mailboxes=[...]` and `cleanup_empty` dry-run confirmed). Rendered AppleScript for the three new scripts compiles via `osacompile`. `bash tools/dev-check.sh release` green; `validate_manifests: OK (version=3.5.0, tools=28)`; full pytest suite passes.
 
-**Blockers / caveats:** strict cleanup is intentionally broad and should be reviewed before perf/tool behavior edits; `E501` is ignored only for embedded AppleScript/docstring literals while formatter-owned wrapping remains enforced.
+**Blockers / caveats:** deferred field-report items by design — #4 GUI `delay`→polling/window-by-reference (highest regression risk), #8 compose dedup guard (#1 already cures observed dupes), #9 preview split (cosmetic). Per-message recipient resolution stays out of bulk `search_emails` (hangs on Exchange); recipients come from `get_email_by_id` / drafts list. See project memory `exchange-applescript-footguns.md`.
