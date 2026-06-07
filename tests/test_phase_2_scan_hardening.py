@@ -36,7 +36,12 @@ class ComposeScanCapTests(unittest.TestCase):
             compose_tools.manage_drafts(account="Work", action="list")
 
         self.assertEqual(len(captured), 1)
-        self.assertIn("messages 1 thru 100", captured[0])
+        # Newest-first cap: Mail returns drafts oldest-first, so the list now
+        # slices the tail window (messages startIdx thru totalDrafts, capped at
+        # DRAFT_LIST_CAP=100) and iterates it in reverse so the newest draft is
+        # never missed when there are more than 100 drafts.
+        self.assertIn("messages startIdx thru totalDrafts of draftsMailbox", captured[0])
+        self.assertIn("if totalDrafts > 100 then set startIdx to totalDrafts - 100 + 1", captured[0])
         self.assertNotIn("every message of draftsMailbox", captured[0])
 
     def test_reply_to_email_subject_lookup_uses_in_loop_filter_and_cap(self):

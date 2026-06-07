@@ -341,7 +341,7 @@ get_email_thread(
     message_id="<message_id from search>"
 )
 
-# 3. Create a threaded draft for later
+# 3. Create a reply draft (plain-text "Re:", correctly addressed) for later
 reply_to_email(
     account="Work",
     message_id="<message_id from search>",

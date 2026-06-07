@@ -185,3 +185,49 @@ Per repo `CLAUDE.md`: route the compose/search edits through `generalPurpose` su
 ---
 
 *All findings above were observed live against the TU - Cayman Exchange account on 2026-06-04 and cross-checked against source in `plugin/apple_mail_mcp/`. No mail was sent and no drafts were deleted in producing this report.*
+
+---
+
+## 3.5.0 reproduction update (2026-06-05)
+
+**Context.** Live task: draft replies to the day's TU inbox (a revision-thread reply-all and a dinner RSVP) on the *TU - Cayman* Exchange account, plugin upgraded to **3.5.0**. The duplicate/clipboard findings below were **not fixed** in 3.5.0 and one got materially worse. To land **one** correct revision draft I needed 2 `reply_to_email` attempts + 1 `manage_drafts(create)` + 4 trash deletions. For unattended/agent drafting this is effectively unusable.
+
+**What 3.5.0 improved (confirmed live):** read tools now return `to`, `cc`, and `has_quoted_original` (findings #2/#3 addressed on the read side), and `manage_drafts(action="list")` now reports `Id` + `To` + body snippet (finding #6). These were genuinely helpful for triage and were the only reason the bugs below were catchable.
+
+### A. Cross-thread body leak — **Critical** (escalation of #4; data-integrity, not just fragility)
+
+A **single** `reply_to_email(message_id=80094)` call (the dinner thread) produced **three** drafts:
+- `80256` — Re: Dinner… → meagan, correct body ✓
+- `80257` — Re: Dinner… → meagan, **empty (signature only)**
+- `80254` — **Re: Notes from today's meeting.** → **hmaleki@business.rutgers.edu**, body = **the dinner reply text**
+
+The dinner body was pasted into a draft replying to a **different message/thread** (Hosein Maleki's "Notes from today's meeting", msg 80088) that the call never referenced. This is the positional `close window 1` + NSPasteboard race (finding #4) manifesting as **content for thread A written into a reply to thread B** — i.e. a real risk of sending the wrong content to the wrong recipient. This should be its own top-severity finding, above the duplicate-persist issue.
+
+### B. Duplicate-persist now also hits the standalone `manage_drafts(create)` path — **High** (regression vs 2026-06-04)
+
+On 6/4 the standalone create path saved exactly once (it was the "clean" contrast in finding #1). On 6/5, `manage_drafts(action="create", ...)` produced **two** drafts from one call:
+- `80268` — To: Stace, Cc: Mariya, body ✓ (keeper)
+- `80269` — **To: blank**, body present
+
+So the `save … then close … saving yes` double-persist (finding #1) is no longer confined to reply/forward; it now reproduces on the standalone path too, and the duplicate can carry **degraded recipients** (blank To). Intermittent — same call shape was single-draft on 6/4.
+
+### C. Empty-body race on reply — **High** (compounds #4)
+
+The first revision retry (`reply_to_email(message_id=80095, cc=Mariya)`) produced a single draft (`80265`) with **correct recipients and correct quoted original but no new body text** — the "Thanks for the nudge, Mariya…" paste was lost entirely (`has_quoted_original=true`, body = signature + quote only). Opposite failure mode to A's empty `80257`. Confirms the body paste is timing-dependent and silently drops.
+
+### D. `reply_to_all=True` drops a To recipient — **High**
+
+Mariya forwarded the thread To: Cayman + Stace; Stace replied. `reply_to_email(message_id=80095, reply_to_all=True)` set **To: Stace only** — Mariya was dropped, even though the message body literally opens "Thanks for the nudge, Mariya." Had to force her in via explicit `cc=`. Reply-all is silently under-populating recipients, which for a coauthor R&R thread is a correctness bug, not cosmetic.
+
+### E. Verification-tooling gaps surfaced while QA'ing the above
+
+- `manage_drafts(action="create")` success message echoes `To` but **not `Cc`** — can't confirm Cc without a follow-up `get_email_by_id` (which *does* now return `cc`). Echo Cc/Bcc in the create/reply confirmation.
+- `search_emails(mailbox="Drafts", subject_keyword="8296082", recent_days=1)` returned **zero** for a draft created seconds earlier and dated today. Newly-created (esp. standalone) drafts aren't reliably findable by subject/date search — likely a null/odd `received_date` on the create path. Forces a fall back to the full `manage_drafts(list)` (100 rows) just to find one's own just-made draft. Either stamp a sane date on created drafts or return the new draft's `message_id` from `create`/`reply`.
+
+### Recommended priority shift
+
+1. **Cross-thread body leak (A)** is now the highest-value fix — it is a correctness/data-integrity hazard, not just flakiness. Implement finding #4's window-by-reference + poll-for-readiness + pasteboard isolation, and gate persist on "this is the window we opened AND body length matches what we wrote."
+2. **Return the created draft's `message_id`** from `reply_to_email` / `forward_email` / `manage_drafts(create)`. Every bug above was only diagnosable because of post-hoc list/get; the tools should hand back the id they just wrote so a caller can verify in one cheap `get_email_by_id` instead of a 100-row list scan.
+3. **Persist-once (B/#1)** and **reply-all recipient capture (D)** remain High and now have fresh 3.5.0 repros.
+
+*Observed live against TU - Cayman on 2026-06-05, plugin 3.5.0. Net Drafts side effects from this session were reconciled (junk drafts 80253/80254/80257/80265/80269 moved to Trash; keepers 80256 dinner, 80268 revision). No mail was sent.*

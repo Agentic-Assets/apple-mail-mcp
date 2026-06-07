@@ -66,7 +66,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 | Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params — use plain compose tools when a named signature is required |
-| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching) and accepts `hide_empty=True` to suppress orphaned blanks |
+| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, and accepts `hide_empty=True` plus `subject_contains="..."` (fast, case-insensitive "find the draft I just made") |
 | Remove orphaned blank drafts | `manage_drafts(action="cleanup_empty")` | Deletes drafts with blank subject AND empty body; `dry_run=True` by default (preview first), capped by `max_deletes` (default 20). Confirm the preview count with the user before `dry_run=False` |
 
 ## Safety And Compliance
@@ -95,13 +95,22 @@ Summarize artifacts for the operator:
 2. Draft location and whether Mail was left open for explicit review.
 3. Next actions (edit, attachments, approvals).
 
-For reply/forward drafts, confirm the draft is genuinely threaded (not an
-accidental standalone wearing a `Re:` subject): fetch it with
-`get_email_by_id(message_id=..., mailbox="Drafts")` and verify `in_reply_to` /
-`references` are present and `to` is the intended recipient. `has_quoted_original`
-indicates the original thread is quoted inline. Bulk `search_emails` no longer
-returns per-message recipients — use `get_email_by_id` (or the `manage_drafts`
-list) to see `to`/`cc`/`bcc`.
+To verify a freshly-created draft, do **not** use `search_emails` — it runs a
+date-filtered scan that is slow on large accounts and silently drops brand-new
+drafts (an unsent `outgoing message` has a null received date). Instead use the
+bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
+(newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Confirm
+`to`/`cc` are the intended recipients and the body is present.
+
+**Reply/forward threading note (v3.6.0):** `reply_to_email` and `forward_email`
+now build the draft through Mail's object model (no GUI window, no clipboard) to
+eliminate the cross-thread body-leak / duplicate / empty-draft races. The trade-off
+is that replies/forwards are **plain-text** drafts with a `> `-quoted original and a
+`Re:`/`Fwd:` subject, and do **not** carry native `In-Reply-To`/`References`
+headers — they are correctly addressed and always contain the body, but thread
+visually rather than via headers. `body_html` on `reply_to_email` is accepted for
+compatibility but ignored. Use `create_rich_email_draft` / `compose_email` when you
+need rich HTML on a genuinely standalone message.
 
 ## Related Skills
 

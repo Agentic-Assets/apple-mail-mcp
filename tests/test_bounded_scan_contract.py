@@ -208,9 +208,12 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         from apple_mail_mcp.tools.compose import _build_draft_lookup
 
         snippet = _build_draft_lookup("invoice question")
-        # Safe primitives must be present.
-        self.assertIn("messages 1 thru", snippet)
-        self.assertIn("repeat with aMessage in candidateMessages", snippet)
+        # Safe primitives must be present. The lookup now slices the newest-first
+        # tail window (messages startIdx thru totalDrafts) and iterates it in
+        # reverse with an in-loop `if`, so a just-created draft past the cap is
+        # still found — but it never uses `whose`.
+        self.assertIn("messages startIdx thru totalDrafts of draftsMailbox", snippet)
+        self.assertIn("repeat with __i from (count of candidateMessages) to 1 by -1", snippet)
         self.assertIn(
             '(subject of aMessage) contains "invoice question"', snippet
         )
@@ -219,6 +222,7 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
             "every message of draftsMailbox whose subject contains", snippet
         )
         self.assertNotIn("draftMessages whose subject contains", snippet)
+        self.assertNotIn("candidateMessages whose", snippet)
 
 
 # ---------------------------------------------------------------------------
