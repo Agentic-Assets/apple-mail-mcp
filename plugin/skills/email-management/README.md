@@ -25,7 +25,7 @@ claude plugin marketplace add Agentic-Assets/apple-mail-mcp
 claude plugin install apple-mail@apple-mail-mcp
 ```
 
-All nine skills under `plugin/skills/` load automatically. Legacy slash command: `/email-management`.
+All nine skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
 
 ## Install (standalone copy)
 

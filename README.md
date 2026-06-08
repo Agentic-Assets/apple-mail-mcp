@@ -31,7 +31,6 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 | [`plugin/apple_mail_mcp/CLAUDE.md`](plugin/apple_mail_mcp/CLAUDE.md) | Package entry, `core.py`, CLI |
 | [`plugin/apple_mail_mcp/tools/CLAUDE.md`](plugin/apple_mail_mcp/tools/CLAUDE.md) | MCP tool modules |
 | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) | Skill authoring |
-| [`plugin/docs/commands.md`](plugin/docs/commands.md) | Legacy slash commands |
 | [`tests/CLAUDE.md`](tests/CLAUDE.md) | Test layout & AppleScript mocks |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | Manifest validation scripts |
 | [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index + plugin skill map |
@@ -46,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (28 tools), legacy `/email-management` slash command, and **nine** bundled workflow skills under `plugin/skills/` (see table below).
+One install — MCP server (28 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -463,11 +462,11 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 
 | Default | Tools | Override |
 |---------|-------|----------|
-| Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week); full scans require explicit opt-in |
+| Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week); routine tools reject unbounded scans |
 | 50 emails max | `list_inbox_emails`, `list_email_attachments` | Pass `max_emails` / `max_results` |
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
-| Unbounded scans refused | All scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; remediation names `full_inbox_export` as the audited full-walk fallback |
+| Unbounded scans refused | All routine scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is a separate audited export tool, not a normal search fallback |
 
 When a per-account call fails in a multi-account fan-out, you get partial results plus an `errors` field naming the account. JSON responses also include `error_details` when the tool can distinguish a timeout from another Mail/App permission error.
 
@@ -605,7 +604,6 @@ apple-mail-mcp/
 │   ├── .claude-plugin/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
-│   ├── commands/              # /email-management slash command
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
 │   ├── apple_mail_mcp/        # Python MCP server package (28 tools)
 │   ├── apple_mail_mcp.py      # Entry point

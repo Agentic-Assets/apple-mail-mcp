@@ -83,7 +83,7 @@
     },
     {
       "name": "reply_to_email",
-      "description": "Reply to an email by message_id (preferred) or subject keyword. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass message_id for constant-cost lookups or route audited full-mailbox sweeps through full_inbox_export. Default mode saves quietly to Drafts; mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, CC/BCC, and HTML body."
+      "description": "Reply to an email by message_id (preferred) or subject keyword using Mail's native reply composer, so quoted prior messages are included automatically. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED. Default mode saves to Drafts, closes the transient compose window, and verifies the saved draft in a bounded newest-Drafts window before success; mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, and CC/BCC. body_html is accepted for backward compatibility but ignored for native replies."
     },
     {
       "name": "compose_email",

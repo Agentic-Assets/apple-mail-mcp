@@ -6,7 +6,7 @@ New or edited skills: delegate drafting to subagents; run **`plugin-dev:plugin-v
 
 ## Skills-only policy
 
-**Ship new entry points as skills only.** Do not add new files under `commands/`. The existing `commands/email-management.md` stays for backward compatibility; Claude Code may auto-convert commands to skills at install time, so authoring both is duplicative.
+**Ship entry points as skills only.** Do not add files under `commands/`. The old `/email-management` slash command was retired because Claude-style hosts can surface commands beside skills, creating duplicate/confusing entry points.
 
 ## Shipped skills
 
@@ -60,7 +60,6 @@ Run **`plugin-dev:skill-reviewer`** on the description and body. Description qua
 
 ## Related folders
 
-- **`../commands/`** — Legacy slash command that delegates to `email-management/SKILL.md` via `${CLAUDE_PLUGIN_ROOT}`
 - **`../../docs/CLAUDE-conventions.md`** — Deep skill-authoring and tool rules
 - **`../apple_mail_mcp/tools/`** — MCP tools referenced by skills
 - **`../.claude-plugin/plugin.json`** — Plugin manifest; skills auto-discovered from this tree

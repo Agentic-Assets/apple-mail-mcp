@@ -42,7 +42,7 @@ Nine skills ship under [`plugin/skills/`](../plugin/skills/) and auto-load with 
 
 **Routing index:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md) (sibling cheat sheet). **Authoring rules:** [`CLAUDE-conventions.md`](CLAUDE-conventions.md) § Skill authoring. **User install blurb:** root [`README.md`](../README.md) § Claude Code Skills.
 
-Legacy slash command: `/email-management` only — all new entry points are skills-only ([`plugin/docs/commands.md`](../plugin/docs/commands.md)).
+Workflow entry points are skills-only. Do not add or restore legacy slash commands; use `plugin/skills/<name>/SKILL.md`.
 
 ## AGENT_LIVE_TESTING.md structure
 

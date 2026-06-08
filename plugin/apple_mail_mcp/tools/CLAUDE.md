@@ -56,7 +56,7 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 | Tool | Default | Notes |
 |------|---------|-------|
 | `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True` |
-| `reply_to_email` | `mode="draft"` (via `send=False`) | Prefer `message_id=` from search/list; `subject_keyword` is fallback |
+| `reply_to_email` | `mode="draft"` (via `send=False`) | Native Mail reply composer; quoted prior messages are automatic; verifies saved draft before success |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
 | `create_rich_email_draft` | saves + closes | Standalone only; same reply-like guard; `review_in_mail=True` for saved-open review |
 
