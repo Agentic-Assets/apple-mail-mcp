@@ -136,10 +136,12 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
             with self.subTest(tool=tool.__name__):
                 captured = []
 
-                def fake_run(script, timeout=120):
+                def fake_run(script, timeout=120, captured=captured):
                     captured.append(script)
                     if "count of outgoing messages" in script:
                         return "0"
+                    if "availableSignatures" in script:
+                        return ""
                     return "saved"
 
                 with patch(
@@ -154,11 +156,7 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
                     )
 
                 self.assertTrue(
-                    any(
-                        f'set message signature of {message_var} to signature "TU"'
-                        in script
-                        for script in captured
-                    ),
+                    any(f'set message signature of {message_var} to signature "TU"' in script for script in captured),
                     captured,
                 )
 
@@ -237,9 +235,7 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Subject: Weekly Update", payload)
             self.assertIn("Opened in Mail: yes", result)
             self.assertIn("Saved in Drafts: yes", result)
-            mock_run.assert_called_once_with(
-                ["open", "-a", "Mail", str(output_path)], check=True
-            )
+            mock_run.assert_called_once_with(["open", "-a", "Mail", str(output_path)], check=True)
             self.assertNotIn("every outgoing message whose subject is", scripts[1])
             # FIX #1: single persist — Cmd+S for UI save, then close saving no (no re-persist)
             _assert_ordered(
@@ -277,9 +273,7 @@ class ComposeToolTests(unittest.TestCase):
                     output_path=str(output_path),
                 )
 
-            mock_run.assert_called_once_with(
-                ["open", "-a", "Mail", str(output_path)], check=True
-            )
+            mock_run.assert_called_once_with(["open", "-a", "Mail", str(output_path)], check=True)
             self.assertIn("Saved in Drafts: yes", result)
             self.assertIn("Left open for review: no", result)
             self.assertNotIn("every outgoing message whose subject is", scripts[1])
@@ -382,9 +376,7 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            result = compose_tools._save_front_compose_window_as_draft(
-                close_after_save=True
-            )
+            result = compose_tools._save_front_compose_window_as_draft(close_after_save=True)
 
         self.assertTrue(result)
         self.assertEqual(len(captured), 1)
@@ -409,9 +401,7 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            result = compose_tools._save_front_compose_window_as_draft(
-                close_after_save=False
-            )
+            result = compose_tools._save_front_compose_window_as_draft(close_after_save=False)
 
         self.assertTrue(result)
         self.assertNotIn("close window 1 saving yes", captured[0])
@@ -451,7 +441,7 @@ class StripCdataTests(unittest.TestCase):
         )
 
     def test_leaves_normal_html_untouched(self):
-        html = '<html><body><h1>Weekly Update</h1></body></html>'
+        html = "<html><body><h1>Weekly Update</h1></body></html>"
         self.assertEqual(html, compose_tools._strip_cdata_wrappers(html))
 
 
@@ -503,9 +493,7 @@ class ValidateFromAddressTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             return_value="Default@Example.com\nSecondary@Example.org",
         ):
-            override, error = compose_tools._validate_from_address(
-                "Work", "  SECONDARY@example.ORG "
-            )
+            override, error = compose_tools._validate_from_address("Work", "  SECONDARY@example.ORG ")
         self.assertEqual(override, "Secondary@Example.org")
         self.assertIsNone(error)
 
@@ -514,9 +502,7 @@ class ValidateFromAddressTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             return_value="default@example.com",
         ):
-            override, error = compose_tools._validate_from_address(
-                "Work", "other@example.com"
-            )
+            override, error = compose_tools._validate_from_address("Work", "other@example.com")
         self.assertIsNone(override)
         self.assertIn("is not configured on account", error)
         self.assertIn("default@example.com", error)
@@ -526,9 +512,7 @@ class ValidateFromAddressTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             return_value="",
         ):
-            override, error = compose_tools._validate_from_address(
-                "Work", "anything@example.com"
-            )
+            override, error = compose_tools._validate_from_address("Work", "anything@example.com")
         self.assertIsNone(override)
         self.assertIn("Could not read email addresses", error)
 
@@ -657,9 +641,7 @@ class ComposeEmailSenderOverrideTests(unittest.TestCase):
         script = captured[0]
         self.assertIn("email addresses of targetAccount", script)
         self.assertIn("if (count of emailAddrs) is 1 then", script)
-        self.assertIn(
-            "set sender of newMessage to item 1 of emailAddrs", script
-        )
+        self.assertIn("set sender of newMessage to item 1 of emailAddrs", script)
         self.assertNotIn('set sender of newMessage to "', script)
 
     def test_injects_sender_when_from_address_is_valid(self):
@@ -686,9 +668,7 @@ class ComposeEmailSenderOverrideTests(unittest.TestCase):
 
         self.assertEqual(len(scripts), 2)
         main_script = scripts[1]
-        self.assertIn(
-            'set sender of newMessage to "secondary@example.org"', main_script
-        )
+        self.assertIn('set sender of newMessage to "secondary@example.org"', main_script)
         self.assertNotIn("if (count of emailAddrs) is 1 then", main_script)
 
     def test_rejects_invalid_from_address_without_sending(self):
@@ -731,35 +711,23 @@ class AccountDefaultAliasIfSingleTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             return_value="",
         ):
-            self.assertIsNone(
-                compose_tools._account_default_alias_if_single("Multi")
-            )
+            self.assertIsNone(compose_tools._account_default_alias_if_single("Multi"))
 
 
 class ComposeSenderScriptTests(unittest.TestCase):
     def test_override_sets_sender_directly(self):
-        script = compose_tools._compose_sender_script(
-            "newMessage", "targetAccount", "chosen@example.com"
-        )
-        self.assertEqual(
-            script, 'set sender of newMessage to "chosen@example.com"'
-        )
+        script = compose_tools._compose_sender_script("newMessage", "targetAccount", "chosen@example.com")
+        self.assertEqual(script, 'set sender of newMessage to "chosen@example.com"')
 
     def test_without_override_emits_single_alias_fallback(self):
-        script = compose_tools._compose_sender_script(
-            "newMessage", "targetAccount", None
-        )
+        script = compose_tools._compose_sender_script("newMessage", "targetAccount", None)
         self.assertIn("email addresses of targetAccount", script)
         self.assertIn("if (count of emailAddrs) is 1 then", script)
-        self.assertIn(
-            "set sender of newMessage to item 1 of emailAddrs", script
-        )
+        self.assertIn("set sender of newMessage to item 1 of emailAddrs", script)
 
     def test_override_value_is_escaped(self):
-        script = compose_tools._compose_sender_script(
-            "newMessage", "targetAccount", 'weird"quote@example.com'
-        )
-        self.assertIn(r'\"quote@example.com', script)
+        script = compose_tools._compose_sender_script("newMessage", "targetAccount", 'weird"quote@example.com')
+        self.assertIn(r"\"quote@example.com", script)
 
 
 class CreateRichEmailDraftFromAddressTests(unittest.TestCase):
@@ -916,13 +884,73 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         # Native Mail reply: Mail constructs the quoted prior conversation and
         # the tool inserts the requested body into the native composer.
         self.assertIn("reply foundMessage with opening window", script)
-        self.assertEqual(script.count("save replyMessage"), 1)
+        self.assertGreaterEqual(script.count("save replyMessage"), 1)
+        self.assertIn("close (window of replyMessage) saving yes", script)
         self.assertIn("close front window saving yes", script)
         self.assertIn("set replySubject to subject of replyMessage as string", script)
         self.assertIn('set outputText to outputText & "Subject: " & replySubject', script)
         self.assertIn('keystroke "v"', script)
         self.assertNotIn("NSPasteboard", script)
         self.assertNotIn("send replyMessage", script)
+
+    def test_reply_draft_success_runs_bounded_saved_draft_verifier(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return (
+                    "SAVING REPLY AS DRAFT\n\n"
+                    "Reply saved as draft!\n"
+                    "To: Sender <sender@example.com>\n"
+                    "Subject: Re: Test\n"
+                )
+            if "repeat with verifyAttempt from 1 to 8" in script:
+                return "FOUND"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+            )
+
+        self.assertIn("Reply saved as draft!", result)
+        verifier_script = next(script for script in captured if "repeat with verifyAttempt from 1 to 8" in script)
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", verifier_script)
+        self.assertIn('set replyBodyNeedle to "Reply body"', verifier_script)
+        self.assertIn('if draftSubject is "Re: Test" then', verifier_script)
+        self.assertIn("if draftContent contains replyBodyNeedle then set draftMatched to true", verifier_script)
+
+    def test_reply_draft_success_reports_error_when_saved_draft_not_verified(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return (
+                    "SAVING REPLY AS DRAFT\n\n"
+                    "Reply saved as draft!\n"
+                    "To: Sender <sender@example.com>\n"
+                    "Subject: Re: Test\n"
+                )
+            if "repeat with verifyAttempt from 1 to 8" in script:
+                return "NOT_FOUND"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+            )
+
+        self.assertIn("did not verify it in the newest Drafts window", result)
+        self.assertIn("No email was sent", result)
 
     def test_reply_open_mode_saves_before_leaving_open_for_review(self):
         captured = []
@@ -974,9 +1002,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn("if (count of emailAddrs) is 1 then", script)
-        self.assertIn(
-            "set sender of replyMessage to item 1 of emailAddrs", script
-        )
+        self.assertIn("set sender of replyMessage to item 1 of emailAddrs", script)
         self.assertNotIn('set sender of replyMessage to "', script)
 
     def test_reply_to_all_uses_native_mail_reply_all(self):
@@ -1040,6 +1066,66 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             script,
         )
 
+    def test_reply_signature_is_applied_before_body_paste(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return ""
+            if "count of outgoing messages" in script:
+                return "0"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                signature_name="TU",
+            )
+
+        script = _main_reply_script(captured)
+        _assert_ordered(
+            self,
+            script,
+            "set replyMessage to reply foundMessage with opening window",
+            'set message signature of replyMessage to signature "TU"',
+            "set the clipboard to replyBodyText",
+            'keystroke "v" using command down',
+        )
+
+    def test_invalid_reply_signature_is_rejected_before_native_reply(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return 'Error: Mail signature "Missing" not found. Available signatures: TU, Agentic Assets'
+            if "count of outgoing messages" in script:
+                return "0"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                signature_name="Missing",
+            )
+
+        self.assertIn('Mail signature "Missing" not found', result)
+        self.assertFalse(
+            any("reply foundMessage" in script for script in captured),
+            captured,
+        )
+
     def test_injects_sender_when_from_address_is_valid(self):
         scripts = []
 
@@ -1061,11 +1147,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 send=False,
             )
 
-        self.assertEqual(len(scripts), 3)
+        self.assertEqual(len(scripts), 2)
         script = _main_reply_script(scripts)
-        self.assertIn(
-            'set sender of replyMessage to "secondary@example.org"', script
-        )
+        self.assertIn('set sender of replyMessage to "secondary@example.org"', script)
         self.assertNotIn("if (count of emailAddrs) is 1 then", script)
 
     def test_rejects_invalid_from_address_without_running_main_script(self):
@@ -1171,9 +1255,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         script = captured[0]
         self.assertIn("if (count of emailAddrs) is 1 then", script)
-        self.assertIn(
-            "set sender of forwardMessage to item 1 of emailAddrs", script
-        )
+        self.assertIn("set sender of forwardMessage to item 1 of emailAddrs", script)
         self.assertNotIn('set sender of forwardMessage to "', script)
 
     def test_injects_sender_when_from_address_is_valid(self):
@@ -1287,9 +1369,7 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         script = captured[0]
         self.assertIn("if (count of emailAddrs) is 1 then", script)
-        self.assertIn(
-            "set sender of newDraft to item 1 of emailAddrs", script
-        )
+        self.assertIn("set sender of newDraft to item 1 of emailAddrs", script)
         self.assertNotIn('set sender of newDraft to "', script)
 
     def test_injects_sender_when_from_address_is_valid(self):
@@ -1316,9 +1396,7 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
 
         self.assertEqual(len(scripts), 2)
         main_script = scripts[1]
-        self.assertIn(
-            'set sender of newDraft to "secondary@example.org"', main_script
-        )
+        self.assertIn('set sender of newDraft to "secondary@example.org"', main_script)
         self.assertNotIn("if (count of emailAddrs) is 1 then", main_script)
 
     def test_rejects_invalid_from_address_without_running_main_script(self):
@@ -1380,9 +1458,7 @@ class ManageDraftsListTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            compose_tools.manage_drafts(
-                account="Work", action="list", subject_contains="Q3 Report"
-            )
+            compose_tools.manage_drafts(account="Work", action="list", subject_contains="Q3 Report")
 
         self.assertEqual(len(captured), 1)
         script = captured[0]
@@ -1526,12 +1602,10 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         self.assertEqual(compose_tools._split_addresses(None), [])
 
     def test_build_recipient_loops_message_var_and_addresses(self):
-        cc_script, bcc_script, cc_addrs, bcc_addrs = (
-            compose_tools._build_recipient_loops(
-                "a@x.com, b@y.com",
-                "c@z.com",
-                message_var="replyMessage",
-            )
+        cc_script, bcc_script, cc_addrs, bcc_addrs = compose_tools._build_recipient_loops(
+            "a@x.com, b@y.com",
+            "c@z.com",
+            message_var="replyMessage",
         )
         self.assertEqual(cc_addrs, ["a@x.com", "b@y.com"])
         self.assertEqual(bcc_addrs, ["c@z.com"])
@@ -1547,20 +1621,15 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         self.assertIn('address:"c@z.com"', bcc_script)
 
     def test_build_recipient_loops_compact_empty(self):
-        cc_script, bcc_script, cc_addrs, bcc_addrs = (
-            compose_tools._build_recipient_loops(None, "", compact=True)
-        )
+        cc_script, bcc_script, cc_addrs, bcc_addrs = compose_tools._build_recipient_loops(None, "", compact=True)
         self.assertEqual(cc_addrs, [])
         self.assertEqual(bcc_addrs, [])
         self.assertEqual(cc_script, "")
         self.assertEqual(bcc_script, "")
-        cc_script, _, _, _ = compose_tools._build_recipient_loops(
-            "one@example.com", None, compact=True
-        )
+        cc_script, _, _, _ = compose_tools._build_recipient_loops("one@example.com", None, compact=True)
         self.assertEqual(
             cc_script,
-            'make new cc recipient at end of cc recipients with properties '
-            '{address:"one@example.com"}\n',
+            'make new cc recipient at end of cc recipients with properties {address:"one@example.com"}\n',
         )
 
 

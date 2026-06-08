@@ -108,9 +108,11 @@ bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
 `reply foundMessage` composer by default, so prior messages are included by Mail
 automatically the same way they appear from the Reply button. The tool inserts the
 new reply body above Mail's native quoted thread, saves the draft, then closes the
-compose window for `mode="draft"`. `body_html` on `reply_to_email` is accepted for
-compatibility but ignored; use `create_rich_email_draft` / `compose_email` only
-for rich HTML on a genuinely standalone message.
+compose window for `mode="draft"`. After Mail reports the save, the tool runs a
+separate bounded newest-Drafts verification before returning success. `body_html`
+on `reply_to_email` is accepted for compatibility but ignored; use
+`create_rich_email_draft` / `compose_email` only for rich HTML on a genuinely
+standalone message.
 
 ## Related Skills
 
