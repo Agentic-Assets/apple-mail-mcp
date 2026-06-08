@@ -1,6 +1,6 @@
 # plugin/ — shared plugin install surface
 
-**Shared Claude Code + Codex install surface** — registers the MCP server, ships skills/commands, bootstraps user-local venv. Tool logic lives in `apple_mail_mcp/`; see root `CLAUDE.md` for server architecture.
+**Shared Claude Code + Codex install surface** — registers the MCP server, ships skills, bootstraps user-local venv. Tool logic lives in `apple_mail_mcp/`; see root `CLAUDE.md` for server architecture.
 
 ## Agent orchestration
 
@@ -32,7 +32,6 @@ Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/v
 
 - **`apple_mail_mcp/`** — Python package (source of truth for all 28 MCP tools)
 - **`skills/`** — Procedural workflows (nine shipped workflow skills — see `skills/CLAUDE.md`)
-- **`commands/`** — Legacy slash command; see [`docs/commands.md`](commands.md)
 - **`ui/`** — Inbox dashboard HTML via `mcp-ui-server` (`dashboard.py`, `templates/`)
 
 ## Related distribution shapes
@@ -46,5 +45,5 @@ Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/v
 - **Manifest edits** (`plugin.json`, marketplace, mcpb, Codex `.mcp.json`): bump version in all versioned files (see root `CLAUDE.md`); keep `.agents/plugins/marketplace.json` pointed at `./plugin` and `plugin/.mcp.json` draft-safe unless intentionally changing send semantics; run **`plugin-dev:plugin-validator`** before merge.
 - **Launcher / deps**: edit `start_mcp.sh`, `requirements.txt`, or `pyproject.toml`; keep plugin and PyPI dependencies/packages aligned (`mcp-ui-server`, `plugin/ui`); test fresh venv by removing `plugin/venv/`; run `bash tools/dev-check.sh release`.
 - **New MCP tools**: implement under `apple_mail_mcp/tools/` and register in `apple_mail_mcp/__init__.py` — not in this wrapper layer.
-- **New user entry points**: add skills under `skills/` only (no new commands).
+- **New user entry points**: add skills under `skills/` only. Do not restore `commands/`; release validation fails if the retired legacy command directory reappears.
 - **Venvs**: `plugin/venv/` = user install (gitignored); `../../.venv/` = dev pytest/editable install.

@@ -7,7 +7,7 @@ During a TU email triage session, Codex had the Apple Mail MCP plugin skills loa
 This was not a `reply_to_email` behavior bug. The repository already makes the intended contract clear:
 
 - `compose_email` is standalone-only and warns callers to use `reply_to_email(message_id=...)` for responses.
-- `reply_to_email` builds a quoted-original block under the new reply body.
+- `reply_to_email` now uses Mail's native reply composer, so Mail builds the quoted prior conversation and the tool verifies the saved draft before reporting success.
 - The operator skill says reply drafts must use `reply_to_email(message_id=...)`, with already-replied checks first.
 
 The failure was that Codex reported the plugin as installed and enabled, while the active session still exposed zero `mcp__apple-mail__*` tools.

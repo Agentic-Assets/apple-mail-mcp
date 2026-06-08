@@ -153,7 +153,8 @@ class ValidateManifestsTests(unittest.TestCase):
                 validate_manifests.ROOT = original_root
 
         self.assertIn(
-            "plugin.json: unsupported strict-validator field 'commands'; rely on commands/ auto-discovery",
+            "plugin.json: unsupported strict-validator field 'commands'; "
+            "ship workflow entry points as skills only",
             errors,
         )
         self.assertIn("plugin.json mcpServers.apple-mail.command: expected /bin/bash", errors)
@@ -596,6 +597,43 @@ class ValidateManifestsTests(unittest.TestCase):
             "get_inbox_overview",
         ):
             self.assertIn(tool, script)
+
+    def test_claude_plugin_contract_rejects_legacy_commands_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_dir = root / "plugin/.claude-plugin"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "name": "apple-mail",
+                        "mcpServers": {
+                            "apple-mail": {
+                                "command": "/bin/bash",
+                                "args": [
+                                    "${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
+                                    "--draft-safe",
+                                ],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "plugin/commands").mkdir(parents=True)
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_plugin_manifest_contract(errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(
+            errors,
+            ["plugin/commands: legacy slash commands are retired; ship skills only"],
+        )
 
     def test_server_json_contract_rejects_package_install_drift(self):
         server_json = {

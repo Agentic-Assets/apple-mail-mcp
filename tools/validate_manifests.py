@@ -207,13 +207,17 @@ def _check_plugin_manifest_contract(errors: list[str]) -> None:
     """Validate plugin fields that have caused strict install/runtime failures."""
     plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
 
-    # Cowork/Claude strict validation rejected this field for this plugin. The
-    # commands/ directory is auto-discovered, so declaring it is unnecessary.
+    # Cowork/Claude strict validation rejected this field for this plugin.
+    # Apple Mail ships workflow entry points as skills only.
     if "commands" in plugin:
         errors.append(
             "plugin.json: unsupported strict-validator field 'commands'; "
-            "rely on commands/ auto-discovery"
+            "ship workflow entry points as skills only"
         )
+
+    commands_dir = ROOT / "plugin/commands"
+    if commands_dir.exists():
+        errors.append("plugin/commands: legacy slash commands are retired; ship skills only")
 
     servers = plugin.get("mcpServers") or {}
     _check_mcp_launcher_contract(

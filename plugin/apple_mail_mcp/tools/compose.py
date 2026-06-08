@@ -310,26 +310,25 @@ def _extract_output_field(output: str, field_name: str) -> str | None:
     return None
 
 
+def _first_non_empty_line(value: str, *, max_chars: int = 500) -> str:
+    """Return a bounded content needle for saved-draft verification."""
+    for line in value.splitlines():
+        candidate = line.strip()
+        if candidate:
+            return candidate[:max_chars]
+    return ""
+
+
 def _verify_saved_reply_draft(
     account: str,
     reply_subject: str,
-    body_temp_path: str,
+    reply_body: str,
     timeout: int | None = None,
 ) -> bool:
     """Confirm a native reply draft appears in a bounded newest Drafts window."""
     safe_account = escape_applescript(account)
     safe_reply_subject = escape_applescript(reply_subject)
-    try:
-        reply_body = Path(body_temp_path).read_text(encoding="utf-8")
-    except OSError:
-        reply_body = ""
-    body_needle = ""
-    for line in reply_body.splitlines():
-        candidate = line.strip()
-        if candidate:
-            body_needle = candidate[:500]
-            break
-    safe_body_needle = escape_applescript(body_needle)
+    safe_body_needle = escape_applescript(_first_non_empty_line(reply_body))
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
     script = f'''
     tell application "Mail"
@@ -1359,7 +1358,7 @@ tell application "Mail"
             if not reply_subject or not _verify_saved_reply_draft(
                 account,
                 reply_subject,
-                body_temp_path,
+                reply_body,
                 timeout=timeout,
             ):
                 mode_text = "opened" if effective_mode == "open" else "created"
