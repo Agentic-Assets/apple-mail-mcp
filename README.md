@@ -78,6 +78,10 @@ MCP-only fallback, still draft-safe:
 codex mcp add apple-mail -- /bin/bash /path/to/apple-mail-mcp/plugin/start_mcp.sh --draft-safe
 ```
 
+If `mcp__apple-mail__*` tools are absent after plugin install, treat that as an MCP registration failure. Do not create reply drafts with generic AppleScript, Mail UI scripting, shell `osascript`, or standalone compose fallbacks. Fix registration first, or use the MCP-only absolute-path fallback above, restart Codex, and confirm the Apple Mail tools are present before drafting.
+
+How to know it worked: `codex plugin list` showing `installed, enabled` is not enough. The pass condition is that the active Codex session exposes `mcp__apple-mail__*` tools and an MCP `list_tools` handshake includes `reply_to_email`. Maintainers can run `bash tools/validate-codex-plugin.sh` to check that install plus runtime path in a temporary `CODEX_HOME`.
+
 Restart Codex Desktop or start a fresh Codex CLI session after installing.
 
 ### Claude Desktop Cowork (plugin marketplace)
@@ -295,7 +299,8 @@ In draft-safe mode:
 - `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows)
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
-- use `reply_to_email(message_id=...)` for replies; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
+- reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
+- treat `subject_keyword` reply targeting or any degraded reply fallback as Cayman-approved-only for the specific message
 - pass `message_id` from search/list tools for reply/forward when available; `subject_keyword` is fallback only
 - explicit `mode="send"` calls return an error
 - `manage_drafts action="send"` returns an error

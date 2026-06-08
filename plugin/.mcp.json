@@ -3,9 +3,10 @@
     "apple-mail": {
       "command": "/bin/bash",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
+        "./start_mcp.sh",
         "--draft-safe"
-      ]
+      ],
+      "cwd": "."
     }
   }
 }

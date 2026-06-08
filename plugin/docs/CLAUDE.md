@@ -12,7 +12,7 @@ Plugin/MCP/skill changes: delegate implementation to subagents; run **`plugin-de
 |------|------|
 | `.claude-plugin/plugin.json` | Plugin manifest: `mcpServers` (includes `--draft-safe` in server args by default), keywords, version |
 | `.codex-plugin/plugin.json` | Codex plugin manifest: interface metadata, `skills: "./skills"`, `mcpServers: "./.mcp.json"` |
-| `.mcp.json` | Codex MCP config launching `/bin/bash ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh --draft-safe` |
+| `.mcp.json` | Codex MCP config launching `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."` |
 | `start_mcp.sh` | First-run venv bootstrap + `fastmcp` import verify, then exec server |
 | `apple_mail_mcp.py` | Thin entry shim → `apple_mail_mcp.__main__.main()` |
 | `requirements.txt` | Runtime deps installed into `plugin/venv/` (not root `.venv/`) |
@@ -20,10 +20,11 @@ Plugin/MCP/skill changes: delegate implementation to subagents; run **`plugin-de
 ## MCP wiring
 
 ```
-Claude Code / Codex → /bin/bash ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
+Claude Code → /bin/bash ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
+Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
 ```
 
-`${CLAUDE_PLUGIN_ROOT}` resolves to this `plugin/` directory at install time. Never hard-code absolute paths in manifests.
+`${CLAUDE_PLUGIN_ROOT}` resolves to this `plugin/` directory for Claude Code. Codex 0.133.0 does **not** expand `${CLAUDE_PLUGIN_ROOT}` inside argv; keep Codex `.mcp.json` on the `cwd: "."` + `./start_mcp.sh` contract unless a runtime smoke proves a new Codex launcher shape.
 
 `plugin.json` passes **`--draft-safe`** to `start_mcp.sh` by default so send tools stay blocked in shared agent workspaces. Override in user MCP config only when intentional.
 

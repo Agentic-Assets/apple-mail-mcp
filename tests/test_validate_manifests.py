@@ -440,12 +440,15 @@ class ValidateManifestsTests(unittest.TestCase):
                 "plugin/.codex-plugin/plugin.json skills: got 'skills', expected './skills'",
                 "plugin/.codex-plugin/plugin.json mcpServers: got './missing.json', expected './.mcp.json'",
                 "plugin/.mcp.json mcpServers.apple-mail.command: expected /bin/bash",
-                "plugin/.mcp.json mcpServers.apple-mail.args: first arg must be ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
+                "plugin/.mcp.json mcpServers.apple-mail.args: first arg must be ./start_mcp.sh",
                 "plugin/.mcp.json mcpServers.apple-mail.args: missing --draft-safe",
+                "plugin/.mcp.json mcpServers.apple-mail.cwd: got 'None', expected '.'",
             ],
         )
 
-    def test_codex_plugin_contract_accepts_valid_marketplace_manifest_and_mcp(self):
+    def test_codex_plugin_contract_rejects_literal_claude_plugin_root_launcher(self):
+        """Regression: Codex 0.133.0 installed the plugin but left this argv
+        literal, so the MCP server never started and no tools registered."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_codex_plugin_fixture(
@@ -500,6 +503,75 @@ class ValidateManifestsTests(unittest.TestCase):
             finally:
                 validate_manifests.ROOT = original_root
 
+        self.assertIn(
+            "plugin/.mcp.json mcpServers.apple-mail.args: first arg must be ./start_mcp.sh",
+            errors,
+        )
+        self.assertIn(
+            "plugin/.mcp.json mcpServers.apple-mail.cwd: got 'None', expected '.'",
+            errors,
+        )
+        self.assertIn(
+            "plugin/.mcp.json mcpServers.apple-mail: must not contain literal ${CLAUDE_PLUGIN_ROOT} in Codex launcher fields",
+            errors,
+        )
+
+    def test_codex_plugin_contract_accepts_valid_marketplace_manifest_and_mcp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_codex_plugin_fixture(
+                root,
+                marketplace={
+                    "name": "apple-mail-mcp",
+                    "interface": {"displayName": "Apple Mail MCP"},
+                    "plugins": [
+                        {
+                            "name": "apple-mail",
+                            "source": {"source": "local", "path": "./plugin"},
+                            "policy": {
+                                "installation": "AVAILABLE",
+                                "authentication": "ON_INSTALL",
+                            },
+                            "category": "Productivity",
+                        }
+                    ],
+                },
+                manifest={
+                    "name": "apple-mail",
+                    "version": "3.6.0",
+                    "description": "Apple Mail with 28 MCP tools",
+                    "author": {"name": "Agentic Assets"},
+                    "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",
+                    "repository": "https://github.com/Agentic-Assets/apple-mail-mcp",
+                    "license": "MIT",
+                    "keywords": ["apple-mail"],
+                    "skills": "./skills",
+                    "mcpServers": "./.mcp.json",
+                    "interface": {"displayName": "Apple Mail"},
+                },
+                mcp={
+                    "mcpServers": {
+                        "apple-mail": {
+                            "command": "/bin/bash",
+                            "args": [
+                                "./start_mcp.sh",
+                                "--draft-safe",
+                            ],
+                            "cwd": ".",
+                        }
+                    },
+                },
+                include_skills_dir=True,
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_codex_plugin_contract("3.6.0", 28, errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
         self.assertEqual(errors, [])
 
     def test_codex_install_smoke_uses_marketplace_then_plugin_id(self):
@@ -513,6 +585,17 @@ class ValidateManifestsTests(unittest.TestCase):
             'codex plugin list --marketplace apple-mail-mcp | grep -F "apple-mail@apple-mail-mcp"',
             script,
         )
+        self.assertIn("codex mcp get apple-mail --json", script)
+        self.assertIn("tools/mcp_tool_smoke.py", script)
+        self.assertIn("--reject-literal '${CLAUDE_PLUGIN_ROOT}'", script)
+        for tool in (
+            "reply_to_email",
+            "compose_email",
+            "manage_drafts",
+            "list_accounts",
+            "get_inbox_overview",
+        ):
+            self.assertIn(tool, script)
 
     def test_server_json_contract_rejects_package_install_drift(self):
         server_json = {

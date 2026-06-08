@@ -46,6 +46,10 @@ See **[[email-drafting]]** for the required pre-draft verification step.
 3. Default plugin installs run **`--draft-safe`**: drafts and open-for-review workflows work; **`mode="send"`** paths error until the server is reconfigured intentionally.
 4. Set optional **`USER_EMAIL_PREFERENCES`** for stable tone and workflow hints; those preferences surface on preference-aware tool docstrings plus the **`email-style-profile`** skill.
 
+### Missing MCP Tools Red Line
+
+If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix MCP registration first. Do not create reply drafts through generic AppleScript, Mail UI scripting, shell `osascript`, or a standalone compose fallback. The only acceptable degraded path is the documented MCP-only absolute-path fallback that launches `plugin/start_mcp.sh --draft-safe`; after adding it, restart the MCP client and confirm the Apple Mail tools are registered before drafting.
+
 ## Decision Tree — Read And Navigate
 
 | Goal | Primary tool chain |

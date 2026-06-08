@@ -163,6 +163,46 @@ def _check_mcp_launcher_contract(
         errors.append(f"{label} mcpServers.apple-mail.args: missing --draft-safe")
 
 
+def _check_codex_mcp_launcher_contract(
+    server: object,
+    label: str,
+    errors: list[str],
+) -> None:
+    """Validate Codex's stdio launch shape after plugin installation.
+
+    Codex 0.133.0 resolves relative `cwd` values against the installed plugin
+    root, but it does not expand `${CLAUDE_PLUGIN_ROOT}` inside argv. Keep this
+    separate from the Claude Code contract above.
+    """
+    if not isinstance(server, dict):
+        errors.append(f"{label}: missing mcpServers.apple-mail")
+        return
+    if server.get("command") != "/bin/bash":
+        errors.append(f"{label} mcpServers.apple-mail.command: expected /bin/bash")
+
+    args = server.get("args")
+    if not isinstance(args, list):
+        errors.append(f"{label} mcpServers.apple-mail.args: expected list")
+        return
+    if not args or args[0] != "./start_mcp.sh":
+        errors.append(
+            f"{label} mcpServers.apple-mail.args: first arg must be ./start_mcp.sh"
+        )
+    if "--draft-safe" not in args:
+        errors.append(f"{label} mcpServers.apple-mail.args: missing --draft-safe")
+
+    cwd = server.get("cwd")
+    if cwd != ".":
+        errors.append(f"{label} mcpServers.apple-mail.cwd: got '{cwd}', expected '.'")
+
+    values = [server.get("command"), *(args if isinstance(args, list) else []), cwd]
+    if any(isinstance(value, str) and "${CLAUDE_PLUGIN_ROOT}" in value for value in values):
+        errors.append(
+            f"{label} mcpServers.apple-mail: must not contain "
+            "literal ${CLAUDE_PLUGIN_ROOT} in Codex launcher fields"
+        )
+
+
 def _check_plugin_manifest_contract(errors: list[str]) -> None:
     """Validate plugin fields that have caused strict install/runtime failures."""
     plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
@@ -455,10 +495,9 @@ def _check_codex_plugin_contract(
     if not isinstance(servers, dict):
         errors.append(f"{mcp_label} mcpServers: expected object")
         return
-    _check_mcp_launcher_contract(
+    _check_codex_mcp_launcher_contract(
         servers.get("apple-mail"),
         mcp_label,
-        "${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
         errors,
     )
 
