@@ -185,29 +185,29 @@ def _build_found_message_lookup(
 def _build_draft_lookup(subject_keyword: str) -> str:
     """Build capped AppleScript to find one draft by subject keyword.
 
-    Emits a **newest-first** bounded slice + in-loop ``if`` filter (no
-    ``whose``). Mail returns ``messages 1 thru N`` oldest-first, so a plain
-    forward slice misses the newest draft when there are more than
-    ``DRAFT_LIST_CAP`` drafts — exactly the just-created draft send/open/
-    delete need to find. We therefore slice the tail
-    ``messages startIdx thru totalDrafts`` and iterate from the end. The
-    historical pre-filter-then-slice ``whose`` form materialized the whole
-    Drafts folder and carried the Gmail-list-eval crash risk; see
-    ``tests/test_no_unbounded_whose.py`` for the lint that forbids it.
+    Emits bounded head/tail slices + in-loop ``if`` filters (no ``whose``).
+    Mail has been observed returning newest Drafts first on real accounts, but
+    the bounded tail fallback keeps send/open/delete tolerant of opposite
+    ordering without ever materializing the whole Drafts mailbox.
     """
     safe_draft_subject = escape_applescript(subject_keyword)
     return f"""
                 set totalDrafts to count of messages of draftsMailbox
-                set startIdx to 1
-                if totalDrafts > {DRAFT_LIST_CAP} then set startIdx to totalDrafts - {DRAFT_LIST_CAP} + 1
+                set headEnd to totalDrafts
+                if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
                 if totalDrafts is 0 then
                     set candidateMessages to {{}}
                 else
-                    set candidateMessages to messages startIdx thru totalDrafts of draftsMailbox
+                    set candidateMessages to messages 1 thru headEnd of draftsMailbox
+                    if totalDrafts > {DRAFT_LIST_CAP} then
+                        set tailStart to totalDrafts - {DRAFT_LIST_CAP} + 1
+                        if tailStart > headEnd then
+                            set candidateMessages to candidateMessages & (messages tailStart thru totalDrafts of draftsMailbox)
+                        end if
+                    end if
                 end if
                 set foundDraft to missing value
-                repeat with __i from (count of candidateMessages) to 1 by -1
-                    set aMessage to item __i of candidateMessages
+                repeat with aMessage in candidateMessages
                     try
                         if (subject of aMessage) contains "{safe_draft_subject}" then
                             set foundDraft to aMessage
@@ -980,7 +980,8 @@ def reply_to_email(
         send: If True, send immediately; if False (default), save as draft. Ignored if mode is set.
         mode: Delivery mode — "draft" (default, save quietly to Drafts and close), "open" (save first, then leave compose window open for review), or "send" (send immediately). Overrides send parameter when set.
         attachments: Optional file paths to attach, comma-separated for multiple (e.g., "/path/to/file1.png,/path/to/file2.pdf")
-        body_html: Accepted for backwards compatibility but ignored. Replies are now composed as plain text via the race-free object model (no clipboard paste), so rich HTML is not applied; pass `reply_body` with the text you want.
+        body_html: Accepted for backwards compatibility but ignored. Replies use Mail's native reply composer and
+            insert reply_body as plain text above Mail's native quoted thread.
         from_address: Optional sender address to use for this reply. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         message_id: Exact numeric Apple Mail message id from search/list tools. Required preference over subject_keyword whenever an id is available.
         recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). Must be > 0 — full-mailbox subject scans are refused; pass `message_id` for constant-cost lookups or fall back to `full_inbox_export`.
@@ -1014,9 +1015,8 @@ def reply_to_email(
 
     reply_body = _strip_cdata_wrappers(reply_body) or ""
     # body_html is accepted for backwards compatibility only and is ignored:
-    # replies are composed as plain text via the race-free object model (no
-    # clipboard paste, no System Events keystroke), so the HTML layer is never
-    # applied and the value is never read.
+    # replies use Mail's native reply composer so quoted chains preserve Mail's
+    # normal formatting; reply_body is inserted as plain text above that quote.
 
     try:
         sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
@@ -1086,17 +1086,10 @@ def reply_to_email(
     if blocked:
         return blocked
 
-    if effective_mode == "open":
+    if effective_mode in ("open", "draft", "send"):
         cap_err = _check_open_compose_window_cap()
         if cap_err:
             return cap_err
-
-    # Reply is built with the race-free object model: a single
-    # `make new outgoing message` (NO window, NO clipboard, NO System Events
-    # keystroke), recipients added deterministically, and a single save/send.
-    # This eliminates the duplicate empty-draft shell, the cross-thread
-    # clipboard-paste leak, and the positional `close window 1` footgun.
-    visible_lower = "true" if effective_mode == "open" else "false"
 
     if effective_mode == "send":
         header_text = "SENDING REPLY"
@@ -1108,7 +1101,13 @@ def reply_to_email(
         success_text = "Reply opened in Mail for review. Edit and send when ready."
     else:  # draft
         header_text = "SAVING REPLY AS DRAFT"
-        post_action = "save replyMessage"
+        post_action = """
+        save replyMessage
+        delay 0.2
+        try
+            close front window saving yes
+        end try
+        """
         success_text = "Reply saved as draft!"
 
     cleanup_script = f'do shell script "rm -f " & quoted form of "{body_temp_path}"'
@@ -1116,23 +1115,14 @@ def reply_to_email(
     sender_script = _compose_sender_script("replyMessage", "targetAccount", sender_override)
     signature_script = _compose_signature_script("replyMessage", resolved_signature_name)
 
-    # When reply_to_all, copy every other party (To + Cc of the original) as Cc,
-    # excluding the original sender and the user's own addresses.
-    reply_all_script = ""
-    if reply_to_all:
-        reply_all_script = """
-            repeat with aRecip in ((to recipients of foundMessage) & (cc recipients of foundMessage))
-                try
-                    set rAddr to address of aRecip
-                    if rAddr is not senderAddr and rAddr is not in myAddrs then
-                        make new cc recipient at end of cc recipients of replyMessage with properties {address:rAddr}
-                    end if
-                end try
-            end repeat"""
+    open_clause = "with opening window"
+    reply_all_clause = " and reply to all" if reply_to_all else ""
 
     script = f'''
 tell application "Mail"
     set outputText to "{header_text}" & return & return
+    set hadClipboard to false
+    set savedClipboard to missing value
 
     try
         set targetAccount to account "{safe_account}"
@@ -1143,52 +1133,39 @@ tell application "Mail"
             return "{not_found_message}"
         end if
 
-        set origSubject to subject of foundMessage
         set origSender to sender of foundMessage
-        set senderAddr to origSender
-        try
-            set senderAddr to extract address from origSender
-        end try
-        set origContent to ""
-        try
-            set origContent to content of foundMessage
-        end try
-        if (count of characters of origContent) > 4000 then
-            set origContent to (text 1 thru 4000 of origContent) & return & "[... quoted original truncated ...]"
-        end if
-
         set replyBodyText to do shell script "cat " & quoted form of "{body_temp_path}"
 
-        -- Build the quoted-original block (plain text, "> " prefixed)
-        set quoteHeader to ""
+        -- Native Mail reply: Mail builds the quoted prior conversation and
+        -- reply metadata exactly as the user would see from the Reply button.
+        set replyMessage to reply foundMessage {open_clause}{reply_all_clause}
+        delay 0.6
+        set replySubject to ""
         try
-            set quoteHeader to "On " & ((date received of foundMessage) as string) & ", " & origSender & " wrote:"
-        on error
-            set quoteHeader to origSender & " wrote:"
+            set replySubject to subject of replyMessage as string
         end try
-        set AppleScript's text item delimiters to {{return, linefeed}}
-        set origLines to text items of origContent
-        set AppleScript's text item delimiters to (return & "> ")
-        set quotedBody to "> " & (origLines as string)
-        set AppleScript's text item delimiters to ""
-        set fullBody to replyBodyText & return & return & quoteHeader & return & quotedBody
 
-        set reSubject to origSubject
-        if reSubject does not start with "Re:" then set reSubject to "Re: " & reSubject
-
-        -- Object-model draft: NO window, NO clipboard, NO System Events
-        set replyMessage to make new outgoing message with properties {{visible:{visible_lower}, subject:reSubject, content:fullBody}}
+        if replyBodyText is not "" then
+            try
+                set savedClipboard to the clipboard
+                set hadClipboard to true
+            end try
+            set the clipboard to replyBodyText
+            activate
+            delay 0.2
+            tell application "System Events"
+                keystroke "v" using command down
+            end tell
+            delay 0.3
+            try
+                if hadClipboard then set the clipboard to savedClipboard
+            end try
+        end if
 
         {sender_script}
         {signature_script}
 
-        -- Deterministic recipients
-        set myAddrs to {{}}
-        try
-            set myAddrs to (email addresses of targetAccount)
-        end try
-        make new to recipient at end of to recipients of replyMessage with properties {{address:senderAddr}}
-        {reply_all_script}
+        -- Optional extra recipients, on top of Mail's native reply recipients.
         {cc_script}
         {bcc_script}
 
@@ -1199,7 +1176,7 @@ tell application "Mail"
 
         set outputText to outputText & "{success_text}" & return
         set outputText to outputText & "To: " & origSender & return
-        set outputText to outputText & "Subject: " & reSubject & return
+        set outputText to outputText & "Subject: " & replySubject & return
     '''
 
     if cc:
@@ -1223,6 +1200,9 @@ tell application "Mail"
 
         return outputText
     on error errMsg
+        try
+            if hadClipboard then set the clipboard to savedClipboard
+        end try
         try
             {cleanup_script}
         end try
@@ -1827,20 +1807,19 @@ def manage_drafts(
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
 
-                -- Newest-first slice: Mail returns messages oldest-first, so the
-                -- newest draft is the LAST message. Take the tail window and
-                -- iterate it in reverse so newly-created drafts are never missed.
+                -- Bounded newest-first window. Real Mail Drafts accounts have
+                -- shown just-created native replies near the front; never use
+                -- `every message` or an unbounded folder scan here.
                 set totalDrafts to count of messages of draftsMailbox
-                set startIdx to 1
-                if totalDrafts > {DRAFT_LIST_CAP} then set startIdx to totalDrafts - {DRAFT_LIST_CAP} + 1
+                set headEnd to totalDrafts
+                if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
                 if totalDrafts is 0 then
                     set draftMessages to {{}}
                 else
-                    set draftMessages to messages startIdx thru totalDrafts of draftsMailbox
+                    set draftMessages to messages 1 thru headEnd of draftsMailbox
                 end if
 
-                repeat with __i from (count of draftMessages) to 1 by -1
-                    set aDraft to item __i of draftMessages
+                repeat with aDraft in draftMessages
                     try
                         set skipThisDraft to false
                         set draftSubject to subject of aDraft

@@ -84,6 +84,98 @@ How to know it worked: `codex plugin list` showing `installed, enabled` is not e
 
 Restart Codex Desktop or start a fresh Codex CLI session after installing.
 
+### Refresh another Mac / second computer
+
+Use this when another computer has an older Apple Mail plugin install, stale
+marketplace cache, or you want to prove both Codex and Claude Code are using the
+same current checkout.
+
+1. Get the current code:
+
+```bash
+cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp
+git fetch origin
+git switch codex/native-mail-reply-drafts   # until this branch is merged
+git pull --ff-only
+```
+
+After the branch is merged, use `git switch main && git pull --ff-only` instead.
+
+2. Refresh Codex from the local checkout:
+
+```bash
+codex plugin remove apple-mail@apple-mail-mcp || true
+codex plugin marketplace remove apple-mail-mcp || true
+codex plugin marketplace add ./
+codex plugin add apple-mail@apple-mail-mcp
+codex mcp get apple-mail --json
+```
+
+The Codex MCP registration should show:
+
+```json
+{
+  "command": "/bin/bash",
+  "args": ["./start_mcp.sh", "--draft-safe"]
+}
+```
+
+`codex plugin list` showing `installed, enabled` is not enough. For a runtime
+smoke, run:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e . pytest
+.venv/bin/python tools/mcp_tool_smoke.py \
+  --command /bin/bash \
+  --arg ./start_mcp.sh \
+  --arg=--draft-safe \
+  --cwd "$PWD/plugin" \
+  --expect-count 28 \
+  --required-tool reply_to_email \
+  --required-tool compose_email \
+  --required-tool manage_drafts \
+  --required-tool list_accounts \
+  --required-tool get_inbox_overview
+```
+
+3. Refresh Claude Code from the local checkout:
+
+```bash
+claude plugin uninstall apple-mail@apple-mail-mcp --scope user --keep-data -y || true
+claude plugin marketplace remove apple-mail-mcp || true
+claude plugin marketplace add ./ --scope user
+claude plugin install apple-mail@apple-mail-mcp --scope user
+claude plugin details apple-mail@apple-mail-mcp
+```
+
+Prefer `--scope user` for personal machine setup. Project-scope marketplace
+entries can write an absolute local path into `.claude/settings.json`, which is
+usually not what you want to commit.
+
+`claude plugin details apple-mail@apple-mail-mcp` should report version `3.6.1`
+and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
+replace the path below if the details output shows a different install path:
+
+```bash
+.venv/bin/python tools/mcp_tool_smoke.py \
+  --command /bin/bash \
+  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.6.1/start_mcp.sh" \
+  --arg=--draft-safe \
+  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.6.1" \
+  --expect-count 28 \
+  --required-tool reply_to_email \
+  --required-tool compose_email \
+  --required-tool manage_drafts \
+  --required-tool list_accounts \
+  --required-tool get_inbox_overview
+```
+
+4. Restart clients:
+
+After either refresh, restart Codex Desktop / start a fresh Codex CLI session and
+restart Claude Code so they load the refreshed plugin process.
+
 ### Claude Desktop Cowork (plugin marketplace)
 
 Cowork uses Anthropic's **remote marketplace backend** (`remoteMarketplaceClient`), which currently rejects most third-party GitHub marketplaces with a generic **"Failed to add marketplace"** even when the repo is valid. This is a [known Cowork/Desktop bug](https://github.com/anthropics/claude-code/issues/41653), not a problem with this fork's manifest. Claude Code CLI install (above) works; Cowork's GitHub sync often does not.
@@ -236,7 +328,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
-| `reply_to_email` | Reply or reply-all with optional HTML body and original thread context; prefer `message_id` from search/list results |
+| `reply_to_email` | Native Mail reply or reply-all draft with Mail-generated quoted thread context; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |

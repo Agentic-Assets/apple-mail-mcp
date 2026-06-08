@@ -24,6 +24,10 @@ def _make_subprocess_result(returncode=0, stdout=b"ok", stderr=b""):
     return result
 
 
+def _main_reply_script(scripts):
+    return next(script for script in scripts if "reply foundMessage" in script)
+
+
 class ComposeScanCapTests(unittest.TestCase):
     def test_manage_drafts_list_caps_draft_enumeration(self):
         captured = []
@@ -36,12 +40,10 @@ class ComposeScanCapTests(unittest.TestCase):
             compose_tools.manage_drafts(account="Work", action="list")
 
         self.assertEqual(len(captured), 1)
-        # Newest-first cap: Mail returns drafts oldest-first, so the list now
-        # slices the tail window (messages startIdx thru totalDrafts, capped at
-        # DRAFT_LIST_CAP=100) and iterates it in reverse so the newest draft is
-        # never missed when there are more than 100 drafts.
-        self.assertIn("messages startIdx thru totalDrafts of draftsMailbox", captured[0])
-        self.assertIn("if totalDrafts > 100 then set startIdx to totalDrafts - 100 + 1", captured[0])
+        # Bounded cap: list reads the newest visible Drafts window and never
+        # materializes the whole mailbox.
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", captured[0])
+        self.assertIn("if headEnd > 100 then set headEnd to 100", captured[0])
         self.assertNotIn("every message of draftsMailbox", captured[0])
 
     def test_reply_to_email_subject_lookup_uses_in_loop_filter_and_cap(self):
@@ -63,13 +65,14 @@ class ComposeScanCapTests(unittest.TestCase):
 
         # Bounded-slice-then-filter: bind a capped newest-first window
         # FIRST (messages 1 thru 100), THEN apply the in-loop if filter.
-        self.assertIn("messages 1 thru 100 of inboxMailbox", captured[0])
+        script = _main_reply_script(captured)
+        self.assertIn("messages 1 thru 100 of inboxMailbox", script)
         # Safe in-loop subject check (no `whose`).
-        self.assertIn("if messageSubject contains", captured[0])
+        self.assertIn("if messageSubject contains", script)
         # Early-exit date guard must be present.
-        self.assertIn("if messageDate < recentCutoffDate then exit repeat", captured[0])
+        self.assertIn("if messageDate < recentCutoffDate then exit repeat", script)
         # The old `candidateMessages whose subject contains` must NOT appear.
-        self.assertNotIn("candidateMessages whose subject contains", captured[0])
+        self.assertNotIn("candidateMessages whose subject contains", script)
 
     def test_reply_to_email_message_id_skips_subject_scan(self):
         captured = []
@@ -88,8 +91,9 @@ class ComposeScanCapTests(unittest.TestCase):
                 reply_body="Thanks",
             )
 
-        self.assertIn("whose id is 12345", captured[0])
-        self.assertNotIn("messages 1 thru 100 of inboxMailbox", captured[0])
+        script = _main_reply_script(captured)
+        self.assertIn("whose id is 12345", script)
+        self.assertNotIn("messages 1 thru 100 of inboxMailbox", script)
 
     def test_forward_email_subject_lookup_uses_in_loop_filter_and_cap(self):
         captured = []

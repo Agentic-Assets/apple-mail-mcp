@@ -208,12 +208,12 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         from apple_mail_mcp.tools.compose import _build_draft_lookup
 
         snippet = _build_draft_lookup("invoice question")
-        # Safe primitives must be present. The lookup now slices the newest-first
-        # tail window (messages startIdx thru totalDrafts) and iterates it in
-        # reverse with an in-loop `if`, so a just-created draft past the cap is
-        # still found — but it never uses `whose`.
-        self.assertIn("messages startIdx thru totalDrafts of draftsMailbox", snippet)
-        self.assertIn("repeat with __i from (count of candidateMessages) to 1 by -1", snippet)
+        # Safe primitives must be present. The lookup checks bounded head/tail
+        # windows and filters in-loop, so it tolerates Mail account ordering
+        # differences without ever using `whose` or an unbounded folder scan.
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", snippet)
+        self.assertIn("messages tailStart thru totalDrafts of draftsMailbox", snippet)
+        self.assertIn("repeat with aMessage in candidateMessages", snippet)
         self.assertIn(
             '(subject of aMessage) contains "invoice question"', snippet
         )

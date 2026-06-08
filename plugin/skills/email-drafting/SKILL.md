@@ -104,15 +104,13 @@ bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
 (newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Confirm
 `to`/`cc` are the intended recipients and the body is present.
 
-**Reply/forward threading note (v3.6.0):** `reply_to_email` and `forward_email`
-now build the draft through Mail's object model (no GUI window, no clipboard) to
-eliminate the cross-thread body-leak / duplicate / empty-draft races. The trade-off
-is that replies/forwards are **plain-text** drafts with a `> `-quoted original and a
-`Re:`/`Fwd:` subject, and do **not** carry native `In-Reply-To`/`References`
-headers — they are correctly addressed and always contain the body, but thread
-visually rather than via headers. `body_html` on `reply_to_email` is accepted for
-compatibility but ignored. Use `create_rich_email_draft` / `compose_email` when you
-need rich HTML on a genuinely standalone message.
+**Reply threading note (v3.6.1+):** `reply_to_email` uses Mail's native
+`reply foundMessage` composer by default, so prior messages are included by Mail
+automatically the same way they appear from the Reply button. The tool inserts the
+new reply body above Mail's native quoted thread, saves the draft, then closes the
+compose window for `mode="draft"`. `body_html` on `reply_to_email` is accepted for
+compatibility but ignored; use `create_rich_email_draft` / `compose_email` only
+for rich HTML on a genuinely standalone message.
 
 ## Related Skills
 
