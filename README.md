@@ -388,7 +388,7 @@ Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows a
 
 In draft-safe mode:
 
-- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows)
+- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies verify the saved draft in a bounded newest-Drafts check before reporting success
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
 - reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`

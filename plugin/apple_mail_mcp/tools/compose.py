@@ -256,6 +256,132 @@ def _compose_signature_script(message_var: str, signature_name: str | None) -> s
     return f'set message signature of {message_var} to signature "{safe_signature}"'
 
 
+def _validate_signature_name(signature_name: str | None, timeout: int | None = None) -> str | None:
+    """Return an error string when a requested Mail signature does not exist."""
+    if not signature_name:
+        return None
+    safe_signature = escape_applescript(signature_name)
+    validation_timeout = 30 if timeout is None else min(timeout, 30)
+    script = f'''
+    tell application "Mail"
+        set availableSignatures to {{}}
+        repeat with sig in signatures
+            set sigName to name of sig as string
+            if sigName is "{safe_signature}" then
+                return ""
+            end if
+            set end of availableSignatures to sigName
+        end repeat
+
+        set oldDelimiters to AppleScript's text item delimiters
+        set AppleScript's text item delimiters to ", "
+        set availableText to availableSignatures as string
+        set AppleScript's text item delimiters to oldDelimiters
+
+        if availableText is "" then
+            return "Error: Mail signature \\"{safe_signature}\\" not found."
+        end if
+        return "Error: Mail signature \\"{safe_signature}\\" not found. Available signatures: " & availableText
+    end tell
+    '''
+    try:
+        result = run_applescript(script, timeout=validation_timeout).strip()
+    except AppleScriptTimeout:
+        return (
+            f"Error: AppleScript timed out while validating Mail signature {signature_name!r}. "
+            "Try again or pass include_signature=False."
+        )
+    except Exception as e:  # noqa: BLE001 - return a tool-facing error instead of creating a partial draft
+        err = str(e)
+        if err.startswith("AppleScript error: "):
+            err = err[len("AppleScript error: ") :]
+        elif err.startswith("AppleScript execution failed: "):
+            err = err[len("AppleScript execution failed: ") :]
+        return f"Error: Could not validate Mail signature {signature_name!r}: {err}"
+    return result or None
+
+
+def _extract_output_field(output: str, field_name: str) -> str | None:
+    """Return a `Field: value` line from a tool status string."""
+    prefix = f"{field_name}: "
+    for line in output.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip()
+    return None
+
+
+def _verify_saved_reply_draft(
+    account: str,
+    reply_subject: str,
+    body_temp_path: str,
+    timeout: int | None = None,
+) -> bool:
+    """Confirm a native reply draft appears in a bounded newest Drafts window."""
+    safe_account = escape_applescript(account)
+    safe_reply_subject = escape_applescript(reply_subject)
+    try:
+        reply_body = Path(body_temp_path).read_text(encoding="utf-8")
+    except OSError:
+        reply_body = ""
+    body_needle = ""
+    for line in reply_body.splitlines():
+        candidate = line.strip()
+        if candidate:
+            body_needle = candidate[:500]
+            break
+    safe_body_needle = escape_applescript(body_needle)
+    verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
+    script = f'''
+    tell application "Mail"
+        set targetAccount to account "{safe_account}"
+        set replyBodyNeedle to "{safe_body_needle}"
+        set replyDraftVerified to false
+
+        repeat with verifyAttempt from 1 to 8
+            try
+                set draftsMailbox to mailbox "Drafts" of targetAccount
+                set totalDrafts to count of messages of draftsMailbox
+                set headEnd to totalDrafts
+                if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
+                if headEnd > 0 then
+                    set candidateDrafts to messages 1 thru headEnd of draftsMailbox
+                    repeat with draftMessage in candidateDrafts
+                        try
+                            set draftMatched to false
+                            set draftSubject to subject of draftMessage as string
+                            if draftSubject is "{safe_reply_subject}" then
+                                if replyBodyNeedle is "" then
+                                    set draftMatched to true
+                                else
+                                    set draftContent to content of draftMessage as string
+                                    if draftContent contains replyBodyNeedle then set draftMatched to true
+                                end if
+                            end if
+
+                            if draftMatched then
+                                set replyDraftVerified to true
+                                exit repeat
+                            end if
+                        end try
+                    end repeat
+                end if
+            end try
+            if replyDraftVerified then exit repeat
+            delay 1
+        end repeat
+
+        if replyDraftVerified then
+            return "FOUND"
+        end if
+        return "NOT_FOUND"
+    end tell
+    '''
+    try:
+        return run_applescript(script, timeout=verification_timeout).strip() == "FOUND"
+    except Exception:  # noqa: BLE001 - caller converts verification failure into a safe error
+        return False
+
+
 def _split_addresses(value: str | None) -> list[str]:
     """Return trimmed recipient addresses preserving order."""
     if not value:
@@ -1028,6 +1154,9 @@ def reply_to_email(
     if sender_error:
         return sender_error
     resolved_signature_name = _resolve_signature_name(include_signature, signature_name)
+    signature_error = _validate_signature_name(resolved_signature_name, timeout=timeout)
+    if signature_error:
+        return signature_error
 
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
@@ -1086,7 +1215,7 @@ def reply_to_email(
     if blocked:
         return blocked
 
-    if effective_mode in ("open", "draft", "send"):
+    if effective_mode == "open":
         cap_err = _check_open_compose_window_cap()
         if cap_err:
             return cap_err
@@ -1097,15 +1226,27 @@ def reply_to_email(
         success_text = "Reply sent successfully!"
     elif effective_mode == "open":
         header_text = "OPENING REPLY FOR REVIEW"
-        post_action = "save replyMessage\n            activate"
+        post_action = """
+        save replyMessage
+        delay 0.8
+        activate
+        """
         success_text = "Reply opened in Mail for review. Edit and send when ready."
     else:  # draft
         header_text = "SAVING REPLY AS DRAFT"
         post_action = """
         save replyMessage
-        delay 0.2
+        delay 1.0
         try
-            close front window saving yes
+            close (window of replyMessage) saving yes
+        on error
+            try
+                close front window saving yes
+            end try
+        end try
+        delay 0.5
+        try
+            save replyMessage
         end try
         """
         success_text = "Reply saved as draft!"
@@ -1145,6 +1286,9 @@ tell application "Mail"
             set replySubject to subject of replyMessage as string
         end try
 
+        {sender_script}
+        {signature_script}
+
         if replyBodyText is not "" then
             try
                 set savedClipboard to the clipboard
@@ -1161,9 +1305,6 @@ tell application "Mail"
                 if hadClipboard then set the clipboard to savedClipboard
             end try
         end if
-
-        {sender_script}
-        {signature_script}
 
         -- Optional extra recipients, on top of Mail's native reply recipients.
         {cc_script}
@@ -1212,9 +1353,21 @@ tell application "Mail"
     """
 
     try:
-        if timeout is None:
-            return run_applescript(script)
-        return run_applescript(script, timeout=timeout)
+        result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
+        if effective_mode in ("draft", "open") and success_text in result:
+            reply_subject = _extract_output_field(result, "Subject")
+            if not reply_subject or not _verify_saved_reply_draft(
+                account,
+                reply_subject,
+                body_temp_path,
+                timeout=timeout,
+            ):
+                mode_text = "opened" if effective_mode == "open" else "created"
+                return (
+                    f"Error: Reply draft was {mode_text}, but Mail did not verify it in the newest Drafts "
+                    "window. No email was sent. Please check Mail Drafts and retry after Mail finishes saving."
+                )
+        return result
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out while replying on account {account!r}. Try again or pass a larger `timeout`."

@@ -40,3 +40,19 @@ Verification:
 - `osacompile` syntax checks passed for `reply foundMessage with opening window` and `reply foundMessage with opening window and reply to all` without creating drafts.
 - `bash tools/dev-check.sh release` passed: ruff, ruff format check, mypy strict, artifact build/validation, Claude plugin validation, full pytest suite. Local `mcpb` CLI remains unavailable, so optional unpack smoke was skipped.
 - `bash tools/validate-codex-plugin.sh` passed: fresh temp Codex marketplace install, installed-plugin venv bootstrap, registered MCP launch, and MCP `list_tools` showing all 28 tools including `reply_to_email`, `compose_email`, `manage_drafts`, `list_accounts`, and `get_inbox_overview`.
+
+## Reply Signature and Saved-Draft Verification Follow-Up - 2026-06-08
+
+- Audited the interrupted overlapping-agent state. The active diff was narrow and non-conflicting; the useful accidental change was preserving `reply_to_email(mode="draft")` from the stale outgoing-message cap probe.
+- Added signature preflight validation so a bad named signature fails before Mail creates a partial native reply.
+- Moved native signature application before reply-body paste so the default reply order is body, signature, then Mail's quoted thread. This matches the way a normal Mail reply should behave when the user changes signatures manually.
+- Added a post-save verifier for native reply drafts. After Mail reports `Reply saved as draft!`, Python runs a separate bounded newest-Drafts AppleScript with a retry loop and only then returns success.
+- The verifier matches the reply subject plus the first non-empty reply-body line, avoiding false failures from Mail/Gmail line-ending normalization while staying bounded.
+
+Verification:
+
+- `.venv/bin/python -m pytest tests/test_compose_tools.py::DefaultMailSignatureSupportTests tests/test_compose_tools.py::ReplyToEmailSenderOverrideTests tests/test_tier3_hardening.py::ComposeOpenWindowCapTests -q` passed.
+- Live invalid-signature smoke with `signature_name="Agentic Assets LLC"` returned `Error: Mail signature "Agentic Assets LLC" not found. Available signatures: TU, Agentic Assets` and bounded Drafts verification found zero marker drafts.
+- Live default reply smoke with `reply_to_email(account="Cayman - Agentic Assets", message_id="80650", mode="draft")` returned `Reply saved as draft!` after the post-save verifier passed.
+- Bounded newest-30 Drafts inspection confirmed the default smoke draft order: marker position `1`, signature position `129`, Taylor quote position `390`.
+- Cleanup deleted only uniquely marked smoke drafts from the bounded newest Drafts window and verified zero smoke-marker matches remained.

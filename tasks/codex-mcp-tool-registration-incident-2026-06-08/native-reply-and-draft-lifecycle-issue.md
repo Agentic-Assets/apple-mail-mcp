@@ -11,6 +11,8 @@ The fix also corrects the Drafts lifecycle issue found during live testing:
 `manage_drafts(action="list", subject_contains=...)` now checks the bounded
 front Drafts window where Mail placed freshly created native reply drafts. No
 Drafts lookup or list path uses `every message` or an unbounded folder scan.
+`reply_to_email(mode="draft")` also performs its own post-save verification in a
+fresh bounded newest-Drafts read before reporting success.
 
 ## Root Cause
 
@@ -30,8 +32,17 @@ Two separate behaviors combined into the visible failure:
 - The requested `reply_body` is inserted above Mail's native quoted thread.
 - `mode="draft"` saves the reply and closes the compose window with saving
   enabled.
+- `mode="draft"` skips the stale outgoing-message cap probe; draft creation must
+  not be blocked by orphaned Mail `outgoing message` objects when the tool will
+  save and close the native reply window.
+- After the create/save AppleScript exits, `reply_to_email` verifies the saved
+  draft in a separate bounded newest-Drafts read. The verifier matches the reply
+  subject plus the first non-empty reply-body line, which is stable across Mail's
+  line-ending normalization.
 - The reply subject is captured before the draft window is saved/closed, avoiding
   the invalid-object error seen in live testing.
+- If the verifier cannot find the saved draft, the tool returns an error instead
+  of claiming success. It does not send mail.
 - Manual quote assembly (`quoteHeader`, `quotedBody`, `fullBody`) is gone from
   the reply path.
 - `manage_drafts(action="list")` reads only the bounded first Drafts window.
@@ -57,9 +68,26 @@ Live Mail:
 - Removed the three uniquely marked smoke drafts from the bounded first-20 Drafts
   window and verified zero remaining smoke-marker matches.
 
-## Remaining Caveat
+## Follow-Up Fix - Signature and Save Verification
 
-Native reply drafting opens a Mail compose window briefly, so the open-compose
-window cap now applies to `reply_to_email` in draft/send/open modes. If Mail
-already has too many compose windows open, the tool returns the existing
-`TOO_MANY_OPEN_DRAFTS` structured error instead of creating another native reply.
+Live testing against the IREI roundtable email showed two additional edge cases:
+
+- Applying a named Mail signature after inserting the reply body could leave
+  Mail's signature marker in the wrong place when the user changed signatures
+  manually. The tool now applies the native Mail signature before pasting the
+  reply body, so the default order is response body, signature, quoted thread.
+- A bad signature name could create a partial blank native reply before failing.
+  The tool now validates requested signature names before creating the reply.
+- Mail/Gmail may not expose the saved draft to the Drafts mailbox until the
+  create/save AppleScript exits. Draft verification now happens in a second
+  AppleScript process with a bounded retry loop.
+
+Live evidence:
+
+- `reply_to_email(message_id="80650", mode="draft")` with no signature override
+  returned `Reply saved as draft!` only after post-save verification passed.
+- A bounded newest-30 Drafts inspection found the smoke draft and confirmed
+  marker position `1`, signature position `129`, and Taylor's native quote
+  position `390`.
+- Removed only uniquely marked smoke drafts from the bounded newest Drafts
+  window and verified zero smoke-marker matches remained.
