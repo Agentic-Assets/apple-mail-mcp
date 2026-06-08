@@ -29,6 +29,10 @@ from apple_mail_mcp.tools import search as search_tools
 from apple_mail_mcp.tools import smart_inbox as smart_inbox_tools
 
 
+def _main_reply_script(scripts):
+    return next(script for script in scripts if "reply foundMessage" in script)
+
+
 class ComposeFullScanGateTests(unittest.TestCase):
     def test_reply_subject_without_date_bound_is_blocked(self):
         with patch("apple_mail_mcp.tools.compose.run_applescript") as runner:
@@ -89,10 +93,10 @@ class ComposeFullScanGateTests(unittest.TestCase):
                 message_id="9876",
                 reply_body="Hi",
                 recent_days=0,
-            )
+        )
         # message_id path skips the subject-scan branch entirely.
         self.assertTrue(captured, "Expected reply AppleScript to be invoked")
-        self.assertIn("whose id is 9876", captured[0])
+        self.assertIn("whose id is 9876", _main_reply_script(captured))
 
 
 class StatisticsFullScanGateTests(unittest.TestCase):

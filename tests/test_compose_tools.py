@@ -28,6 +28,14 @@ def _assert_ordered(testcase, text, *snippets):
         last_position = position
 
 
+def _main_reply_script(scripts):
+    """Return the generated reply script, skipping helper probes."""
+    reply_scripts = [script for script in scripts if "reply foundMessage" in script]
+    if len(reply_scripts) != 1:
+        raise AssertionError(f"expected one reply script, got {len(reply_scripts)}")
+    return reply_scripts[0]
+
+
 class DefaultMailSignatureSupportTests(unittest.TestCase):
     def test_server_exposes_default_mail_signature_env_setting(self):
         self.assertTrue(hasattr(_server, "DEFAULT_MAIL_SIGNATURE"))
@@ -130,6 +138,8 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
 
                 def fake_run(script, timeout=120):
                     captured.append(script)
+                    if "count of outgoing messages" in script:
+                        return "0"
                     return "saved"
 
                 with patch(
@@ -143,9 +153,13 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
                         **kwargs,
                     )
 
-                self.assertIn(
-                    f'set message signature of {message_var} to signature "TU"',
-                    captured[0],
+                self.assertTrue(
+                    any(
+                        f'set message signature of {message_var} to signature "TU"'
+                        in script
+                        for script in captured
+                    ),
+                    captured,
                 )
 
 
@@ -819,11 +833,13 @@ class CreateRichEmailDraftFromAddressTests(unittest.TestCase):
 
 
 class ReplyToEmailSenderOverrideTests(unittest.TestCase):
-    def test_reply_defaults_to_draft_mode(self):
+    def test_reply_uses_native_mail_reply_and_preserves_native_quote_by_default(self):
         captured = []
 
         def fake_run(script, timeout=120):
             captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
             return "ok"
 
         with patch(
@@ -836,17 +852,76 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_body="Reply body",
             )
 
-        self.assertEqual(len(captured), 1)
-        script = captured[0]
-        self.assertIn("SAVING REPLY AS DRAFT", script)
-        # Object-model reply: race-free `make new outgoing message`, single
-        # `save replyMessage`, NO GUI window, NO clipboard, NO System Events.
-        self.assertIn("make new outgoing message", script)
-        self.assertEqual(script.count("save replyMessage"), 1)
-        self.assertNotIn("close window 1 saving no", script)
-        self.assertNotIn('keystroke "v"', script)
+        script = _main_reply_script(captured)
+        _assert_ordered(
+            self,
+            script,
+            "set replyBodyText to do shell script",
+            "set replyMessage to reply foundMessage with opening window",
+            'keystroke "v" using command down',
+            "save replyMessage",
+        )
+        self.assertNotIn("make new outgoing message", script)
+        self.assertNotIn("content:fullBody", script)
+        self.assertNotIn("set content of replyMessage", script)
+        self.assertNotIn("set origContent to content of foundMessage", script)
+        self.assertNotIn("set quotedBody", script)
+        self.assertNotIn("quoted original truncated", script)
         self.assertNotIn("NSPasteboard", script)
-        self.assertNotIn("reply foundMessage with opening window", script)
+
+    def test_empty_reply_body_leaves_native_reply_content_untouched(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="",
+            )
+
+        script = _main_reply_script(captured)
+        self.assertIn('if replyBodyText is not "" then', script)
+        self.assertNotIn("set content of replyMessage", script)
+
+    def test_reply_defaults_to_draft_mode(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+            )
+
+        script = _main_reply_script(captured)
+        self.assertIn("SAVING REPLY AS DRAFT", script)
+        # Native Mail reply: Mail constructs the quoted prior conversation and
+        # the tool inserts the requested body into the native composer.
+        self.assertIn("reply foundMessage with opening window", script)
+        self.assertEqual(script.count("save replyMessage"), 1)
+        self.assertIn("close front window saving yes", script)
+        self.assertIn("set replySubject to subject of replyMessage as string", script)
+        self.assertIn('set outputText to outputText & "Subject: " & replySubject', script)
+        self.assertIn('keystroke "v"', script)
+        self.assertNotIn("NSPasteboard", script)
         self.assertNotIn("send replyMessage", script)
 
     def test_reply_open_mode_saves_before_leaving_open_for_review(self):
@@ -873,6 +948,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         # captured[0] is the window-count probe; find the main reply script.
         reply_scripts = [s for s in captured if "OPENING REPLY FOR REVIEW" in s]
         self.assertEqual(len(reply_scripts), 1)
+        self.assertIn("reply foundMessage with opening window", reply_scripts[0])
         self.assertIn("save replyMessage", reply_scripts[0])
         self.assertIn("review", result)
 
@@ -881,6 +957,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         def fake_run(script, timeout=120):
             captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
             return "ok"
 
         with patch(
@@ -894,19 +972,20 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 send=False,
             )
 
-        self.assertEqual(len(captured), 1)
-        script = captured[0]
+        script = _main_reply_script(captured)
         self.assertIn("if (count of emailAddrs) is 1 then", script)
         self.assertIn(
             "set sender of replyMessage to item 1 of emailAddrs", script
         )
         self.assertNotIn('set sender of replyMessage to "', script)
 
-    def test_reply_to_all_emits_original_party_cc_loop(self):
+    def test_reply_to_all_uses_native_mail_reply_all(self):
         captured = []
 
         def fake_run(script, timeout=120):
             captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
             return "ok"
 
         with patch(
@@ -920,21 +999,25 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_to_all=True,
             )
 
-        self.assertEqual(len(captured), 1)
-        script = captured[0]
-        # reply_to_all copies every other party (To + Cc of the original) as Cc,
-        # excluding the sender and the user's own addresses.
-        self.assertIn("to recipients of foundMessage", script)
-        self.assertIn("cc recipients of foundMessage", script)
-        self.assertIn("if rAddr is not senderAddr and rAddr is not in myAddrs", script)
-        # Object-model, not the old GUI reply.
-        self.assertNotIn("reply to all", script)
+        script = _main_reply_script(captured)
+        self.assertIn(
+            "reply foundMessage with opening window and reply to all",
+            script,
+        )
+        self.assertNotIn("to recipients of foundMessage", script)
+        self.assertNotIn("cc recipients of foundMessage", script)
+        self.assertNotIn(
+            "if rAddr is not senderAddr and rAddr is not in myAddrs",
+            script,
+        )
 
-    def test_reply_without_all_omits_original_party_cc_loop(self):
+    def test_reply_without_all_uses_native_plain_reply(self):
         captured = []
 
         def fake_run(script, timeout=120):
             captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
             return "ok"
 
         with patch(
@@ -948,12 +1031,13 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_to_all=False,
             )
 
-        self.assertEqual(len(captured), 1)
-        script = captured[0]
-        # A plain reply only addresses the original sender — no fan-out loop.
+        script = _main_reply_script(captured)
+        self.assertIn("reply foundMessage with opening window", script)
+        self.assertNotIn("reply to all", script)
         self.assertNotIn("cc recipients of foundMessage", script)
-        self.assertIn(
-            "make new to recipient at end of to recipients of replyMessage", script
+        self.assertNotIn(
+            "make new to recipient at end of to recipients of replyMessage",
+            script,
         )
 
     def test_injects_sender_when_from_address_is_valid(self):
@@ -977,8 +1061,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 send=False,
             )
 
-        self.assertEqual(len(scripts), 2)
-        script = scripts[1]
+        self.assertEqual(len(scripts), 3)
+        script = _main_reply_script(scripts)
         self.assertIn(
             'set sender of replyMessage to "secondary@example.org"', script
         )
@@ -1277,12 +1361,12 @@ class ManageDraftsListTests(unittest.TestCase):
 
         self.assertEqual(len(captured), 1)
         script = captured[0]
-        # Newest-first slice: tail window + reverse iteration so just-created
-        # drafts are never missed even past the cap.
+        # Bounded newest-first slice: real Mail Drafts accounts show newly
+        # created native replies near the front. Never scan the whole folder.
         self.assertIn("set totalDrafts to count of messages of draftsMailbox", script)
-        self.assertIn("messages startIdx thru totalDrafts of draftsMailbox", script)
-        self.assertIn("if totalDrafts > 100 then set startIdx to totalDrafts - 100 + 1", script)
-        self.assertNotIn("messages 1 thru 100 of draftsMailbox", script)
+        self.assertIn("if headEnd > 100 then set headEnd to 100", script)
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
+        self.assertNotIn("messages startIdx thru totalDrafts of draftsMailbox", script)
         self.assertNotIn("every message of draftsMailbox", script)
 
     def test_list_subject_contains_adds_case_insensitive_filter_only(self):

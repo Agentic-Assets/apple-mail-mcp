@@ -236,7 +236,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
-| `reply_to_email` | Reply or reply-all with optional HTML body and original thread context; prefer `message_id` from search/list results |
+| `reply_to_email` | Native Mail reply or reply-all draft with Mail-generated quoted thread context; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
