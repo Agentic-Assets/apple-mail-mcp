@@ -95,33 +95,35 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 ## Versioning
 
-Version is duplicated across **five** files — bump all together when releasing. Top-level marketplace `metadata.version` (1.0.0) describes the marketplace manifest itself; don't touch it. See [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).
+Version is duplicated across **six** files — bump all together when releasing. Top-level Claude marketplace `metadata.version` (1.0.0) describes the marketplace manifest itself; don't touch it. The Codex marketplace at `.agents/plugins/marketplace.json` does not carry a release version; it points at `./plugin`. See [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).
 
 | File | Field |
 |------|-------|
 | `pyproject.toml` | `[project].version` |
 | `plugin/.claude-plugin/plugin.json` | `version` |
+| `plugin/.codex-plugin/plugin.json` | `version` |
 | `.claude-plugin/marketplace.json` | `plugins[0].version` |
 | `server.json` | `version` and `packages[0].version` |
 | `apple-mail-mcpb/manifest.json` | `version` |
 
-Tool-count claims drift. Description fields in `plugin.json`, `marketplace.json`, and `apple-mail-mcpb/manifest.json` must match `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. The mcpb manifest also embeds the full `tools[]` array — both count and names must match code. Run [`tools/validate_manifests.py`](../tools/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove; run `bash tools/dev-check.sh release` before shipping manifest, package, or artifact changes.
+Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marketplace manifests, and `apple-mail-mcpb/manifest.json` must match `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. The mcpb manifest also embeds the full `tools[]` array — both count and names must match code. Run [`tools/validate_manifests.py`](../tools/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove; run `bash tools/dev-check.sh release` before shipping manifest, package, or artifact changes.
 
 ---
 
-## Distribution channels — three artifacts, one source
+## Distribution channels — four install surfaces, one source
 
-The repo ships from **one source tree** to **three install surfaces**. All three artifacts rebuild in one shot via [`tools/build-artifacts.sh`](../tools/build-artifacts.sh); the validator and CI tests enforce parity between them.
+The repo ships from **one source tree** to **four install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/build-artifacts.sh`](../tools/build-artifacts.sh); Claude Code and Codex plugin installs share the checked-in `plugin/` runtime. The validator and CI tests enforce parity between them.
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|
 | `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin install apple-mail@apple-mail-mcp` (uses `.claude-plugin/marketplace.json`) |
 | `apple-mail.plugin` | Claude Desktop **Cowork** | Customize → Add plugin → **Upload plugin**. The Cowork UI accepts the `.plugin` extension; without it the upload silently fails. |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add Agentic-Assets/apple-mail-mcp` then `codex plugin add apple-mail@apple-mail-mcp`; local checkouts can use `codex plugin marketplace add .` |
 
 **`.zip` and `.plugin` must be byte-identical** — `tools/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/test_validate_manifests.py::test_plugin_file_parity_*`.
 
-**Never** ship a release where any of the three artifacts is missing or stale. Real installer failures we have hit and now guard against:
+**Never** ship a release where any required artifact or manifest is missing or stale. Real installer failures we have hit and now guard against:
 
 - MCPB built with raw `zip -r .` emitting zero-byte directory entries → Claude Desktop installer aborts with `ENOENT`. Build with `mcpb pack` or `zip -X -D`. Guard: `_check_no_directory_entries`.
 - Plugin zip wrapping files under `plugin/` prefix → Cowork rejects with "No manifest found". Build from inside `plugin/`. Guard: `test_plugin_zip_has_manifest_at_root_not_nested`.

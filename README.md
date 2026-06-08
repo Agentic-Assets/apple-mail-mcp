@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **367** unit tests + **30 subtests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **798 tests + 30 subtests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -37,7 +37,8 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 | [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index + plugin skill map |
 | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) | Phase plans & backlog |
 | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) | Desktop bundle build |
-| [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) | Marketplace manifest |
+| [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) | Claude Code marketplace manifest |
+| [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) | Codex Desktop/CLI marketplace manifest |
 
 ## Quick Install
 
@@ -53,6 +54,31 @@ claude plugin install apple-mail@apple-mail-mcp
 ```
 
 Then restart Claude Code.
+
+### Codex Desktop / CLI Plugin
+
+Codex uses the repo marketplace at `.agents/plugins/marketplace.json`, which points at the shared `plugin/` runtime and `plugin/.codex-plugin/plugin.json`.
+
+```bash
+codex plugin marketplace add Agentic-Assets/apple-mail-mcp
+codex plugin add apple-mail@apple-mail-mcp
+```
+
+For a local checkout:
+
+```bash
+cd /path/to/apple-mail-mcp
+codex plugin marketplace add .
+codex plugin add apple-mail@apple-mail-mcp
+```
+
+MCP-only fallback, still draft-safe:
+
+```bash
+codex mcp add apple-mail -- /bin/bash /path/to/apple-mail-mcp/plugin/start_mcp.sh --draft-safe
+```
+
+Restart Codex Desktop or start a fresh Codex CLI session after installing.
 
 ### Claude Desktop Cowork (plugin marketplace)
 
@@ -421,7 +447,7 @@ This is more reliable than injecting raw HTML into AppleScript `content`, which 
 
 ## Claude Code Skills
 
-Workflow skills ship with the plugin and load automatically on install (see [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) for routing):
+Workflow skills ship with the Claude Code and Codex plugin installs and load automatically on install (see [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) for routing):
 
 | Skill | Purpose |
 |-------|---------|
@@ -445,14 +471,14 @@ for d in apple-mail-operator inbox-triage email-management mailbox-taxonomy \
 done
 ```
 
-The plugin MCP server starts with **`--draft-safe`** by default (see `plugin/.claude-plugin/plugin.json`).
+The plugin MCP server starts with **`--draft-safe`** by default for both Claude Code (`plugin/.claude-plugin/plugin.json`) and Codex (`plugin/.mcp.json`).
 
 ## Requirements
 
 - macOS with Apple Mail configured
 - Python 3.10+
 - `fastmcp>=3.1.0,<4` and `mcp-ui-server==1.0.0` for the MCP Apps dashboard
-- Claude Desktop or any MCP-compatible client
+- Claude Desktop, Codex Desktop/CLI, or any MCP-compatible client
 - Mail.app permissions: Automation + Mail Data Access (grant in **System Settings > Privacy & Security > Automation**)
 
 ## Troubleshooting
@@ -471,11 +497,17 @@ The plugin MCP server starts with **`--draft-safe`** by default (see `plugin/.cl
 
 ```
 apple-mail-mcp/
+├── .agents/
+│   └── plugins/
+│       └── marketplace.json   # Codex Desktop/CLI marketplace entry
 ├── .claude-plugin/
-│   └── marketplace.json       # Marketplace manifest (for plugin distribution)
-├── plugin/                    # Claude Code plugin
+│   └── marketplace.json       # Claude Code marketplace manifest
+├── plugin/                    # Shared Claude Code + Codex plugin runtime
+│   ├── .codex-plugin/
+│   │   └── plugin.json        # Codex plugin manifest
 │   ├── .claude-plugin/
-│   │   └── plugin.json        # Plugin manifest
+│   │   └── plugin.json        # Claude Code plugin manifest
+│   ├── .mcp.json              # Codex MCP config
 │   ├── commands/              # /email-management slash command
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
 │   ├── apple_mail_mcp/        # Python MCP server package (28 tools)

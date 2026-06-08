@@ -70,6 +70,8 @@ assert_version() {
 
 assert_version "plugin/.claude-plugin/plugin.json" "version" \
   "plugin/.claude-plugin/plugin.json version"
+assert_version "plugin/.codex-plugin/plugin.json" "version" \
+  "plugin/.codex-plugin/plugin.json version"
 assert_version ".claude-plugin/marketplace.json" "plugins[0].version" \
   "marketplace.json plugins[0].version"
 assert_version "server.json" "version" "server.json version"
@@ -105,6 +107,9 @@ def check_claim(text, source):
 
 plugin = json.load(open("plugin/.claude-plugin/plugin.json", encoding="utf-8"))
 check_claim(plugin.get("description"), "plugin/.claude-plugin/plugin.json description")
+
+codex = json.load(open("plugin/.codex-plugin/plugin.json", encoding="utf-8"))
+check_claim(codex.get("description"), "plugin/.codex-plugin/plugin.json description")
 
 market = json.load(open(".claude-plugin/marketplace.json", encoding="utf-8"))
 plugins = market.get("plugins") or []

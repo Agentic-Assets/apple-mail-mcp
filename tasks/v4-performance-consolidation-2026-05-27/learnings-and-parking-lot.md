@@ -49,5 +49,5 @@
 - Add a `tests/test_perf_budget.py` fixture format that can assert p50/p95 for all top-10 tools without touching Mail.app.
 - Decide whether deprecation aliases count as registered tools during the one-minor compatibility window. The objective requires registered count `<=18`, so this affects manifest design.
 - Keep strict `ruff`/`mypy` clean before behavior work; `tools/dev-check.sh lint` is now fatal for the package gate.
-- Update stale test-count docs after the first v4 docs or tooling PR; several files still mention `674 tests + 30 subtests`.
+- Test-count docs were refreshed during the Codex plugin close-out; rerun `pytest tests/ --collect-only -q` before future release docs changes.
 - Keep Gmail quirks front and center: uppercase `INBOX`, sequential-only Mail calls where needed, and re-push behavior on Cayman - Agentic Assets.

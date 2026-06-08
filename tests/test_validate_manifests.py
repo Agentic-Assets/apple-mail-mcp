@@ -275,6 +275,25 @@ class ValidateManifestsTests(unittest.TestCase):
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("---\nname: op\n---\n", encoding="utf-8")
 
+    def _write_codex_plugin_fixture(
+        self,
+        root: Path,
+        *,
+        marketplace: dict,
+        manifest: dict,
+        mcp: dict,
+        include_skills_dir: bool = False,
+    ) -> None:
+        for path, payload in (
+            (root / ".agents/plugins/marketplace.json", marketplace),
+            (root / "plugin/.codex-plugin/plugin.json", manifest),
+            (root / "plugin/.mcp.json", mcp),
+        ):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload), encoding="utf-8")
+        if include_skills_dir:
+            (root / "plugin/skills").mkdir(parents=True)
+
     def test_marketplace_contract_rejects_dual_component_declarations(self):
         """Regression: 2026-05-25 — Claude Code surfaced 'conflicting manifests'
         because marketplace.json listed `skills` while plugin.json declared
@@ -353,6 +372,147 @@ class ValidateManifestsTests(unittest.TestCase):
 
         conflict_errors = [e for e in errors if "conflict with plugin.json" in e]
         self.assertEqual(conflict_errors, [])
+
+    def test_codex_plugin_contract_rejects_manifest_marketplace_and_mcp_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_codex_plugin_fixture(
+                root,
+                marketplace={
+                    "name": "wrong-marketplace",
+                    "interface": {"displayName": "Wrong"},
+                    "plugins": [
+                        {
+                            "name": "wrong-plugin",
+                            "source": {"source": "git", "path": "plugin"},
+                            "policy": {
+                                "installation": "BLOCKED",
+                                "authentication": "NEVER",
+                            },
+                            "category": "Email",
+                        }
+                    ],
+                },
+                manifest={
+                    "name": "wrong-plugin",
+                    "version": "9.9.9",
+                    "description": "Apple Mail with 27 MCP tools",
+                    "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",
+                    "repository": "https://github.com/Agentic-Assets/apple-mail-mcp",
+                    "license": "MIT",
+                    "keywords": ["apple-mail"],
+                    "skills": "skills",
+                    "mcpServers": "./missing.json",
+                    "interface": {},
+                },
+                mcp={
+                    "mcpServers": {
+                        "apple-mail": {
+                            "command": "bash",
+                            "args": ["start_mcp.sh"],
+                        }
+                    }
+                },
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_codex_plugin_contract("3.6.0", 28, errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(
+            errors,
+            [
+                ".agents/plugins/marketplace.json name: got 'wrong-marketplace', expected 'apple-mail-mcp'",
+                ".agents/plugins/marketplace.json interface.displayName: got 'Wrong', expected 'Apple Mail MCP'",
+                ".agents/plugins/marketplace.json plugins[0].name: got 'wrong-plugin', expected 'apple-mail'",
+                ".agents/plugins/marketplace.json plugins[0].source: expected {'source': 'local', 'path': './plugin'}",
+                ".agents/plugins/marketplace.json plugins[0].policy.installation: got 'BLOCKED', expected 'AVAILABLE'",
+                ".agents/plugins/marketplace.json plugins[0].policy.authentication: got 'NEVER', expected 'ON_INSTALL'",
+                ".agents/plugins/marketplace.json plugins[0].category: got 'Email', expected 'Productivity'",
+                "plugin/.codex-plugin/plugin.json: missing author",
+                "plugin/.codex-plugin/plugin.json name: got 'wrong-plugin', expected 'apple-mail'",
+                "plugin/.codex-plugin/plugin.json version: got '9.9.9', expected '3.6.0'",
+                "plugin/.codex-plugin/plugin.json description: description claims 27 tools, registry has 28",
+                "plugin/.codex-plugin/plugin.json skills: got 'skills', expected './skills'",
+                "plugin/.codex-plugin/plugin.json mcpServers: got './missing.json', expected './.mcp.json'",
+                "plugin/.mcp.json mcpServers.apple-mail.command: expected /bin/bash",
+                "plugin/.mcp.json mcpServers.apple-mail.args: first arg must be ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
+                "plugin/.mcp.json mcpServers.apple-mail.args: missing --draft-safe",
+            ],
+        )
+
+    def test_codex_plugin_contract_accepts_valid_marketplace_manifest_and_mcp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_codex_plugin_fixture(
+                root,
+                marketplace={
+                    "name": "apple-mail-mcp",
+                    "interface": {"displayName": "Apple Mail MCP"},
+                    "plugins": [
+                        {
+                            "name": "apple-mail",
+                            "source": {"source": "local", "path": "./plugin"},
+                            "policy": {
+                                "installation": "AVAILABLE",
+                                "authentication": "ON_INSTALL",
+                            },
+                            "category": "Productivity",
+                        }
+                    ],
+                },
+                manifest={
+                    "name": "apple-mail",
+                    "version": "3.6.0",
+                    "description": "Apple Mail with 28 MCP tools",
+                    "author": {"name": "Agentic Assets"},
+                    "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",
+                    "repository": "https://github.com/Agentic-Assets/apple-mail-mcp",
+                    "license": "MIT",
+                    "keywords": ["apple-mail"],
+                    "skills": "./skills",
+                    "mcpServers": "./.mcp.json",
+                    "interface": {"displayName": "Apple Mail"},
+                },
+                mcp={
+                    "mcpServers": {
+                        "apple-mail": {
+                            "command": "/bin/bash",
+                            "args": [
+                                "${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
+                                "--draft-safe",
+                            ],
+                        }
+                    },
+                },
+                include_skills_dir=True,
+            )
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_codex_plugin_contract("3.6.0", 28, errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(errors, [])
+
+    def test_codex_install_smoke_uses_marketplace_then_plugin_id(self):
+        """Keep the Codex install path executable and discoverable."""
+        script = (ROOT / "tools/validate-codex-plugin.sh").read_text(encoding="utf-8")
+
+        self.assertIn('export CODEX_HOME="$TMP_HOME"', script)
+        self.assertIn("codex plugin marketplace add .", script)
+        self.assertIn("codex plugin add apple-mail@apple-mail-mcp", script)
+        self.assertIn(
+            'codex plugin list --marketplace apple-mail-mcp | grep -F "apple-mail@apple-mail-mcp"',
+            script,
+        )
 
     def test_server_json_contract_rejects_package_install_drift(self):
         server_json = {
