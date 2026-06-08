@@ -2,12 +2,14 @@
 
 Top-level **Claude Code marketplace** registration → [`plugin/`](../plugin/) via `"source": "./plugin"`.
 
+Codex Desktop/CLI uses a separate marketplace file at [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json) plus [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json). Keep Claude and Codex plugin identities aligned, but do not add Codex fields to this Claude marketplace manifest.
+
 ## Two version fields
 
 | Field | Example | Meaning |
 |-------|---------|---------|
 | `metadata.version` | `1.0.0` | **This marketplace JSON** — not the plugin. Don't bump on every release. |
-| `plugins[0].version` | `3.2.1` | **Plugin release** — sync with `pyproject.toml`, `plugin.json`, `server.json`, mcpb manifest. |
+| `plugins[0].version` | `3.6.1` | **Plugin release** — sync with `pyproject.toml`, `plugin.json`, `server.json`, mcpb manifest. |
 
 `validate_manifests.sh` checks `plugins[0].version`, tool-count in `plugins[0].description`, `source`, listed skill paths, plugin name/version parity with `plugin/.claude-plugin/plugin.json`, **and the dual-component-conflict rule below**.
 
@@ -22,6 +24,8 @@ The check lives in `tools/validate_manifests.py::_check_marketplace_contract` (r
 ## Not here
 
 - Plugin manifest → `plugin/.claude-plugin/plugin.json`
+- Codex marketplace → `.agents/plugins/marketplace.json`
+- Codex plugin manifest → `plugin/.codex-plugin/plugin.json`
 - Desktop bundle → [`apple-mail-mcpb/`](../apple-mail-mcpb/)
 
 ## Local install
@@ -37,6 +41,15 @@ claude plugin install apple-mail@apple-mail-mcp
 ```
 
 Installs the MCP server (28 tools, **`--draft-safe`** by default) plus **nine** auto-discovered workflow skills under `plugin/skills/` — see [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md).
+
+Codex users install through the sibling Codex marketplace:
+
+```bash
+codex plugin marketplace add Agentic-Assets/apple-mail-mcp
+codex plugin add apple-mail@apple-mail-mcp
+```
+
+For a local checkout, use `codex plugin marketplace add .` before the same `codex plugin add apple-mail@apple-mail-mcp` command.
 
 After edits: `plugin-dev:plugin-validator` + `tools/validate_manifests.sh` (+ `plugin-dev:skill-reviewer` when skills change).
 

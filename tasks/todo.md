@@ -1,13 +1,13 @@
 # Active Pointer — apple-mail-mcp
 
-**Branch:** `fix/v3.6.0-compose-race-and-draft-lookup` (stacked on the 3.5.0 field-report work; not yet merged).
+**Branch:** `feat/codex-claude-plugin-setup` (created 2026-06-07 from current `main` checkout).
 
-**Active workstream:** v3.6.0 compose-path race elimination + reliable draft lookup, from a 2nd live draft-QA session. The 3.5.0 `saving no` change was insufficient — reply/forward were driving Mail's GUI (window + clipboard + positional `close window 1`), causing duplicate drafts, an empty-body draft, a cross-thread body leak (one reply's body landed in an unrelated thread), and dropped reply-all recipients. Drafts search was also slow/missing new drafts.
+**Active workstream:** Codex + Claude plugin setup hardening. Goal: keep existing Claude Code/Cowork/MCPB paths working while adding a real Codex plugin surface (`plugin/.codex-plugin/plugin.json`, `plugin/.mcp.json`, `.agents/plugins/marketplace.json`), easy Codex install commands, and validator coverage.
 
-**What shipped:** reply_to_email + forward_email rebuilt on the object model (`make new outgoing message`, no window/clipboard/System Events, single save); deterministic reply-all recipients; `compose_email` HTML path hardened to `window of newMsg`; `manage_drafts(action="list")` + draft lookup read newest-first with a new `subject_contains` filter and no date dependency. Trade-off: replies are now plain-text "Re:" drafts without native In-Reply-To headers.
+**Plan:** [`tasks/codex-claude-plugin-setup-2026-06-07/phase-plan.md`](codex-claude-plugin-setup-2026-06-07/phase-plan.md)
 
-**Next action:** push branch + open PR; await "Cayman approved this merge" before merging. Earlier 3.5.0 PR is #17.
+**Next action:** commit and push.
 
-**Latest verification (2026-06-05):** `bash tools/dev-check.sh release` green; `validate_manifests OK (version=3.6.0, tools=28)`; 795 passed + 30 subtests; all 11 rendered compose scripts compile via `osacompile`; zip/.plugin byte-identical. **Live verification still pending on the user's TU Exchange Mail** (the GUI races only reproduce live) — user is testing.
+**Latest verification (2026-06-07):** `bash tools/dev-check.sh release` passed at version `3.6.1`; `.venv/bin/pytest tests/test_validate_manifests.py -q` passed with 32 tests; `bash tools/validate-codex-plugin.sh` installed `apple-mail@apple-mail-mcp` version `3.6.1` in a temporary `CODEX_HOME`; `cmp apple-mail-plugin.zip apple-mail.plugin` passed; collected test count is 798 tests + 30 subtests.
 
-**Blockers / caveats:** replies lose native In-Reply-To/References threading (visual "Re:" threading only) — a deliberate reliability trade-off; revisit a native-threaded path later if desired. `manage_drafts(action="cleanup_empty")` still scans oldest-first (minor; the empty-draft generator is now fixed). See project memory `exchange-applescript-footguns.md` and `compose-must-use-object-model.md`.
+**Blockers / caveats:** `mcpb` CLI is not installed locally, so the release script skipped optional `mcpb unpack + validate`; structural MCPB checks still passed through `tools/validate_manifests.py`. No Mail.app live smoke is required because runtime tool code did not change.

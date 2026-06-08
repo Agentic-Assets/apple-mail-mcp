@@ -5,6 +5,9 @@
 | File | Purpose | Status |
 |------|---------|--------|
 | [`todo.md`](todo.md) | Tiny active pointer for the current branch/workstream | Active |
+| [`codex-claude-plugin-setup-2026-06-07/phase-plan.md`](codex-claude-plugin-setup-2026-06-07/phase-plan.md) | Codex + Claude plugin setup plan, based on Corbis reference research | Active; implemented and ready to ship |
+| [`codex-claude-plugin-setup-2026-06-07/progress-log.md`](codex-claude-plugin-setup-2026-06-07/progress-log.md) | Discovery, execution, and verification evidence for cross-platform plugin setup | Active; 3.6.1 release gate evidence recorded |
+| [`codex-claude-plugin-setup-2026-06-07/learnings-and-parking-lot.md`](codex-claude-plugin-setup-2026-06-07/learnings-and-parking-lot.md) | Durable packaging lessons and deferred cleanup items | Active sidecar |
 | [`v4-performance-consolidation-2026-05-27/phase-plan.md`](v4-performance-consolidation-2026-05-27/phase-plan.md) | v4 performance/consolidation/FTS/strict-gate phase plan | Active; strict package gate green |
 | [`v4-performance-consolidation-2026-05-27/progress-log.md`](v4-performance-consolidation-2026-05-27/progress-log.md) | v4 recon evidence, blocker record, and next action log | Active; latest strict-gate evidence recorded |
 | [`v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`](v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md) | v4 competitor prior art, hot-path findings, and parked risks | Active sidecar |

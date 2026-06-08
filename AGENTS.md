@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**28 tools**, **674 tests + 30 subtests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), Codex plugin (`plugin/`), and Codex Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entry: `.Codex-plugin/marketplace.json`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**28 tools**, **798 tests + 30 subtests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI.
 
 ## Agent orchestration (required)
 
@@ -30,18 +30,19 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 | Area | Read |
 |------|------|
-| Plugin wrapper, `start_mcp.sh`, manifests | [`plugin/docs/AGENTS.md`](plugin/docs/AGENTS.md) |
-| Package entry, `core.py`, `server.py`, CLI | [`plugin/apple_mail_mcp/AGENTS.md`](plugin/apple_mail_mcp/AGENTS.md) |
-| Individual MCP tools | [`plugin/apple_mail_mcp/tools/AGENTS.md`](plugin/apple_mail_mcp/tools/AGENTS.md) |
-| Skills (9 workflow skills) | [`plugin/skills/AGENTS.md`](plugin/skills/AGENTS.md) |
+| Plugin wrapper, `start_mcp.sh`, manifests | [`plugin/docs/CLAUDE.md`](plugin/docs/CLAUDE.md) |
+| Package entry, `core.py`, `server.py`, CLI | [`plugin/apple_mail_mcp/CLAUDE.md`](plugin/apple_mail_mcp/CLAUDE.md) |
+| Individual MCP tools | [`plugin/apple_mail_mcp/tools/CLAUDE.md`](plugin/apple_mail_mcp/tools/CLAUDE.md) |
+| Skills (9 workflow skills) | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) |
 | Legacy slash commands | [`plugin/docs/commands.md`](plugin/docs/commands.md) |
-| Tests & mocking AppleScript | [`tests/AGENTS.md`](tests/AGENTS.md) |
-| Manifest validation, pre-commit | [`tools/AGENTS.md`](tools/AGENTS.md) |
-| Live CLI testing, agent workflows | [`docs/AGENTS.md`](docs/AGENTS.md) |
-| Deep tool/skill/plugin rules | [`docs/Codex-conventions.md`](docs/Codex-conventions.md) |
-| Phase plans & backlog | [`tasks/AGENTS.md`](tasks/AGENTS.md) · [`tasks/todo.md`](tasks/todo.md) |
-| MCPB bundle build | [`apple-mail-mcpb/AGENTS.md`](apple-mail-mcpb/AGENTS.md) |
-| Marketplace manifest | [`.Codex-plugin/AGENTS.md`](.Codex-plugin/AGENTS.md) |
+| Tests & mocking AppleScript | [`tests/CLAUDE.md`](tests/CLAUDE.md) |
+| Manifest validation, pre-commit | [`tools/CLAUDE.md`](tools/CLAUDE.md) |
+| Live CLI testing, agent workflows | [`docs/CLAUDE.md`](docs/CLAUDE.md) |
+| Deep tool/skill/plugin rules | [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) |
+| Phase plans & backlog | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) · [`tasks/todo.md`](tasks/todo.md) |
+| MCPB bundle build | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) |
+| Claude Code marketplace manifest | [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) |
+| Codex Desktop/CLI plugin surface | [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) · [`plugin/.codex-plugin/plugin.json`](plugin/.codex-plugin/plugin.json) · [`plugin/.mcp.json`](plugin/.mcp.json) |
 
 ## Architecture (prose)
 
@@ -51,7 +52,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/pytest tests/                    # 674 tests + 30 subtests
+.venv/bin/pytest tests/                    # 798 tests + 30 subtests
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```
@@ -59,16 +60,17 @@ python3 -m venv .venv && .venv/bin/pip install -e . pytest
 ## Version bump (release together)
 
 - `pyproject.toml` → `[project].version`
-- `plugin/.Codex-plugin/plugin.json` → `version`
-- `.Codex-plugin/marketplace.json` → `plugins[0].version` (not `metadata.version`)
+- `plugin/.claude-plugin/plugin.json` → `version`
+- `plugin/.codex-plugin/plugin.json` → `version`
+- `.claude-plugin/marketplace.json` → `plugins[0].version` (not `metadata.version`)
 - `server.json` → top-level + `packages[0].version`
 - `apple-mail-mcpb/manifest.json` → `version`
 
-Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. Before shipping, run `bash tools/dev-check.sh release`; the release gate includes fatal `ruff check`, `ruff format --check`, and `mypy --strict` for `plugin/apple_mail_mcp/`. Do not add new lint/type tools without asking.
+Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. Codex marketplace metadata lives in `.agents/plugins/marketplace.json` and points at `./plugin`; Codex MCP wiring lives in `plugin/.mcp.json` and should keep `--draft-safe` unless explicitly changed. Before shipping, run `bash tools/dev-check.sh release`; the release gate includes fatal `ruff check`, `ruff format --check`, and `mypy --strict` for `plugin/apple_mail_mcp/`. Do not add new lint/type tools without asking.
 
 ## Related folders
 
-`plugin/apple_mail_mcp/` (source of truth) · `plugin/` (Codex plugin) · `apple-mail-mcpb/` · `.Codex-plugin/` · `tests/` · `tools/` · `docs/` · `tasks/`
+`plugin/apple_mail_mcp/` (source of truth) · `plugin/` (shared Claude Code + Codex plugin runtime) · `.agents/plugins/` (Codex marketplace) · `.claude-plugin/` (Claude Code marketplace) · `apple-mail-mcpb/` · `tests/` · `tools/` · `docs/` · `tasks/`
 
 **Repo agent skills:** Add under `.agents/skills/<name>/`; symlink `.claude/skills/<name>` → `../../.agents/skills/<name>` (not `.cursor/skills/`). Commit and push after adding or moving skills.
 **Post-change ship:** Invoke `finalize-apple-mail-mcp` to sync docs, AGENTS.md, manifests, then commit and push when the user asks.
