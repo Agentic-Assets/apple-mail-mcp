@@ -3,6 +3,19 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
+## 3.6.1 — 2026-06-07
+
+Codex plugin install-smoke regression recovery and test-count verification.
+
+### Fixed
+
+- **Codex plugin install surface** — recovered `plugin/.codex-plugin/plugin.json` versioning and marketplace routing after Codex setup work (2026-06-07).
+- **Test count verification** — confirmed 798 tests + 30 subtests via `pytest --collect-only -q` in CI; updated root guidance.
+
+### Changed
+
+- **Documentation alignment** — manifest validator, release gate, and CI now all source from canonical `pyproject.toml` version (3.6.1).
+
 ## 3.6.0 — 2026-06-05
 
 Compose-path race elimination + reliable draft lookup, from a second live draft-QA
