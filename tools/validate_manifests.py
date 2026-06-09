@@ -856,6 +856,16 @@ def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _check_no_stale_distribution_artifacts(expected_version: str, errors: list[str]) -> None:
+    expected_name = f"apple-mail-mcp-v{expected_version}.mcpb"
+    for path in sorted(ROOT.glob("apple-mail-mcp-v*.mcpb")):
+        if path.name != expected_name:
+            errors.append(
+                f"stale distribution artifact: {path.name}; "
+                "remove or run tools/build-artifacts.sh"
+            )
+
+
 def _check_artifact_freshness(
     expected_version: str,
     errors: list[str],
@@ -919,6 +929,8 @@ def _check_artifact_freshness(
         else:
             if actual_readme != _generated_mcpb_readme():
                 errors.append(f"{mcpb.name}: stale README.md; rebuild {mcpb.name}")
+
+    _check_no_stale_distribution_artifacts(expected_version, errors)
 
 
 def main() -> None:

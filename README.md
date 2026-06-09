@@ -93,12 +93,8 @@ same current checkout.
 
 ```bash
 cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp
-git fetch origin
-git switch codex/native-mail-reply-drafts   # until this branch is merged
-git pull --ff-only
+git switch main && git pull --ff-only
 ```
-
-After the branch is merged, use `git switch main && git pull --ff-only` instead.
 
 2. Refresh Codex from the local checkout:
 

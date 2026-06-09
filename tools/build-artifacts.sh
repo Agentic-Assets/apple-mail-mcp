@@ -18,6 +18,15 @@ ZIP_OUT="apple-mail-plugin.zip"
 PLUGIN_OUT="apple-mail.plugin"
 MCPB_OUT="apple-mail-mcp-v${VERSION}.mcpb"
 
+echo "→ Pruning stale apple-mail-mcp-v*.mcpb (keeping ${MCPB_OUT})"
+for stale in apple-mail-mcp-v*.mcpb; do
+  [[ -e "${stale}" ]] || continue
+  if [[ "${stale}" != "${MCPB_OUT}" ]]; then
+    echo "  removing ${stale}"
+    rm -f "${stale}"
+  fi
+done
+
 echo "→ Building ${ZIP_OUT} (Claude Code plugin)"
 rm -f "${ZIP_OUT}" "${PLUGIN_OUT}"
 # Zip from INSIDE plugin/ so `.claude-plugin/plugin.json` sits at the zip root.

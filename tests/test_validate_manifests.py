@@ -1006,6 +1006,43 @@ packages = ["plugin/apple_mail_mcp"]
             ),
         )
 
+    def test_no_stale_distribution_artifacts_flags_old_mcpb(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "apple-mail-mcp-v3.5.0.mcpb").write_bytes(b"stale")
+            (tmp_path / "apple-mail-mcp-v3.6.1.mcpb").write_bytes(b"current")
+
+            errors: list[str] = []
+            original_root = validate_manifests.ROOT
+            try:
+                validate_manifests.ROOT = tmp_path
+                validate_manifests._check_no_stale_distribution_artifacts(
+                    "3.6.1", errors
+                )
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("stale distribution artifact: apple-mail-mcp-v3.5.0.mcpb", errors[0])
+        self.assertIn("tools/build-artifacts.sh", errors[0])
+
+    def test_no_stale_distribution_artifacts_passes_when_only_current(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "apple-mail-mcp-v3.6.1.mcpb").write_bytes(b"current")
+
+            errors: list[str] = []
+            original_root = validate_manifests.ROOT
+            try:
+                validate_manifests.ROOT = tmp_path
+                validate_manifests._check_no_stale_distribution_artifacts(
+                    "3.6.1", errors
+                )
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()
