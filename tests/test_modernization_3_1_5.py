@@ -134,6 +134,7 @@ class DefaultAccountFallbackTests(unittest.TestCase):
                 subject_keyword="Promo",
                 max_moves=1,
                 dry_run=True,
+                allow_filter_scan=True,
             )
         self.assertNotIn("DEFAULT_MAIL_ACCOUNT", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
@@ -157,6 +158,7 @@ class DefaultAccountFallbackTests(unittest.TestCase):
                 subject_keyword="Promo",
                 max_deletes=1,
                 dry_run=True,
+                allow_filter_scan=True,
             )
         self.assertNotIn("DEFAULT_MAIL_ACCOUNT", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
@@ -290,6 +292,7 @@ class WhoseAndCapTests(unittest.TestCase):
                 subject_keywords=["test"],
                 max_moves=5,
                 dry_run=True,
+                allow_filter_scan=True,
             )
         script = cap.last_script
         self.assertIn("messages 1 thru scanUpperBound of currentMailbox", script)
@@ -305,7 +308,7 @@ class WhoseAndCapTests(unittest.TestCase):
             )
         script = cap.last_script
         self.assertIn("1 thru 20", script)
-        self.assertIn("set mailboxUpperBound to 500", script)
+        self.assertIn("set mailboxUpperBound to 250", script)
 
     def test_analytics_get_statistics_short_window_uses_tighter_caps(self):
         cap = _ScriptCapture(return_value="ok")
@@ -317,7 +320,7 @@ class WhoseAndCapTests(unittest.TestCase):
             )
         script = cap.last_script
         self.assertIn("1 thru 10", script)
-        self.assertIn("set mailboxUpperBound to 100", script)
+        self.assertIn("set mailboxUpperBound to 75", script)
 
 
 class NoAccountErrorTests(unittest.TestCase):
@@ -453,6 +456,7 @@ class AppleScriptTimeoutHandlingTests(unittest.TestCase):
                 subject_keyword="Promo",
                 max_moves=1,
                 dry_run=True,
+                allow_filter_scan=True,
             )
         self.assertIn("timed out", result.lower())
 

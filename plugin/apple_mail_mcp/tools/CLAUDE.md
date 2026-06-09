@@ -22,7 +22,22 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 - Default `recent_days=2.0` (48h). Tools refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED`. The only tool that walks the entire inbox is `full_inbox_export` (slow; documented cost). Prefer bounded newest-message slices (`messages 1 thru N`) over broad `whose` clauses on large remote mailboxes.
 - Pass `timeout` through to `run_applescript`; catch `AppleScriptTimeout` → structured error with account name.
+- **ID-first mutations (v3.7.0+):** `move_email`, `update_email_status`, and `manage_trash` prefer `message_ids` from a prior list/search. Filter paths require `allow_filter_scan=True` or return `FILTER_SCAN_DISABLED`. `search_emails` requires `allow_body_scan=True` when `body_text` is set or returns `BODY_SCAN_DISABLED`.
+- **Scan caps (v3.7.1):** bounded slices read `SCAN_BOUNDS` in `constants.py` (search ceiling 250, inbox max 500, `mailbox="All"` fan-out 10). See `docs/CLAUDE-conventions.md` § Centralized scan caps.
 - Mutations: `normalize_message_ids` / `message_ids` for targeted ops. Detail: `docs/CLAUDE-conventions.md`.
+
+## Structured error codes (agent-facing)
+
+Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediation` fields. Tests in `test_phase_2_scan_hardening.py` and `test_mail_search_tools.py` lock the contracts.
+
+| Code | When | Remediation hint |
+|------|------|------------------|
+| `FILTER_SCAN_DISABLED` | `move_email` / `update_email_status` / `manage_trash` called with filters but no `message_ids` and `allow_filter_scan=False` | Collect ids first; or `allow_filter_scan=True` for approved bulk |
+| `BODY_SCAN_DISABLED` | `search_emails(body_text=...)` without `allow_body_scan=True` | Narrow with subject/sender/date; or opt in with tight `date_from` |
+| `UNBOUNDED_SCAN_REQUIRED` | Routine scan with `recent_days=0` / `max_emails=0` | Pass bounded window or use `full_inbox_export` |
+| `INVALID_SCAN_WINDOW` | Forged or out-of-policy `ScanWindow` token | Call `bounded_inbox_scan()` only |
+| `WHOSE_ID_LIST_TOO_LARGE` | `message_ids` longer than `MAX_WHOSE_IDS` (50) | `iter_id_chunks` + one call per batch |
+| `UNSAFE_WHOSE_ON_LIST` | `build_bounded_message_scan(..., whose_condition=...)` | Use `build_bounded_filtered_scan` |
 
 ## Forbidden AppleScript patterns
 

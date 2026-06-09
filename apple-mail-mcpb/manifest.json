@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.6.1",
+  "version": "3.7.1",
   "description": "Natural language interface for Apple Mail with 28 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, full-inbox export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
@@ -79,7 +79,7 @@
     },
     {
       "name": "move_email",
-      "description": "Move emails between mailboxes by subject/sender/date filters. Supports nested paths (e.g. 'Projects/Alpha'). Default max 50 moves; pass dry_run=true to preview before acting."
+      "description": "Move emails by message_ids (preferred, fast) or rarely by filters with allow_filter_scan=true. Nested mailbox paths use '/'. Default max 50; dry_run=true previews ID moves without scanning."
     },
     {
       "name": "reply_to_email",
@@ -103,7 +103,7 @@
     },
     {
       "name": "list_email_attachments",
-      "description": "List attachments for inbox emails. Capped at max_results (default 50) for fast responses on large inboxes."
+      "description": "List attachments by message_ids (preferred) or subject keyword. Capped at max_results (default 50) for fast responses on large inboxes."
     },
     {
       "name": "save_email_attachment",
@@ -111,7 +111,7 @@
     },
     {
       "name": "search_emails",
-      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 without date_from is rejected with UNBOUNDED_SCAN_REQUIRED — pass recent_days=7 or date_from='YYYY-MM-DD', or route audited full-mailbox sweeps through full_inbox_export. all_accounts=True overrides default account. AppleScript scan_cap scales with recent_days (floor=limit+offset+1, ceiling=500) so narrow filters over a wider window actually inspect a meaningful portion of that window."
+      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 without date_from is rejected with UNBOUNDED_SCAN_REQUIRED — pass recent_days=7 or date_from='YYYY-MM-DD', or route audited full-mailbox sweeps through full_inbox_export. all_accounts=True overrides default account. body_text requires allow_body_scan=True or returns BODY_SCAN_DISABLED. AppleScript scan_cap scales with recent_days (floor=limit+offset+1, ceiling=250) so narrow filters over a wider window actually inspect a meaningful portion of that window."
     },
     {
       "name": "get_email_by_id",
@@ -119,15 +119,15 @@
     },
     {
       "name": "get_email_thread",
-      "description": "Return the full conversation thread for an email, grouped by subject across Inbox + Sent. Defaults to last 48 hours; recent_days=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass recent_days=7 or smaller, or route audited full-mailbox sweeps through full_inbox_export."
+      "description": "Return the full conversation thread for an email, grouped by subject across Inbox + Sent. Prefer message_id from search_emails or list_inbox_emails; subject_keyword is optional when message_id is set. Defaults to last 48 hours; recent_days=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass recent_days=7 or smaller, or route audited full-mailbox sweeps through full_inbox_export."
     },
     {
       "name": "update_email_status",
-      "description": "Batch mark read/unread, flag/unflag. Requires at least one filter or explicit apply_to_all. Default max 10 per call."
+      "description": "Batch mark read/unread, flag/unflag by message_ids (preferred). Filter scans require allow_filter_scan=true. Default max 10 per call."
     },
     {
       "name": "manage_trash",
-      "description": "Email deletion lifecycle: move_to_trash, delete_permanent, empty_trash. Requires filters for safety. empty_trash requires confirm_empty=True. Default max 5 per call."
+      "description": "Trash lifecycle: move_to_trash, delete_permanent, empty_trash. Prefer message_ids; filter scans need allow_filter_scan=true. empty_trash requires confirm_empty=True. Default max 5."
     },
     {
       "name": "create_mailbox",
@@ -151,11 +151,11 @@
     },
     {
       "name": "get_statistics",
-      "description": "Email analytics: account overview, sender stats, or mailbox breakdown. Short windows scan 10 mailboxes up to 100 messages each; longer windows scan 20 up to 500. days_back=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass days_back=7 or 30, or route audited full-mailbox sweeps through full_inbox_export to prevent unbounded scans on large inboxes."
+      "description": "Email analytics: account overview, sender stats, or mailbox breakdown. Short windows scan 10 mailboxes up to 75 messages each; longer windows scan 20 up to 250. days_back=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass days_back=7 or 30, or route audited full-mailbox sweeps through full_inbox_export to prevent unbounded scans on large inboxes."
     },
     {
       "name": "export_emails",
-      "description": "Export emails to txt or html. Single email by subject, or up to max_emails messages from a mailbox (default 1000)."
+      "description": "Export emails to txt or html. Single email by message_id (preferred) or subject keyword, or up to max_emails messages from a mailbox (default 1000)."
     },
     {
       "name": "full_inbox_export",

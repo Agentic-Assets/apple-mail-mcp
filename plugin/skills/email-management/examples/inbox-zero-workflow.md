@@ -15,7 +15,7 @@ For every email in your inbox, choose ONE action:
 
 ### 1. Delete (or Trash)
 **When**: Email has no value, spam, unwanted newsletters
-**Tool**: `manage_trash(action="move_to_trash", subject_keyword="...", sender="...")`
+**Tool**: collect `message_id` from `list_inbox_emails` or `search_emails`, then `manage_trash(action="move_to_trash", message_ids=[...])`. Do not pass `subject_keyword=` or `sender=` to `manage_trash` (returns `FILTER_SCAN_DISABLED` without `allow_filter_scan=True`).
 **Examples**:
 - Spam and promotional emails you'll never read
 - Automated notifications you don't need
@@ -61,7 +61,7 @@ For every email in your inbox, choose ONE action:
 3. Review drafts weekly to avoid accumulation
 
 **Alternative**: Flag the email and set a reminder if you don't want to start a draft yet:
-`update_email_status(action="flag", subject_keyword="...")`
+`update_email_status(action="flag", message_ids=["..."])` (use the `message_id` from list/search)
 
 ### 5. Do (or Act)
 **When**: Email requires action (not just a reply) that takes under 2 minutes
@@ -103,8 +103,8 @@ For each email, apply the 5 D's:
 
 1. **Quick Scan**: Subject and sender
 2. **Decision**: Which of the 5 actions?
-3. **Execute**: Use appropriate tool
-4. **Archive or File**: `move_email(to_mailbox="Archive")` or specific folder
+3. **Execute**: Use appropriate tool (mutations always pass `message_id` from the current row)
+4. **Archive or File**: `move_email(message_ids=["..."], to_mailbox="Archive")` or a specific folder
 
 **Step 4: Review Flagged Items**
 ```
@@ -165,7 +165,7 @@ Inbox (empty)
 **Solution**:
 1. Unsubscribe from newsletters: `get_statistics(scope="account_overview")` to see top senders
 2. Set up filters in Mail app for auto-filing
-3. Process in batches: `search_emails(sender="newsletter.com")` → bulk trash
+3. Process in batches: `search_emails(sender="newsletter.com", recent_days=30, limit=50)` → collect `message_id`s → `manage_trash(action="move_to_trash", message_ids=[...])`
 4. Delegate more: Forward emails that others can handle
 
 ### "I'm afraid to delete emails"
@@ -275,9 +275,9 @@ Track these to measure success:
 | Check urgent | `search_emails(subject_keyword="urgent")` |
 | Quick reply | `get_email_thread(message_id="...")` then `reply_to_email(reply_body="...", message_id="...")` |
 | Create draft | `manage_drafts(action="create", ...)` |
-| Move to trash | `manage_trash(action="move_to_trash", ...)` |
-| Archive | `move_email(to_mailbox="Archive", ...)` |
-| Flag for later | `update_email_status(action="flag", ...)` |
+| Move to trash | `manage_trash(action="move_to_trash", message_ids=[...])` |
+| Archive | `move_email(message_ids=[...], to_mailbox="Archive")` |
+| Flag for later | `update_email_status(action="flag", message_ids=[...])` |
 | List drafts | `manage_drafts(action="list")` |
 | Search all | `search_emails(mailbox="All", ...)` |
 

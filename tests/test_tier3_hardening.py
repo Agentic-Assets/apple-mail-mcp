@@ -55,10 +55,10 @@ class BodySearchCapTests(unittest.TestCase):
         defaults.update(kwargs)
         return search_tools._build_search_script(**defaults)[0]
 
-    def test_body_search_without_date_from_explicit_caps_at_100(self):
-        """Without explicit date_from, body_text triggers auto-cap at 100."""
+    def test_body_search_without_date_from_explicit_caps_at_75(self):
+        """Without explicit date_from, body_text triggers BODY_SEARCH_AUTO_CAP."""
         script = self._build(body_text="needle", date_from_explicit=False)
-        self.assertIn("set scanUpperBound to 100", script)
+        self.assertIn("set scanUpperBound to 75", script)
 
     def test_body_search_with_date_from_explicit_no_cap(self):
         """When date_from_explicit=True the auto-cap is skipped; scan_cap stays at the
@@ -68,15 +68,15 @@ class BodySearchCapTests(unittest.TestCase):
             date_from="2026-05-20",
             date_from_explicit=True,
         )
-        # scan_cap should be >= 300 (window-based), not capped at 100
-        self.assertNotIn("set scanUpperBound to 100", script)
+        # scan_cap should be window-based, not capped at BODY_SEARCH_AUTO_CAP
+        self.assertNotIn("set scanUpperBound to 75", script)
 
     def test_no_body_search_not_capped(self):
         """Without body_text, no auto-cap is applied (scan_cap stays window-based)."""
         script = self._build(body_text=None, sender="boss@example.com")
-        # scan_cap for 2-day window with sender filter = 300
-        self.assertIn("set scanUpperBound to 300", script)
-        self.assertNotIn("set scanUpperBound to 100", script)
+        # scan_cap for 2-day window with sender filter = 150
+        self.assertIn("set scanUpperBound to 150", script)
+        self.assertNotIn("set scanUpperBound to 75", script)
 
     def test_body_search_capped_flag_returned_true_when_cap_fires(self):
         """_build_search_script returns body_search_capped=True when the cap fires."""
@@ -133,6 +133,7 @@ class BodySearchCapTests(unittest.TestCase):
                     search_tools.search_emails(
                         account="Work",
                         body_text="needle",
+                        allow_body_scan=True,
                         output_format="json",
                     )
                 )
@@ -152,6 +153,7 @@ class BodySearchCapTests(unittest.TestCase):
                 search_tools.search_emails(
                     account="Work",
                     body_text="needle",
+                    allow_body_scan=True,
                     output_format="text",
                 )
             )

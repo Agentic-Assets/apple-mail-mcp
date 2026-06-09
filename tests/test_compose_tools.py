@@ -1442,7 +1442,7 @@ class ManageDraftsListTests(unittest.TestCase):
         # Bounded newest-first slice: real Mail Drafts accounts show newly
         # created native replies near the front. Never scan the whole folder.
         self.assertIn("set totalDrafts to count of messages of draftsMailbox", script)
-        self.assertIn("if headEnd > 100 then set headEnd to 100", script)
+        self.assertIn("if headEnd > 75 then set headEnd to 75", script)
         self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
         self.assertNotIn("messages startIdx thru totalDrafts of draftsMailbox", script)
         self.assertNotIn("every message of draftsMailbox", script)

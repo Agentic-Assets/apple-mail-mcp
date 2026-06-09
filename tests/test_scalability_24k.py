@@ -291,15 +291,15 @@ class ListInboxUnreadFilterBoundedTests(unittest.TestCase):
         script = self._text_script(max_emails=50)
         self.assertIn("messages 1 thru 500", script)
 
-    def test_scan_cap_has_floor_of_100(self):
-        # max_emails=5 → scan_cap = max(5*10, 100) = 100
+    def test_scan_cap_has_floor_of_50(self):
+        # max_emails=5 → scan_cap = max(5*10, INBOX_DEFAULT_CAP//2) = 50
         script = self._text_script(max_emails=5)
-        self.assertIn("messages 1 thru 100", script)
+        self.assertIn("messages 1 thru 50", script)
 
-    def test_scan_cap_ceiling_at_1000(self):
-        # max_emails=500 → scan_cap = min(max(500*10, 100), 1000) = 1000
+    def test_scan_cap_ceiling_at_500(self):
+        # max_emails=500 → scan_cap = min(max(500*10, 50), INBOX_MAX_CAP) = 500
         script = self._text_script(max_emails=500)
-        self.assertIn("messages 1 thru 1000", script)
+        self.assertIn("messages 1 thru 500", script)
 
     def test_candidate_messages_variable_present(self):
         # The fix binds `candidateMessages` for the bounded slice and then
@@ -333,12 +333,10 @@ class SearchScanCapScalingTests(unittest.TestCase):
             recent_days=recent_days,
         )[0]
 
-    def test_default_recent_days_2_scales_to_300(self):
-        # Phase A: window cap comes from
-        # bounded_scan.compute_scan_upper_bound(2.0) = 200 + 2*50 = 300,
-        # floored at limit+1+offset (=21) → scan_cap=300.
+    def test_default_recent_days_2_scales_to_150(self):
+        # bounded_scan.compute_scan_upper_bound(2.0) = 100 + 2*25 = 150.
         script = self._script(recent_days=2.0)
-        self.assertIn("set scanUpperBound to 300", script)
+        self.assertIn("set scanUpperBound to 150", script)
 
     def test_recent_window_exits_before_subject_reads(self):
         # Large Exchange no-hit subject searches were slow because we read
@@ -389,15 +387,15 @@ class SearchScanCapScalingTests(unittest.TestCase):
         collection_block = script.split("set matchingCount to count of matchingMessages", 1)[0]
         self.assertNotIn("set messageDate to date received of aMessage", collection_block)
 
-    def test_recent_days_7_caps_at_500(self):
-        # compute_scan_upper_bound(7.0) = 200 + 350 = 550, clamped to 500.
+    def test_recent_days_7_caps_at_250(self):
+        # compute_scan_upper_bound(7.0) = 100 + 175 = 275, clamped to 250.
         script = self._script(recent_days=7.0)
-        self.assertIn("set scanUpperBound to 500", script)
+        self.assertIn("set scanUpperBound to 250", script)
 
-    def test_recent_days_30_caps_at_500(self):
-        # recent_days=30 → 200 + 1500 = 1700, clamped to 500.
+    def test_recent_days_30_caps_at_250(self):
+        # recent_days=30 → 100 + 750, clamped to SEARCH_WINDOW_CAP (250).
         script = self._script(recent_days=30.0)
-        self.assertIn("set scanUpperBound to 500", script)
+        self.assertIn("set scanUpperBound to 250", script)
 
     def test_recent_days_zero_uses_floor(self):
         # recent_days=0 keeps base scan_cap = limit + 1 + offset = 21
@@ -406,7 +404,7 @@ class SearchScanCapScalingTests(unittest.TestCase):
         self.assertIn("set scanUpperBound to 21", script)
 
     def test_floor_dominates_when_limit_is_huge(self):
-        # limit=600 → base_cap=601 > compute(2.0)=300, scan_cap=601.
+        # limit=600 → base_cap=601 > compute(2.0)=150, scan_cap=601.
         script = self._script(recent_days=2.0, limit=600)
         self.assertIn("set scanUpperBound to 601", script)
 

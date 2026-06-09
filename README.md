@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **798 tests + 30 subtests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **822 tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -148,16 +148,16 @@ Prefer `--scope user` for personal machine setup. Project-scope marketplace
 entries can write an absolute local path into `.claude/settings.json`, which is
 usually not what you want to commit.
 
-`claude plugin details apple-mail@apple-mail-mcp` should report version `3.6.1`
+`claude plugin details apple-mail@apple-mail-mcp` should report version `3.7.1`
 and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
 replace the path below if the details output shows a different install path:
 
 ```bash
 .venv/bin/python tools/mcp_tool_smoke.py \
   --command /bin/bash \
-  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.6.1/start_mcp.sh" \
+  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
   --arg=--draft-safe \
-  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.6.1" \
+  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1" \
   --expect-count 28 \
   --required-tool reply_to_email \
   --required-tool compose_email \
@@ -307,16 +307,16 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `list_account_addresses` | List sender aliases configured for a Mail account |
 | `search_emails` | Unified search — subject, sender, body, dates, attachments. Defaults to last 48h and the default account |
 | `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results |
-| `get_email_thread` | Conversation thread view across Inbox + Sent |
+| `get_email_thread` | Conversation thread view across Inbox + Sent; prefer `message_id` from search/list results |
 
 ### Organization
 | Tool | Description |
 |------|-------------|
 | `list_mailboxes` | Folder hierarchy with optional message counts |
 | `create_mailbox` | Create new mailboxes (supports nested paths) |
-| `move_email` | Move emails with filters (subject, sender, date, read status, dry-run). Default max 50 |
-| `update_email_status` | Mark read/unread, flag/unflag — by filters or message IDs. Default max 10 |
-| `manage_trash` | Soft delete, permanent delete, empty trash. Default max 5 |
+| `move_email` | Move by `message_ids` (preferred) or filters with `allow_filter_scan=True`. Default max 50 |
+| `update_email_status` | Mark read/unread, flag/unflag by `message_ids` (preferred) or filters with `allow_filter_scan=True`. Default max 10 |
+| `manage_trash` | Soft delete, permanent delete, empty trash; prefer `message_ids`, filters need `allow_filter_scan=True`. Default max 5 |
 | `synchronize_account` | Explicitly confirmed Mail.app sync for an account (can fetch large backlogs) |
 
 ### Composition
@@ -331,7 +331,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Attachments
 | Tool | Description |
 |------|-------------|
-| `list_email_attachments` | List attachments with names and sizes (capped at 50 by default) |
+| `list_email_attachments` | List attachments by `message_ids` (preferred) or subject keyword (capped at 50 by default) |
 | `save_email_attachment` | Save attachments to disk (validates target path) |
 
 ### Smart Inbox
@@ -344,8 +344,8 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Analytics & Export
 | Tool | Description |
 |------|-------------|
-| `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 100 messages, longer windows 20 × 500 |
-| `export_emails` | Export single emails or full mailboxes to TXT/HTML (default cap 1000) |
+| `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 75 messages, longer windows 20 × 250 |
+| `export_emails` | Export single emails by `message_id` or subject, or full mailboxes to TXT/HTML (default cap 1000) |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Audited full-inbox walk; only tool that scans every message. Slow (minutes on 24K mailboxes). Named in `UNBOUNDED_SCAN_REQUIRED` remediation as the legitimate fallback. |
 
@@ -463,6 +463,11 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
 | Unbounded scans refused | All routine scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is a separate audited export tool, not a normal search fallback |
+| **ID-first mutations** | `move_email`, `update_email_status`, `manage_trash` | Pass `message_ids=[...]` from `search_emails` or `list_inbox_emails` (fast, preferred). Filter-based bulk moves/updates/trash require `allow_filter_scan=True` or return `code: FILTER_SCAN_DISABLED`. |
+| **Gated filter scans** | `move_email`, `update_email_status`, `manage_trash` (filter path only) | `allow_filter_scan=True` (slow; timeout-prone on 24k+ inboxes). Filter paths still default to a 48h `recent_days` window. |
+| **Body scan gate** | `search_emails` | `body_text` requires `allow_body_scan=True` or returns `code: BODY_SCAN_DISABLED`. Prefer subject/sender/date filters; pair body scans with a tight date window. |
+
+**Recommended mutation flow:** search or list → collect `message_id` values → call `move_email`, `update_email_status`, or `manage_trash` with `message_ids`. Use `dry_run=True` with ids for a fast preview without acting.
 
 When a per-account call fails in a multi-account fan-out, you get partial results plus an `errors` field naming the account. JSON responses also include `error_details` when the tool can distinguish a timeout from another Mail/App permission error.
 

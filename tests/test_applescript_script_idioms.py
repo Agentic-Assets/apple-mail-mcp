@@ -659,14 +659,14 @@ class AnalyticsStatisticsScriptBuilderTests(unittest.TestCase):
         self.assertIn("messages 1 thru mailboxUpperBound of aMailbox", script)
 
     def test_short_window_uses_tighter_caps(self):
-        """days_back <=7 should produce a tighter cap (100 messages per
-        mailbox) than longer windows (500)."""
+        """days_back <=7 should produce a tighter cap (INBOX_LONG) than longer
+        windows (SEARCH_WINDOW_CAP)."""
         short_script = self._capture_script(days_back=7)
         long_script = self._capture_script(days_back=30)
-        self.assertIn("100", short_script)
-        self.assertIn("500", long_script)
+        self.assertIn("75", short_script)
+        self.assertIn("250", long_script)
         # Tighter cap must not appear in the long-window script
-        self.assertNotIn("\n            set mailboxUpperBound to 100", long_script)
+        self.assertNotIn("\n            set mailboxUpperBound to 75", long_script)
 
     def test_does_not_use_whose_for_message_filtering(self):
         """AppleScript 'whose' clauses on remote mailboxes can materialize

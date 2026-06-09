@@ -1,23 +1,37 @@
 # ID-first refactor spec
 
-## Current state (audit)
+**Status:** Phase 1 mutation ID paths **shipped in v3.7.0**. Filter-based mutation paths are gated behind `allow_filter_scan=True` (default `False`); see [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md) § ID-first mutations and scan opt-in gates.
 
-| Tool | Accepts message_ids? | Guardrails (recent_days / cap / single_account)? |
+## Current state (audit) — updated 2026-06-09
+
+| Tool | Accepts message_ids? | Guardrails (recent_days / cap / filter gate)? |
 |---|---|---|
-| `update_email_status` | YES ✓ | ID path: N/A; filter path: no recent_days default, no cap |
-| `move_email` | NO | keyword-only, no recent_days, no cap (timeout on 24K inbox) |
-| `manage_trash` (move_to_trash) | NO | keyword-only, no recent_days, no cap |
-| `manage_trash` (delete_permanent) | NO | keyword-only, no recent_days, no cap |
+| `update_email_status` | **YES ✓ shipped** | ID path: `build_whose_id_list`, cap 50 ids; filter path: `recent_days=2.0`, requires `allow_filter_scan=True` |
+| `move_email` | **YES ✓ shipped** | ID path: fast, ignores filters; filter path: `recent_days=2.0`, `allow_filter_scan=True`, `UNBOUNDED_SCAN_REQUIRED` without date window |
+| `manage_trash` (move_to_trash) | **YES ✓ shipped** | ID path: fast; filter path: `allow_filter_scan=True`, `recent_days` on filter branch |
+| `manage_trash` (delete_permanent) | **YES ✓ shipped** | ID path: fast; filter path: `allow_filter_scan=True` |
 | `get_email_by_id` | YES (singular) ✓ | N/A (single ID lookup) |
-| `get_email_thread` | NO | keyword-only, NO date cap, scans ALL mailboxes (timeout on 24K inbox) |
-| `search_emails` | NO | has `recent_days=2.0` default, has output cap, single account or all |
-| `list_email_attachments` | NO | keyword-only, no recent_days default |
-| `get_awaiting_reply` | NO | no date filter, scans all accounts |
-| `get_needs_response` | NO | no date filter, scans all accounts |
-| `get_top_senders` | NO | no date filter, scans all accounts |
-| `get_statistics` | NO | no date filter, scans all accounts |
-| `list_inbox_emails` | N/A | list operation, not per-message |
+| `get_email_thread` | **YES ✓ shipped** (`message_id`) | `recent_days=30` default; subject_keyword fallback capped |
+| `search_emails` | N/A (returns ids) | `recent_days=2.0`, output cap; `body_text` requires `allow_body_scan=True` (`BODY_SCAN_DISABLED`) |
+| `list_email_attachments` | NO | keyword-only; backlog: add `recent_days` default |
+| `get_awaiting_reply` | NO | backlog: `recent_days` default |
+| `get_needs_response` | NO | backlog: `recent_days` default |
+| `get_top_senders` | NO | backlog: `recent_days` default |
+| `get_statistics` | NO | backlog: `recent_days` default |
+| `list_inbox_emails` | N/A | list operation, returns `message_id` for downstream mutations |
 | `inbox_dashboard` | N/A | list operation, not per-message |
+
+### `allow_filter_scan` gate (v3.7.0)
+
+Applies to **`move_email`**, **`update_email_status`**, and **`manage_trash`** when called **without** `message_ids` and with filter kwargs (`subject_keyword`, `sender`, `apply_to_all`, etc.):
+
+| Caller passes | Result |
+|---|---|
+| `message_ids=[...]` | Fast ID path; filters ignored; no gate |
+| Filters only, `allow_filter_scan=False` (default) | Structured `FILTER_SCAN_DISABLED` with remediation to collect ids first |
+| Filters + `allow_filter_scan=True` | Slow filter path; response prefixed with `FILTER_SCAN_WARNING`; still bounded by `recent_days` / `older_than_days` |
+
+Contract tests: `tests/test_phase_2_scan_hardening.py` (mutation gate), `tests/test_mail_search_tools.py` (move/trash integration).
 
 ## Template patterns
 
@@ -60,9 +74,9 @@ Behavior:
 - Returns AppleScript `try`/`on error` block for robust resolution
 - Raises error if mailbox not found
 
-## Spec: move_email
+## Spec: move_email — **SHIPPED v3.7.0**
 
-**Current file:** `plugin/apple_mail_mcp/tools/manage.py:56–226`
+**File:** `plugin/apple_mail_mcp/tools/manage.py` (`move_email`, `_move_email_by_message_ids`)
 
 ### New signature
 ```python
@@ -133,9 +147,9 @@ def build_id_list_condition(field_name: str, ids: List[str]) -> str:
     return "(" + " or ".join(parts) + ")"
 ```
 
-## Spec: manage_trash
+## Spec: manage_trash — **SHIPPED v3.7.0**
 
-**Current file:** `plugin/apple_mail_mcp/tools/manage.py:587–877`
+**File:** `plugin/apple_mail_mcp/tools/manage.py` (`manage_trash`, ID branches for `move_to_trash` / `delete_permanent`)
 
 ### New signature
 ```python
@@ -184,9 +198,9 @@ repeat with aMessage in targetMessages
 end repeat
 ```
 
-## Spec: get_email_thread
+## Spec: get_email_thread — **SHIPPED v3.7.0**
 
-**Current file:** `plugin/apple_mail_mcp/tools/search.py:1001–1149`
+**File:** `plugin/apple_mail_mcp/tools/search.py` (`get_email_thread`)
 
 ### New signature
 ```python
@@ -258,4 +272,4 @@ def get_email_thread(
 
 ---
 
-**Next step:** Implementer uses this spec to add `message_ids` parameter and ID-based code path to `move_email`, `manage_trash`, and `get_email_thread`. Reference `update_email_status` for the ID-based pattern. Test against 24K-message mailbox to confirm no timeout regressions.
+**Next step (backlog):** Apply `recent_days` defaults to analytics/smart_inbox tools in the guardrails table; optional `message_ids` on `list_email_attachments`. Live perf gate on 24K-message mailbox after release.

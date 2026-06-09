@@ -36,6 +36,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from apple_mail_mcp.backend.base import ScanWindow, ToolError
+from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import normalize_message_ids
 
 MAX_SCAN_DAYS = 365
@@ -53,7 +54,7 @@ _ISSUER = "core.bounded_inbox_scan"
 
 def _unbounded_remediation(mailbox: str) -> dict[str, Any]:
     return {
-        "preferred": "Pass recent_days=7 or limit=200",
+        "preferred": f"Pass recent_days=7 or limit={SCAN_BOUNDS['SEARCH_WINDOW_CAP']}",
         "fallback_tool": "full_inbox_export",
         "fallback_tool_args": {"mailbox": mailbox},
     }
@@ -228,23 +229,26 @@ def build_bounded_filtered_scan(
 
 def compute_scan_upper_bound(
     recent_days: float,
-    base_cap: int = 200,
-    window_cap: int = 500,
+    base_cap: int | None = None,
+    window_cap: int | None = None,
+    days_scale: int | None = None,
 ) -> int:
     """Derive a bounded slice size from a ``recent_days`` window.
 
-    Mirrors the existing logic at ``tools/search.py:268-283``: tools that
-    need to look back further than the default window scale the cap up,
-    but never beyond ``window_cap``. ``base_cap`` applies for the
-    smallest windows.
+    Defaults come from ``constants.SCAN_BOUNDS`` so one edit retunes every
+    tool. Scales as ``base_cap + recent_days * days_scale``, clamped to
+    ``window_cap``.
     """
+    base = base_cap if base_cap is not None else SCAN_BOUNDS["SEARCH_BASE_CAP"]
+    window = window_cap if window_cap is not None else SCAN_BOUNDS["SEARCH_WINDOW_CAP"]
+    scale = days_scale if days_scale is not None else SCAN_BOUNDS["SEARCH_DAYS_SCALE"]
     if recent_days is None or recent_days <= 0:
-        return base_cap
-    scaled = int(base_cap + (recent_days * 50))
-    if scaled < base_cap:
-        return base_cap
-    if scaled > window_cap:
-        return window_cap
+        return base
+    scaled = int(base + (recent_days * scale))
+    if scaled < base:
+        return base
+    if scaled > window:
+        return window
     return scaled
 
 

@@ -78,6 +78,36 @@ def _date_from_for_recent_days(days: float | None) -> str | None:
     return (datetime.now() - timedelta(days=float(days))).strftime("%Y-%m-%d")
 
 
+FILTER_SCAN_WARNING = (
+    "WARNING: filter scan enabled — slow and timeout-prone on large mailboxes (24k+). "
+    "Prefer message_ids from list_inbox_emails or search_emails."
+)
+
+
+def _filter_scan_disabled_error(tool_name: str) -> str:
+    """Structured error when filter-based mutation is attempted without opt-in."""
+    return serialize_tool_error(
+        ToolError(
+            code="FILTER_SCAN_DISABLED",
+            message=(f"{tool_name} requires message_ids by default. Filter scans are slow on large mailboxes."),
+            remediation={
+                "preferred": (
+                    "Use search_emails(...) or list_inbox_emails(...) to collect "
+                    f"message_id, then call {tool_name}(message_ids=[...])"
+                ),
+                "escape_hatch": (
+                    "allow_filter_scan=True (slow; timeout-prone on 24k+ inboxes; use only for approved bulk campaigns)"
+                ),
+            },
+        )
+    )
+
+
+def _with_filter_scan_warning(text: str) -> str:
+    """Prefix filter-scan escape-hatch responses with an explicit warning."""
+    return f"{FILTER_SCAN_WARNING}\n\n{text}"
+
+
 def _format_dry_run_records(
     title: str,
     records: list[dict[str, Any]],
@@ -110,6 +140,7 @@ def _search_message_ids(
     date_to: str | None = None,
     limit: int,
     timeout: int | None = None,
+    recent_days: float = 0.0,
 ) -> list[str]:
     """Resolve message IDs through the bounded search helper."""
     records = _search_mail_records(
@@ -124,6 +155,7 @@ def _search_message_ids(
         offset=0,
         limit=limit,
         timeout=timeout,
+        recent_days=recent_days,
     )
     ids: list[str] = []
     for record in records:
@@ -249,36 +281,37 @@ def move_email(
     dry_run: bool = False,
     only_read: bool = False,
     recent_days: float = 2.0,
+    allow_filter_scan: bool = False,
     timeout: int | None = None,
 ) -> str:
     """
-    Move email(s) matching filters from one mailbox to another.
+      Move email(s) by exact ``message_ids`` (fast) or, rarely, by filters.
 
-    Supports subject, sender, and date filters. Use dry_run=True to preview
-    matches without moving. Set only_read=True to skip unread emails (useful
-    for archiving). For archiving to "Archive", just set to_mailbox="Archive".
+    Preferred: pass ``message_ids`` from ``list_inbox_emails`` or ``search_emails``.
+    Filter-based moves require ``allow_filter_scan=True`` (slow on large mailboxes).
+    Use ``dry_run=True`` with ``message_ids`` for a fast preview without moving.
 
-    When ``message_ids`` is provided, moves exact IDs and ignores keyword/sender
-    filters. When ``account`` is None the configured ``DEFAULT_MAIL_ACCOUNT`` is used.
+      When ``message_ids`` is provided, moves exact IDs and ignores keyword/sender
+      filters. When ``account`` is None the configured ``DEFAULT_MAIL_ACCOUNT`` is used.
 
-    Args:
-        account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
-        to_mailbox: Destination mailbox name. For nested mailboxes, use "/" separator (e.g., "Projects/Amplify Impact")
-        message_ids: Optional list of exact Mail message ids for precise targeting
-        subject_keyword: Optional keyword to search for in email subjects
-        from_mailbox: Source mailbox name (default: "INBOX")
-        max_moves: Maximum number of emails to move (default: 50, safety limit)
-        subject_keywords: Optional list of keywords to match in subjects; matches any keyword
-        sender: Optional sender to filter emails by
-        older_than_days: Optional age filter - only move emails older than N days
-        dry_run: If True, preview what would be moved without acting (default: False)
-        only_read: If True, only move emails that have been read (default: False)
-        recent_days: Recent window to search by default (default: 2.0, 0 = unbounded).
-            Ignored when older_than_days is set or message_ids is provided.
-        timeout: Optional AppleScript timeout in seconds (default: 300s).
+      Args:
+          account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
+          to_mailbox: Destination mailbox name. For nested mailboxes, use "/" separator (e.g., "Projects/Amplify Impact")
+          message_ids: List of exact Mail message ids (preferred path)
+          subject_keyword: Filter by subject (requires allow_filter_scan=True)
+          from_mailbox: Source mailbox name (default: "INBOX")
+          max_moves: Maximum number of emails to move (default: 50, safety limit)
+          subject_keywords: Optional list of keywords to match in subjects; matches any keyword
+          sender: Optional sender to filter emails by (requires allow_filter_scan=True)
+          older_than_days: Optional age filter - only move emails older than N days
+          dry_run: If True, preview without acting. Fast with message_ids; slow with filters.
+          only_read: If True, only move emails that have been read (default: False)
+          recent_days: Recent window when using filter scan (default: 2.0).
+          allow_filter_scan: Opt in to slow subject/sender filter scans (default: False).
+          timeout: Optional AppleScript timeout in seconds (default: 300s).
 
-    Returns:
-        Confirmation message with details of moved emails
+      Returns:
+          Confirmation message with details of moved emails
     """
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT
@@ -321,8 +354,12 @@ def move_email(
     if not subject_terms and not sender and not older_than_days:
         return (
             "Error: At least one filter is required (subject_keyword, sender, "
-            "or older_than_days). This prevents accidentally moving everything."
+            "or older_than_days), or pass message_ids=[...]. "
+            "This prevents accidentally moving everything."
         )
+
+    if not allow_filter_scan:
+        return _filter_scan_disabled_error("move_email")
 
     effective_recent_days = recent_days if older_than_days is None else 0
 
@@ -360,17 +397,20 @@ def move_email(
                 offset=0,
                 limit=max_moves + 1,
                 timeout=timeout if timeout is not None else 45,
+                recent_days=effective_recent_days,
             )
         except AppleScriptTimeout:
-            return (
+            return _with_filter_scan_warning(
                 f"Error: move_email dry-run timed out on account '{account}'. "
-                "Retry with a larger timeout or tighter filters."
+                "Retry with message_ids=[...] or a larger timeout."
             )
-        return _format_dry_run_records(
-            f"DRY RUN - PREVIEW MOVE: {from_mailbox} -> {to_mailbox}",
-            records,
-            "Would move",
-            max_moves,
+        return _with_filter_scan_warning(
+            _format_dry_run_records(
+                f"DRY RUN - PREVIEW MOVE: {from_mailbox} -> {to_mailbox}",
+                records,
+                "Would move",
+                max_moves,
+            )
         )
 
     search_timeout = timeout if timeout is not None else min(effective_timeout, 120)
@@ -385,22 +425,28 @@ def move_email(
             date_to=_date_to_for_older_than(older_than_days),
             limit=max_moves,
             timeout=search_timeout,
+            recent_days=effective_recent_days,
         )
     except AppleScriptTimeout:
-        return f"Error: move_email timed out on account '{account}'. Retry with a larger timeout or tighter filters."
+        return _with_filter_scan_warning(
+            f"Error: move_email timed out on account '{account}'. "
+            "Prefer message_ids=[...] or retry with a larger timeout."
+        )
 
     if not resolved_ids:
-        return f"No matching emails found in {from_mailbox} for account '{account}'."
+        return _with_filter_scan_warning(f"No matching emails found in {from_mailbox} for account '{account}'.")
 
-    return _move_email_by_message_ids(
-        account=account,
-        from_mailbox=from_mailbox,
-        to_mailbox=to_mailbox,
-        message_ids=resolved_ids,
-        max_moves=max_moves,
-        dry_run=False,
-        timeout=effective_timeout,
-        dest_ref=dest_ref,
+    return _with_filter_scan_warning(
+        _move_email_by_message_ids(
+            account=account,
+            from_mailbox=from_mailbox,
+            to_mailbox=to_mailbox,
+            message_ids=resolved_ids,
+            max_moves=max_moves,
+            dry_run=False,
+            timeout=effective_timeout,
+            dest_ref=dest_ref,
+        )
     )
 
 
@@ -687,27 +733,33 @@ def update_email_status(
     apply_to_all: bool = False,
     message_ids: list[str] | None = None,
     older_than_days: int | None = None,
+    recent_days: float = 2.0,
+    allow_filter_scan: bool = False,
     timeout: int | None = None,
 ) -> str:
     """
     Update email status - mark as read/unread or flag/unflag emails.
 
+    Preferred: pass ``message_ids`` from a prior list/search call.
+    Filter-based updates require ``allow_filter_scan=True`` (slow on large mailboxes).
+
     When message_ids is provided, uses exact ID matching (ignores other filters).
-    Otherwise filters by subject, sender, and/or age.
 
     When ``account`` is None the configured ``DEFAULT_MAIL_ACCOUNT`` is used.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
         action: Action to perform: "mark_read", "mark_unread", "flag", "unflag"
-        subject_keyword: Optional keyword to filter emails by subject
+        subject_keyword: Filter by subject (requires allow_filter_scan=True)
         subject_keywords: Optional list of subject keywords; matches any keyword
-        sender: Optional sender to filter emails by
+        sender: Optional sender to filter emails by (requires allow_filter_scan=True)
         mailbox: Mailbox to search in (default: "INBOX")
         max_updates: Maximum number of emails to update (safety limit, default: 10)
-        apply_to_all: Must be True to allow updates without any filter
-        message_ids: Optional list of exact Mail message ids for precise targeting
+        apply_to_all: Bulk update without filters (requires allow_filter_scan=True)
+        message_ids: List of exact Mail message ids (preferred path)
         older_than_days: Optional age filter - only update emails older than N days
+        recent_days: Recent window when using filter scan (default: 2.0).
+        allow_filter_scan: Opt in to slow filter scans (default: False).
         timeout: Optional AppleScript timeout in seconds (default: 300s).
 
     Returns:
@@ -820,9 +872,14 @@ def update_email_status(
     has_filter = bool(subject_terms) or bool(sender) or (older_than_days is not None and older_than_days > 0)
     if not has_filter and not apply_to_all:
         return (
-            "Error: No filter provided. Provide subject_keyword, sender, or older_than_days "
-            "to filter emails, or set apply_to_all=True to update all messages in the mailbox."
+            "Error: No filter provided. Provide message_ids=[...], subject_keyword, sender, "
+            "or older_than_days to filter emails, or set apply_to_all=True."
         )
+
+    if not allow_filter_scan:
+        return _filter_scan_disabled_error("update_email_status")
+
+    effective_recent_days = recent_days if older_than_days is None else 0.0
 
     if action in {"mark_read", "mark_unread"}:
         search_read = "unread" if action == "mark_read" else "read"
@@ -834,22 +891,27 @@ def update_email_status(
                 subject_terms=subject_terms or None,
                 sender=sender,
                 read_status=search_read,
-                date_from=None,
+                date_from=_date_from_for_recent_days(effective_recent_days),
                 date_to=_date_to_for_older_than(older_than_days),
                 limit=max_updates,
                 timeout=search_timeout,
+                recent_days=effective_recent_days,
             )
         except AppleScriptTimeout:
-            return f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
+            return _with_filter_scan_warning(
+                f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
+            )
         if not resolved_ids:
-            return f"No matching emails found in {mailbox} for account '{account}'."
-        return update_email_status(
-            account=account,
-            action=action,
-            mailbox=mailbox,
-            message_ids=resolved_ids,
-            max_updates=max_updates,
-            timeout=timeout,
+            return _with_filter_scan_warning(f"No matching emails found in {mailbox} for account '{account}'.")
+        return _with_filter_scan_warning(
+            update_email_status(
+                account=account,
+                action=action,
+                mailbox=mailbox,
+                message_ids=resolved_ids,
+                max_updates=max_updates,
+                timeout=timeout,
+            )
         )
 
     scan_cap = min(500, max(max_updates * 10, 50))
@@ -933,9 +995,11 @@ def update_email_status(
     '''
 
     try:
-        return run_applescript(script, timeout=effective_timeout)
+        return _with_filter_scan_warning(run_applescript(script, timeout=effective_timeout))
     except AppleScriptTimeout:
-        return f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
+        return _with_filter_scan_warning(
+            f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
+        )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
@@ -954,13 +1018,15 @@ def manage_trash(
     older_than_days: int | None = None,
     dry_run: bool = True,
     recent_days: float = 2.0,
+    allow_filter_scan: bool = False,
     timeout: int | None = None,
 ) -> str:
     """
     Manage trash operations - delete emails or empty trash.
 
-    When dry_run=True (default), previews what would be moved to trash or
-    permanently deleted without acting. Set dry_run=False to execute.
+    Preferred: pass ``message_ids`` from a prior list/search call.
+    Filter-based trash ops require ``allow_filter_scan=True`` (slow on large mailboxes).
+    When dry_run=True (default), previews without acting; fast with message_ids.
 
     When ``message_ids`` is provided for ``move_to_trash`` or ``delete_permanent``,
     targets exact IDs and ignores keyword/sender filters.
@@ -970,18 +1036,18 @@ def manage_trash(
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
         action: Action to perform: "move_to_trash", "delete_permanent", "empty_trash"
-        message_ids: Optional list of exact Mail message ids for precise targeting
-        subject_keyword: Optional keyword to filter emails (not used for empty_trash)
+        message_ids: List of exact Mail message ids (preferred path)
+        subject_keyword: Filter by subject (requires allow_filter_scan=True)
         subject_keywords: Optional list of subject keywords; matches any keyword
-        sender: Optional sender to filter emails (not used for empty_trash)
+        sender: Optional sender to filter emails (requires allow_filter_scan=True)
         mailbox: Source mailbox (default: "INBOX", not used for empty_trash or delete_permanent)
         max_deletes: Maximum number of emails to delete (safety limit, default: 5)
         confirm_empty: Must be True to execute "empty_trash" action (safety confirmation)
-        apply_to_all: Must be True to allow operations without subject_keyword or sender filter
+        apply_to_all: Bulk trash without filters (requires allow_filter_scan=True)
         older_than_days: Optional age filter - only affect emails older than N days
         dry_run: If True (default), preview what would be affected without acting
-        recent_days: Recent window to search by default (default: 2.0, 0 = unbounded).
-            Ignored when older_than_days is set or message_ids is provided.
+        recent_days: Recent window when using filter scan (default: 2.0).
+        allow_filter_scan: Opt in to slow filter scans (default: False).
         timeout: Optional AppleScript timeout in seconds (default: 300s).
 
     Returns:
@@ -1154,9 +1220,12 @@ def manage_trash(
         # Safety check: require at least one filter or explicit apply_to_all
         if not subject_terms and not sender and not apply_to_all:
             return (
-                "Error: No filter provided. Provide subject_keyword or sender to filter emails, "
-                "or set apply_to_all=True to delete all matching messages."
+                "Error: No filter provided. Provide message_ids=[...], subject_keyword, sender, "
+                "or set apply_to_all=True."
             )
+
+        if not allow_filter_scan:
+            return _filter_scan_disabled_error("manage_trash")
 
         # Build search condition with escaped inputs
         conditions = []
@@ -1175,18 +1244,23 @@ def manage_trash(
                     sender=sender,
                     limit=max_deletes,
                     timeout=search_timeout,
+                    recent_days=effective_recent_days,
                 )
             except AppleScriptTimeout:
-                return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
+                return _with_filter_scan_warning(
+                    f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
+                )
             if not resolved_ids:
-                return f"No matching emails found in Trash for account '{account}'."
-            return manage_trash(
-                account=account,
-                action="delete_permanent",
-                message_ids=resolved_ids,
-                max_deletes=max_deletes,
-                dry_run=dry_run,
-                timeout=timeout,
+                return _with_filter_scan_warning(f"No matching emails found in Trash for account '{account}'.")
+            return _with_filter_scan_warning(
+                manage_trash(
+                    account=account,
+                    action="delete_permanent",
+                    message_ids=resolved_ids,
+                    max_deletes=max_deletes,
+                    dry_run=dry_run,
+                    timeout=timeout,
+                )
             )
 
         matching_messages_script = (
@@ -1252,9 +1326,12 @@ def manage_trash(
         has_filter = bool(subject_terms) or bool(sender) or (older_than_days is not None and older_than_days > 0)
         if not has_filter and not apply_to_all:
             return (
-                "Error: No filter provided. Provide subject_keyword, sender, or older_than_days "
-                "to filter emails, or set apply_to_all=True to move all messages to trash."
+                "Error: No filter provided. Provide message_ids=[...], subject_keyword, sender, "
+                "or older_than_days, or set apply_to_all=True."
             )
+
+        if not allow_filter_scan:
+            return _filter_scan_disabled_error("manage_trash")
 
         if dry_run:
             try:
@@ -1269,17 +1346,20 @@ def manage_trash(
                     offset=0,
                     limit=max_deletes + 1,
                     timeout=timeout if timeout is not None else 45,
+                    recent_days=effective_recent_days,
                 )
             except AppleScriptTimeout:
-                return (
+                return _with_filter_scan_warning(
                     f"Error: manage_trash dry-run timed out on account '{account}'. "
-                    "Retry with a larger timeout or tighter filters."
+                    "Prefer message_ids=[...] or a larger timeout."
                 )
-            return _format_dry_run_records(
-                "DRY RUN - PREVIEW TRASH",
-                records,
-                "Would trash",
-                max_deletes,
+            return _with_filter_scan_warning(
+                _format_dry_run_records(
+                    "DRY RUN - PREVIEW TRASH",
+                    records,
+                    "Would trash",
+                    max_deletes,
+                )
             )
 
         search_timeout = timeout if timeout is not None else min(effective_timeout, 120)
@@ -1293,25 +1373,37 @@ def manage_trash(
                 date_to=_date_to_for_older_than(older_than_days),
                 limit=max_deletes,
                 timeout=search_timeout,
+                recent_days=effective_recent_days,
             )
         except AppleScriptTimeout:
-            return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
+            return _with_filter_scan_warning(
+                f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
+            )
         if not resolved_ids:
-            return f"No matching emails found in {mailbox} for account '{account}'."
-        return manage_trash(
-            account=account,
-            action="move_to_trash",
-            message_ids=resolved_ids,
-            mailbox=mailbox,
-            max_deletes=max_deletes,
-            dry_run=False,
-            timeout=timeout,
+            return _with_filter_scan_warning(f"No matching emails found in {mailbox} for account '{account}'.")
+        return _with_filter_scan_warning(
+            manage_trash(
+                account=account,
+                action="move_to_trash",
+                message_ids=resolved_ids,
+                mailbox=mailbox,
+                max_deletes=max_deletes,
+                dry_run=False,
+                timeout=timeout,
+            )
         )
 
     try:
-        return run_applescript(script, timeout=effective_timeout)
+        result = run_applescript(script, timeout=effective_timeout)
+        if action == "empty_trash":
+            return result
+        return _with_filter_scan_warning(result)
     except AppleScriptTimeout:
-        return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
+        if action == "empty_trash":
+            return f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
+        return _with_filter_scan_warning(
+            f"Error: manage_trash timed out after {effective_timeout}s on account '{account}'."
+        )
 
 
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)

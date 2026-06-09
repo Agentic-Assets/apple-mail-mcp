@@ -14,6 +14,56 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 [`bounded_inbox_scan()`](../plugin/apple_mail_mcp/bounded_scan.py) is the **sole legitimate issuer** of `ScanWindow` capability tokens. Tools must never construct `ScanWindow` directly — call `bounded_inbox_scan()` or one of the safe builders (`build_bounded_message_scan`, `build_whose_id_list`). `AppleScriptBackend._check_window` rejects forged or out-of-policy windows with structured error `code: INVALID_SCAN_WINDOW`. This is what enforces the unbounded-scan refusal (`code: UNBOUNDED_SCAN_REQUIRED`) and the `full_inbox_export` audit boundary at the backend layer, not just inside tool wrappers. Contract suite: `test_bounded_scan_contract`, `test_no_unbounded_whose`, `test_full_inbox_export`.
 
+### ID-first mutations and scan opt-in gates (v3.7.0)
+
+Destructive and bulk mutation tools default to **exact `message_ids`** from a prior `list_inbox_emails` or `search_emails` call. Filter-based paths (subject, sender, `apply_to_all`, etc.) are **off by default** and require an explicit escape hatch.
+
+| Gate | Tools | Default | Opt-in kwarg | Structured error when blocked |
+|------|-------|---------|--------------|-------------------------------|
+| Filter scan | `move_email`, `update_email_status`, `manage_trash` | `message_ids` preferred; filter path disabled | `allow_filter_scan=True` | `code: FILTER_SCAN_DISABLED` |
+| Body scan | `search_emails` | `body_text` ignored unless opted in | `allow_body_scan=True` | `code: BODY_SCAN_DISABLED` |
+
+**`FILTER_SCAN_DISABLED` contract** (`manage.py` → `_filter_scan_disabled_error`):
+
+- Raised when a mutation tool is called with filter kwargs (`subject_keyword`, `sender`, `apply_to_all`, etc.) but **without** `message_ids` and **without** `allow_filter_scan=True`.
+- `remediation.preferred`: collect ids via `search_emails` / `list_inbox_emails`, then call the mutation with `message_ids=[...]`.
+- `remediation.escape_hatch`: `allow_filter_scan=True` (slow; timeout-prone on 24k+ inboxes; approved bulk campaigns only).
+- When the escape hatch is used, responses are prefixed with `FILTER_SCAN_WARNING` so agents see the slow-path notice in plain text.
+
+**`BODY_SCAN_DISABLED` contract** (`search.py` → `_body_scan_disabled_error`):
+
+- Raised when `search_emails` is called with `body_text` set but `allow_body_scan=False` (the default).
+- Body scans are O(N × message-size) on large mailboxes; pair `allow_body_scan=True` with a tight `date_from` / `recent_days` window.
+- `remediation.preferred`: narrow with `subject_keyword`, `sender`, `date_from`, or `has_attachments` instead.
+
+**ID path rules** (shared across `move_email`, `update_email_status`, `manage_trash`):
+
+- When `message_ids` is provided, keyword/sender/date filters are **ignored** (fast `build_whose_id_list` path).
+- Empty or all-non-numeric `message_ids` → plain-text validation error before AppleScript runs.
+- Lists longer than `MAX_WHOSE_IDS` (50) → `code: WHOSE_ID_LIST_TOO_LARGE`; chunk with `bounded_scan.iter_id_chunks`.
+- Filter paths still honor `recent_days` defaults and refuse unbounded scans with `UNBOUNDED_SCAN_REQUIRED` when no date window is set.
+
+Agent workflow: **search/list → collect `message_id` → mutate by ids**. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk or full-text campaigns.
+
+### Centralized scan caps (`SCAN_BOUNDS`, v3.7.1)
+
+All bounded AppleScript slices read caps from [`constants.py`](../plugin/apple_mail_mcp/constants.py) `SCAN_BOUNDS`. Edit one dict to retune every tool; `bounded_scan.compute_scan_upper_bound()` uses `SEARCH_BASE_CAP`, `SEARCH_WINDOW_CAP`, and `SEARCH_DAYS_SCALE`.
+
+| Key | Value | Used by |
+|-----|-------|---------|
+| `SEARCH_BASE_CAP` | 100 | `search_emails` floor via `compute_scan_upper_bound` |
+| `SEARCH_WINDOW_CAP` | 250 | `search_emails` ceiling; `get_statistics` long windows (20 mailboxes) |
+| `SEARCH_DAYS_SCALE` | 25 | Per-day scaling in `compute_scan_upper_bound` |
+| `BODY_SEARCH_AUTO_CAP` | 75 | `search_emails` body scans without explicit `date_from` |
+| `INBOX_DEFAULT_CAP` / `INBOX_MAX_CAP` | 100 / 500 | `list_inbox_emails` unread/read filter slice |
+| `INBOX_SHORT` / `INBOX_LONG` | 25 / 75 | `smart_inbox` per-mailbox ceilings |
+| `TRASH_SCAN` | 100 | Trash listing branches |
+| `DRAFT_LOOKUP` / `MESSAGE_LOOKUP` | 75 | Compose draft/reply lookup tails |
+| `MAX_MAILBOXES_PER_SEARCH` | 20 | Multi-mailbox `search_emails` fan-out |
+| `MAX_MAILBOXES_PER_SEARCH_ALL` | 10 | `search_emails(mailbox="All")` cap |
+
+`get_statistics`: `days_back <= 7` → 10 mailboxes × `INBOX_LONG` (75); else 20 × `SEARCH_WINDOW_CAP` (250).
+
 ### Performance defaults
 
 - **Recent-window default**: any tool that searches or lists takes `recent_days: float = 2.0` (48h). Tools must refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED` plus a `remediation.fallback_tool` field. The only tool that walks the entire inbox is `full_inbox_export` (slow; documented cost). Routine tests and skills must pass bounded `recent_days` / `max_emails`.

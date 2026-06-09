@@ -98,10 +98,10 @@ Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 min
 3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(message_id=...)` for full content — do not re-search by subject.
 4. Decide per message using the four-option rule: respond, defer, file, or delete.
    - For responses, defer to **`email-drafting`** (compose MCP stack).
-   - To defer, flag with `update_email_status(action="flag", subject_keyword="...")`.
-   - To file, use `move_email(to_mailbox="...", max_moves=1)`.
-   - To delete, use `manage_trash(action="move_to_trash")` with an explicit cap.
-5. Mark processed batches read: `update_email_status(action="mark_read", ...)`.
+   - To defer, flag with `update_email_status(action="flag", message_ids=["..."])`.
+   - To file, use `move_email(message_ids=["..."], to_mailbox="...", dry_run=True)` then execute.
+   - To delete, use `manage_trash(action="move_to_trash", message_ids=["..."])` with an explicit cap.
+5. Mark processed batches read: `update_email_status(action="mark_read", message_ids=[...])`.
 6. End the session by re-running `get_inbox_overview()` to confirm the queue is drained.
 
 Tips:
@@ -118,9 +118,9 @@ Goal: keep folder structure healthy and archive aging messages.
 2. Identify clutter: mailboxes with more than 1,000 messages or with a high unread ratio.
 3. Analyze patterns: `get_statistics(scope="account_overview")` plus `get_top_senders()`. For per-folder volume, prefer `list_mailboxes(include_counts=True)`; when calling `get_statistics(scope="mailbox_breakdown")`, pass explicit `mailbox=` — omitting it scopes to the default Inbox in code. Full guidance lives in `references/analytics.md`.
 4. Adjust folders: collaborate with **`mailbox-taxonomy`** for naming; create net-new folders with `create_mailbox` after explicit confirmation (rename/delete heavy work still occurs in Mail UI when needed).
-5. Bulk-organize by sender or date:
-   - `search_emails(sender="...", recent_days=30)` then `move_email(sender="...", to_mailbox="...", max_moves=N)`. **Always co-filter** `move_email(sender=...)` with `subject_keyword=` or a tight `recent_days` ceiling (≤30), OR pass `message_ids=[...]` collected from the prior bounded search — a bare `sender=` filter can stall on a 24k inbox.
-   - `search_emails(date_to="YYYY-MM-DD", date_from="YYYY-MM-DD")` then move to an archive folder.
+5. Bulk-organize by sender or date (ID-first — see **`email-archive-cleanup`**):
+   - `search_emails(sender="...", recent_days=30)` → collect `message_id`s → `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` → execute.
+   - Filter-only `move_email(sender=...)` requires `allow_filter_scan=True` (slow; rarely use).
 6. Archive read mail older than 30 days into `Archive/<year>`.
 
 Detailed safe bulk operations are documented in `references/bulk-cleanup.md`.
@@ -131,11 +131,11 @@ Goal: drain the inbox by processing every message exactly once.
 
 1. Survey: `get_inbox_overview()` and `get_statistics(scope="account_overview")` to size the problem.
 2. Process top-down with the five-D framework on each message:
-   - Delete: spam, expired notifications — `manage_trash(action="move_to_trash")`.
+   - Delete: spam, expired notifications — `manage_trash(action="move_to_trash", message_ids=[...])`.
    - Delegate: forward — use **`email-drafting`** (`forward_email` tool) after user confirms recipients.
    - Defer: flag and move to a "Follow Up" mailbox.
    - Do: respond now if under two minutes — use **`email-drafting`** (compose stack); never auto-send under `--draft-safe`. Always route replies through `reply_to_email(message_id=...)`; `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
-   - File: `move_email(to_mailbox="...")` for reference material.
+   - File: `move_email(message_ids=[...], to_mailbox="...")` for reference material.
 3. Keep folders sparing: an "Action Required", "Waiting For", and "Reference" trio handles most cases.
 4. Maintain daily — Inbox Zero is a habit, not a one-time event.
 
@@ -157,13 +157,13 @@ Mindset:
 | Find a specific email | `search_emails(subject_keyword="...")` | Defaults to last 48 hours |
 | Read one message by id | `get_email_by_id(message_id="...")` | After search/list returns an id |
 | Search by sender | `search_emails(sender="...")` | Same defaults apply |
-| Search email bodies | `search_emails(body_text="...", include_content=True)` | Slower; use when subject is unknown |
+| Search email bodies | `search_emails(body_text="...", allow_body_scan=True)` | Slower; requires explicit opt-in |
 | Cross-account search | `search_emails(account=None, all_accounts=True)` | Costly on Exchange; use sparingly |
 | Recent inbox listing | `list_inbox_emails(max_emails=50, read_status="unread", include_content=False)` | Default cap is 50; `read_status="unread"` is the cheapest pass on a large inbox. Legacy `include_read=False` still works but deprecated. |
-| View a conversation | `get_email_thread(account="...", subject_keyword="...", mailbox="INBOX", recent_days=2)` — `account` required; widen `mailbox`/`recent_days` only when needed |
-| Move messages | `move_email(..., max_moves=N)` | Default cap is 50; set `max_moves=1` for precise single-message filing. When using `sender=`, always co-filter with `subject_keyword=` or a tight `recent_days` ceiling (≤30), OR pass `message_ids=[...]` from a prior bounded search. |
-| Flag / mark read | `update_email_status(action="...", max_updates=N)` | Default cap is 10 |
-| Move to trash / delete | `manage_trash(action="...", max_deletes=N)` | See `references/bulk-cleanup.md` |
+| View a conversation | `get_email_thread(message_id="...")` or `subject_keyword=` when no id | Prefer id from list/search |
+| Move messages | `move_email(message_ids=[...], max_moves=N)` | ID-first; filter scans need `allow_filter_scan=True` |
+| Flag / mark read | `update_email_status(action="...", message_ids=[...])` | ID-first; default cap 10 |
+| Move to trash / delete | `manage_trash(action="...", message_ids=[...])` | See `references/bulk-cleanup.md` |
 | Analytics | `get_statistics()` and `get_top_senders()` | See `references/analytics.md` |
 | Export for backup | `export_emails(scope="...", mailbox="...")` | Run before any large delete |
 | Sync stale account | `synchronize_account(account="...", confirm_sync=True)` | Only after the user explicitly accepts that Mail may fetch a large backlog |
@@ -184,7 +184,7 @@ Mindset:
 1. Start with `search_emails(subject_keyword="...")` on the default account and default 48-hour window.
 2. Widen the time window: add `recent_days=30`. If the tool returns `code: UNBOUNDED_SCAN_REQUIRED`, follow the `remediation.fallback_tool` field — usually a wider `recent_days` covers it; only escalate to `full_inbox_export` after confirming with the user.
 3. Widen the scope: add `all_accounts=True` to search every configured account.
-4. Search the body: `search_emails(body_text="...", include_content=True, recent_days=30)` before asking to run a full scan.
+4. Search the body: `search_emails(body_text="...", allow_body_scan=True, recent_days=30)` before asking to run a full scan.
 5. Filter by attachment if relevant: `search_emails(has_attachments=True, ...)`.
 6. Check Trash explicitly: `search_emails(mailbox="Trash", recent_days=30, ...)`. For a true full Trash walk, escalate to `full_inbox_export` (slow); never call it unprompted.
 
@@ -193,22 +193,22 @@ Mindset:
 1. Review current layout: `list_mailboxes(include_counts=True)`.
 2. Create project folders in Apple Mail (or via `create_mailbox` if the user confirms).
 3. Find project messages: `search_emails(subject_keyword="ProjectName", recent_days=30)`, widening only after review.
-4. Bulk move: `move_email(subject_keyword="ProjectName", to_mailbox="Projects/ProjectName", max_moves=50)` after previewing.
+4. Bulk move: collect ids from step 3, then `move_email(message_ids=[...], to_mailbox="Projects/ProjectName", dry_run=True)` then execute.
 5. Add sender-based moves for team members on the same project.
 
 ### "I need to follow up on emails"
 
-1. Flag the message: `update_email_status(action="flag", subject_keyword="...", max_updates=1)`.
+1. Flag the message: `update_email_status(action="flag", message_ids=["..."], max_updates=1)`.
 2. Optionally move flagged items into a dedicated "Follow Up" mailbox for visibility.
 3. Schedule a recurring weekly review of the flagged set with a bounded date window; do not use full scans in recurring workflows.
-4. Clear the flag once handled: `update_email_status(action="unflag", subject_keyword="...")`.
+4. Clear the flag once handled: `update_email_status(action="unflag", message_ids=["..."])`.
 
 ### "Too many emails from one sender"
 
 1. Confirm volume: `get_statistics(scope="sender_stats", sender="...")`.
 2. Find the messages: `search_emails(sender="...", recent_days=30)`. If the user wants every message from this sender across all time, call `full_inbox_export` (slow) rather than ratcheting `recent_days` indefinitely.
 3. If unwanted, run the cleanup sequence from `references/bulk-cleanup.md`.
-4. If wanted but noisy, create a dedicated folder and bulk-move with `move_email(sender="...", to_mailbox="...", max_moves=N)`. Co-filter with `subject_keyword=` or `recent_days≤30`, or pass `message_ids=[...]` from the prior `search_emails` call — a bare `sender=` filter can stall on a 24k inbox.
+4. If wanted but noisy, create a dedicated folder and bulk-move with `message_ids` from step 2 (`email-archive-cleanup` workflow).
 5. If the sender is a newsletter, surface it via `get_top_senders()` and unsubscribe in Apple Mail.
 
 ## Additional Resources

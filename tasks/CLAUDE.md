@@ -20,7 +20,7 @@ When executing [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-pl
 | [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md) | **Backlog sidecar** — detailed robustness tasks that no longer belong in `todo.md`. |
 | [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) | **Historical release sequencing** — phases 1→4 after 3.1.6 hardening. Keep useful items but verify against current 3.2.1 state. |
 | [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) | **Live perf numbers** — production vs light account; root-cause notes. |
-| [`id-first-refactor-spec.md`](id-first-refactor-spec.md) | Future spec (3.1.8+) — not in current phase plan. |
+| [`id-first-refactor-spec.md`](id-first-refactor-spec.md) | Shipped reference — ID-first mutations + `allow_filter_scan` gate (v3.7.0). |
 
 ## Archive
 
@@ -41,7 +41,7 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
 
 ## Maintenance
 
-- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (798 tests + 30 subtests)
+- After `tools/*.py`: `.venv/bin/pytest tests/ -q` (822 tests)
 - After manifests/package/artifact changes: `bash tools/dev-check.sh release` + `plugin-dev:plugin-validator`
 - After skills: `plugin-dev:skill-reviewer` (+ manifest validator if marketing copy changed)
 - Live workflow: [`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)

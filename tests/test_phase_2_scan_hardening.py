@@ -43,7 +43,7 @@ class ComposeScanCapTests(unittest.TestCase):
         # Bounded cap: list reads the newest visible Drafts window and never
         # materializes the whole mailbox.
         self.assertIn("messages 1 thru headEnd of draftsMailbox", captured[0])
-        self.assertIn("if headEnd > 100 then set headEnd to 100", captured[0])
+        self.assertIn("if headEnd > 75 then set headEnd to 75", captured[0])
         self.assertNotIn("every message of draftsMailbox", captured[0])
 
     def test_reply_to_email_subject_lookup_uses_in_loop_filter_and_cap(self):
@@ -64,9 +64,9 @@ class ComposeScanCapTests(unittest.TestCase):
             )
 
         # Bounded-slice-then-filter: bind a capped newest-first window
-        # FIRST (messages 1 thru 100), THEN apply the in-loop if filter.
+        # FIRST (messages 1 thru MESSAGE_LOOKUP cap), THEN apply the in-loop if filter.
         script = _main_reply_script(captured)
-        self.assertIn("messages 1 thru 100 of inboxMailbox", script)
+        self.assertIn("messages 1 thru 75 of inboxMailbox", script)
         # Safe in-loop subject check (no `whose`).
         self.assertIn("if messageSubject contains", script)
         # Early-exit date guard must be present.
@@ -93,7 +93,7 @@ class ComposeScanCapTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn("whose id is 12345", script)
-        self.assertNotIn("messages 1 thru 100 of inboxMailbox", script)
+        self.assertNotIn("messages 1 thru 75 of inboxMailbox", script)
 
     def test_forward_email_subject_lookup_uses_in_loop_filter_and_cap(self):
         captured = []
@@ -109,7 +109,7 @@ class ComposeScanCapTests(unittest.TestCase):
                 to="other@example.com",
             )
 
-        self.assertIn("messages 1 thru 100 of targetMailbox", captured[0])
+        self.assertIn("messages 1 thru 75 of targetMailbox", captured[0])
         # Safe in-loop subject check (no `whose`).
         self.assertIn("if messageSubject contains", captured[0])
         # Early-exit date guard must be present.
@@ -432,7 +432,7 @@ class HeavyScanGuardTests(unittest.TestCase):
         with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
             smart_inbox_tools.get_needs_response(account="Work", days_back=7)
 
-        self.assertIn("set mailboxUpperBound to 30", captured["script"])
+        self.assertIn("set mailboxUpperBound to 25", captured["script"])
         self.assertIn("messages 1 thru mailboxUpperBound of targetMailbox", captured["script"])
         self.assertNotIn("every message of targetMailbox whose", captured["script"])
         self.assertNotIn("set mailboxMessages to messages of targetMailbox", captured["script"])
@@ -449,7 +449,7 @@ class HeavyScanGuardTests(unittest.TestCase):
 
         self.assertEqual(len(captured["scripts"]), 2)
         inbox_script, sent_script = captured["scripts"]
-        self.assertIn("set inboxUpperBound to 30", inbox_script)
+        self.assertIn("set inboxUpperBound to 25", inbox_script)
         self.assertIn("messages 1 thru inboxUpperBound of inboxMailbox", inbox_script)
         self.assertIn("set sentUpperBound to 20", sent_script)
         self.assertIn("messages 1 thru sentUpperBound of sentMailbox", sent_script)
@@ -470,7 +470,7 @@ class HeavyScanGuardTests(unittest.TestCase):
                 days_back=2,
             )
 
-        self.assertIn("set mailboxUpperBound to 100", captured["script"])
+        self.assertIn("set mailboxUpperBound to 75", captured["script"])
         self.assertIn("1 thru 10", captured["script"])
         self.assertIn("messages 1 thru mailboxUpperBound of aMailbox", captured["script"])
         self.assertNotIn("every message of aMailbox whose date received", captured["script"])
@@ -798,6 +798,85 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
         self.assertTrue(data["truncated"])
 
 
+class FilterScanGateTests(unittest.TestCase):
+    """Mutation tools require message_ids unless allow_filter_scan=True."""
+
+    def test_move_email_filter_without_opt_in_returns_filter_scan_disabled(self):
+        import json
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.move_email(
+                account="Work",
+                sender="newsletter@example.com",
+                to_mailbox="Archive",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "FILTER_SCAN_DISABLED")
+        self.assertIn("message_ids", payload["remediation"]["preferred"])
+
+    def test_move_email_filter_with_opt_in_invokes_search(self):
+        with patch(
+            "apple_mail_mcp.tools.manage._search_mail_records",
+            return_value=[],
+        ) as mock_search, patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.move_email(
+                account="Work",
+                subject_keyword="Promo",
+                to_mailbox="Archive",
+                dry_run=True,
+                allow_filter_scan=True,
+            )
+
+        mock_search.assert_called_once()
+        mock_run.assert_not_called()
+        self.assertIn("WARNING: filter scan enabled", result)
+
+    def test_move_email_message_ids_ignores_filter_gate(self):
+        with patch(
+            "apple_mail_mcp.tools.manage.run_applescript",
+            return_value="MOVING EMAILS BY IDS",
+        ) as mock_run:
+            result = manage_tools.move_email(
+                account="Work",
+                to_mailbox="Archive",
+                message_ids=["99"],
+                dry_run=True,
+            )
+
+        mock_run.assert_called_once()
+        self.assertNotIn("FILTER_SCAN_DISABLED", result)
+
+    def test_update_email_status_filter_without_opt_in_blocked(self):
+        import json
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.update_email_status(
+                account="Work",
+                action="mark_read",
+                subject_keyword="Newsletter",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "FILTER_SCAN_DISABLED")
+
+    def test_manage_trash_filter_without_opt_in_blocked(self):
+        import json
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.manage_trash(
+                account="Work",
+                action="move_to_trash",
+                sender="spam@example.com",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "FILTER_SCAN_DISABLED")
+
+
 class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
     """Fix #3: move_email must refuse recent_days=0 without older_than_days."""
 
@@ -811,6 +890,7 @@ class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
                 sender="newsletter@example.com",
                 to_mailbox="Archive",
                 recent_days=0,
+                allow_filter_scan=True,
             )
 
         mock_run.assert_not_called()
@@ -839,6 +919,7 @@ class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
                     to_mailbox="Archive",
                     recent_days=0,
                     older_than_days=30,
+                    allow_filter_scan=True,
                 )
 
         # Should NOT return a structured error
@@ -886,6 +967,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
                 action="move_to_trash",
                 sender="newsletter@example.com",
                 recent_days=0,
+                allow_filter_scan=True,
             )
 
         mock_run.assert_not_called()
@@ -906,6 +988,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
                 sender="newsletter@example.com",
                 apply_to_all=True,
                 recent_days=0,
+                allow_filter_scan=True,
             )
 
         mock_run.assert_not_called()
@@ -972,6 +1055,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
                 recent_days=0,
                 older_than_days=30,
                 dry_run=True,
+                allow_filter_scan=True,
             )
 
         import json
@@ -980,6 +1064,43 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
             self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
         except (json.JSONDecodeError, TypeError):
             pass  # Plain text dry-run result is fine
+
+
+class AnalyticsMessageIdPathTests(unittest.TestCase):
+    def test_list_email_attachments_message_ids_uses_exact_id_condition(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "ATTACHMENTS FOR: message_ids: 777"
+
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            result = analytics_tools.list_email_attachments(
+                account="Work",
+                message_ids=["777"],
+            )
+
+        self.assertIn("id is 777", captured["script"])
+        self.assertNotIn("subject contains", captured["script"])
+        self.assertIn("ATTACHMENTS FOR", result)
+
+    def test_export_emails_single_email_message_id_skips_subject_search(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "EXPORTING EMAIL"
+
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            result = analytics_tools.export_emails(
+                account="Work",
+                scope="single_email",
+                message_id="888",
+                save_directory="~/Desktop",
+            )
+
+        self.assertIn("whose id is 888", captured["script"])
+        self.assertIn("EXPORTING EMAIL", result)
 
 
 if __name__ == "__main__":
