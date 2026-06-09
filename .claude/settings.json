@@ -43,7 +43,6 @@
   "enabledPlugins": {
     "plugin-dev@claude-plugins-official": true,
     "python-development@claude-code-workflows": true,
-    "apple-mail@apple-mail-mcp": true,
     "code-simplifier@claude-plugins-official": true
   }
 }
