@@ -1,5 +1,7 @@
 # Whose-Elimination & Envelope Index Migration — Final Synthesis
 
+> Historical reference. This document records May 2026 planning language, including old `allow_full_scan` concepts. Current source, tests, `README.md`, and `docs/CLAUDE-conventions.md` are authoritative: routine scans/searches must stay bounded, and unbounded scan behavior must not be reintroduced from this planning note.
+
 **Date:** 2026-05-22
 **Branch:** `feat/apple-mail-plugin-robustness` (v3.1.10)
 **Reports synthesized:**

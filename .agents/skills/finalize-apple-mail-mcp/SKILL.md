@@ -164,11 +164,12 @@ bash tools/dev-check.sh release
 
 That tier runs `validate_manifests` + `pytest` + the wrapper-surface check, then invokes `tools/build-artifacts.sh` to:
 
-1. Rebuild `apple-mail-plugin.zip` with the README exclusion list (`venv`, `__pycache__`, `*.pyc`, `.DS_Store`, `CLAUDE.md`, `.env*`, logs, temp/backup files).
-2. Copy the zip bytes to `apple-mail.plugin` so the Cowork artifact stays byte-identical to the marketplace zip.
-3. Rebuild `apple-mail-mcp-v{VERSION}.mcpb` via `apple-mail-mcpb/build-mcpb.sh` (which prefers official `mcpb pack`).
-4. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh` — fails if any of the three artifacts is missing or the `.plugin` bytes diverge from the `.zip`.
-5. Run `mcpb unpack` + `mcpb validate` as a final structural smoke (if `mcpb` CLI present).
+1. Prune stale `apple-mail-mcp-v*.mcpb` at repo root (keeps only the current `pyproject.toml` version).
+2. Rebuild `apple-mail-plugin.zip` with the README exclusion list (`venv`, `__pycache__`, `*.pyc`, `.DS_Store`, `CLAUDE.md`, `.env*`, logs, temp/backup files).
+3. Copy the zip bytes to `apple-mail.plugin` so the Cowork artifact stays byte-identical to the marketplace zip.
+4. Rebuild `apple-mail-mcp-v{VERSION}.mcpb` via `apple-mail-mcpb/build-mcpb.sh` (which prefers official `mcpb pack`).
+5. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh` — fails if any of the three artifacts is missing, stale older `.mcpb` bundles remain, or the `.plugin` bytes diverge from the `.zip`.
+6. Run `mcpb unpack` + `mcpb validate` as a final structural smoke (if `mcpb` CLI present).
 
 If any step fails, fix the underlying issue — do not commit stale artifacts. **Never delete `apple-mail.plugin` or build it manually** — it must come from the build script's byte-copy, not a hand-zip, or the parity check rejects it.
 

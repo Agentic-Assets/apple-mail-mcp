@@ -46,6 +46,10 @@ See **[[email-drafting]]** for the required pre-draft verification step.
 3. Default plugin installs run **`--draft-safe`**: drafts and open-for-review workflows work; **`mode="send"`** paths error until the server is reconfigured intentionally.
 4. Set optional **`USER_EMAIL_PREFERENCES`** for stable tone and workflow hints; those preferences surface on preference-aware tool docstrings plus the **`email-style-profile`** skill.
 
+### Missing MCP Tools Red Line
+
+If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix MCP registration first. Do not create reply drafts through generic AppleScript, Mail UI scripting, shell `osascript`, or a standalone compose fallback. The only acceptable degraded path is the documented MCP-only absolute-path fallback that launches `plugin/start_mcp.sh --draft-safe`; after adding it, restart the MCP client and confirm the Apple Mail tools are registered before drafting.
+
 ## Decision Tree — Read And Navigate
 
 | Goal | Primary tool chain |
@@ -65,7 +69,7 @@ See **[[email-drafting]]** for the required pre-draft verification step.
 - Reserve `all_accounts=True` / cross-account scans for explicit user requests — large Exchange profiles may time out; partial JSON with `errors` is expected behavior.
 - Prefer `search_emails(mailboxes=["INBOX", "Sent", ...])` to scan a few named folders over `mailbox="All"` on large Exchange/Gmail accounts — it avoids the whole-profile fan-out and returns a structured per-folder error for any missing/slow mailbox instead of failing the call.
 - After `list_inbox_emails` or `search_emails` returns `message_id`, always drill with `get_email_by_id` rather than fuzzy re-search. `get_email_by_id` is also where per-message recipients (`to`/`cc`/`bcc`) and thread headers (`in_reply_to`/`references`) now come from — bulk `search_emails` no longer returns them.
-- **Never verify drafts with `search_emails`.** Drafts are unsent `outgoing message` objects with a null received date, so the date-filtered search is both slow and silently drops them. Use `manage_drafts(action="list", subject_contains="...")` (bounded, newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`.
+- **Never verify drafts with `search_emails`.** Drafts are unsent `outgoing message` objects with a null received date, so the date-filtered search is both slow and silently drops them. Use `manage_drafts(action="list", subject_contains="...")` (bounded, newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. `reply_to_email` also runs its own bounded newest-Drafts verification before reporting success for draft/open modes.
 
 ## Operator Safety Patterns
 

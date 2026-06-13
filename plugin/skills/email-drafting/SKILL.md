@@ -39,9 +39,11 @@ Never use standalone draft creators (`compose_email`, `create_rich_email_draft`,
 
 ## Preconditions
 
-1. Know the **`account`** (defaults follow `DEFAULT_MAIL_ACCOUNT`) and signature intent. Compose/reply/forward default to **`include_signature=True`**, which applies **`DEFAULT_MAIL_SIGNATURE`** when that env var is set; when unset, no signature is applied. Pass `include_signature=False` to suppress, or `signature_name` to override the default for one call.
-2. For replies/forwards, use the Mail **`message_id`** returned by `search_emails`, `list_inbox_emails`, `get_email_by_id`, or thread tools whenever available. Do not switch to `subject_keyword` just because the subject is visible; subject lookup is only for cases where no message id is available.
-3. Load **`USER_EMAIL_PREFERENCES`** plus any capture from **`email-style-profile`** before writing content.
+1. Know the **`account`** (defaults follow `DEFAULT_MAIL_ACCOUNT`) and signature intent. Compose/reply/forward default to **`include_signature=True`**, which applies **`DEFAULT_MAIL_SIGNATURE`** when that env var is set; when unset, the tool does not force a named signature and Mail may still apply the account's normal default signature. Pass `include_signature=False` to suppress plugin-applied signatures, or `signature_name` to override the default for one call.
+2. Confirm the `mcp__apple-mail__*` tools are actually registered before any drafting call. If they are absent, fix MCP registration or use the documented MCP-only absolute-path fallback; do not draft with generic AppleScript, Mail UI scripting, shell `osascript`, or a standalone compose fallback.
+3. For replies/forwards, use the Mail **`message_id`** returned by `search_emails`, `list_inbox_emails`, `get_email_by_id`, or thread tools whenever available. Do not switch to `subject_keyword` just because the subject is visible; subject lookup is only for cases where no message id is available.
+4. Reply drafting requires `reply_to_email(message_id=...)`. Use `subject_keyword` or any standalone/degraded fallback for a reply only if Cayman explicitly approves that degraded path for the specific message.
+5. Load **`USER_EMAIL_PREFERENCES`** plus any capture from **`email-style-profile`** before writing content.
 
 ## Pre-call Checklist (every mutate call)
 
@@ -50,7 +52,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 1. **Recipients** — explicit `to`, `cc`, `bcc`. Confirm spelling and that no replies stay private.
 2. **Subject line** — exact text. For replies/forwards, confirm the inherited subject if Mail will prepend `Re:` / `Fwd:`.
 3. **Mode** — `draft` (quiet save, default) vs `open` (saved + window stays open for review) vs `send` (blocked under `--draft-safe`). `mode="send"` requires explicit user confirmation and a non-draft-safe configuration.
-4. **Signature intent** — `include_signature=True` applies `DEFAULT_MAIL_SIGNATURE` if set; pass `signature_name` to override, `include_signature=False` to suppress. `create_rich_email_draft` does not accept signature params — switch to a plain compose tool when a named signature is required.
+4. **Signature intent** — `include_signature=True` applies `DEFAULT_MAIL_SIGNATURE` if set; when unset, Mail may still apply the account's normal default signature. Pass `signature_name` to override, `include_signature=False` to suppress plugin-applied signatures. `create_rich_email_draft` does not accept signature params — switch to a plain compose tool when a named signature is required.
 5. **Source message id** (replies/forwards only) — pass the `message_id` returned by search/list. Fall back to `subject_keyword` only when no id is available.
 6. **Standalone-confirmed override** — `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` refuse `Re:`/`Fwd:` subjects or bodies containing quoted-thread markers and return a structured error. If the user genuinely wants a fresh standalone message that happens to look threaded (e.g. a new "Re: weekly review" note unrelated to any prior thread), pass `standalone_confirmed=True` (CLI: `--standalone-confirmed`); never use this override to substitute for `reply_to_email` / `forward_email`.
 
@@ -102,15 +104,15 @@ bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
 (newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Confirm
 `to`/`cc` are the intended recipients and the body is present.
 
-**Reply/forward threading note (v3.6.0):** `reply_to_email` and `forward_email`
-now build the draft through Mail's object model (no GUI window, no clipboard) to
-eliminate the cross-thread body-leak / duplicate / empty-draft races. The trade-off
-is that replies/forwards are **plain-text** drafts with a `> `-quoted original and a
-`Re:`/`Fwd:` subject, and do **not** carry native `In-Reply-To`/`References`
-headers — they are correctly addressed and always contain the body, but thread
-visually rather than via headers. `body_html` on `reply_to_email` is accepted for
-compatibility but ignored. Use `create_rich_email_draft` / `compose_email` when you
-need rich HTML on a genuinely standalone message.
+**Reply threading note (v3.6.1+):** `reply_to_email` uses Mail's native
+`reply foundMessage` composer by default, so prior messages are included by Mail
+automatically the same way they appear from the Reply button. The tool inserts the
+new reply body above Mail's native quoted thread, saves the draft, then closes the
+compose window for `mode="draft"`. After Mail reports the save, the tool runs a
+separate bounded newest-Drafts verification before returning success. `body_html`
+on `reply_to_email` is accepted for compatibility but ignored; use
+`create_rich_email_draft` / `compose_email` only for rich HTML on a genuinely
+standalone message.
 
 ## Related Skills
 

@@ -14,6 +14,7 @@ from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTAT
 logger = logging.getLogger(__name__)
 
 from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
 from apple_mail_mcp.constants import SCAN_BOUNDS, SKIP_FOLDERS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
@@ -21,6 +22,7 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     inject_preferences,
     list_mail_account_names,
+    normalize_message_ids,
     run_applescript,
     validate_account_name,
     validate_save_path,
@@ -33,20 +35,24 @@ from apple_mail_mcp.tools.search import _search_mail_records_sync as _search_mai
 def list_email_attachments(
     account: str | None = None,
     subject_keyword: str = "",
+    message_ids: list[str] | None = None,
     max_results: int = 50,
     timeout: int | None = None,
 ) -> str:
     """
-    List attachments for emails matching a subject keyword.
+    List attachments for emails matching a subject keyword or exact message ids.
 
     Scans the most-recent inbox messages (capped at ``max_results`` via
     ``items 1 thru max_results``) and returns attachments for the messages
-    whose subject contains ``subject_keyword``.
+    whose subject contains ``subject_keyword``. When ``message_ids`` is set,
+    looks up exact messages by id and ignores ``subject_keyword``.
 
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal"). Falls back
             to ``DEFAULT_MAIL_ACCOUNT`` when None.
-        subject_keyword: Keyword to search for in email subjects
+        subject_keyword: Keyword to search for in email subjects (omit when
+            message_ids is set)
+        message_ids: Optional list of exact Mail message ids for precise targeting
         max_results: Maximum number of messages to inspect from the inbox
             (default: 50). The AppleScript only enumerates this many messages.
         timeout: Optional AppleScript timeout in seconds. Defaults to the
@@ -61,6 +67,9 @@ def list_email_attachments(
     if not account:
         return "Error: 'account' is required (no DEFAULT_MAIL_ACCOUNT configured)"
 
+    if message_ids is None and not subject_keyword:
+        return "Error: subject_keyword or message_ids is required"
+
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
     if account_err:
@@ -70,51 +79,92 @@ def list_email_attachments(
     escaped_keyword = escape_applescript(subject_keyword)
     escaped_account = escape_applescript(account)
 
-    # Fast no-hit path: use the optimized search helper first so no-match
-    # attachment checks don't scan the inbox with a Python-side loop.
-    try:
-        preflight_records = _search_mail_records(
-            account=account,
-            mailbox="INBOX",
-            subject_terms=[subject_keyword],
-            has_attachments=True,
-            include_content=False,
-            offset=0,
-            limit=max_results,
-            timeout=timeout,
-        )
-    except AppleScriptTimeout:
-        return f"Error: AppleScript timed out while listing attachments for '{account}'"
-    if not preflight_records:
-        return (
-            f"ATTACHMENTS FOR: {subject_keyword}\n\n"
-            "========================================\n"
-            "FOUND: 0 matching email(s)\n"
-            "========================================"
-        )
+    header_label = subject_keyword
+    use_id_lookup = False
+    id_filter_script = ""
+
+    if message_ids is not None:
+        normalized_ids = normalize_message_ids(message_ids)
+        if not normalized_ids:
+            return "Error: 'message_ids' must contain one or more numeric Mail ids"
+        if len(normalized_ids) > MAX_WHOSE_IDS:
+            return json.dumps(
+                ToolError(
+                    code="WHOSE_ID_LIST_TOO_LARGE",
+                    message=(
+                        f"list_email_attachments received {len(normalized_ids)} message_ids; "
+                        f"hard cap is {MAX_WHOSE_IDS} per call."
+                    ),
+                    remediation={
+                        "preferred": (f"Split message_ids into batches of {MAX_WHOSE_IDS} or fewer"),
+                    },
+                ).to_dict(),
+                indent=2,
+            )
+        id_condition = build_whose_id_list(normalized_ids)
+        use_id_lookup = True
+        header_label = f"message_ids: {', '.join(normalized_ids)}"
+        id_filter_script = f"set inboxMessages to every message of inboxMailbox whose {id_condition}"
+    else:
+        # Fast no-hit path: use the optimized search helper first so no-match
+        # attachment checks don't scan the inbox with a Python-side loop.
+        try:
+            preflight_records = _search_mail_records(
+                account=account,
+                mailbox="INBOX",
+                subject_terms=[subject_keyword],
+                has_attachments=True,
+                include_content=False,
+                offset=0,
+                limit=max_results,
+                timeout=timeout,
+            )
+        except AppleScriptTimeout:
+            return f"Error: AppleScript timed out while listing attachments for '{account}'"
+        if not preflight_records:
+            return (
+                f"ATTACHMENTS FOR: {subject_keyword}\n\n"
+                "========================================\n"
+                "FOUND: 0 matching email(s)\n"
+                "========================================"
+            )
+
+    escaped_header = escape_applescript(header_label)
+    message_lookup_script = (
+        id_filter_script
+        if use_id_lookup
+        else f"""
+            if (count of messages of inboxMailbox) > {max_results} then
+                set inboxMessages to messages 1 thru {max_results} of inboxMailbox
+            else
+                set inboxMessages to messages of inboxMailbox
+            end if"""
+    )
+    subject_match_block = (
+        ""
+        if use_id_lookup
+        else f"""
+                    -- Check if subject contains keyword
+                    if messageSubject contains "{escaped_keyword}" then"""
+    )
+    subject_match_close = "" if use_id_lookup else "                    end if"
 
     script = f'''
     tell application "Mail"
-        set outputText to "ATTACHMENTS FOR: {escaped_keyword}" & return & return
+        set outputText to "ATTACHMENTS FOR: {escaped_header}" & return & return
         set resultCount to 0
 
         try
             set targetAccount to account "{escaped_account}"
             {inbox_mailbox_script("inboxMailbox", "targetAccount")}
-            if (count of messages of inboxMailbox) > {max_results} then
-                set inboxMessages to messages 1 thru {max_results} of inboxMailbox
-            else
-                set inboxMessages to messages of inboxMailbox
-            end if
+            {message_lookup_script}
 
             repeat with aMessage in inboxMessages
                 if resultCount >= {max_results} then exit repeat
 
                 try
                     set messageSubject to subject of aMessage
-
-                    -- Check if subject contains keyword
-                    if messageSubject contains "{escaped_keyword}" then
+{subject_match_block}
                         set messageSender to sender of aMessage
                         set messageDate to date received of aMessage
 
@@ -145,7 +195,7 @@ def list_email_attachments(
 
                         set outputText to outputText & return
                         set resultCount to resultCount + 1
-                    end if
+{subject_match_close}
                 end try
             end repeat
 
@@ -346,12 +396,12 @@ def _statistics_json_error(
 def _statistics_scan_caps(days_back: int) -> tuple[int, int]:
     """Return (max_mailboxes, max_messages_per_mailbox) for overview/sender scans.
 
-    ``INBOX_LONG`` (100) is the short-window per-mailbox ceiling; the wider
-    longer-window cap (500) stays inline because no shared constant matches.
+    Short windows use ``INBOX_LONG`` per mailbox; longer windows use
+    ``SEARCH_WINDOW_CAP``.
     """
     if days_back > 0 and days_back <= 7:
         return 10, SCAN_BOUNDS["INBOX_LONG"]
-    return 20, 500
+    return 20, SCAN_BOUNDS["SEARCH_WINDOW_CAP"]
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -369,8 +419,8 @@ def get_statistics(
     Get comprehensive email statistics and analytics.
 
     For ``account_overview`` and ``sender_stats``, scans a bounded slice of
-    mailboxes and newest messages (``days_back <= 7``: 10 mailboxes × 100
-    messages; longer windows: 20 × 500) so AppleScript wall time stays
+    mailboxes and newest messages (``days_back <= 7``: 10 mailboxes × 75
+    messages; longer windows: 20 × 250) so AppleScript wall time stays
     predictable on Exchange / Gmail accounts with deep history.
     ``mailbox_breakdown`` is bounded by Mail.app's own count APIs and is not
     capped.
@@ -950,6 +1000,7 @@ def export_emails(
     account: str | None = None,
     scope: str = "entire_mailbox",
     subject_keyword: str | None = None,
+    message_id: str | None = None,
     mailbox: str = "INBOX",
     save_directory: str = "~/Desktop",
     format: str = "txt",
@@ -972,8 +1023,10 @@ def export_emails(
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
             ``DEFAULT_MAIL_ACCOUNT`` when None.
-        scope: Export scope: "single_email" (requires subject_keyword) or "entire_mailbox"
-        subject_keyword: Keyword to find email (required for single_email)
+        scope: Export scope: "single_email" (requires subject_keyword or message_id)
+            or "entire_mailbox"
+        subject_keyword: Keyword to find email (optional when message_id is set)
+        message_id: Optional numeric Apple Mail message id for single_email scope
         mailbox: Mailbox to export from (default: "INBOX")
         save_directory: Directory to save exports (default: "~/Desktop")
         format: Export format: "txt", "html" (default: "txt")
@@ -1028,27 +1081,33 @@ def export_emails(
     safe_save_dir = escape_applescript(save_dir)
 
     if scope == "single_email":
-        if not subject_keyword:
-            return "Error: 'subject_keyword' required for single_email scope"
+        if not message_id and not subject_keyword:
+            return "Error: 'message_id' or 'subject_keyword' required for single_email scope"
 
-        safe_subject_keyword = escape_applescript(subject_keyword)
-        try:
-            records = _search_mail_records(
-                account=account,
-                mailbox=mailbox,
-                subject_terms=[subject_keyword],
-                include_content=False,
-                offset=0,
-                limit=1,
-                timeout=timeout if timeout is not None else 45,
-            )
-        except AppleScriptTimeout:
-            return f"Error: AppleScript timed out while locating email for '{account}'"
-        if not records:
-            return f"⚠ No email found matching: {safe_subject_keyword}"
-        target_message_id = str(records[0].get("message_id", "")).strip()
-        if not target_message_id.isdigit():
-            return f"⚠ No email found matching: {safe_subject_keyword}"
+        safe_subject_keyword = escape_applescript(subject_keyword or "")
+        if message_id:
+            normalized_ids = normalize_message_ids([message_id])
+            if not normalized_ids:
+                return "Error: message_id must be a numeric Apple Mail message id"
+            target_message_id = normalized_ids[0]
+        else:
+            try:
+                records = _search_mail_records(
+                    account=account,
+                    mailbox=mailbox,
+                    subject_terms=[subject_keyword],
+                    include_content=False,
+                    offset=0,
+                    limit=1,
+                    timeout=timeout if timeout is not None else 45,
+                )
+            except AppleScriptTimeout:
+                return f"Error: AppleScript timed out while locating email for '{account}'"
+            if not records:
+                return f"⚠ No email found matching: {safe_subject_keyword}"
+            target_message_id = str(records[0].get("message_id", "")).strip()
+            if not target_message_id.isdigit():
+                return f"⚠ No email found matching: {safe_subject_keyword}"
 
         script = f'''
         tell application "Mail"

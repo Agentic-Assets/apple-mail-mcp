@@ -39,6 +39,7 @@ docs/superpowers/plans/
 apple-mail-mcpb/build/
 *.mcpb
 apple-mail.plugin
+*.textClipping
 
 # Archive
 archive/

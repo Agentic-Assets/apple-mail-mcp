@@ -167,17 +167,17 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
     def test_compute_scan_upper_bound_caps_at_window_cap(self):
         # Anything that scales beyond the default 500-message ceiling
         # must clamp to the window cap.
-        self.assertEqual(compute_scan_upper_bound(365), 500)
-        self.assertEqual(compute_scan_upper_bound(1000), 500)
+        self.assertEqual(compute_scan_upper_bound(365), 250)
+        self.assertEqual(compute_scan_upper_bound(1000), 250)
 
     def test_compute_scan_upper_bound_uses_base_cap_for_tiny_windows(self):
-        self.assertEqual(compute_scan_upper_bound(0), 200)
-        self.assertEqual(compute_scan_upper_bound(0.5), 225)
+        self.assertEqual(compute_scan_upper_bound(0), 100)
+        self.assertEqual(compute_scan_upper_bound(0.5), 112)
 
     def test_compute_scan_upper_bound_respects_custom_caps(self):
         result = compute_scan_upper_bound(7, base_cap=100, window_cap=300)
-        # base_cap + (7 * 50) = 100 + 350 = 450 → clamped to 300.
-        self.assertEqual(result, 300)
+        # base_cap + (7 * 25) = 275 (below custom window cap).
+        self.assertEqual(result, 275)
 
     def test_build_whose_id_list_format(self):
         self.assertEqual(
@@ -208,12 +208,12 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         from apple_mail_mcp.tools.compose import _build_draft_lookup
 
         snippet = _build_draft_lookup("invoice question")
-        # Safe primitives must be present. The lookup now slices the newest-first
-        # tail window (messages startIdx thru totalDrafts) and iterates it in
-        # reverse with an in-loop `if`, so a just-created draft past the cap is
-        # still found — but it never uses `whose`.
-        self.assertIn("messages startIdx thru totalDrafts of draftsMailbox", snippet)
-        self.assertIn("repeat with __i from (count of candidateMessages) to 1 by -1", snippet)
+        # Safe primitives must be present. The lookup checks bounded head/tail
+        # windows and filters in-loop, so it tolerates Mail account ordering
+        # differences without ever using `whose` or an unbounded folder scan.
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", snippet)
+        self.assertIn("messages tailStart thru totalDrafts of draftsMailbox", snippet)
+        self.assertIn("repeat with aMessage in candidateMessages", snippet)
         self.assertIn(
             '(subject of aMessage) contains "invoice question"', snippet
         )

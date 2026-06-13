@@ -1,13 +1,13 @@
 # Active Pointer — apple-mail-mcp
 
-**Branch:** `feat/codex-claude-plugin-setup` (created 2026-06-07 from current `main` checkout).
+**Branch:** `codex/cleanup-docs-and-simplify`.
 
-**Active workstream:** Codex + Claude plugin setup hardening. Goal: keep existing Claude Code/Cowork/MCPB paths working while adding a real Codex plugin surface (`plugin/.codex-plugin/plugin.json`, `plugin/.mcp.json`, `.agents/plugins/marketplace.json`), easy Codex install commands, and validator coverage.
+**Active workstream:** Cleanup and simplification after the native-reply/Codex launcher fixes. Goal: remove duplicate legacy command exposure, tighten docs around Mail-native reply drafts/signatures, and keep validator coverage aligned with the simplified plugin surface.
 
-**Plan:** [`tasks/codex-claude-plugin-setup-2026-06-07/phase-plan.md`](codex-claude-plugin-setup-2026-06-07/phase-plan.md)
+**Plan:** [`tasks/cleanup-docs-and-simplify-2026-06-08/phase-plan.md`](cleanup-docs-and-simplify-2026-06-08/phase-plan.md)
 
-**Next action:** commit and push.
+**Next action:** review final diff, then commit/push the cleanup branch.
 
-**Latest verification (2026-06-07):** `bash tools/dev-check.sh release` passed at version `3.6.1`; `.venv/bin/pytest tests/test_validate_manifests.py -q` passed with 32 tests; `bash tools/validate-codex-plugin.sh` installed `apple-mail@apple-mail-mcp` version `3.6.1` in a temporary `CODEX_HOME`; `cmp apple-mail-plugin.zip apple-mail.plugin` passed; collected test count is 798 tests + 30 subtests.
+**Latest verification (2026-06-08):** Cleanup branch passed `.venv/bin/python -m pytest tests/test_validate_manifests.py tests/test_compose_tools.py::ReplyToEmailSenderOverrideTests tests/test_compose_tools.py::DefaultMailSignatureSupportTests -q`, `bash tools/dev-check.sh release`, `bash tools/validate-codex-plugin.sh`, `git diff --check`, and an artifact listing check confirming `apple-mail-plugin.zip` no longer contains retired command files.
 
-**Blockers / caveats:** `mcpb` CLI is not installed locally, so the release script skipped optional `mcpb unpack + validate`; structural MCPB checks still passed through `tools/validate_manifests.py`. No Mail.app live smoke is required because runtime tool code did not change.
+**Blockers / caveats:** No known code blocker. `mcpb` CLI is not installed locally, so release validation skipped optional `mcpb unpack + validate`; structural MCPB checks still passed through `tools/validate_manifests.py`.

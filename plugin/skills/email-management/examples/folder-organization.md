@@ -86,8 +86,11 @@ Inbox (always empty or near-empty)
 # Review current structure
 list_mailboxes(include_counts=True)
 
-# Move to Archive after processing
-move_email(to_mailbox="Archive", subject_keyword="...", max_moves=10)
+# Move to Archive after processing (ID-first)
+preview = search_emails(mailbox="INBOX", subject_keyword="...", recent_days=7, limit=10)
+ids = [e["message_id"] for e in preview["emails"]]
+move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=10)
+move_email(message_ids=ids, to_mailbox="Archive", max_moves=10)
 
 # Find anything later with search
 search_emails(mailbox="All", subject_keyword="...")
@@ -126,9 +129,11 @@ list_mailboxes()
 create_mailbox(name="Projects")
 create_mailbox(name="Projects/Project Alpha")
 
-# 3. Move project emails
-search_emails(subject_keyword="Project Alpha", mailbox="All")
-move_email(to_mailbox="Projects/Project Alpha", subject_keyword="Project Alpha", max_moves=20)
+# 3. Move project emails (ID-first)
+preview = search_emails(subject_keyword="Project Alpha", mailbox="INBOX", recent_days=90, limit=20)
+ids = [e["message_id"] for e in preview["emails"]]
+move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/Project Alpha", max_moves=20)
+move_email(message_ids=ids, to_mailbox="Projects/Project Alpha", max_moves=20)
 
 # 4. Set up routine to file new project emails
 #    (Do this during daily processing)
@@ -165,9 +170,11 @@ get_statistics(scope="account_overview")
 
 # 2. Create client folders in Mail app
 
-# 3. Batch move by sender
-search_emails(sender="contact@clienta.com", mailbox="All")
-move_email(to_mailbox="Clients/Client A", sender="contact@clienta.com", max_moves=50)
+# 3. Batch move by sender (ID-first)
+preview = search_emails(sender="contact@clienta.com", mailbox="INBOX", recent_days=90, limit=50)
+ids = [e["message_id"] for e in preview["emails"]]
+move_email(dry_run=True, message_ids=ids, to_mailbox="Clients/Client A", max_moves=50)
+move_email(message_ids=ids, to_mailbox="Clients/Client A", max_moves=50)
 
 # 4. Review and adjust
 list_mailboxes(include_counts=True)
@@ -275,36 +282,29 @@ list_mailboxes(include_counts=True)
 **Batch migration workflow**:
 
 ```
-# 1. Identify emails to move
-search_emails(subject_keyword="Project Alpha", mailbox="All")
+# 1. Identify emails to move (bounded search)
+preview = search_emails(subject_keyword="Project Alpha", mailbox="INBOX", recent_days=90, limit=20)
+ids = [e["message_id"] for e in preview["emails"]]
 
-# 2. Move in batches
-move_email(
-    to_mailbox="Projects/Project Alpha",
-    subject_keyword="Project Alpha",
-    from_mailbox="INBOX",
-    max_moves=20
-)
+# 2. Simulate, then move in batches
+move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/Project Alpha", max_moves=20)
+move_email(message_ids=ids, to_mailbox="Projects/Project Alpha", max_moves=20)
 
 # 3. Verify
 list_mailboxes(include_counts=True)
 
-# 4. Repeat for other categories
+# 4. Repeat for other categories (re-search between batches)
 ```
 
 **For sender-based migration**:
 ```
 # Find all emails from a sender
-search_emails(sender="client@example.com", mailbox="All", max_results=50)
+preview = search_emails(sender="client@example.com", mailbox="INBOX", recent_days=90, limit=50)
+ids = [e["message_id"] for e in preview["emails"]]
 
-# Move them
-move_email(
-    to_mailbox="Clients/Client Name",
-    from_mailbox="INBOX",
-    sender="client@example.com",  # Use search to identify first
-    max_moves=20,
-    dry_run=True
-)
+# Simulate, then move
+move_email(dry_run=True, message_ids=ids, to_mailbox="Clients/Client Name", max_moves=20)
+move_email(message_ids=ids, to_mailbox="Clients/Client Name", max_moves=20)
 ```
 
 ### Step 5: Establish Routine
@@ -320,12 +320,15 @@ move_email(
 #    - Reference emails → Reference
 #    - Everything else → Archive
 
-# 3. Quick moves using keywords
-move_email(to_mailbox="Projects/Alpha", subject_keyword="Alpha", max_moves=5)
-move_email(to_mailbox="Clients/ClientA", subject_keyword="ClientA", max_moves=5)
+# 3. Quick moves (ID-first: search → message_ids → move_email)
+alpha = search_emails(subject_keyword="Alpha", mailbox="INBOX", recent_days=7, limit=5)
+move_email(message_ids=[e["message_id"] for e in alpha["emails"]], to_mailbox="Projects/Alpha", max_moves=5)
+client = search_emails(subject_keyword="ClientA", mailbox="INBOX", recent_days=7, limit=5)
+move_email(message_ids=[e["message_id"] for e in client["emails"]], to_mailbox="Clients/ClientA", max_moves=5)
 
 # 4. Batch archive remaining
-move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=20)
+remaining = list_inbox_emails(max_emails=20, include_content=False, output_format="json")
+move_email(message_ids=[e["message_id"] for e in remaining["emails"]], to_mailbox="Archive", max_moves=20)
 ```
 
 ## Maintaining Your Structure
@@ -492,10 +495,11 @@ Projects/
 
 **Moving to nested folders**:
 ```
-# Note the "/" separator for nested paths
+# Note the "/" separator for nested paths; collect ids first
+preview = search_emails(subject_keyword="Alpha", mailbox="INBOX", recent_days=30, limit=10)
 move_email(
+    message_ids=[e["message_id"] for e in preview["emails"]],
     to_mailbox="Projects/ClientA/Project Alpha",
-    subject_keyword="Alpha",
     max_moves=10
 )
 ```
@@ -533,12 +537,15 @@ For short-term projects (2-4 weeks):
 
 ```
 # Create temporary folder in Mail app
-# Use during project
-move_email(to_mailbox="Temp/ProjectName", ...)
+# Use during project — file by id as you process
+preview = list_inbox_emails(max_emails=25, include_content=False, output_format="json")
+move_email(message_ids=[e["message_id"] for e in preview["emails"]], to_mailbox="Temp/ProjectName", max_moves=25)
 
-# When project completes, bulk archive
-search_emails(mailbox="Temp/ProjectName", max_results=100)
-move_email(to_mailbox="Archive/2025/ProjectName", ...)
+# When project completes, bulk archive (ID-first)
+preview = search_emails(mailbox="Temp/ProjectName", limit=100)
+ids = [e["message_id"] for e in preview["emails"]]
+move_email(dry_run=True, message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)
+move_email(message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)
 
 # Delete empty temp folder in Mail app
 ```
@@ -601,8 +608,10 @@ Archive/
 3. **File new emails** going forward
 4. **Backfill key projects** only:
    ```
-   search_emails(subject_keyword="ProjectName", mailbox="All", max_results=50)
-   move_email(to_mailbox="Projects/ProjectName", ...)
+   preview = search_emails(subject_keyword="ProjectName", mailbox="INBOX", recent_days=90, limit=50)
+   ids = [e["message_id"] for e in preview["emails"]]
+   move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/ProjectName", max_moves=50)
+   move_email(message_ids=ids, to_mailbox="Projects/ProjectName", max_moves=50)
    ```
 5. **Leave Archive alone** - search when needed
 
@@ -611,8 +620,8 @@ Archive/
 | Task | Tool | Example |
 |------|------|---------|
 | View structure | `list_mailboxes()` | include_counts=True |
-| Move emails | `move_email()` | to_mailbox="path/to/folder" |
-| Batch move | `move_email()` | max_moves=20 |
+| Move emails | `move_email()` | message_ids=[...], to_mailbox="path/to/folder" |
+| Batch move | `search_emails` → `move_email()` | dry_run=True first; max_moves=20 |
 | Find emails | `search_emails()` | mailbox="All" |
 | Check patterns | `get_statistics()` | scope="account_overview" |
 | Mailbox stats | `get_statistics()` | scope="mailbox_breakdown" |

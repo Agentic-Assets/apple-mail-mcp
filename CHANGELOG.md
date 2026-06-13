@@ -15,6 +15,50 @@ Codex plugin install-smoke regression recovery and test-count verification.
 ### Changed
 
 - **Documentation alignment** — manifest validator, release gate, and CI now all source from canonical `pyproject.toml` version (3.6.1).
+## 3.7.1 — 2026-06-09
+
+Tighter centralized ``SCAN_BOUNDS`` for large-mailbox performance. Tool count
+unchanged (28).
+
+### Changed (scan caps)
+
+Search window ceiling **250** (was 500), search base **100** (was 200), inbox
+unread scan max **500** (was 1000), ``mailbox="All"`` fan-out unchanged at
+**10** folders, explicit multi-mailbox search cap **20** (was 50).
+``compute_scan_upper_bound()`` reads defaults from ``SCAN_BOUNDS`` (scale **25**
+days/message, was 50). ``get_statistics`` short windows: 10 mailboxes × **75**
+messages; longer windows: 20 × **250**.
+
+## 3.7.0 — 2026-06-09
+
+ID-first mutation hardening for large mailboxes (24k+). Tool count unchanged (28).
+
+### Changed (performance / agent safety)
+
+- **`move_email`**, **`update_email_status`**, **`manage_trash`**: filter-based scans
+  (subject/sender/date) now require **`allow_filter_scan=True`**. Default path is
+  **`message_ids=[...]`** from a prior `list_inbox_emails` or `search_emails` call.
+  Filter escape hatch responses include an explicit slow-scan warning.
+- **`search_emails`**: **`body_text`** requires **`allow_body_scan=True`** or returns
+  structured **`BODY_SCAN_DISABLED`**.
+- **`mailbox="All"`** searches cap at **10** folders (was 50); JSON sets
+  `mailboxes_truncated` when capped.
+- Sender-only searches emit pairing hints (co-filter with subject or tight
+  `recent_days`).
+
+### Added
+
+- Structured error **`FILTER_SCAN_DISABLED`** with remediation pointing to ID-first
+  workflow and `allow_filter_scan` escape hatch.
+- **`get_email_thread(message_id=...)`** for thread drill-down without subject
+  re-search.
+- **`list_email_attachments(message_ids=[...])`** and **`export_emails`**
+  `single_email` **`message_id`** param.
+
+### Fixed
+
+- Mutation filter paths now pass **`recent_days`** into the search helper so scan
+  caps use `compute_scan_upper_bound()` instead of bare `limit+1`.
 
 ## 3.6.0 — 2026-06-05
 

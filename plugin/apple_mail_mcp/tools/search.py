@@ -192,6 +192,28 @@ def _format_search_records_text(
     return "\n".join(lines)
 
 
+SENDER_ONLY_SEARCH_HINT = (
+    "sender-only search can be slow on large mailboxes; add subject_keyword, "
+    "date_from, has_attachments, or body_text (with allow_body_scan=True) to narrow the scan"
+)
+
+
+def _body_scan_disabled_error() -> str:
+    """Structured error when body_text is set without allow_body_scan opt-in."""
+    tool_error = ToolError(
+        code="BODY_SCAN_DISABLED",
+        message=(
+            "search_emails refuses body_text scans without allow_body_scan=True; "
+            "body scans are O(N × message-size) on large mailboxes"
+        ),
+        remediation={
+            "preferred": ("Narrow with subject_keyword, sender, date_from, or has_attachments instead"),
+            "escape_hatch": "allow_body_scan=True (slow; pair with tight date_from)",
+        },
+    )
+    return serialize_tool_error(tool_error)
+
+
 def _build_search_response(
     records: list[dict[str, Any]],
     offset: int,
@@ -205,6 +227,8 @@ def _build_search_response(
     searched_from: str | None = None,
     body_search_capped: bool = False,
     mailbox_count_capped: bool = False,
+    mailboxes_truncated: bool = False,
+    sender_only_hint: bool = False,
 ) -> str:
     """Return either JSON or text for search results."""
     sorted_records = _sort_search_records(records, sort)
@@ -212,7 +236,7 @@ def _build_search_response(
     items = sorted_records[:limit]
     next_offset = offset + len(items) if has_more else None
 
-    _max_mb = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
+    _max_mb_all = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH_ALL"]
     if output_format == "json":
         payload: dict[str, Any] = {
             "items": items,
@@ -227,18 +251,23 @@ def _build_search_response(
         }
         if body_search_capped:
             payload["body_search_capped"] = True
+            _body_cap = SCAN_BOUNDS["BODY_SEARCH_AUTO_CAP"]
             payload["body_search_cap_warning"] = (
-                "body_text scan was capped at 100 messages because no explicit date_from "
+                f"body_text scan was capped at {_body_cap} messages because no explicit date_from "
                 "was supplied. Pass date_from='YYYY-MM-DD' to search a larger window."
             )
+        if mailboxes_truncated:
+            payload["mailboxes_truncated"] = True
         if mailbox_count_capped:
             payload.setdefault("warnings", []).append(
-                f"mailbox='All' search was capped at {_max_mb} mailboxes per account "
-                "(SCAN_BOUNDS['MAX_MAILBOXES_PER_SEARCH']). Accounts with more than "
-                f"{_max_mb} labels/folders (e.g. Gmail with 200+ labels) may have "
+                f"mailbox='All' search was capped at {_max_mb_all} mailboxes per account "
+                "(SCAN_BOUNDS['MAX_MAILBOXES_PER_SEARCH_ALL']). Accounts with more than "
+                f"{_max_mb_all} labels/folders (e.g. Gmail with 200+ labels) may have "
                 "incomplete results. Pass mailbox='INBOX' or a specific folder name "
                 "for a complete search."
             )
+        if sender_only_hint:
+            payload.setdefault("warnings", []).append(SENDER_ONLY_SEARCH_HINT)
         if errors:
             payload["errors"] = errors
         if error_details:
@@ -253,17 +282,20 @@ def _build_search_response(
         recent_days_applied=recent_days_applied,
     )
     if body_search_capped:
+        _body_cap = SCAN_BOUNDS["BODY_SEARCH_AUTO_CAP"]
         warning = (
-            "WARNING: body_text scan capped at 100 messages (no explicit date_from). "
+            f"WARNING: body_text scan capped at {_body_cap} messages (no explicit date_from). "
             "Pass date_from='YYYY-MM-DD' to search a larger window.\n"
         )
         text_result = warning + text_result
     if mailbox_count_capped:
         mb_warning = (
-            f"WARNING: mailbox='All' search capped at {_max_mb} mailboxes per account. "
+            f"WARNING: mailbox='All' search capped at {_max_mb_all} mailboxes per account. "
             "Accounts with many labels (e.g. Gmail 200+ labels) may have incomplete results.\n"
         )
         text_result = mb_warning + text_result
+    if sender_only_hint:
+        text_result = f"WARNING: {SENDER_ONLY_SEARCH_HINT}\n" + text_result
     return text_result
 
 
@@ -308,11 +340,11 @@ def _build_search_script(
     portion of that window — otherwise a 7-day query with default limit=20
     would only inspect the 21 newest messages and silently miss matches
     further back. Floor stays at ``collect_limit + offset`` and ceiling
-    caps at 500 to keep Mail bounded on remote IMAP/Exchange mailboxes.
+    caps at ``SEARCH_WINDOW_CAP`` to keep Mail bounded on remote IMAP/Exchange mailboxes.
 
     Performance guidance — body_text:
         When ``body_text`` is set without an explicit ``date_from``, the
-        scan_cap is further capped at 100 to prevent hundreds of cold-cache
+        scan_cap is further capped at ``BODY_SEARCH_AUTO_CAP`` to prevent hundreds of cold-cache
         IMAP body fetches (each can take ~1s on large Exchange inboxes).
         When the caller passes an explicit ``date_from`` (``date_from_explicit=True``),
         the cap is left as-is because the caller has explicitly bounded the window.
@@ -348,7 +380,7 @@ def _build_search_script(
     # ``date_from``, cap at 100 to keep wall time reasonable. When an explicit
     # ``date_from`` is passed the caller has intentionally bounded the scan, so
     # we leave the cap as-is.
-    BODY_SEARCH_AUTO_CAP = 100
+    BODY_SEARCH_AUTO_CAP = SCAN_BOUNDS["BODY_SEARCH_AUTO_CAP"]
     body_search_capped = False
     if use_body_search and not date_from_explicit and scan_cap > BODY_SEARCH_AUTO_CAP:
         scan_cap = min(scan_cap, BODY_SEARCH_AUTO_CAP)
@@ -373,7 +405,9 @@ def _build_search_script(
                             end try
     """
 
-    _max_mailboxes_per_search = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
+    _max_mailboxes_per_search = (
+        SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH_ALL"] if mailbox == "All" else SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
+    )
     if mailboxes:
         # Explicit mailbox list: look up each named folder, degrade gracefully
         # if a name doesn't exist (emits ERROR_MAILBOX instead of hard failure).
@@ -951,6 +985,9 @@ def _search_mail_records_sync(**kwargs: Any) -> list[dict[str, Any]]:
                 limit=kwargs.get("limit", 100),
                 body_text=kwargs.get("body_text"),
                 timeout=kwargs.get("timeout"),
+                recent_days=kwargs.get("recent_days", 0.0),
+                date_from_explicit=kwargs.get("date_from_explicit", False),
+                mailboxes=kwargs.get("mailboxes"),
             )
             return records
         except AppleScriptTimeout:
@@ -983,6 +1020,7 @@ async def search_emails(
     include_content: bool = False,
     max_content_length: int = 500,
     body_text: str | None = None,
+    allow_body_scan: bool = False,
     max_results: int | None = 20,
     output_format: str = "text",
     offset: int = 0,
@@ -1043,6 +1081,8 @@ async def search_emails(
             Setting `body_text` to any non-empty string scans message bodies
             (O(N × message-size)); pair with tight filters (account, date_from,
             subject_keyword) to keep wall time predictable on large mailboxes.
+        allow_body_scan: Opt in to body_text scans (default False). When False,
+            passing body_text returns a structured ``BODY_SCAN_DISABLED`` error.
         max_results: Backward-compatible alias for limit
         output_format: Output format: "text" or "json" (default: "text")
         offset: Number of matching results to skip before returning data
@@ -1076,6 +1116,18 @@ async def search_emails(
     """
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
+
+    if body_text and not allow_body_scan:
+        return _body_scan_disabled_error()
+
+    sender_only_hint = bool(
+        sender
+        and not subject_keyword
+        and not subject_keywords
+        and date_from is None
+        and not body_text
+        and has_attachments is None
+    )
 
     if limit is None:
         limit = max_results if max_results is not None else 100
@@ -1199,6 +1251,7 @@ async def search_emails(
                     if _is_replied(rec):
                         rec["already_replied"] = True
 
+        _mailbox_all = mailbox == "All"
         return _build_search_response(
             records,
             offset=offset,
@@ -1211,68 +1264,29 @@ async def search_emails(
             recent_days_applied=effective_recent_days,
             searched_from=searched_from,
             body_search_capped=body_search_capped,
-            mailbox_count_capped=(mailbox == "All"),
+            mailbox_count_capped=_mailbox_all,
+            mailboxes_truncated=_mailbox_all,
+            sender_only_hint=sender_only_hint,
         )
     except ValueError as exc:
         return f"Error: {exc}"
 
 
-@mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
-@inject_preferences
-def get_email_by_id(
+def _fetch_email_record_by_id(
     account: str,
     message_id: str,
     mailbox: str = "INBOX",
     include_content: bool = True,
     max_content_length: int = 5000,
-    output_format: str = "text",
     timeout: int | None = None,
-) -> str:
-    """
-    Fetch one email by its exact Apple Mail message id.
-
-    Use this after `search_emails` returns a `message_id` when you need the
-    full message body or stable metadata without running another broad subject
-    search.
-
-    Returned fields include ``to``, ``cc``, ``bcc`` (recipient addresses),
-    ``in_reply_to`` and ``references`` (thread-linking headers parsed from the
-    raw ``all headers`` of the message), and ``has_quoted_original`` (True when
-    the content contains a quoted prior message). When ``in_reply_to`` or
-    ``references`` are present, the message is confirmed to be part of a thread
-    — useful for verifying that a draft reply is correctly threaded.
-
-    Args:
-        account: Account name to search in (e.g., "Gmail", "Work").
-        message_id: Exact numeric Apple Mail message id returned by search tools.
-        mailbox: Mailbox to search in (default: "INBOX").
-        include_content: Whether to include email content (default: True).
-        max_content_length: Maximum content characters to return when include_content=True.
-        output_format: Output format: "text" or "json" (default: "text").
-        timeout: Optional AppleScript timeout in seconds (default: 120s).
-
-    Returns:
-        One matching email as text, or JSON with {"item": ...}. If no message is
-        found, JSON returns {"item": null}. JSON items include ``to``, ``cc``,
-        ``bcc``, ``in_reply_to``, ``references``, and ``has_quoted_original``
-        when available.
-    """
-    if output_format not in {"text", "json"}:
-        return "Error: Invalid output_format. Use: text, json"
-
-    validation_timeout = 30 if timeout is None else min(timeout, 30)
-    account_err = validate_account_name(account, timeout=validation_timeout)
-    if account_err:
-        if output_format == "json":
-            return account_not_found_json(account, timeout=validation_timeout)
-        return account_err
-
+) -> dict[str, Any] | None:
+    """Fetch one message record by numeric Mail id. Returns None when not found."""
     normalized_ids = normalize_message_ids([message_id])
     if not normalized_ids:
-        return "Error: message_id must be a numeric Apple Mail message id"
+        return None
 
     if max_content_length < 0:
-        return "Error: max_content_length must be >= 0"
+        raise ValueError("max_content_length must be >= 0")
 
     safe_account = escape_applescript(account)
     numeric_id = normalized_ids[0]
@@ -1372,7 +1386,6 @@ def get_email_by_id(
                     set readValue to "true"
                 end if
 
-                -- Fields 9-13: to, cc, in_reply_to, references, bcc
                 set toRecips to ""
                 try
                     set toAddrs to {{}}
@@ -1410,11 +1423,6 @@ def get_email_by_id(
                     set AppleScript's text item delimiters to {{return, linefeed}}
                     set headerLines to text items of msgHeaders
                     set AppleScript's text item delimiters to ""
-                    -- NB: only the first physical line of a folded (RFC 2822
-                    -- continuation) References header is captured; that is
-                    -- sufficient to confirm the message is threaded. The length
-                    -- guards keep a value-less header (e.g. bare "In-Reply-To:")
-                    -- from raising and wiping an already-parsed sibling field.
                     repeat with headerLine in headerLines
                         set headerLineText to headerLine as string
                         ignoring case
@@ -1453,22 +1461,13 @@ def get_email_by_id(
     end tell
     '''
 
-    try:
-        result = run_applescript(script, timeout=effective_timeout)
-    except AppleScriptTimeout:
-        return (
-            f"Error: AppleScript timed out while fetching message_id={numeric_id} "
-            f"on account {account!r}. Try again or pass a larger `timeout`."
-        )
+    result = run_applescript(script, timeout=effective_timeout)
     if result.startswith("ERROR|||"):
-        return f"Error: {result.split('|||', 1)[1]}"
+        raise ValueError(result.split("|||", 1)[1])
 
     records, _mb_errors = _parse_search_records(result)
     item = records[0] if records else None
     if item is not None and include_content:
-        # Compute has_quoted_original from the content preview (Python side).
-        # Patterns: "On <date> ... wrote:", lines starting with ">", or
-        # "-----Original Message-----" markers.
         preview = item.get("content_preview", "") or ""
         has_quoted = bool(
             re.search(r"On .+wrote:", preview, re.DOTALL)
@@ -1476,6 +1475,85 @@ def get_email_by_id(
             or "-----Original Message-----" in preview
         )
         item["has_quoted_original"] = has_quoted
+    return item
+
+
+@mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@inject_preferences
+def get_email_by_id(
+    account: str,
+    message_id: str,
+    mailbox: str = "INBOX",
+    include_content: bool = True,
+    max_content_length: int = 5000,
+    output_format: str = "text",
+    timeout: int | None = None,
+) -> str:
+    """
+    Fetch one email by its exact Apple Mail message id.
+
+    Use this after `search_emails` returns a `message_id` when you need the
+    full message body or stable metadata without running another broad subject
+    search.
+
+    Returned fields include ``to``, ``cc``, ``bcc`` (recipient addresses),
+    ``in_reply_to`` and ``references`` (thread-linking headers parsed from the
+    raw ``all headers`` of the message), and ``has_quoted_original`` (True when
+    the content contains a quoted prior message). When ``in_reply_to`` or
+    ``references`` are present, the message is confirmed to be part of a thread
+    — useful for verifying that a draft reply is correctly threaded.
+
+    Args:
+        account: Account name to search in (e.g., "Gmail", "Work").
+        message_id: Exact numeric Apple Mail message id returned by search tools.
+        mailbox: Mailbox to search in (default: "INBOX").
+        include_content: Whether to include email content (default: True).
+        max_content_length: Maximum content characters to return when include_content=True.
+        output_format: Output format: "text" or "json" (default: "text").
+        timeout: Optional AppleScript timeout in seconds (default: 120s).
+
+    Returns:
+        One matching email as text, or JSON with {"item": ...}. If no message is
+        found, JSON returns {"item": null}. JSON items include ``to``, ``cc``,
+        ``bcc``, ``in_reply_to``, ``references``, and ``has_quoted_original``
+        when available.
+    """
+    if output_format not in {"text", "json"}:
+        return "Error: Invalid output_format. Use: text, json"
+
+    validation_timeout = 30 if timeout is None else min(timeout, 30)
+    account_err = validate_account_name(account, timeout=validation_timeout)
+    if account_err:
+        if output_format == "json":
+            return account_not_found_json(account, timeout=validation_timeout)
+        return account_err
+
+    normalized_ids = normalize_message_ids([message_id])
+    if not normalized_ids:
+        return "Error: message_id must be a numeric Apple Mail message id"
+
+    if max_content_length < 0:
+        return "Error: max_content_length must be >= 0"
+
+    numeric_id = normalized_ids[0]
+    effective_timeout = timeout if timeout is not None else 120
+
+    try:
+        item = _fetch_email_record_by_id(
+            account=account,
+            message_id=message_id,
+            mailbox=mailbox,
+            include_content=include_content,
+            max_content_length=max_content_length,
+            timeout=effective_timeout,
+        )
+    except AppleScriptTimeout:
+        return (
+            f"Error: AppleScript timed out while fetching message_id={numeric_id} "
+            f"on account {account!r}. Try again or pass a larger `timeout`."
+        )
+    except ValueError as exc:
+        return f"Error: {exc}"
 
     if output_format == "json":
         return json.dumps({"item": item})
@@ -1518,35 +1596,45 @@ def _thread_strip_prefixes_handler() -> str:
 @inject_preferences
 def get_email_thread(
     account: str,
-    subject_keyword: str,
+    subject_keyword: str | None = None,
+    message_id: str | None = None,
     mailbox: str = "INBOX",
     max_messages: int = 50,
     recent_days: float = 2.0,
     timeout: int | None = None,
 ) -> str:
     """
-    Get an email conversation thread - all messages with the same or similar subject.
+      Get an email conversation thread - all messages with the same or similar subject.
 
-    Defaults to the last 48 hours. Unbounded thread scans
-    (``recent_days=0``) are refused — use ``full_inbox_export`` for the
-    audited full-mailbox escape hatch. Subject matching is case-insensitive.
+      Defaults to the last 48 hours. Unbounded thread scans
+      (``recent_days=0``) are refused — use ``full_inbox_export`` for the
+      audited full-mailbox escape hatch. Subject matching is case-insensitive.
 
-    Args:
-        account: Account name (e.g., "Gmail", "Work")
-        subject_keyword: Keyword to identify the thread (e.g., "Re: Project Update")
-        mailbox: Mailbox to search in (default: "INBOX", use "All" for all mailboxes)
-        max_messages: Maximum number of thread messages to return (default: 50)
-        recent_days: Only scan messages received within this many days (default: 2.0
-            = 48h). ``recent_days=0`` is rejected with ``UNBOUNDED_SCAN_REQUIRED``.
-        timeout: Optional AppleScript timeout in seconds (default: 120).
+    Preferred: pass ``message_id`` from ``search_emails`` or ``list_inbox_emails``
+    to fetch the anchor message by id and derive the thread subject automatically.
 
-    Returns:
-        Formatted thread view with all related messages sorted by date
+      Args:
+          account: Account name (e.g., "Gmail", "Work")
+          subject_keyword: Keyword to identify the thread (e.g., "Re: Project Update").
+              Optional when ``message_id`` is provided.
+          message_id: Optional numeric Apple Mail message id. When set, fetches the
+              anchor message first and derives the thread subject from it.
+          mailbox: Mailbox to search in (default: "INBOX", use "All" for all mailboxes)
+          max_messages: Maximum number of thread messages to return (default: 50)
+          recent_days: Only scan messages received within this many days (default: 2.0
+              = 48h). ``recent_days=0`` is rejected with ``UNBOUNDED_SCAN_REQUIRED``.
+          timeout: Optional AppleScript timeout in seconds (default: 120).
+
+      Returns:
+          Formatted thread view with all related messages sorted by date
     """
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
     if account_err:
         return account_err
+
+    if not message_id and not subject_keyword:
+        return "Error: Provide either message_id or subject_keyword"
 
     if max_messages <= 0:
         return "Error: max_messages must be > 0"
@@ -1568,13 +1656,43 @@ def get_email_thread(
         return serialize_tool_error(tool_error)
     effective_timeout = timeout if timeout is not None else 120
 
+    resolved_mailbox = mailbox
+    resolved_subject = subject_keyword or ""
+
+    if message_id:
+        normalized_ids = normalize_message_ids([message_id])
+        if not normalized_ids:
+            return "Error: message_id must be a numeric Apple Mail message id"
+        try:
+            anchor = _fetch_email_record_by_id(
+                account=account,
+                message_id=message_id,
+                mailbox=mailbox,
+                include_content=False,
+                max_content_length=0,
+                timeout=effective_timeout,
+            )
+        except AppleScriptTimeout:
+            return (
+                f"Error: AppleScript timed out while fetching message_id={normalized_ids[0]} "
+                f"on account {account!r}. Try again or pass a larger `timeout`."
+            )
+        except ValueError as exc:
+            return f"Error: {exc}"
+        if anchor is None:
+            return f"Error: No email found for message_id={normalized_ids[0]} in {mailbox}"
+        resolved_subject = anchor.get("subject", "") or resolved_subject
+        resolved_mailbox = anchor.get("mailbox") or mailbox
+
     # Escape user inputs for AppleScript
     escaped_account = escape_applescript(account)
-    escaped_mailbox = escape_applescript(mailbox)
+    escaped_mailbox = escape_applescript(resolved_mailbox)
 
-    cleaned_keyword = subject_keyword
+    cleaned_keyword = resolved_subject
     for prefix in THREAD_PREFIXES:
         cleaned_keyword = cleaned_keyword.replace(prefix, "").strip()
+    if not cleaned_keyword:
+        cleaned_keyword = resolved_subject
     escaped_keyword = escape_applescript(cleaned_keyword)
 
     date_setup = ""

@@ -1,6 +1,6 @@
 ---
 name: email-attachments
-description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses list_email_attachments (subject-scoped scans), save_email_attachment, search_emails (has_attachments filters), get_email_by_id for confirmation, optionally export_emails for bundles. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
+description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses list_email_attachments (message_ids preferred; subject keyword as fallback), save_email_attachment, search_emails (has_attachments filters), get_email_by_id for confirmation, optionally export_emails for bundles. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
 ---
 
 # Email Attachments
@@ -31,6 +31,14 @@ For genuine full-inbox attachment audits (rare), escalate to `full_inbox_export`
 Widen timeframe only after checking performance.
 
 ### 2. Inspect Attachments Cheaply
+
+Prefer ids from step 1:
+
+```
+list_email_attachments(message_ids=[12345, 12346], max_results=10)
+```
+
+Fallback when ids are unknown (bounded subject scan):
 
 ```
 list_email_attachments(subject_keyword="...", max_results=10)

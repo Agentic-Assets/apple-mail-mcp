@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **798 tests + 30 subtests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **822 tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -31,7 +31,6 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 | [`plugin/apple_mail_mcp/CLAUDE.md`](plugin/apple_mail_mcp/CLAUDE.md) | Package entry, `core.py`, CLI |
 | [`plugin/apple_mail_mcp/tools/CLAUDE.md`](plugin/apple_mail_mcp/tools/CLAUDE.md) | MCP tool modules |
 | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) | Skill authoring |
-| [`plugin/docs/commands.md`](plugin/docs/commands.md) | Legacy slash commands |
 | [`tests/CLAUDE.md`](tests/CLAUDE.md) | Test layout & AppleScript mocks |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | Manifest validation scripts |
 | [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index + plugin skill map |
@@ -46,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (28 tools), legacy `/email-management` slash command, and **nine** bundled workflow skills under `plugin/skills/` (see table below).
+One install — MCP server (28 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -78,7 +77,99 @@ MCP-only fallback, still draft-safe:
 codex mcp add apple-mail -- /bin/bash /path/to/apple-mail-mcp/plugin/start_mcp.sh --draft-safe
 ```
 
+If `mcp__apple-mail__*` tools are absent after plugin install, treat that as an MCP registration failure. Do not create reply drafts with generic AppleScript, Mail UI scripting, shell `osascript`, or standalone compose fallbacks. Fix registration first, or use the MCP-only absolute-path fallback above, restart Codex, and confirm the Apple Mail tools are present before drafting.
+
+How to know it worked: `codex plugin list` showing `installed, enabled` is not enough. The pass condition is that the active Codex session exposes `mcp__apple-mail__*` tools and an MCP `list_tools` handshake includes `reply_to_email`. Maintainers can run `bash tools/validate-codex-plugin.sh` to check that install plus runtime path in a temporary `CODEX_HOME`.
+
 Restart Codex Desktop or start a fresh Codex CLI session after installing.
+
+### Refresh another Mac / second computer
+
+Use this when another computer has an older Apple Mail plugin install, stale
+marketplace cache, or you want to prove both Codex and Claude Code are using the
+same current checkout.
+
+1. Get the current code:
+
+```bash
+cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp
+git switch main && git pull --ff-only
+```
+
+2. Refresh Codex from the local checkout:
+
+```bash
+codex plugin remove apple-mail@apple-mail-mcp || true
+codex plugin marketplace remove apple-mail-mcp || true
+codex plugin marketplace add ./
+codex plugin add apple-mail@apple-mail-mcp
+codex mcp get apple-mail --json
+```
+
+The Codex MCP registration should show:
+
+```json
+{
+  "command": "/bin/bash",
+  "args": ["./start_mcp.sh", "--draft-safe"]
+}
+```
+
+`codex plugin list` showing `installed, enabled` is not enough. For a runtime
+smoke, run:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e . pytest
+.venv/bin/python tools/mcp_tool_smoke.py \
+  --command /bin/bash \
+  --arg ./start_mcp.sh \
+  --arg=--draft-safe \
+  --cwd "$PWD/plugin" \
+  --expect-count 28 \
+  --required-tool reply_to_email \
+  --required-tool compose_email \
+  --required-tool manage_drafts \
+  --required-tool list_accounts \
+  --required-tool get_inbox_overview
+```
+
+3. Refresh Claude Code from the local checkout:
+
+```bash
+claude plugin uninstall apple-mail@apple-mail-mcp --scope user --keep-data -y || true
+claude plugin marketplace remove apple-mail-mcp || true
+claude plugin marketplace add ./ --scope user
+claude plugin install apple-mail@apple-mail-mcp --scope user
+claude plugin details apple-mail@apple-mail-mcp
+```
+
+Prefer `--scope user` for personal machine setup. Project-scope marketplace
+entries can write an absolute local path into `.claude/settings.json`, which is
+usually not what you want to commit.
+
+`claude plugin details apple-mail@apple-mail-mcp` should report version `3.7.1`
+and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
+replace the path below if the details output shows a different install path:
+
+```bash
+.venv/bin/python tools/mcp_tool_smoke.py \
+  --command /bin/bash \
+  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
+  --arg=--draft-safe \
+  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1" \
+  --expect-count 28 \
+  --required-tool reply_to_email \
+  --required-tool compose_email \
+  --required-tool manage_drafts \
+  --required-tool list_accounts \
+  --required-tool get_inbox_overview
+```
+
+4. Restart clients:
+
+After either refresh, restart Codex Desktop / start a fresh Codex CLI session and
+restart Claude Code so they load the refreshed plugin process.
 
 ### Claude Desktop Cowork (plugin marketplace)
 
@@ -216,23 +307,23 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `list_account_addresses` | List sender aliases configured for a Mail account |
 | `search_emails` | Unified search — subject, sender, body, dates, attachments. Defaults to last 48h and the default account |
 | `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results |
-| `get_email_thread` | Conversation thread view across Inbox + Sent |
+| `get_email_thread` | Conversation thread view across Inbox + Sent; prefer `message_id` from search/list results |
 
 ### Organization
 | Tool | Description |
 |------|-------------|
 | `list_mailboxes` | Folder hierarchy with optional message counts |
 | `create_mailbox` | Create new mailboxes (supports nested paths) |
-| `move_email` | Move emails with filters (subject, sender, date, read status, dry-run). Default max 50 |
-| `update_email_status` | Mark read/unread, flag/unflag — by filters or message IDs. Default max 10 |
-| `manage_trash` | Soft delete, permanent delete, empty trash. Default max 5 |
+| `move_email` | Move by `message_ids` (preferred) or filters with `allow_filter_scan=True`. Default max 50 |
+| `update_email_status` | Mark read/unread, flag/unflag by `message_ids` (preferred) or filters with `allow_filter_scan=True`. Default max 10 |
+| `manage_trash` | Soft delete, permanent delete, empty trash; prefer `message_ids`, filters need `allow_filter_scan=True`. Default max 5 |
 | `synchronize_account` | Explicitly confirmed Mail.app sync for an account (can fetch large backlogs) |
 
 ### Composition
 | Tool | Description |
 |------|-------------|
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
-| `reply_to_email` | Reply or reply-all with optional HTML body and original thread context; prefer `message_id` from search/list results |
+| `reply_to_email` | Native Mail reply or reply-all draft with Mail-generated quoted thread context; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
@@ -240,7 +331,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Attachments
 | Tool | Description |
 |------|-------------|
-| `list_email_attachments` | List attachments with names and sizes (capped at 50 by default) |
+| `list_email_attachments` | List attachments by `message_ids` (preferred) or subject keyword (capped at 50 by default) |
 | `save_email_attachment` | Save attachments to disk (validates target path) |
 
 ### Smart Inbox
@@ -253,8 +344,8 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Analytics & Export
 | Tool | Description |
 |------|-------------|
-| `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 100 messages, longer windows 20 × 500 |
-| `export_emails` | Export single emails or full mailboxes to TXT/HTML (default cap 1000) |
+| `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 75 messages, longer windows 20 × 250 |
+| `export_emails` | Export single emails by `message_id` or subject, or full mailboxes to TXT/HTML (default cap 1000) |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Audited full-inbox walk; only tool that scans every message. Slow (minutes on 24K mailboxes). Named in `UNBOUNDED_SCAN_REQUIRED` remediation as the legitimate fallback. |
 
@@ -292,10 +383,11 @@ Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows a
 
 In draft-safe mode:
 
-- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows)
+- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies verify the saved draft in a bounded newest-Drafts check before reporting success
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
-- use `reply_to_email(message_id=...)` for replies; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
+- reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
+- treat `subject_keyword` reply targeting or any degraded reply fallback as Cayman-approved-only for the specific message
 - pass `message_id` from search/list tools for reply/forward when available; `subject_keyword` is fallback only
 - explicit `mode="send"` calls return an error
 - `manage_drafts action="send"` returns an error
@@ -366,11 +458,16 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 
 | Default | Tools | Override |
 |---------|-------|----------|
-| Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week); full scans require explicit opt-in |
+| Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week); routine tools reject unbounded scans |
 | 50 emails max | `list_inbox_emails`, `list_email_attachments` | Pass `max_emails` / `max_results` |
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
-| Unbounded scans refused | All scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; remediation names `full_inbox_export` as the audited full-walk fallback |
+| Unbounded scans refused | All routine scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is a separate audited export tool, not a normal search fallback |
+| **ID-first mutations** | `move_email`, `update_email_status`, `manage_trash` | Pass `message_ids=[...]` from `search_emails` or `list_inbox_emails` (fast, preferred). Filter-based bulk moves/updates/trash require `allow_filter_scan=True` or return `code: FILTER_SCAN_DISABLED`. |
+| **Gated filter scans** | `move_email`, `update_email_status`, `manage_trash` (filter path only) | `allow_filter_scan=True` (slow; timeout-prone on 24k+ inboxes). Filter paths still default to a 48h `recent_days` window. |
+| **Body scan gate** | `search_emails` | `body_text` requires `allow_body_scan=True` or returns `code: BODY_SCAN_DISABLED`. Prefer subject/sender/date filters; pair body scans with a tight date window. |
+
+**Recommended mutation flow:** search or list → collect `message_id` values → call `move_email`, `update_email_status`, or `manage_trash` with `message_ids`. Use `dry_run=True` with ids for a fast preview without acting.
 
 When a per-account call fails in a multi-account fan-out, you get partial results plus an `errors` field naming the account. JSON responses also include `error_details` when the tool can distinguish a timeout from another Mail/App permission error.
 
@@ -508,7 +605,6 @@ apple-mail-mcp/
 │   ├── .claude-plugin/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
-│   ├── commands/              # /email-management slash command
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
 │   ├── apple_mail_mcp/        # Python MCP server package (28 tools)
 │   ├── apple_mail_mcp.py      # Entry point

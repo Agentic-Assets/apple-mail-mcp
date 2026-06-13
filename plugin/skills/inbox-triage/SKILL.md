@@ -108,6 +108,17 @@ Summarize in plain language:
 
 Do not bulk-move or trash during triage unless the user explicitly asks.
 
+## Archive handoff (when the user asks mid-triage)
+
+Triage stays read-first, but a quick "archive these" request is common. Do not call `move_email(subject_keyword=...)` or `move_email(sender=...)` from triage — those return `FILTER_SCAN_DISABLED` unless `allow_filter_scan=True`.
+
+1. Collect `message_id`s from the triage pass you already ran (`list_inbox_emails`, `get_needs_response`, or `search_emails` JSON).
+2. Confirm the subject/sender list with the user.
+3. `move_email(dry_run=True, message_ids=[...], to_mailbox="Archive", max_moves=25)` — quote the count.
+4. `move_email(dry_run=False, message_ids=[...], ...)` after confirmation.
+
+For larger cleanups, hand off to **`email-archive-cleanup`**.
+
 ## Performance rules
 
 - Keep `days_back` small (2 for needs-response, 7 for awaiting-reply).

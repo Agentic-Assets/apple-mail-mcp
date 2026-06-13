@@ -15,15 +15,22 @@ See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonic
 
 `full_inbox_export` is the only tool that walks the entire inbox. Use it as the evidence step for annual cleanups, full audits, or pre-migration snapshots — pair it with `export_emails` for the on-disk artifact before any irreversible `manage_trash(action="delete_permanent")`. It is slow (minutes on a 24k inbox); for staged campaigns, keep using bounded `search_emails` + `message_ids=[...]` flows instead.
 
-## ID-list flow (preferred for bulk moves and trash)
+## ID-first flow (mandatory for bulk moves, status, and trash)
 
-On a 24k inbox, re-filtering by sender/subject inside `move_email` or `manage_trash` re-pays the scan cost for every batch. Prefer:
+`move_email`, `update_email_status`, and `manage_trash` **require `message_ids` by default**. Passing `subject_keyword=`, `sender=`, or `apply_to_all=True` without `message_ids` returns `code: FILTER_SCAN_DISABLED` unless you opt in with `allow_filter_scan=True`.
 
-1. `search_emails(sender="...", subject_keyword="...", recent_days=30, limit=50)` — bounded preview that returns `message_id`s.
-2. Collect the `message_id`s from the result.
-3. `move_email(message_ids=[ids], to_mailbox="...", max_moves=50)` or `manage_trash(message_ids=[ids], action="move_to_trash", max_deletes=50)`.
+On a 24k inbox, filter-based mutations re-pay the scan cost for every batch and often time out. Always:
 
-Sender-only `move_email(sender=...)` calls **require a co-filter** — pair with `subject_keyword=`, a tight `recent_days≤30` ceiling, or use the `message_ids=[...]` form above. A bare `sender=` filter against a 24k inbox can stall.
+1. **List or search (bounded)** — `search_emails(sender="...", subject_keyword="...", recent_days=30, limit=50)` or `list_inbox_emails(...)`; inspect sample subjects.
+2. **Collect `message_id`s** — extract ids from the JSON/text result.
+3. **Simulate** — `move_email(dry_run=True, message_ids=[ids], to_mailbox="...", max_moves=50)` (or `manage_trash(dry_run=True, message_ids=[ids], ...)`).
+4. **Execute** — `move_email(dry_run=False, message_ids=[ids], ...)` after the operator confirms counts.
+
+Repeat in batches until stop conditions. Re-run a narrower search between batches if the cohort is still large.
+
+### `allow_filter_scan=True` (rare escape hatch only)
+
+Use only when the user has explicitly approved a bulk campaign and ID collection is impractical (e.g. migrating an entire sender across years). The tool prefixes responses with a slow-scan warning. Pair `sender=` with `subject_keyword=` or a tight `recent_days≤30` ceiling; never bare `sender=` on a 24k inbox.
 
 ## Standard Campaign Shape
 
@@ -42,25 +49,29 @@ Sequence:
 
 Always quote expected totals after dry runs.
 
-### 3. Simulate Mutations (`dry_run=True`)
+### 3. Simulate Mutations (`dry_run=True`, `message_ids` required)
 
-Mandatory first pass:
+Mandatory first pass after collecting ids from step 2:
 
-- **`move_email(dry_run=True, ...)`** — validate counts + mailbox path spelling (nested slashes).
-- Trash paths: **`manage_trash(action="move_to_trash", dry_run=True, ...)`** before committing.
+```
+ids = [e["message_id"] for e in preview["emails"]]
+move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=50)
+```
 
-Discuss raising `max_moves` / `max_deletes`; defaults protect against catastrophe.
+Trash paths: **`manage_trash(action="move_to_trash", dry_run=True, message_ids=ids, ...)`** before committing. Status paths: **`update_email_status(dry_run=True, message_ids=ids, action="mark_read", ...)`**.
 
-### 4. Execute In Batches
+Quote expected totals from the dry-run response. Discuss raising `max_moves` / `max_deletes`; defaults protect against catastrophe. If you hit `FILTER_SCAN_DISABLED`, you forgot `message_ids` — go back to search/list, do not flip `allow_filter_scan=True` without user approval.
+
+### 4. Execute In Batches (`message_ids` only)
 
 | Action | Typical tool |
 |--------|---------------|
-| File / archive batch | `move_email(dry_run=False, subject_keyword | sender | message_ids ..., max_moves=50)` |
-| Mark processed | `update_email_status(action="mark_read"|"unflag", max_updates≤50 after confirmation)` |
-| Remove noise | Prefer trash soft-delete with caps; escalate `delete_permanent` only post-export + verbal/written affirmation |
+| File / archive batch | `move_email(dry_run=False, message_ids=ids, to_mailbox="...", max_moves=50)` |
+| Mark processed | `update_email_status(action="mark_read"\|"unflag", message_ids=ids, max_updates≤50 after confirmation)` |
+| Remove noise | `manage_trash(action="move_to_trash", message_ids=ids, max_deletes≤50)`; escalate `delete_permanent` only post-export + verbal/written affirmation |
 | Hydrate caches | `synchronize_account(account="...", confirm_sync=True)` only after explicit user approval; it can fetch large remote backlogs |
 
-Re-run narrower searches between batches until stop conditions.
+Slice `ids` into batches of ≤50. Re-run narrower `search_emails` between batches until stop conditions.
 
 ### 5. Regression Check
 

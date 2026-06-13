@@ -21,12 +21,21 @@ Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].n
 8. **Release artifact presence** — opt in with `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` to require **all three** local distributables before shipping: `apple-mail-plugin.zip`, `apple-mail.plugin`, and `apple-mail-mcp-v{version}.mcpb`
 9. **Plugin/.plugin byte parity** — `apple-mail.plugin` must exist alongside `apple-mail-plugin.zip` and be byte-identical. The `.plugin` extension is the canonical Cowork "Add plugin → Upload plugin" artifact; drifting bytes break the Cowork upload silently. Always rebuild via `tools/build-artifacts.sh`, which copies the canonical zip to the `.plugin` name.
 10. **Marketplace ↔ plugin.json component conflict** — fails if both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while marketplace `strict` is not `true`. Mirrors the Claude Code "conflicting manifests" install error. See [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json" for the rule and escape hatch.
-11. **Codex plugin surface** — `.agents/plugins/marketplace.json` must point at `./plugin`; `plugin/.codex-plugin/plugin.json` must expose `skills: "./skills"` and `mcpServers: "./.mcp.json"`; `plugin/.mcp.json` must launch `start_mcp.sh --draft-safe`.
+11. **Codex plugin surface** — `.agents/plugins/marketplace.json` must point at `./plugin`; `plugin/.codex-plugin/plugin.json` must expose `skills: "./skills"` and `mcpServers: "./.mcp.json"`; `plugin/.mcp.json` must launch `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."`.
+12. **Stale distribution artifacts** — fails if repo root contains `apple-mail-mcp-v*.mcpb` files other than the current `pyproject.toml` version; run `tools/build-artifacts.sh` to prune and rebuild.
 
 ```bash
 bash tools/validate_manifests.sh
 APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh
 ```
+
+Codex runtime registration is checked separately:
+
+```bash
+bash tools/validate-codex-plugin.sh
+```
+
+That smoke installs the plugin into a temporary `CODEX_HOME`, reads `codex mcp get apple-mail --json`, launches the registered stdio server, and fails unless MCP `list_tools` includes `reply_to_email`, `compose_email`, `manage_drafts`, `list_accounts`, and `get_inbox_overview`.
 
 Skips Claude marketplace `metadata.version` (1.0.0) and Codex marketplace release versioning because `.agents/plugins/marketplace.json` is install routing metadata — see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).
 

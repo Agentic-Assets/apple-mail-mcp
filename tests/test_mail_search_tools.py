@@ -363,6 +363,7 @@ class SearchToolTests(unittest.TestCase):
                 search_tools.search_emails(
                     account="Work",
                     body_text="invoice",
+                    allow_body_scan=True,
                     output_format="json",
                     limit=5,
                 )
@@ -842,10 +843,12 @@ class ManageToolTests(unittest.TestCase):
                 subject_keyword="Ticket",
                 dry_run=True,
                 max_moves=1,
+                allow_filter_scan=True,
             )
 
         mock_search.assert_called_once()
         mock_run.assert_not_called()
+        self.assertIn("WARNING: filter scan enabled", result)
         self.assertIn("DRY RUN - PREVIEW MOVE", result)
         self.assertIn("Would move: Ticket", result)
 
@@ -862,10 +865,12 @@ class ManageToolTests(unittest.TestCase):
                 subject_keyword="Ticket",
                 dry_run=True,
                 max_deletes=1,
+                allow_filter_scan=True,
             )
 
         mock_search.assert_called_once()
         mock_run.assert_not_called()
+        self.assertIn("WARNING: filter scan enabled", result)
         self.assertIn("DRY RUN - PREVIEW TRASH", result)
         self.assertIn("TOTAL: 0", result)
 
@@ -881,10 +886,12 @@ class ManageToolTests(unittest.TestCase):
                 account="Work",
                 action="delete_permanent",
                 subject_keyword="Ticket",
+                allow_filter_scan=True,
             )
 
         mock_search.assert_called_once()
-        self.assertEqual(result, "preview")
+        self.assertIn("WARNING: filter scan enabled", result)
+        self.assertIn("preview", result)
         script = mock_run.call_args.args[0]
         self.assertIn("DRY RUN - PREVIEW PERMANENT DELETE BY IDS", script)
         self.assertIn("Would permanently delete", script)
@@ -902,9 +909,10 @@ class ManageToolTests(unittest.TestCase):
                 account="Work",
                 action="delete_permanent",
                 apply_to_all=True,
+                allow_filter_scan=True,
             )
 
-        self.assertEqual(result, "preview")
+        self.assertIn("preview", result)
         self.assertIn("DRY RUN - PREVIEW PERMANENT DELETE", captured["script"])
         self.assertIn("Would permanently delete", captured["script"])
         self.assertIn("TOTAL WOULD DELETE", captured["script"])
@@ -1049,16 +1057,16 @@ class GetEmailThreadTests(unittest.TestCase):
 
 
 class MailboxAllCapTests(unittest.TestCase):
-    """Fix #5: search_emails(mailbox='All') must cap at MAX_MAILBOXES_PER_SEARCH."""
+    """Fix #5: search_emails(mailbox='All') must cap at MAX_MAILBOXES_PER_SEARCH_ALL."""
 
     def _run(self, coro):
         import asyncio
         return asyncio.run(coro)
 
     def test_mailbox_all_script_contains_cap_guard(self):
-        """Generated AppleScript must truncate searchMailboxes when > 50."""
+        """Generated AppleScript must truncate searchMailboxes when > 10."""
         from apple_mail_mcp.constants import SCAN_BOUNDS
-        cap = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
+        cap = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH_ALL"]
 
         captured = {}
 
@@ -1096,6 +1104,7 @@ class MailboxAllCapTests(unittest.TestCase):
         self.assertIn("warnings", payload)
         self.assertTrue(len(payload["warnings"]) > 0)
         self.assertIn("mailbox='All'", payload["warnings"][0])
+        self.assertTrue(payload.get("mailboxes_truncated"))
 
     def test_mailbox_inbox_script_has_no_cap_guard(self):
         """For mailbox='INBOX' the cap guard must NOT appear in the script."""
@@ -1446,6 +1455,115 @@ class NewFieldsTests(unittest.TestCase):
         self.assertIn("error_details", response)
         error_mailboxes = [e["mailbox"] for e in response["error_details"]]
         self.assertIn("SlowFolder", error_mailboxes)
+
+
+class SearchGuardrailTests(unittest.TestCase):
+    """Phase 3 search_emails guardrails: body scan gate, sender hint."""
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def test_body_text_without_allow_body_scan_returns_structured_error(self):
+        result = self._run(
+            search_tools.search_emails(
+                account="Work",
+                body_text="quarterly report",
+                recent_days=7,
+            )
+        )
+        parsed = json.loads(result)
+        self.assertEqual(parsed.get("code"), "BODY_SCAN_DISABLED")
+        self.assertIn("allow_body_scan", parsed.get("remediation", {}).get("escape_hatch", ""))
+
+    def test_body_text_with_allow_body_scan_proceeds(self):
+        captured = {}
+
+        def fake_run(script, timeout=180):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    body_text="quarterly report",
+                    allow_body_scan=True,
+                    recent_days=7,
+                )
+            )
+
+        self.assertNotIn("BODY_SCAN_DISABLED", result)
+        self.assertIn("msgContent contains", captured["script"])
+
+    def test_sender_only_search_emits_json_warning(self):
+        def fake_run(script, timeout=180):
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            raw = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    sender="news@example.com",
+                    recent_days=7,
+                    output_format="json",
+                )
+            )
+
+        payload = json.loads(raw)
+        warnings = payload.get("warnings", [])
+        self.assertTrue(any("sender-only" in w.lower() for w in warnings))
+
+    def test_sender_only_search_emits_text_warning(self):
+        def fake_run(script, timeout=180):
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    sender="news@example.com",
+                    recent_days=7,
+                    output_format="text",
+                )
+            )
+
+        self.assertIn("WARNING:", result)
+        self.assertIn("sender-only", result.lower())
+
+
+class GetEmailThreadMessageIdTests(unittest.TestCase):
+    """Phase 2: get_email_thread(message_id=...) derives subject from anchor."""
+
+    def test_get_email_thread_message_id_fetches_anchor_then_scans(self):
+        anchor_line = (
+            "12345|||msg@example.com|||Re: Budget Review|||alice@example.com|||"
+            "INBOX|||Work|||false|||2026-01-15T10:00:00||||||"
+        )
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "whose id is 12345" in script:
+                return anchor_line
+            return "EMAIL THREAD VIEW"
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_thread(
+                account="Work",
+                message_id="12345",
+                max_messages=10,
+                recent_days=7,
+            )
+
+        self.assertIn("EMAIL THREAD VIEW", result)
+        self.assertEqual(len(captured), 2)
+        thread_script = captured[1]
+        self.assertIn("Budget Review", thread_script)
+
+    def test_get_email_thread_requires_subject_or_message_id(self):
+        result = search_tools.get_email_thread(account="Work", recent_days=7)
+        self.assertIn("message_id or subject_keyword", result)
 
 
 if __name__ == "__main__":

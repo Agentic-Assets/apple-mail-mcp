@@ -55,10 +55,10 @@ class BodySearchCapTests(unittest.TestCase):
         defaults.update(kwargs)
         return search_tools._build_search_script(**defaults)[0]
 
-    def test_body_search_without_date_from_explicit_caps_at_100(self):
-        """Without explicit date_from, body_text triggers auto-cap at 100."""
+    def test_body_search_without_date_from_explicit_caps_at_75(self):
+        """Without explicit date_from, body_text triggers BODY_SEARCH_AUTO_CAP."""
         script = self._build(body_text="needle", date_from_explicit=False)
-        self.assertIn("set scanUpperBound to 100", script)
+        self.assertIn("set scanUpperBound to 75", script)
 
     def test_body_search_with_date_from_explicit_no_cap(self):
         """When date_from_explicit=True the auto-cap is skipped; scan_cap stays at the
@@ -68,15 +68,15 @@ class BodySearchCapTests(unittest.TestCase):
             date_from="2026-05-20",
             date_from_explicit=True,
         )
-        # scan_cap should be >= 300 (window-based), not capped at 100
-        self.assertNotIn("set scanUpperBound to 100", script)
+        # scan_cap should be window-based, not capped at BODY_SEARCH_AUTO_CAP
+        self.assertNotIn("set scanUpperBound to 75", script)
 
     def test_no_body_search_not_capped(self):
         """Without body_text, no auto-cap is applied (scan_cap stays window-based)."""
         script = self._build(body_text=None, sender="boss@example.com")
-        # scan_cap for 2-day window with sender filter = 300
-        self.assertIn("set scanUpperBound to 300", script)
-        self.assertNotIn("set scanUpperBound to 100", script)
+        # scan_cap for 2-day window with sender filter = 150
+        self.assertIn("set scanUpperBound to 150", script)
+        self.assertNotIn("set scanUpperBound to 75", script)
 
     def test_body_search_capped_flag_returned_true_when_cap_fires(self):
         """_build_search_script returns body_search_capped=True when the cap fires."""
@@ -133,6 +133,7 @@ class BodySearchCapTests(unittest.TestCase):
                     search_tools.search_emails(
                         account="Work",
                         body_text="needle",
+                        allow_body_scan=True,
                         output_format="json",
                     )
                 )
@@ -152,6 +153,7 @@ class BodySearchCapTests(unittest.TestCase):
                 search_tools.search_emails(
                     account="Work",
                     body_text="needle",
+                    allow_body_scan=True,
                     output_format="text",
                 )
             )
@@ -260,9 +262,7 @@ class SynchronizeAccountOuterTimeoutTests(unittest.TestCase):
                 return_value=["AccountA", "AccountB", "AccountC", "AccountD"],
             ),
         ):
-            result = manage_tools.synchronize_account(
-                all_accounts=True, confirm_sync=True
-            )
+            result = manage_tools.synchronize_account(all_accounts=True, confirm_sync=True)
 
         # The outer timeout for the main sync script should be 8*4 + 5 = 37
         main_sync_timeout = captured_timeout[-1]
@@ -301,6 +301,7 @@ class SaveEmailAttachmentSizeLimitTests(unittest.TestCase):
 
     def _base_kwargs(self):
         import os
+
         home = os.path.expanduser("~")
         return dict(
             account="Work",
@@ -349,6 +350,7 @@ class SaveEmailAttachmentSizeLimitTests(unittest.TestCase):
 
     def test_probe_failure_fails_open(self):
         """When the probe fails (returns -1), the save is not blocked."""
+
         def fake_run(script, timeout=None):
             if "file size of anAttachment" in script:
                 return "-1"  # probe failed
@@ -365,6 +367,7 @@ class SaveEmailAttachmentSizeLimitTests(unittest.TestCase):
 
     def test_insufficient_disk_space_returns_tool_error(self):
         """Returns ATTACHMENT_TOO_LARGE when disk free space is below attachment + 100 MB."""
+
         def fake_run(script, timeout=None):
             if "file size of anAttachment" in script:
                 return str(50 * 1024 * 1024)  # 50 MB attachment (under 10MB cap... wait)
@@ -388,6 +391,7 @@ class SaveEmailAttachmentSizeLimitTests(unittest.TestCase):
     def test_default_max_size_bytes_is_100mb(self):
         """The default max_size_bytes is 100 MB."""
         import inspect
+
         sig = inspect.signature(manage_tools.save_email_attachment)
         default = sig.parameters["max_size_bytes"].default
         self.assertEqual(default, 100 * 1024 * 1024)
@@ -405,24 +409,27 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
 
     def _fake_run_at_cap(self, main_return="ok"):
         """Returns a fake_run that simulates CAP open windows on the probe."""
+
         def fake_run(script, timeout=None):
             if "count of outgoing messages" in script:
                 return str(self.CAP)  # already at cap
             return main_return
+
         return fake_run
 
     def _fake_run_below_cap(self, main_return="ok"):
         """Returns a fake_run that simulates CAP-1 open windows on the probe."""
+
         def fake_run(script, timeout=None):
             if "count of outgoing messages" in script:
                 return str(self.CAP - 1)  # below cap
             return main_return
+
         return fake_run
 
     # compose_email
     def test_compose_open_refused_at_cap(self):
-        with patch("apple_mail_mcp.tools.compose.run_applescript",
-                   side_effect=self._fake_run_at_cap()):
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=self._fake_run_at_cap()):
             result = compose_tools.compose_email(
                 account="Work",
                 to="x@example.com",
@@ -435,8 +442,9 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
         self.assertEqual(payload["remediation"]["open_window_count"], self.CAP)
 
     def test_compose_open_allowed_below_cap(self):
-        with patch("apple_mail_mcp.tools.compose.run_applescript",
-                   side_effect=self._fake_run_below_cap("✓ Email opened")):
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript", side_effect=self._fake_run_below_cap("✓ Email opened")
+        ):
             result = compose_tools.compose_email(
                 account="Work",
                 to="x@example.com",
@@ -467,8 +475,7 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
 
     # reply_to_email
     def test_reply_open_refused_at_cap(self):
-        with patch("apple_mail_mcp.tools.compose.run_applescript",
-                   side_effect=self._fake_run_at_cap()):
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=self._fake_run_at_cap()):
             result = compose_tools.reply_to_email(
                 account="Work",
                 message_id="12345",
@@ -479,8 +486,10 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
         self.assertEqual(payload["code"], "TOO_MANY_OPEN_DRAFTS")
 
     def test_reply_open_allowed_below_cap(self):
-        with patch("apple_mail_mcp.tools.compose.run_applescript",
-                   side_effect=self._fake_run_below_cap("Reply opened in Mail.")):
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=self._fake_run_below_cap("Reply opened in Mail."),
+        ):
             result = compose_tools.reply_to_email(
                 account="Work",
                 message_id="12345",
@@ -489,10 +498,29 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
             )
         self.assertNotIn("TOO_MANY_OPEN_DRAFTS", result)
 
+    def test_reply_draft_mode_not_affected(self):
+        """reply_to_email(mode='draft') skips the stale outgoing-message cap probe."""
+        called_probe = [False]
+
+        def fake_run(script, timeout=None):
+            if "count of outgoing messages" in script:
+                called_probe[0] = True
+            return "Reply saved as draft!"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply",
+                mode="draft",
+            )
+
+        self.assertFalse(called_probe[0], "Window probe should not run for reply mode='draft'")
+        self.assertNotIn("TOO_MANY_OPEN_DRAFTS", result)
+
     # forward_email
     def test_forward_open_refused_at_cap(self):
-        with patch("apple_mail_mcp.tools.compose.run_applescript",
-                   side_effect=self._fake_run_at_cap()):
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=self._fake_run_at_cap()):
             result = compose_tools.forward_email(
                 account="Work",
                 message_id="12345",
@@ -503,8 +531,9 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
         self.assertEqual(payload["code"], "TOO_MANY_OPEN_DRAFTS")
 
     def test_forward_open_allowed_below_cap(self):
-        with patch("apple_mail_mcp.tools.compose.run_applescript",
-                   side_effect=self._fake_run_below_cap("Forward opened.")):
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript", side_effect=self._fake_run_below_cap("Forward opened.")
+        ):
             result = compose_tools.forward_email(
                 account="Work",
                 message_id="12345",
@@ -515,6 +544,7 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
 
     def test_probe_failure_fails_open(self):
         """When the probe errors, mode='open' is NOT blocked (fail-open)."""
+
         def fake_run(script, timeout=None):
             if "count of outgoing messages" in script:
                 raise Exception("Mail not running")
@@ -536,8 +566,7 @@ class ComposeOpenWindowCapTests(unittest.TestCase):
 
     def test_too_many_drafts_remediation_points_to_draft_mode(self):
         """The remediation should explicitly mention mode='draft'."""
-        with patch("apple_mail_mcp.tools.compose.run_applescript",
-                   side_effect=self._fake_run_at_cap()):
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=self._fake_run_at_cap()):
             result = compose_tools.compose_email(
                 account="Work",
                 to="x@example.com",

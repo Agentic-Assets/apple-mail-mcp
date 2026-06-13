@@ -19,7 +19,8 @@ Tool/CLI work: delegate to subagents for implementation; use **`plugin-dev:plugi
 | `cli.py` | `apple-mail` subcommands (search, inbox, draft, smoke-test, quick-check, …) |
 | `__main__.py` | MCP stdio entry, orphan watcher (python-sdk#526), read-only tool removal |
 | `__init__.py` | Side-effect imports of six `tools/` modules; `UI_AVAILABLE` flag |
-| `constants.py` | Shared patterns (`SKIP_FOLDERS`, newsletter detection, `TIME_RANGES`) |
+| `constants.py` | Shared patterns (`SKIP_FOLDERS`, newsletter detection, `TIME_RANGES`, `SCAN_BOUNDS`) |
+| `bounded_scan.py` | `ScanWindow` tokens, `compute_scan_upper_bound`, safe AppleScript builders |
 
 ## `tools/` subfolder
 
