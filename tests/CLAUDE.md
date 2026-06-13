@@ -25,9 +25,22 @@ Autouse fixture `_pass_through_known_test_accounts` patches `validate_account_na
 
 ## Test files
 
-`test_bulk_helpers` · `test_mail_search_tools` · `test_inbox_tools` · `test_compose_tools` · `test_modernization_3_1_5` · `test_phase_a_fixes` · `test_phase_2_scan_hardening` · `test_get_inbox_overview_json` · `test_get_statistics_json` · `test_read_only_registry` · `test_cli` · `test_cli_perf` · `test_wrapper_surface` · `test_orphan_watcher` · `test_validate_manifests` · `test_full_inbox_export` · `test_replied_detection` · `test_scalability_24k`
+**40 test modules** on disk; discover via `pytest tests/ --collect-only -q`.
 
-**v3.2.0 contract suite** (capability-token + unbounded-scan refusal — keep green before any release): `test_bounded_scan_contract` · `test_no_unbounded_whose` · `test_full_inbox_export`.
+**Core suites by domain:**
+
+- **Inbox tools**: `test_inbox_tools`, `test_inbox_typed_kwargs`, `test_get_inbox_overview_json`
+- **Search**: `test_mail_search_tools`, `test_search_escaping`, `test_no_unbounded_whose`
+- **Compose**: `test_compose_tools`, `test_compose_security`, `test_compose_none_handling`
+- **Analytics**: `test_get_statistics_json`, `test_analytics_resource_safety`
+- **Registry/CLI**: `test_read_only_registry`, `test_cli`, `test_cli_perf`
+- **Contracts & hardening**: `test_bounded_scan_contract`, `test_contracts_*.py` (inbox, search, smart_inbox), `test_tier*_hardening_*.py`
+- **Phase fixes**: `test_phase_a_fixes`, `test_phase_2_scan_hardening`, `test_phase_*_regression`
+- **Infrastructure**: `test_orphan_watcher`, `test_validate_manifests`, `test_wrapper_surface`, `test_bulk_helpers`
+- **Scale/regression**: `test_scalability_24k`, `test_gmail_unread_crash_regression`
+- **Property-based (under `tests/property/`)**: `test_escape_applescript_properties`, `test_validate_account_name_properties`
+
+**v3.2.0 contract suite** (capability-token + unbounded-scan refusal — keep green before any release): `test_bounded_scan_contract`, `test_no_unbounded_whose`, `test_full_inbox_export`.
 
 ## CI vs live Mail
 
