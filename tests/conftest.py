@@ -32,6 +32,18 @@ def _pass_through_known_test_accounts(monkeypatch):
         lambda timeout=30: ["Work"],
     )
     monkeypatch.setattr(
+        "apple_mail_mcp.tools.search.list_mail_account_names",
+        lambda timeout=30: ["Work"],
+    )
+    monkeypatch.setattr(
+        "apple_mail_mcp.tools.manage.list_mail_account_names",
+        lambda timeout=30: ["Work"],
+    )
+    monkeypatch.setattr(
+        "apple_mail_mcp.tools.analytics.list_mail_account_names",
+        lambda timeout=30: ["Work"],
+    )
+    monkeypatch.setattr(
         "apple_mail_mcp.cli._mailbox_count",
         lambda account: 0,
     )

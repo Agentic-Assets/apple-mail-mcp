@@ -5,10 +5,10 @@ import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from apple_mail_mcp.core import AppleScriptTimeout
-
 from apple_mail_mcp.tools import analytics as analytics_tools
 from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools import inbox as inbox_tools
@@ -258,55 +258,36 @@ class ErrorPrefixTests(unittest.TestCase):
 
 
 class ValidateSavePathTests(unittest.TestCase):
-    @staticmethod
-    def _expanduser_factory(home: str):
-        resolved_home = os.path.realpath(home)
-
-        def fake_expanduser(path: str) -> str:
-            if path == "~":
-                return resolved_home
-            if path.startswith("~/"):
-                return os.path.join(resolved_home, path[2:])
-            return path
-
-        return fake_expanduser
-
     def test_validate_save_path_accepts_home_subdirectory(self):
         with tempfile.TemporaryDirectory() as home:
-            target = os.path.join(home, "Desktop")
-            os.makedirs(target)
-            with patch(
-                "apple_mail_mcp.core.os.path.expanduser",
-                side_effect=self._expanduser_factory(home),
-            ):
+            home_path = Path(home)
+            target = home_path / "Desktop"
+            target.mkdir()
+            with patch("apple_mail_mcp.core.Path.home", return_value=home_path):
                 from apple_mail_mcp.core import validate_save_path
 
-                self.assertIsNone(validate_save_path(target))
+                self.assertIsNone(validate_save_path(str(target)))
 
     def test_validate_save_path_rejects_outside_home(self):
-        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as outside:
-            with patch(
-                "apple_mail_mcp.core.os.path.expanduser",
-                side_effect=self._expanduser_factory(home),
-            ):
-                from apple_mail_mcp.core import validate_save_path
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as outside, patch(
+            "apple_mail_mcp.core.Path.home", return_value=Path(home)
+        ):
+            from apple_mail_mcp.core import validate_save_path
 
-                err = validate_save_path(outside)
-                self.assertIsNotNone(err)
-                self.assertIn("home directory", err)
+            err = validate_save_path(outside)
+            self.assertIsNotNone(err)
+            self.assertIn("home directory", err)
 
     def test_validate_save_path_rejects_sensitive_directory(self):
         with tempfile.TemporaryDirectory() as home:
-            ssh_dir = os.path.join(home, ".ssh")
-            os.makedirs(ssh_dir)
-            target = os.path.join(ssh_dir, "id_rsa")
-            with patch(
-                "apple_mail_mcp.core.os.path.expanduser",
-                side_effect=self._expanduser_factory(home),
-            ):
+            home_path = Path(home)
+            ssh_dir = home_path / ".ssh"
+            ssh_dir.mkdir()
+            target = ssh_dir / "id_rsa"
+            with patch("apple_mail_mcp.core.Path.home", return_value=home_path):
                 from apple_mail_mcp.core import validate_save_path
 
-                err = validate_save_path(target)
+                err = validate_save_path(str(target))
                 self.assertIsNotNone(err)
                 self.assertIn("sensitive directory", err)
                 self.assertIn(".ssh", err)
