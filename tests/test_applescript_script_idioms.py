@@ -185,6 +185,8 @@ class NeedsResponseInboxScriptIdiomsTests(unittest.TestCase):
     def test_emits_MSG_protocol_in_script(self):
         script = self._build()
         self.assertIn('"MSG|||"', script)
+        self.assertIn("set mailAppId to id of aMessage as string", script)
+        self.assertIn('" & mailAppId & "|||" & inboxMessageId', script)
 
     def test_does_not_contain_broken_header_value_idiom(self):
         """Regression guard: needs_response should never use the broken form."""
@@ -367,21 +369,23 @@ class ParseNeedsResponseRowsAdditionalEdgeCasesTests(unittest.TestCase):
     """Additional edge cases not covered by test_smart_inbox_json.py."""
 
     def test_boolean_fields_true_parsed_correctly(self):
-        raw = "MSG|||<x@x.com>|||S|||u@x.com|||2026-05-20|||true|||true"
+        raw = "MSG|||601|||<x@x.com>|||S|||u@x.com|||2026-05-20|||true|||true"
         rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].message_id, "601")
+        self.assertEqual(rows[0].internet_message_id, "<x@x.com>")
         self.assertTrue(rows[0].is_flagged)
         self.assertTrue(rows[0].has_question)
 
     def test_boolean_fields_false_parsed_correctly(self):
-        raw = "MSG|||<x@x.com>|||S|||u@x.com|||2026-05-20|||false|||false"
+        raw = "MSG|||602|||<x@x.com>|||S|||u@x.com|||2026-05-20|||false|||false"
         rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
         self.assertFalse(rows[0].is_flagged)
         self.assertFalse(rows[0].has_question)
 
     def test_boolean_field_with_surrounding_whitespace(self):
         """AppleScript may emit ' true' or 'true '; strip() is applied."""
-        raw = "MSG|||<x@x.com>|||S|||u@x.com|||2026-05-20||| true ||| false "
+        raw = "MSG|||603|||<x@x.com>|||S|||u@x.com|||2026-05-20||| true ||| false "
         rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0].is_flagged)
@@ -400,13 +404,14 @@ class ParseNeedsResponseRowsAdditionalEdgeCasesTests(unittest.TestCase):
         emits an empty string.  The parser must pass that through so Python
         skips replied-detection for this message (not crash).
 
-        MSG row schema: MSG|||message_id|||subject|||sender|||date|||flagged|||question
-        An empty message_id produces: MSG|||||subject|||sender|||date|||f|||f
+        MSG row schema: MSG|||message_id|||internet_message_id|||subject|||sender|||date|||flagged|||question
+        An empty internet_message_id produces: MSG|||604||||||subject|||sender|||date|||f|||f
         """
-        raw = "MSG||||||No-ID subject|||sender@x.com|||2026-05-20|||false|||false"
+        raw = "MSG|||604||||||No-ID subject|||sender@x.com|||2026-05-20|||false|||false"
         rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].message_id, "")
+        self.assertEqual(rows[0].message_id, "604")
+        self.assertEqual(rows[0].internet_message_id, "")
         self.assertEqual(rows[0].subject, "No-ID subject")
 
 

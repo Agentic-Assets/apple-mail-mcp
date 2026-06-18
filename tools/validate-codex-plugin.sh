@@ -6,12 +6,14 @@ cd "$ROOT"
 
 SMOKE_PYTHON="${APPLE_MAIL_MCP_SMOKE_PYTHON:-$ROOT/.venv/bin/python}"
 REQUIRED_TOOLS=(
+  get_email_source
   reply_to_email
   compose_email
   manage_drafts
   list_accounts
   get_inbox_overview
 )
+EXPECTED_TOOL_COUNT="$(rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l | tr -d ' ')"
 SMOKE_TOOL_ARGS=()
 for tool_name in "${REQUIRED_TOOLS[@]}"; do
   SMOKE_TOOL_ARGS+=(--required-tool "$tool_name")
@@ -41,7 +43,7 @@ trap 'rm -rf "$TMP_HOME"' EXIT
   --arg "$ROOT/plugin/start_mcp.sh" \
   --arg=--draft-safe \
   --cwd "$ROOT" \
-  --expect-count 28 \
+  --expect-count "$EXPECTED_TOOL_COUNT" \
   "${SMOKE_TOOL_ARGS[@]}"
 
 export CODEX_HOME="$TMP_HOME"
@@ -56,7 +58,7 @@ codex mcp get apple-mail --json > "$SERVER_JSON"
 "$SMOKE_PYTHON" tools/mcp_tool_smoke.py \
   --server-json "$SERVER_JSON" \
   --reject-literal '${CLAUDE_PLUGIN_ROOT}' \
-  --expect-count 28 \
+  --expect-count "$EXPECTED_TOOL_COUNT" \
   "${SMOKE_TOOL_ARGS[@]}"
 
 echo "Codex plugin install + MCP runtime smoke OK"

@@ -24,9 +24,9 @@ class GetNeedsResponseTextOutputTests(unittest.TestCase):
 
     def test_text_mode_renders_high_and_normal_sections(self):
         inbox_raw = (
-            "MSG|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
-            "MSG|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
-            "MSG|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||101|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
+            "MSG|||102|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
+            "MSG|||103|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
         )
 
         with patch(
@@ -60,9 +60,9 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
 
     def test_json_mode_returns_dict_with_expected_keys(self):
         inbox_raw = (
-            "MSG|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
-            "MSG|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
-            "MSG|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||101|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
+            "MSG|||102|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
+            "MSG|||103|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
         )
         with patch(
             "apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=inbox_raw
@@ -92,15 +92,18 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
             self.assertIn("priority", entry)
             self.assertIn("already_replied", entry)
             self.assertIn("message_id", entry)
+            self.assertIn("internet_message_id", entry)
             self.assertFalse(entry["already_replied"])
+        self.assertEqual(result["high_priority"][0]["message_id"], "101")
+        self.assertEqual(result["high_priority"][0]["internet_message_id"], "<flagged-1@example.com>")
         self.assertEqual(result["skipped_replied_count"], 0)
         self.assertEqual(result["errors"], [])
 
     def test_json_mode_marks_already_replied_when_replied_set_matches(self):
         # Two inbox candidates; the second was already replied to.
         inbox_raw = (
-            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
-            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||201|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||202|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
         )
         replied_raw = "<replied-1@example.com>"
         sequence = [inbox_raw, replied_raw]
@@ -128,11 +131,13 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
         # The already-replied entry gets the [ALREADY REPLIED] prefix on its priority.
         replied_entry = next(e for e in all_entries if e["subject"] == "Old thread")
         self.assertIn("[ALREADY REPLIED]", replied_entry["priority"])
+        self.assertEqual(replied_entry["message_id"], "202")
+        self.assertEqual(replied_entry["internet_message_id"], "<replied-1@example.com>")
 
     def test_json_mode_skips_replied_when_include_replied_false(self):
         inbox_raw = (
-            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
-            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||301|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||302|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
         )
         replied_raw = "<replied-1@example.com>"
         sequence = [inbox_raw, replied_raw]
@@ -192,7 +197,7 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
     def test_json_mode_respects_max_results_cap(self):
         # Five candidates, all normal priority. max_results=2 must trim.
         inbox_raw = "\n".join(
-            f"MSG|||<m{i}@example.com>|||Subj {i}|||u{i}@example.com|||2026-05-{20 - i:02d}|||false|||false"
+            f"MSG|||{400 + i}|||<m{i}@example.com>|||Subj {i}|||u{i}@example.com|||2026-05-{20 - i:02d}|||false|||false"
             for i in range(5)
         )
         with patch(
@@ -332,20 +337,22 @@ class NeedsResponseRowParsingTests(unittest.TestCase):
 
     def test_parser_skips_malformed_lines(self):
         raw = (
-            "MSG|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||501|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false\n"
             "MSG|||not-enough-fields\n"
-            "MSG|||<b@example.com>|||Another|||bob@example.com|||2026-05-19|||true|||true"
+            "MSG|||502|||<b@example.com>|||Another|||bob@example.com|||2026-05-19|||true|||true"
         )
         rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
         subjects = [r.subject for r in rows]
         self.assertEqual(subjects, ["Good", "Another"])
+        self.assertEqual(rows[0].message_id, "501")
+        self.assertEqual(rows[0].internet_message_id, "<a@example.com>")
         self.assertTrue(rows[1].is_flagged)
         self.assertTrue(rows[1].has_question)
 
     def test_parser_ignores_non_msg_prefixed_lines(self):
         raw = (
             "ERROR|||not for us\n"
-            "MSG|||<a@example.com>|||S|||u@example.com|||2026|||false|||false\n"
+            "MSG|||503|||<a@example.com>|||S|||u@example.com|||2026|||false|||false\n"
             "random noise"
         )
         rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)

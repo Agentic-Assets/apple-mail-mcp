@@ -1,8 +1,8 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.7.1",
-  "description": "Natural language interface for Apple Mail with 28 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, full-inbox export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
+  "version": "3.7.2",
+  "description": "Natural language interface for Apple Mail with 29 tools — email search, raw source retrieval, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, attachments, Mail rules advising, full-inbox export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
   },
@@ -115,7 +115,11 @@
     },
     {
       "name": "get_email_by_id",
-      "description": "Fetch one exact email by the Apple Mail message id returned from search results. Use after search_emails when you need full body or stable metadata without another broad subject search."
+      "description": "Fetch one exact email by the Apple Mail message id returned from search results. Use after search_emails when you need full body content or stable metadata without another broad subject search."
+    },
+    {
+      "name": "get_email_source",
+      "description": "Fetch raw RFC 822/MIME source for one exact email by numeric Apple Mail message id. Use when original headers, MIME boundaries, href URLs, or faithful archive bytes are needed beyond rendered body text."
     },
     {
       "name": "get_email_thread",

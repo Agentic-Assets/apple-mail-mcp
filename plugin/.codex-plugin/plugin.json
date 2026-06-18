@@ -1,7 +1,7 @@
 {
   "name": "apple-mail",
-  "version": "3.7.1",
-  "description": "Natural language interface for Apple Mail -- search, compose, triage, organize, and analyze email with 28 MCP tools plus bundled workflow skills.",
+  "version": "3.7.2",
+  "description": "Natural language interface for Apple Mail -- search, compose, triage, organize, and analyze email with 29 MCP tools plus bundled workflow skills.",
   "author": {
     "name": "Agentic Assets",
     "url": "https://github.com/Agentic-Assets"

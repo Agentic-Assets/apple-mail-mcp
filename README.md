@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **822 tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **29 tools**, **831 tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -45,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (28 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
+One install — MCP server (29 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -148,16 +148,16 @@ Prefer `--scope user` for personal machine setup. Project-scope marketplace
 entries can write an absolute local path into `.claude/settings.json`, which is
 usually not what you want to commit.
 
-`claude plugin details apple-mail@apple-mail-mcp` should report version `3.7.1`
+`claude plugin details apple-mail@apple-mail-mcp` should report version `3.7.2`
 and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
 replace the path below if the details output shows a different install path:
 
 ```bash
 .venv/bin/python tools/mcp_tool_smoke.py \
   --command /bin/bash \
-  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
+  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.2/start_mcp.sh" \
   --arg=--draft-safe \
-  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1" \
+  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.2" \
   --expect-count 28 \
   --required-tool reply_to_email \
   --required-tool compose_email \
@@ -295,7 +295,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 
 </details>
 
-## Tools (28)
+## Tools (29)
 
 ### Reading & Search
 | Tool | Description |
@@ -306,7 +306,8 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `list_accounts` | List all configured Mail accounts |
 | `list_account_addresses` | List sender aliases configured for a Mail account |
 | `search_emails` | Unified search — subject, sender, body, dates, attachments. Defaults to last 48h and the default account |
-| `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results |
+| `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results, including full bounded `content` in JSON when requested |
+| `get_email_source` | Fetch raw RFC 822/MIME source by exact Apple Mail message id for original headers, MIME parts, and href URLs |
 | `get_email_thread` | Conversation thread view across Inbox + Sent; prefer `message_id` from search/list results |
 
 ### Organization
@@ -325,7 +326,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
 | `reply_to_email` | Native Mail reply or reply-all draft with Mail-generated quoted thread context; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
-| `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
+| `manage_drafts` | Create, bounded-list, send, open, and delete drafts; exact `draft_id` is preferred for send/open/delete, and standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
@@ -383,7 +384,7 @@ Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows a
 
 In draft-safe mode:
 
-- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies verify the saved draft in a bounded newest-Drafts check before reporting success
+- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies report and verify the exact saved Draft ID before reporting success
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
 - reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
@@ -606,7 +607,7 @@ apple-mail-mcp/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
-│   ├── apple_mail_mcp/        # Python MCP server package (28 tools)
+│   ├── apple_mail_mcp/        # Python MCP server package (29 tools)
 │   ├── apple_mail_mcp.py      # Entry point
 │   ├── start_mcp.sh           # Startup wrapper (auto-creates venv)
 │   └── requirements.txt

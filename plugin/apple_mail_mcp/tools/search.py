@@ -98,7 +98,7 @@ def _parse_search_records(
             mb, _, msg = tail.partition("|||")
             mailbox_errors.append({"mailbox": mb.strip(), "message": msg.strip()})
             continue
-        parts = line.split("|||", 13)
+        parts = line.split("|||", 14)
         if len(parts) < 8:
             continue
 
@@ -127,6 +127,7 @@ def _parse_search_records(
             (11, "in_reply_to"),
             (12, "references"),
             (13, "bcc"),
+            (14, "content"),
         )
         for idx, key in optional_fields:
             if len(parts) > idx and parts[idx].strip():
@@ -1364,6 +1365,7 @@ def _fetch_email_record_by_id(
                 set mailboxName to my sanitize_field(name of targetMailbox)
                 set accountName to my sanitize_field(name of targetAccount)
                 set contentPreview to ""
+                set contentValue to ""
 
                 if {str(include_content).lower()} then
                     try
@@ -1374,9 +1376,11 @@ def _fetch_email_record_by_id(
                         set cleanText to contentParts as string
                         set AppleScript's text item delimiters to ""
                         if {max_content_length} > 0 and length of cleanText > {max_content_length} then
-                            set contentPreview to my sanitize_field(text 1 thru {max_content_length} of cleanText & "...")
+                            set contentValue to my sanitize_field(text 1 thru {max_content_length} of cleanText)
+                            set contentPreview to my sanitize_field(contentValue & "...")
                         else
-                            set contentPreview to my sanitize_field(cleanText)
+                            set contentValue to my sanitize_field(cleanText)
+                            set contentPreview to contentValue
                         end if
                     end try
                 end if
@@ -1453,7 +1457,7 @@ def _fetch_email_record_by_id(
                     set bccRecips to ""
                 end try
 
-                return messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips
+                return messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips & "|||" & contentValue
             on error errMsg
                 return "ERROR|||" & errMsg
             end try
@@ -1468,7 +1472,7 @@ def _fetch_email_record_by_id(
     records, _mb_errors = _parse_search_records(result)
     item = records[0] if records else None
     if item is not None and include_content:
-        preview = item.get("content_preview", "") or ""
+        preview = item.get("content") or item.get("content_preview", "") or ""
         has_quoted = bool(
             re.search(r"On .+wrote:", preview, re.DOTALL)
             or re.search(r"(?m)^>", preview)
@@ -1561,6 +1565,148 @@ def get_email_by_id(
     if item is None:
         return f"Error: No email found for message_id={numeric_id} in {mailbox}"
     return _format_search_records_text([item])
+
+
+def _fetch_email_source_by_id(
+    account: str,
+    numeric_id: str,
+    mailbox: str = "INBOX",
+    timeout: int | None = None,
+) -> str | None:
+    """Fetch raw RFC 822/MIME source for one normalized numeric Mail id."""
+    safe_account = escape_applescript(account)
+    effective_timeout = timeout if timeout is not None else 120
+
+    script = f'''
+    tell application "Mail"
+        with timeout of {effective_timeout} seconds
+            try
+                set targetAccount to account "{safe_account}"
+                {build_mailbox_ref(mailbox, var_name="targetMailbox")}
+                set targetMessages to every message of targetMailbox whose id is {numeric_id}
+
+                if (count of targetMessages) is 0 then
+                    return ""
+                end if
+
+                set aMessage to item 1 of targetMessages
+                return source of aMessage
+            on error errMsg
+                return "ERROR|||" & errMsg
+            end try
+        end timeout
+    end tell
+    '''
+
+    result = run_applescript(script, timeout=effective_timeout)
+    if result.startswith("ERROR|||"):
+        raise ValueError(result.split("|||", 1)[1])
+    return result or None
+
+
+@mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@inject_preferences
+def get_email_source(
+    account: str,
+    message_id: str,
+    mailbox: str = "INBOX",
+    output_format: str = "text",
+    timeout: int | None = None,
+) -> str:
+    """
+    Fetch raw RFC 822/MIME source for one email by exact Apple Mail message id.
+
+    Use this when headers, MIME boundaries, original links, or raw body source
+    are needed beyond the normalized fields returned by ``get_email_by_id``.
+    The lookup uses Mail's numeric ``id`` property only, never subject search.
+
+    Args:
+        account: Account name to search in (e.g., "Gmail", "Work").
+        message_id: Exact numeric Apple Mail message id returned by search tools.
+        mailbox: Mailbox to search in (default: "INBOX").
+        output_format: Output format: "text" or "json" (default: "text").
+        timeout: Optional AppleScript timeout in seconds (default: 120s).
+
+    Returns:
+        Raw message source as text, or JSON with account, mailbox, message_id,
+        and source. If no message is found, JSON returns ``source: null``.
+    """
+    if output_format not in {"text", "json"}:
+        return "Error: Invalid output_format. Use: text, json"
+
+    validation_timeout = 30 if timeout is None else min(timeout, 30)
+    account_err = validate_account_name(account, timeout=validation_timeout)
+    if account_err:
+        if output_format == "json":
+            return account_not_found_json(account, timeout=validation_timeout)
+        return account_err
+
+    normalized_ids = normalize_message_ids([message_id])
+    if not normalized_ids:
+        if output_format == "json":
+            return json.dumps(
+                {
+                    "error": "message_id must be a numeric Apple Mail message id",
+                    "account": account,
+                    "mailbox": mailbox,
+                    "message_id": message_id,
+                    "source": None,
+                }
+            )
+        return "Error: message_id must be a numeric Apple Mail message id"
+
+    numeric_id = normalized_ids[0]
+    effective_timeout = timeout if timeout is not None else 120
+
+    try:
+        source = _fetch_email_source_by_id(
+            account=account,
+            numeric_id=numeric_id,
+            mailbox=mailbox,
+            timeout=effective_timeout,
+        )
+    except AppleScriptTimeout:
+        message = (
+            f"AppleScript timed out while fetching source for message_id={numeric_id} "
+            f"on account {account!r}. Try again or pass a larger `timeout`."
+        )
+        if output_format == "json":
+            return json.dumps(
+                {
+                    "error": message,
+                    "account": account,
+                    "mailbox": mailbox,
+                    "message_id": numeric_id,
+                    "source": None,
+                }
+            )
+        return f"Error: {message}"
+    except ValueError as exc:
+        if output_format == "json":
+            return json.dumps(
+                {
+                    "error": str(exc),
+                    "account": account,
+                    "mailbox": mailbox,
+                    "message_id": numeric_id,
+                    "source": None,
+                }
+            )
+        return f"Error: {exc}"
+
+    if output_format == "json":
+        return json.dumps(
+            {
+                "account": account,
+                "mailbox": mailbox,
+                "message_id": numeric_id,
+                "source": source,
+            }
+        )
+
+    if source is None:
+        return f"Error: No email found for message_id={numeric_id} in {mailbox}"
+    return source
 
 
 def _thread_strip_prefixes_handler() -> str:

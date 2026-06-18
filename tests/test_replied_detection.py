@@ -97,10 +97,11 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
         self.assertNotIn("sentMailbox", captured["scripts"][0])
 
     def test_include_already_replied_false_skips_replied_emails(self):
-        # Schema: MSG|||message_id|||subject|||sender|||date|||is_flagged|||has_question
+        # Schema:
+        # MSG|||message_id|||internet_message_id|||subject|||sender|||date|||is_flagged|||has_question
         inbox_raw = (
-            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
-            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||501|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||502|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
         )
         replied_raw = "<replied-1@example.com>"
         sequence = [inbox_raw, replied_raw]
@@ -130,8 +131,8 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
 
     def test_include_already_replied_true_keeps_and_annotates(self):
         inbox_raw = (
-            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
-            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||601|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||602|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
         )
         replied_raw = "<replied-1@example.com>"
         sequence = [inbox_raw, replied_raw]

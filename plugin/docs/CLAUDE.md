@@ -30,7 +30,7 @@ Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/v
 
 ## Subfolders
 
-- **`apple_mail_mcp/`** — Python package (source of truth for all 28 MCP tools)
+- **`apple_mail_mcp/`** — Python package (source of truth for all 29 MCP tools)
 - **`skills/`** — Procedural workflows (nine shipped workflow skills — see `skills/CLAUDE.md`)
 - **`ui/`** — Inbox dashboard HTML via `mcp-ui-server` (`dashboard.py`, `templates/`)
 

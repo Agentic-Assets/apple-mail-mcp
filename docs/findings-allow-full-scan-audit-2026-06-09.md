@@ -232,7 +232,7 @@ This is the **only** tool designed for whole-mailbox walks. No boolean opt-in on
 
 ---
 
-## Full tool inventory (28 tools) — scan sensitivity
+## Historical full tool inventory (28 tools at v3.7.1) — scan sensitivity
 
 | Tool | `allow_full_scan` (current) | Other scan gates | Full-mailbox risk |
 |------|----------------------------|------------------|-------------------|

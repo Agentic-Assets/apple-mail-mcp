@@ -16,7 +16,7 @@ from apple_mail_mcp.tools import (
     compose,  # noqa: F401  (5 tools)
     inbox,  # noqa: F401  (6 tools)
     manage,  # noqa: F401  (6 tools)
-    search,  # noqa: F401  (3 tools)
+    search,  # noqa: F401  (4 tools)
     smart_inbox,  # noqa: F401  (3 tools)
 )
 

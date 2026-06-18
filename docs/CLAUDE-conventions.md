@@ -131,7 +131,7 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 | Mode | Behavior | When agents should use it |
 |------|----------|---------------------------|
-| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. Native replies may briefly open a transient Mail compose window, then save, close, and verify the saved Drafts message before success. | Bulk drafting, background agent work, default under `--draft-safe` |
+| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. Native replies may briefly open a transient Mail compose window, then save, close, and verify the exact saved Draft ID before success. | Bulk drafting, background agent work, default under `--draft-safe` |
 | `open` | Save first, then leave the compose window open for human review | User wants each draft to pop up in Mail (e.g. review 10 replies in sequence) |
 | `send` | Send immediately | Explicit user authorization only; blocked when `DRAFT_SAFE` or `READ_ONLY` |
 

@@ -399,6 +399,47 @@ class SearchToolTests(unittest.TestCase):
         self.assertEqual(response["item"]["content_preview"], "Full body preview")
         self.assertIn("whose id is 12345", captured["script"])
 
+    def test_get_email_source_returns_raw_source_json(self):
+        captured = {}
+        raw_source = "From: sender@example.com\nMessage-ID: <abc@example.com>\n\nRaw body"
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            captured["timeout"] = timeout
+            return raw_source
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_source(
+                    account="Work",
+                    message_id="12345",
+                    output_format="json",
+                    timeout=77,
+                )
+            )
+
+        self.assertEqual(response["account"], "Work")
+        self.assertEqual(response["mailbox"], "INBOX")
+        self.assertEqual(response["message_id"], "12345")
+        self.assertEqual(response["source"], raw_source)
+        self.assertIn("source of aMessage", captured["script"])
+        self.assertIn("whose id is 12345", captured["script"])
+        self.assertEqual(captured["timeout"], 77)
+
+    def test_get_email_source_rejects_non_numeric_ids_without_applescript(self):
+        with patch("apple_mail_mcp.tools.search.run_applescript") as mock_run:
+            response = json.loads(
+                search_tools.get_email_source(
+                    account="Work",
+                    message_id="not-an-id",
+                    output_format="json",
+                )
+            )
+
+        self.assertIn("numeric Apple Mail message id", response["error"])
+        self.assertIsNone(response["source"])
+        mock_run.assert_not_called()
+
     def test_get_email_by_id_rejects_non_numeric_ids(self):
         result = search_tools.get_email_by_id(
             account="Work",
@@ -1242,6 +1283,7 @@ class NewFieldsTests(unittest.TestCase):
         in_reply_to: str = "",
         references: str = "",
         bcc: str = "",
+        content: str = "",
     ) -> str:
         parts = [
             str(message_id),
@@ -1258,6 +1300,7 @@ class NewFieldsTests(unittest.TestCase):
             in_reply_to,
             references,
             bcc,
+            content,
         ]
         return "|||".join(parts)
 
@@ -1292,6 +1335,33 @@ class NewFieldsTests(unittest.TestCase):
         self.assertEqual(item["in_reply_to"], "<orig@example.com>")
         self.assertEqual(item["references"], "<orig@example.com>")
         self.assertNotIn("bcc", item)  # bcc was empty
+
+    def test_get_email_by_id_json_includes_content_and_preview(self):
+        """JSON keeps content_preview compatibility and adds full content."""
+        line = self._record_line_14(
+            12345,
+            "Full Body",
+            content_preview="Full body conte...",
+            content="Full body content",
+        )
+
+        def fake_run(script, timeout=120):
+            return line
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_by_id(
+                    account="Work",
+                    message_id="12345",
+                    include_content=True,
+                    max_content_length=17,
+                    output_format="json",
+                )
+            )
+
+        item = response["item"]
+        self.assertEqual(item["content"], "Full body content")
+        self.assertEqual(item["content_preview"], "Full body conte...")
 
     def test_get_email_by_id_script_contains_all_headers(self):
         """The generated AppleScript must read `all headers of aMessage`

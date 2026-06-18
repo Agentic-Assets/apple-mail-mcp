@@ -22,6 +22,7 @@ READ_ONLY_TOOLS = {
     "get_inbox_overview",
     "search_emails",
     "get_email_by_id",
+    "get_email_source",
     "get_email_thread",
     "get_awaiting_reply",
     "get_needs_response",

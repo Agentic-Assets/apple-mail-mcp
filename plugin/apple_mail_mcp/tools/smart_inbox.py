@@ -481,7 +481,8 @@ def get_awaiting_reply(
 class _NeedsResponseRow:
     """Structured per-message candidate emitted by the inbox script."""
 
-    message_id: str  # Internet Message-ID (or "" when missing)
+    message_id: str  # Numeric Apple Mail id (or "" when missing)
+    internet_message_id: str  # Internet Message-ID (or "" when missing)
     subject: str
     sender: str
     date_str: str
@@ -492,7 +493,7 @@ class _NeedsResponseRow:
 def _parse_needs_response_inbox_rows(raw: str) -> list[_NeedsResponseRow]:
     """Parse ``MSG|||...`` lines into ``_NeedsResponseRow`` instances.
 
-    Schema: MSG|||message_id|||subject|||sender|||date_str|||is_flagged|||has_question
+    Schema: MSG|||message_id|||internet_message_id|||subject|||sender|||date_str|||is_flagged|||has_question
     Booleans are encoded as ``"true"`` / ``"false"``. Malformed rows are
     skipped silently so a single bad message can't poison the result.
     """
@@ -500,17 +501,18 @@ def _parse_needs_response_inbox_rows(raw: str) -> list[_NeedsResponseRow]:
     for line in raw.splitlines():
         if not line.startswith("MSG|||"):
             continue
-        parts = line.split("|||", 6)
-        if len(parts) != 7:
+        parts = line.split("|||", 7)
+        if len(parts) != 8:
             continue
         rows.append(
             _NeedsResponseRow(
                 message_id=parts[1],
-                subject=parts[2],
-                sender=parts[3],
-                date_str=parts[4],
-                is_flagged=parts[5].strip().lower() == "true",
-                has_question=parts[6].strip().lower() == "true",
+                internet_message_id=parts[2],
+                subject=parts[3],
+                sender=parts[4],
+                date_str=parts[5],
+                is_flagged=parts[6].strip().lower() == "true",
+                has_question=parts[7].strip().lower() == "true",
             )
         )
     return rows
@@ -553,8 +555,8 @@ def _classify_needs_response_rows(
         if len(high) + len(normal) >= max_results:
             break
         already_replied = False
-        if row.message_id and replied_ids:
-            already_replied = _normalize_message_id(row.message_id) in replied_ids
+        if row.internet_message_id and replied_ids:
+            already_replied = _normalize_message_id(row.internet_message_id) in replied_ids
 
         if already_replied and not include_already_replied:
             skipped += 1
@@ -572,6 +574,7 @@ def _classify_needs_response_rows(
             "priority": priority,
             "already_replied": already_replied,
             "message_id": row.message_id,
+            "internet_message_id": row.internet_message_id,
         }
         if row.has_question or row.is_flagged:
             high.append(entry)
@@ -709,6 +712,11 @@ def _build_needs_response_inbox_script(
                                 set isFlagged to flagged status of aMessage
                             end try
 
+                            set mailAppId to ""
+                            try
+                                set mailAppId to id of aMessage as string
+                            end try
+
                             -- Internet Message-ID may not be available on every
                             -- message; emit "" in that case so Python treats it
                             -- as never-replied.
@@ -725,7 +733,7 @@ def _build_needs_response_inbox_script(
                             set questionText to "false"
                             if hasQuestion then set questionText to "true"
 
-                            set end of outputLines to "MSG|||" & inboxMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText
+                            set end of outputLines to "MSG|||" & mailAppId & "|||" & inboxMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText
                             set emittedCount to emittedCount + 1
                         end if
                     end if

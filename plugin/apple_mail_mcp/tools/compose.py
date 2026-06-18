@@ -218,6 +218,34 @@ def _build_draft_lookup(subject_keyword: str) -> str:
     """
 
 
+def _build_draft_id_lookup(draft_id: str) -> tuple[str, str | None]:
+    """Build AppleScript to find one draft by exact numeric message id."""
+    normalized = normalize_message_ids([draft_id])
+    if not normalized:
+        return "", "Error: 'draft_id' must be a numeric Apple Mail message id."
+    numeric_id = normalized[0]
+    return (
+        f"""
+                set targetDrafts to every message of draftsMailbox whose id is {numeric_id}
+                set foundDraft to missing value
+                if (count of targetDrafts) > 0 then
+                    set foundDraft to item 1 of targetDrafts
+                end if
+        """,
+        None,
+    )
+
+
+def _build_manage_draft_lookup(draft_subject: str | None, draft_id: str | None) -> tuple[str, str, str | None]:
+    """Return lookup snippet, not-found label, and optional validation error."""
+    if draft_id:
+        lookup, error = _build_draft_id_lookup(draft_id)
+        return lookup, f"draft_id={draft_id}", error
+    if not draft_subject:
+        return "", "", "Error: 'draft_subject' or 'draft_id' is required for this action"
+    return _build_draft_lookup(draft_subject), f"matching: {escape_applescript(draft_subject)}", None
+
+
 def _resolve_account(account: str | None, timeout: int | None = None) -> tuple[str | None, str | None]:
     """Resolve an account argument against ``DEFAULT_MAIL_ACCOUNT``.
 
@@ -254,6 +282,15 @@ def _compose_signature_script(message_var: str, signature_name: str | None) -> s
         return ""
     safe_signature = escape_applescript(signature_name)
     return f'set message signature of {message_var} to signature "{safe_signature}"'
+
+
+def _clear_signature_script(message_var: str) -> str:
+    """AppleScript fragment that asks Mail to remove the native signature."""
+    return f"""
+        try
+            set message signature of {message_var} to missing value
+        end try
+    """
 
 
 def _validate_signature_name(signature_name: str | None, timeout: int | None = None) -> str | None:
@@ -321,13 +358,16 @@ def _first_non_empty_line(value: str, *, max_chars: int = 500) -> str:
 
 def _verify_saved_reply_draft(
     account: str,
-    reply_subject: str,
+    draft_id: str,
     reply_body: str,
     timeout: int | None = None,
 ) -> bool:
-    """Confirm a native reply draft appears in a bounded newest Drafts window."""
+    """Confirm a native reply draft exists by exact id and contains the body."""
+    normalized = normalize_message_ids([draft_id])
+    if not normalized:
+        return False
+    numeric_id = normalized[0]
     safe_account = escape_applescript(account)
-    safe_reply_subject = escape_applescript(reply_subject)
     safe_body_needle = escape_applescript(_first_non_empty_line(reply_body))
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
     script = f'''
@@ -339,30 +379,17 @@ def _verify_saved_reply_draft(
         repeat with verifyAttempt from 1 to 8
             try
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                set totalDrafts to count of messages of draftsMailbox
-                set headEnd to totalDrafts
-                if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
-                if headEnd > 0 then
-                    set candidateDrafts to messages 1 thru headEnd of draftsMailbox
-                    repeat with draftMessage in candidateDrafts
+                set matchingDrafts to every message of draftsMailbox whose id is {numeric_id}
+                if (count of matchingDrafts) > 0 then
+                    set draftMessage to item 1 of matchingDrafts
+                    if replyBodyNeedle is "" then
+                        set replyDraftVerified to true
+                    else
                         try
-                            set draftMatched to false
-                            set draftSubject to subject of draftMessage as string
-                            if draftSubject is "{safe_reply_subject}" then
-                                if replyBodyNeedle is "" then
-                                    set draftMatched to true
-                                else
-                                    set draftContent to content of draftMessage as string
-                                    if draftContent contains replyBodyNeedle then set draftMatched to true
-                                end if
-                            end if
-
-                            if draftMatched then
-                                set replyDraftVerified to true
-                                exit repeat
-                            end if
+                            set draftContent to content of draftMessage as string
+                            if draftContent contains replyBodyNeedle then set replyDraftVerified to true
                         end try
-                    end repeat
+                    end if
                 end if
             end try
             if replyDraftVerified then exit repeat
@@ -1228,6 +1255,10 @@ def reply_to_email(
         post_action = """
         save replyMessage
         delay 0.8
+        set savedDraftId to ""
+        try
+            set savedDraftId to (id of replyMessage) as string
+        end try
         activate
         """
         success_text = "Reply opened in Mail for review. Edit and send when ready."
@@ -1236,16 +1267,16 @@ def reply_to_email(
         post_action = """
         save replyMessage
         delay 1.0
+        set savedDraftId to ""
         try
-            close (window of replyMessage) saving yes
+            set savedDraftId to (id of replyMessage) as string
+        end try
+        try
+            close (window of replyMessage) saving no
         on error
             try
-                close front window saving yes
+                close front window saving no
             end try
-        end try
-        delay 0.5
-        try
-            save replyMessage
         end try
         """
         success_text = "Reply saved as draft!"
@@ -1253,7 +1284,11 @@ def reply_to_email(
     cleanup_script = f'do shell script "rm -f " & quoted form of "{body_temp_path}"'
 
     sender_script = _compose_sender_script("replyMessage", "targetAccount", sender_override)
-    signature_script = _compose_signature_script("replyMessage", resolved_signature_name)
+    signature_script = (
+        _compose_signature_script("replyMessage", resolved_signature_name)
+        if include_signature
+        else _clear_signature_script("replyMessage")
+    )
 
     open_clause = "with opening window"
     reply_all_clause = " and reply to all" if reply_to_all else ""
@@ -1261,8 +1296,7 @@ def reply_to_email(
     script = f'''
 tell application "Mail"
     set outputText to "{header_text}" & return & return
-    set hadClipboard to false
-    set savedClipboard to missing value
+    set savedDraftId to ""
 
     try
         set targetAccount to account "{safe_account}"
@@ -1290,19 +1324,15 @@ tell application "Mail"
 
         if replyBodyText is not "" then
             try
-                set savedClipboard to the clipboard
-                set hadClipboard to true
+                set nativeReplyContent to content of replyMessage as string
+            on error
+                set nativeReplyContent to ""
             end try
-            set the clipboard to replyBodyText
-            activate
-            delay 0.2
-            tell application "System Events"
-                keystroke "v" using command down
-            end tell
-            delay 0.3
-            try
-                if hadClipboard then set the clipboard to savedClipboard
-            end try
+            if nativeReplyContent is "" then
+                set content of replyMessage to replyBodyText
+            else
+                set content of replyMessage to replyBodyText & return & return & nativeReplyContent
+            end if
         end if
 
         -- Optional extra recipients, on top of Mail's native reply recipients.
@@ -1317,6 +1347,9 @@ tell application "Mail"
         set outputText to outputText & "{success_text}" & return
         set outputText to outputText & "To: " & origSender & return
         set outputText to outputText & "Subject: " & replySubject & return
+        if savedDraftId is not "" then
+            set outputText to outputText & "Draft ID: " & savedDraftId & return
+        end if
     '''
 
     if cc:
@@ -1341,9 +1374,6 @@ tell application "Mail"
         return outputText
     on error errMsg
         try
-            if hadClipboard then set the clipboard to savedClipboard
-        end try
-        try
             {cleanup_script}
         end try
         return "Error: " & errMsg & return & "Please check that the account name is correct and the email exists."
@@ -1354,17 +1384,17 @@ tell application "Mail"
     try:
         result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
         if effective_mode in ("draft", "open") and success_text in result:
-            reply_subject = _extract_output_field(result, "Subject")
-            if not reply_subject or not _verify_saved_reply_draft(
+            draft_id = _extract_output_field(result, "Draft ID")
+            if not draft_id or not _verify_saved_reply_draft(
                 account,
-                reply_subject,
+                draft_id,
                 reply_body,
                 timeout=timeout,
             ):
                 mode_text = "opened" if effective_mode == "open" else "created"
                 return (
-                    f"Error: Reply draft was {mode_text}, but Mail did not verify it in the newest Drafts "
-                    "window. No email was sent. Please check Mail Drafts and retry after Mail finishes saving."
+                    f"Error: Reply draft was {mode_text}, but Mail did not verify its exact Draft ID. "
+                    "No email was sent. Please check Mail Drafts and retry after Mail finishes saving."
                 )
         return result
     except AppleScriptTimeout:
@@ -1898,6 +1928,8 @@ def manage_drafts(
     dry_run: bool = True,
     max_deletes: int = 20,
     subject_contains: str | None = None,
+    max_results: int = 20,
+    draft_id: str | None = None,
 ) -> str:
     """
     Manage draft emails - list, create, send, open, delete, or cleanup_empty drafts.
@@ -1916,6 +1948,8 @@ def manage_drafts(
         standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
         hide_empty: For action="list", skip drafts whose subject AND body are both blank (orphaned compose windows). Default False (show everything).
         subject_contains: For action="list", only show drafts whose subject contains this keyword (case-insensitive). This is the fast, reliable way to find a draft you just created — the list scans the newest drafts first and applies the filter in-loop (no date filter is added). Default None (show everything).
+        max_results: For action="list", maximum visible drafts to return. The scan stops after this many matches, including filtered subject_contains matches. Default 20; capped by the Drafts scan limit.
+        draft_id: Exact Apple Mail draft message id for action="send", "open", or "delete". Prefer this over draft_subject to avoid acting on the first same-subject match.
         dry_run: For action="cleanup_empty", when True (default) only previews which blank drafts would be removed without deleting. Set False to actually delete. Ignored by other actions.
         max_deletes: For action="cleanup_empty", maximum number of blank drafts to delete in one call (safety cap). Default 20. Ignored by other actions.
 
@@ -1936,6 +1970,9 @@ def manage_drafts(
     safe_account = escape_applescript(account)
 
     if action == "list":
+        if max_results < 1:
+            return "Error: 'max_results' must be >= 1 for listing drafts"
+        list_limit = min(max_results, DRAFT_LIST_CAP)
         hide_empty_flag = "true" if hide_empty else "false"
         # Optional case-insensitive subject filter — the fast, reliable way to
         # find a just-created draft. No date filter is added (new drafts have a
@@ -1952,6 +1989,7 @@ def manage_drafts(
         script = f'''
         tell application "Mail"
             set hideEmpty to {hide_empty_flag}
+            set maxResults to {list_limit}
             set draftLines to ""
             set shownCount to 0
 
@@ -1972,6 +2010,7 @@ def manage_drafts(
                 end if
 
                 repeat with aDraft in draftMessages
+                    if shownCount >= maxResults then exit repeat
                     try
                         set skipThisDraft to false
                         set draftSubject to subject of aDraft
@@ -2024,6 +2063,7 @@ def manage_drafts(
                                 set draftLines to draftLines & "   " & bodySnippet & return
                             end if
                             set draftLines to draftLines & return
+                            if shownCount >= maxResults then exit repeat
                         end if
                     end try
                 end repeat
@@ -2128,10 +2168,12 @@ def manage_drafts(
             return "Error: Sending drafts is disabled in read-only mode."
         if _server.DRAFT_SAFE:
             return "Error: Sending drafts is disabled in draft-safe mode."
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for sending drafts"
+        if not draft_subject and not draft_id:
+            return "Error: 'draft_subject' or 'draft_id' is required for sending drafts"
 
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, not_found_label, lookup_error = _build_manage_draft_lookup(draft_subject, draft_id)
+        if lookup_error:
+            return lookup_error
 
         script = f'''
         tell application "Mail"
@@ -2140,19 +2182,21 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set foundDraftId to (id of foundDraft) as string
 
                     -- Send the draft
                     send foundDraft
 
                     set outputText to outputText & "✓ Draft sent successfully!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & foundDraftId & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ No draft found {not_found_label}" & return
                 end if
 
             on error errMsg
@@ -2164,10 +2208,12 @@ def manage_drafts(
         '''
 
     elif action == "open":
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for opening drafts"
+        if not draft_subject and not draft_id:
+            return "Error: 'draft_subject' or 'draft_id' is required for opening drafts"
 
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, not_found_label, lookup_error = _build_manage_draft_lookup(draft_subject, draft_id)
+        if lookup_error:
+            return lookup_error
 
         script = f'''
         tell application "Mail"
@@ -2176,10 +2222,11 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set foundDraftId to (id of foundDraft) as string
 
                     -- Open the draft in a visible compose window
                     set draftWindow to open foundDraft
@@ -2187,10 +2234,11 @@ def manage_drafts(
 
                     set outputText to outputText & "✓ Draft opened in Mail for review!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & foundDraftId & return
                     set outputText to outputText & return & "Edit and send when ready." & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ No draft found {not_found_label}" & return
                 end if
 
             on error errMsg
@@ -2202,10 +2250,12 @@ def manage_drafts(
         '''
 
     elif action == "delete":
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for deleting drafts"
+        if not draft_subject and not draft_id:
+            return "Error: 'draft_subject' or 'draft_id' is required for deleting drafts"
 
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, not_found_label, lookup_error = _build_manage_draft_lookup(draft_subject, draft_id)
+        if lookup_error:
+            return lookup_error
 
         script = f'''
         tell application "Mail"
@@ -2214,19 +2264,21 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set foundDraftId to (id of foundDraft) as string
 
                     -- Delete the draft
                     delete foundDraft
 
                     set outputText to outputText & "✓ Draft deleted successfully!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & foundDraftId & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ No draft found {not_found_label}" & return
                 end if
 
             on error errMsg
