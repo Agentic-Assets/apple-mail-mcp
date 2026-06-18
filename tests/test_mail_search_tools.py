@@ -6,9 +6,9 @@ import unittest
 from unittest.mock import patch
 
 from apple_mail_mcp.core import AppleScriptTimeout
+from apple_mail_mcp.tools import inbox as inbox_tools
 from apple_mail_mcp.tools import manage as manage_tools
 from apple_mail_mcp.tools import search as search_tools
-from apple_mail_mcp.tools import inbox as inbox_tools
 
 
 def _record_line(
@@ -680,17 +680,16 @@ class SearchToolTests(unittest.TestCase):
 
         from apple_mail_mcp import server as _srv
 
-        with patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"):
-            with patch(
-                "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-            ):
-                _run(
-                    search_tools.search_emails(
-                        subject_keyword="Test",
-                        output_format="json",
-                        limit=5,
-                    )
+        with patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"), patch(
+            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
+        ):
+            _run(
+                search_tools.search_emails(
+                    subject_keyword="Test",
+                    output_format="json",
+                    limit=5,
                 )
+            )
 
         # Single-account fast path: only one AppleScript call, targeting "Work".
         self.assertEqual(len(captured["scripts"]), 1)
@@ -710,18 +709,17 @@ class SearchToolTests(unittest.TestCase):
 
         from apple_mail_mcp import server as _srv
 
-        with patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"):
-            with patch(
-                "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-            ):
-                _run(
-                    search_tools.search_emails(
-                        all_accounts=True,
-                        subject_keyword="Test",
-                        output_format="json",
-                        limit=5,
-                    )
+        with patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"), patch(
+            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
+        ):
+            _run(
+                search_tools.search_emails(
+                    all_accounts=True,
+                    subject_keyword="Test",
+                    output_format="json",
+                    limit=5,
                 )
+            )
 
         # 1 account-listing probe + 2 per-account dispatches.
         self.assertEqual(len(captured["scripts"]), 3)
@@ -748,19 +746,18 @@ class SearchToolTests(unittest.TestCase):
 
         with _clear_default_mail_account(), patch(
             "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
-            with patch(
-                "apple_mail_mcp.tools.search.asyncio.to_thread",
-                wraps=asyncio.to_thread,
-            ) as to_thread_spy:
-                _run(
-                    search_tools.search_emails(
-                        account=None,
-                        subject_keyword="X",
-                        output_format="json",
-                        limit=5,
-                    )
+        ), patch(
+            "apple_mail_mcp.tools.search.asyncio.to_thread",
+            wraps=asyncio.to_thread,
+        ) as to_thread_spy:
+            _run(
+                search_tools.search_emails(
+                    account=None,
+                    subject_keyword="X",
+                    output_format="json",
+                    limit=5,
                 )
+            )
 
         # 1 list-accounts dispatch + 3 per-account dispatches
         self.assertGreaterEqual(to_thread_spy.call_count, 4)
@@ -1362,6 +1359,66 @@ class NewFieldsTests(unittest.TestCase):
         item = response["item"]
         self.assertEqual(item["content"], "Full body content")
         self.assertEqual(item["content_preview"], "Full body conte...")
+        self.assertNotIn("warnings", item)
+
+    def test_get_email_by_id_json_warns_when_only_preview_is_available(self):
+        """JSON flags preview-only content while keeping legacy preview field."""
+        line = self._record_line_14(
+            12345,
+            "Preview Only",
+            content_preview="Preview text from Mail",
+            content="",
+        )
+
+        def fake_run(script, timeout=120):
+            return line
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_by_id(
+                    account="Work",
+                    message_id="12345",
+                    include_content=True,
+                    output_format="json",
+                )
+            )
+
+        item = response["item"]
+        self.assertEqual(item["content_preview"], "Preview text from Mail")
+        self.assertNotIn("content", item)
+        self.assertEqual(
+            item["warnings"],
+            [
+                {
+                    "code": "FULL_CONTENT_UNAVAILABLE",
+                    "message": "Full message content was unavailable; only content_preview text is present.",
+                }
+            ],
+        )
+
+    def test_get_email_by_id_json_does_not_warn_when_content_not_requested(self):
+        """Preview-only records are not content-fallback warnings unless requested."""
+        line = self._record_line_14(
+            12345,
+            "Preview Only",
+            content_preview="Preview text from Mail",
+            content="",
+        )
+
+        def fake_run(script, timeout=120):
+            return line
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_by_id(
+                    account="Work",
+                    message_id="12345",
+                    include_content=False,
+                    output_format="json",
+                )
+            )
+
+        self.assertNotIn("warnings", response["item"])
 
     def test_get_email_by_id_script_contains_all_headers(self):
         """The generated AppleScript must read `all headers of aMessage`

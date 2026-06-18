@@ -17,16 +17,18 @@ access, and reply draft reliability. Tool count is now 29.
 ### Changed
 
 - **`get_email_by_id(..., include_content=True, output_format="json")`** now
-  returns bounded full `content` while preserving `content_preview`.
+  returns bounded full `content` while preserving `content_preview`; when Mail
+  exposes only preview text, JSON includes a `FULL_CONTENT_UNAVAILABLE` warning.
 - **`get_needs_response(..., output_format="json")`** now returns numeric Apple
   Mail ids in `message_id` and preserves the Internet Message-ID separately as
   `internet_message_id`.
 - **`reply_to_email`** now writes reply bodies through Mail's object model,
   emits `Draft ID`, verifies that exact draft id, and avoids subject-only
-  verification matches.
+  verification matches. Draft verification also checks the expected attachment
+  count when attachments are requested.
 - **`manage_drafts(action="list")`** supports `max_results` and stops after
-  enough visible matches. Draft `send`, `open`, and `delete` can target exact
-  `draft_id`.
+  enough visible matches. List output includes scanned-count diagnostics, and
+  draft `send`, `open`, and `delete` can target exact `draft_id`.
 
 ### Fixed
 

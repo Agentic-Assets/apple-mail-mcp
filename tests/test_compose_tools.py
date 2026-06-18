@@ -933,6 +933,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         self.assertIn("Reply saved as draft!", result)
         script = _main_reply_script(captured)
+        verifier_script = next(script for script in captured if "repeat with verifyAttempt from 1 to 8" in script)
         _assert_ordered(
             self,
             script,
@@ -944,6 +945,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         )
         self.assertNotIn("set the clipboard", script)
         self.assertNotIn('keystroke "v"', script)
+        self.assertIn("set expectedAttachmentCount to 1", verifier_script)
+        self.assertIn("count of mail attachments of draftMessage", verifier_script)
 
     def test_reply_draft_success_runs_exact_saved_draft_verifier(self):
         captured = []
@@ -977,7 +980,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         verifier_script = next(script for script in captured if "repeat with verifyAttempt from 1 to 8" in script)
         self.assertIn("every message of draftsMailbox whose id is 4242", verifier_script)
         self.assertIn('set replyBodyNeedle to "Reply body"', verifier_script)
-        self.assertIn("if draftContent contains replyBodyNeedle then set replyDraftVerified to true", verifier_script)
+        self.assertIn("set expectedAttachmentCount to 0", verifier_script)
+        self.assertIn("if draftContent contains replyBodyNeedle then set bodyVerified to true", verifier_script)
+        self.assertIn("if bodyVerified and attachmentsVerified then set replyDraftVerified to true", verifier_script)
         self.assertNotIn("draftSubject is", verifier_script)
         self.assertNotIn("messages 1 thru headEnd of draftsMailbox", verifier_script)
 
@@ -1524,6 +1529,11 @@ class ManageDraftsListTests(unittest.TestCase):
         self.assertIn("if headEnd > 75 then set headEnd to 75", script)
         self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
         self.assertIn("set maxResults to 20", script)
+        self.assertIn("set scannedCount to 0", script)
+        self.assertIn("set scannedCount to scannedCount + 1", script)
+        self.assertIn('Scanned: " & scannedCount & " of " & totalDrafts', script)
+        self.assertIn('scan limit: " & scanLimit', script)
+        self.assertIn('result limit: " & maxResults', script)
         self.assertIn("if shownCount >= maxResults then exit repeat", script)
         self.assertNotIn("messages startIdx thru totalDrafts of draftsMailbox", script)
         self.assertNotIn("every message of draftsMailbox", script)
@@ -1546,6 +1556,7 @@ class ManageDraftsListTests(unittest.TestCase):
         # In-loop, case-insensitive subject filter.
         self.assertIn("ignoring case", script)
         self.assertIn('does not contain "Q3 Report"', script)
+        self.assertIn('set subjectFilterLine to return & "Subject filter: Q3 Report"', script)
         self.assertIn("if shownCount >= maxResults then exit repeat", script)
         # No date filter is ever added (would drop null-date new drafts).
         self.assertNotIn("recentCutoffDate", script)
@@ -1571,6 +1582,7 @@ class ManageDraftsListTests(unittest.TestCase):
 
         script = captured[0]
         self.assertIn("set maxResults to 3", script)
+        self.assertIn('result limit: " & maxResults', script)
         self.assertIn("if shownCount >= maxResults then exit repeat", script)
         self.assertIn('does not contain "Q3 Report"', script)
 
@@ -1610,7 +1622,7 @@ class ManageDraftsListTests(unittest.TestCase):
             with self.subTest(action=action):
                 captured = []
 
-                def fake_run(script, timeout=120):
+                def fake_run(script, timeout=120, captured=captured):
                     captured.append(script)
                     return "ok"
 

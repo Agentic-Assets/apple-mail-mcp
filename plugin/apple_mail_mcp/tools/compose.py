@@ -360,9 +360,10 @@ def _verify_saved_reply_draft(
     account: str,
     draft_id: str,
     reply_body: str,
+    expected_attachment_count: int = 0,
     timeout: int | None = None,
 ) -> bool:
-    """Confirm a native reply draft exists by exact id and contains the body."""
+    """Confirm a native reply draft exists by exact id and expected draft content."""
     normalized = normalize_message_ids([draft_id])
     if not normalized:
         return False
@@ -374,6 +375,7 @@ def _verify_saved_reply_draft(
     tell application "Mail"
         set targetAccount to account "{safe_account}"
         set replyBodyNeedle to "{safe_body_needle}"
+        set expectedAttachmentCount to {expected_attachment_count}
         set replyDraftVerified to false
 
         repeat with verifyAttempt from 1 to 8
@@ -382,14 +384,24 @@ def _verify_saved_reply_draft(
                 set matchingDrafts to every message of draftsMailbox whose id is {numeric_id}
                 if (count of matchingDrafts) > 0 then
                     set draftMessage to item 1 of matchingDrafts
+                    set bodyVerified to false
+                    set attachmentsVerified to false
                     if replyBodyNeedle is "" then
-                        set replyDraftVerified to true
+                        set bodyVerified to true
                     else
                         try
                             set draftContent to content of draftMessage as string
-                            if draftContent contains replyBodyNeedle then set replyDraftVerified to true
+                            if draftContent contains replyBodyNeedle then set bodyVerified to true
                         end try
                     end if
+                    if expectedAttachmentCount is 0 then
+                        set attachmentsVerified to true
+                    else
+                        try
+                            if (count of mail attachments of draftMessage) >= expectedAttachmentCount then set attachmentsVerified to true
+                        end try
+                    end if
+                    if bodyVerified and attachmentsVerified then set replyDraftVerified to true
                 end if
             end try
             if replyDraftVerified then exit repeat
@@ -1210,10 +1222,12 @@ def reply_to_email(
     # Build attachment script if provided (object model: attach to replyMessage)
     attachment_script = ""
     attachment_info = ""
+    expected_attachment_count = 0
     if attachments:
         validated_paths, error = _validate_attachment_paths(attachments)
         if error:
             return error
+        expected_attachment_count = len(validated_paths)
         for path in validated_paths:
             safe_path = escape_applescript(path)
             attachment_script += f'''
@@ -1389,11 +1403,16 @@ tell application "Mail"
                 account,
                 draft_id,
                 reply_body,
+                expected_attachment_count=expected_attachment_count,
                 timeout=timeout,
             ):
                 mode_text = "opened" if effective_mode == "open" else "created"
+                expected_details = "expected body"
+                if expected_attachment_count:
+                    expected_details += f" and {expected_attachment_count} attachment(s)"
                 return (
                     f"Error: Reply draft was {mode_text}, but Mail did not verify its exact Draft ID. "
+                    f"Verification checks the exact Draft ID for {expected_details}. "
                     "No email was sent. Please check Mail Drafts and retry after Mail finishes saving."
                 )
         return result
@@ -1955,8 +1974,9 @@ def manage_drafts(
 
     Returns:
         Formatted output based on action. For action="list" each draft now reports
-        its message id, To recipients, and a short body snippet so the list is
-        directly triageable; verify full threading with `get_email_by_id`.
+        its message id, To recipients, a short body snippet, and scan diagnostics
+        so the list is directly triageable; verify full threading with
+        `get_email_by_id`.
     """
 
     account, account_error = _resolve_account(account, timeout=timeout)
@@ -1986,12 +2006,20 @@ def manage_drafts(
                         end ignoring"""
         else:
             subject_filter_script = ""
+            safe_subject_contains = ""
         script = f'''
         tell application "Mail"
             set hideEmpty to {hide_empty_flag}
             set maxResults to {list_limit}
             set draftLines to ""
             set shownCount to 0
+            set scannedCount to 0
+            set subjectFilterLine to ""
+            set scanLimit to 0
+            set totalDrafts to 0
+            if "{safe_subject_contains}" is not "" then
+                set subjectFilterLine to return & "Subject filter: {safe_subject_contains}"
+            end if
 
             try
                 set targetAccount to account "{safe_account}"
@@ -2003,6 +2031,7 @@ def manage_drafts(
                 set totalDrafts to count of messages of draftsMailbox
                 set headEnd to totalDrafts
                 if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
+                set scanLimit to headEnd
                 if totalDrafts is 0 then
                     set draftMessages to {{}}
                 else
@@ -2011,6 +2040,7 @@ def manage_drafts(
 
                 repeat with aDraft in draftMessages
                     if shownCount >= maxResults then exit repeat
+                    set scannedCount to scannedCount + 1
                     try
                         set skipThisDraft to false
                         set draftSubject to subject of aDraft
@@ -2072,7 +2102,7 @@ def manage_drafts(
                 return "Error: " & errMsg
             end try
 
-            return "DRAFT EMAILS - {safe_account}" & return & return & "Found " & shownCount & " draft(s)" & return & return & draftLines
+            return "DRAFT EMAILS - {safe_account}" & return & return & "Found " & shownCount & " draft(s)" & return & "Scanned: " & scannedCount & " of " & totalDrafts & " draft(s) (scan limit: " & scanLimit & ", result limit: " & maxResults & ")" & subjectFilterLine & return & return & draftLines
         end tell
         '''
 

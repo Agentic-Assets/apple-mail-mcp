@@ -1472,6 +1472,13 @@ def _fetch_email_record_by_id(
     records, _mb_errors = _parse_search_records(result)
     item = records[0] if records else None
     if item is not None and include_content:
+        if item.get("content_preview") and not item.get("content"):
+            item.setdefault("warnings", []).append(
+                {
+                    "code": "FULL_CONTENT_UNAVAILABLE",
+                    "message": "Full message content was unavailable; only content_preview text is present.",
+                }
+            )
         preview = item.get("content") or item.get("content_preview", "") or ""
         has_quoted = bool(
             re.search(r"On .+wrote:", preview, re.DOTALL)
