@@ -1,6 +1,6 @@
 name: CI
 
-on:
+"on":
   push:
   pull_request:
 
@@ -24,7 +24,8 @@ jobs:
           pip install -e ".[dev]" pytest
 
       - name: Lint (ruff, warn-only baseline)
-        run: ruff check plugin/ tools/ tests/ || echo "warning: ruff baseline has pre-existing UP0xx modernization issues — non-blocking until dedicated sweep PR"
+        run: |
+          ruff check plugin/ tools/ tests/ || echo "warning: ruff baseline has pre-existing UP0xx modernization issues, non-blocking until dedicated sweep PR"
         continue-on-error: true
 
       - name: Validate manifests
