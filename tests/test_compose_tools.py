@@ -1,6 +1,7 @@
 """Tests for compose and rich draft helpers."""
 
 import inspect
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +35,27 @@ def _main_reply_script(scripts):
     if len(reply_scripts) != 1:
         raise AssertionError(f"expected one reply script, got {len(reply_scripts)}")
     return reply_scripts[0]
+
+
+def _saved_reply_draft_output(
+    *,
+    to="Sender <sender@example.com>",
+    subject="Re: Test",
+    draft_id=None,
+    quote_needle=None,
+):
+    lines = [
+        "SAVING REPLY AS DRAFT",
+        "",
+        "Reply saved as draft!",
+        f"To: {to}",
+        f"Subject: {subject}",
+    ]
+    if draft_id is not None:
+        lines.append(f"Draft ID: {draft_id}")
+    if quote_needle is not None:
+        lines.append(f"Quote Needle: {quote_needle}")
+    return "\n".join(lines) + "\n"
 
 
 class DefaultMailSignatureSupportTests(unittest.TestCase):
@@ -824,20 +846,25 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         _assert_ordered(
             self,
             script,
+            "set sourceContent to content of foundMessage as string",
             "set replyBodyText to do shell script",
-            "set replyMessage to reply foundMessage with opening window",
-            'keystroke "v" using command down',
+            "set replyMessage to reply foundMessage",
+            'set quotedOriginalNeedle to "On " & sourceDate & ", " & sourceSender & " wrote:"',
+            "set quotedOriginalText to quotedOriginalNeedle & return & sourceContent",
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "set content of replyMessage to (composedReplyContent as rich text)",
             "save replyMessage",
         )
         self.assertNotIn("make new outgoing message", script)
         self.assertNotIn("content:fullBody", script)
-        self.assertNotIn("set content of replyMessage", script)
-        self.assertNotIn("set origContent to content of foundMessage", script)
         self.assertNotIn("set quotedBody", script)
         self.assertNotIn("quoted original truncated", script)
+        self.assertNotIn("set existingReplyContent to content of replyMessage", script)
         self.assertNotIn("NSPasteboard", script)
+        self.assertNotIn("System Events", script)
+        self.assertNotIn('keystroke "v"', script)
 
-    def test_empty_reply_body_leaves_native_reply_content_untouched(self):
+    def test_empty_reply_body_keeps_body_assignment_guarded(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -858,7 +885,34 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn('if replyBodyText is not "" then', script)
-        self.assertNotIn("set content of replyMessage", script)
+        self.assertIn("set content of replyMessage to (composedReplyContent as rich text)", script)
+
+    def test_reply_draft_success_outputs_artifact_id_for_exact_verification(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+            )
+
+        self.assertIn("Draft ID: 84053", result)
+        verifier_script = next(script for script in captured if "set targetDraftId to" in script)
+        self.assertIn('set targetDraftIdText to "84053"', verifier_script)
+        self.assertIn("message id targetDraftId of draftsMailbox", verifier_script)
+        self.assertIn("return exactResult", verifier_script)
 
     def test_reply_defaults_to_draft_mode(self):
         captured = []
@@ -883,14 +937,23 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("SAVING REPLY AS DRAFT", script)
         # Native Mail reply: Mail constructs the quoted prior conversation and
         # the tool inserts the requested body into the native composer.
-        self.assertIn("reply foundMessage with opening window", script)
+        self.assertIn("set replyMessage to reply foundMessage", script)
+        self.assertNotIn("set replyMessage to reply foundMessage with opening window", script)
         self.assertGreaterEqual(script.count("save replyMessage"), 1)
-        self.assertIn("close (window of replyMessage) saving yes", script)
-        self.assertIn("close front window saving yes", script)
-        self.assertIn("set replySubject to subject of replyMessage as string", script)
+        self.assertNotIn("close (window of replyMessage)", script)
+        self.assertNotIn("close front window", script)
+        self.assertIn("set sourceSubject to subject of foundMessage as string", script)
+        self.assertNotIn("set replySubject to subject of replyMessage as string", script)
         self.assertIn('set outputText to outputText & "Subject: " & replySubject', script)
-        self.assertIn('keystroke "v"', script)
+        self.assertIn("set quotedOriginalText to", script)
+        self.assertIn(
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            script,
+        )
+        self.assertNotIn("content of replyMessage as string", script)
         self.assertNotIn("NSPasteboard", script)
+        self.assertNotIn("System Events", script)
+        self.assertNotIn('keystroke "v"', script)
         self.assertNotIn("send replyMessage", script)
 
     def test_reply_draft_success_runs_bounded_saved_draft_verifier(self):
@@ -899,13 +962,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         def fake_run(script, timeout=120):
             captured.append(script)
             if "reply foundMessage" in script:
-                return (
-                    "SAVING REPLY AS DRAFT\n\n"
-                    "Reply saved as draft!\n"
-                    "To: Sender <sender@example.com>\n"
-                    "Subject: Re: Test\n"
-                )
-            if "repeat with verifyAttempt from 1 to 8" in script:
+                return _saved_reply_draft_output()
+            if "repeat with verifyAttempt from 1 to 20" in script:
                 return "FOUND"
             return "ok"
 
@@ -920,22 +978,92 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         self.assertIn("Reply saved as draft!", result)
-        verifier_script = next(script for script in captured if "repeat with verifyAttempt from 1 to 8" in script)
+        verifier_script = next(script for script in captured if "repeat with verifyAttempt from 1 to 20" in script)
         self.assertIn("messages 1 thru headEnd of draftsMailbox", verifier_script)
         self.assertIn('set replyBodyNeedle to "Reply body"', verifier_script)
-        self.assertIn('if draftSubject is "Re: Test" then', verifier_script)
-        self.assertIn("if draftContent contains replyBodyNeedle then set draftMatched to true", verifier_script)
+        self.assertIn('if "Re: Test" is "" or draftSubject is "Re: Test" then', verifier_script)
+        self.assertIn("my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)", verifier_script)
+        self.assertIn('return "BODY_MISSING|" & bodyMissingDraftId', verifier_script)
+
+    def test_reply_draft_success_reports_structured_artifact_error_when_body_missing(self):
+        sentinel = "AA-REPLY-BODY-SENTINEL-84053"
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "BODY_MISSING|84053"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body=f"{sentinel}\n\nReply body",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_DRAFT_BODY_MISSING")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["expected_body_needle"], sentinel)
+        self.assertIn("No email was sent", payload["message"])
+
+    def test_reply_draft_verifier_rejects_body_after_quoted_original(self):
+        def fake_run(script, timeout=120):
+            if 'set targetDraftIdText to "84053"' in script:
+                return "BODY_AFTER_QUOTE|84053"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Unique body sentinel",
+                draft_id="84053",
+                quoted_needle="Original message text",
+            )
+
+        self.assertFalse(verification.ok)
+        self.assertEqual(verification.body_missing_artifact_id, "84053")
+        self.assertEqual(verification.status, "body_after_quote")
+
+    def test_reply_draft_reports_structured_error_when_body_saved_after_quote(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(
+                    draft_id="84053",
+                    quote_needle="On Today, Sender <sender@example.com> wrote:",
+                )
+            if 'set targetDraftIdText to "84053"' in script:
+                return "BODY_AFTER_QUOTE|84053"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Unique body sentinel",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_DRAFT_BODY_AFTER_QUOTE")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["verification_status"], "body_after_quote")
 
     def test_reply_draft_success_reports_error_when_saved_draft_not_verified(self):
         def fake_run(script, timeout=120):
             if "reply foundMessage" in script:
-                return (
-                    "SAVING REPLY AS DRAFT\n\n"
-                    "Reply saved as draft!\n"
-                    "To: Sender <sender@example.com>\n"
-                    "Subject: Re: Test\n"
-                )
-            if "repeat with verifyAttempt from 1 to 8" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
                 return "NOT_FOUND"
             return "ok"
 
@@ -1027,7 +1155,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn(
-            "reply foundMessage with opening window and reply to all",
+            "reply foundMessage with reply to all",
             script,
         )
         self.assertNotIn("to recipients of foundMessage", script)
@@ -1058,7 +1186,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         script = _main_reply_script(captured)
-        self.assertIn("reply foundMessage with opening window", script)
+        self.assertIn("set replyMessage to reply foundMessage", script)
+        self.assertNotIn("set replyMessage to reply foundMessage with opening window", script)
         self.assertNotIn("reply to all", script)
         self.assertNotIn("cc recipients of foundMessage", script)
         self.assertNotIn(
@@ -1066,7 +1195,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             script,
         )
 
-    def test_reply_signature_is_applied_before_body_paste(self):
+    def test_reply_signature_is_applied_before_body_insert(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -1092,10 +1221,45 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         _assert_ordered(
             self,
             script,
-            "set replyMessage to reply foundMessage with opening window",
+            "set replyMessage to reply foundMessage",
             'set message signature of replyMessage to signature "TU"',
-            "set the clipboard to replyBodyText",
-            'keystroke "v" using command down',
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "set content of replyMessage to (composedReplyContent as rich text)",
+        )
+        self.assertNotIn("set the clipboard to replyBodyText", script)
+        self.assertNotIn("System Events", script)
+        self.assertNotIn('keystroke "v"', script)
+
+    def test_include_signature_false_still_inserts_reply_body(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
+            return "ok"
+
+        with (
+            patch.object(compose_tools.server, "DEFAULT_MAIL_SIGNATURE", "TU", create=True),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Unique body sentinel 84053",
+                include_signature=False,
+            )
+
+        script = _main_reply_script(captured)
+        self.assertIn("set message signature of replyMessage to missing value", script)
+        _assert_ordered(
+            self,
+            script,
+            "set message signature of replyMessage to missing value",
+            'if replyBodyText is not "" then',
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "set content of replyMessage to (composedReplyContent as rich text)",
+            "save replyMessage",
         )
 
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):

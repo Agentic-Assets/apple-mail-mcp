@@ -3,13 +3,13 @@
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import re
 import subprocess
 import sys
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,8 +97,8 @@ def _json_field(path: Path, dotted: str):
 
 def _extract_registered_tool_names() -> list[str]:
     names: list[str] = []
-    for path in sorted(glob.glob(str(ROOT / "plugin/apple_mail_mcp/tools/*.py"))):
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    for path in sorted((ROOT / "plugin/apple_mail_mcp/tools").glob("*.py")):
+        lines = path.read_text(encoding="utf-8").splitlines()
         i = 0
         while i < len(lines):
             if re.match(r"^@mcp\.tool", lines[i]):
@@ -124,9 +124,7 @@ def _check_tool_count_claim(text: str | None, source: str, actual: int, errors: 
         return
     claimed = int(match.group(1))
     if claimed != actual:
-        errors.append(
-            f"{source}: description claims {claimed} tools, registry has {actual}"
-        )
+        errors.append(f"{source}: description claims {claimed} tools, registry has {actual}")
 
 
 def _append_mismatch(
@@ -155,10 +153,7 @@ def _check_mcp_launcher_contract(
         errors.append(f"{label} mcpServers.apple-mail.args: expected list")
         return
     if not args or args[0] != first_arg:
-        errors.append(
-            f"{label} mcpServers.apple-mail.args: first arg must be "
-            f"{first_arg}"
-        )
+        errors.append(f"{label} mcpServers.apple-mail.args: first arg must be {first_arg}")
     if "--draft-safe" not in args:
         errors.append(f"{label} mcpServers.apple-mail.args: missing --draft-safe")
 
@@ -185,9 +180,7 @@ def _check_codex_mcp_launcher_contract(
         errors.append(f"{label} mcpServers.apple-mail.args: expected list")
         return
     if not args or args[0] != "./start_mcp.sh":
-        errors.append(
-            f"{label} mcpServers.apple-mail.args: first arg must be ./start_mcp.sh"
-        )
+        errors.append(f"{label} mcpServers.apple-mail.args: first arg must be ./start_mcp.sh")
     if "--draft-safe" not in args:
         errors.append(f"{label} mcpServers.apple-mail.args: missing --draft-safe")
 
@@ -198,8 +191,7 @@ def _check_codex_mcp_launcher_contract(
     values = [server.get("command"), *(args if isinstance(args, list) else []), cwd]
     if any(isinstance(value, str) and "${CLAUDE_PLUGIN_ROOT}" in value for value in values):
         errors.append(
-            f"{label} mcpServers.apple-mail: must not contain "
-            "literal ${CLAUDE_PLUGIN_ROOT} in Codex launcher fields"
+            f"{label} mcpServers.apple-mail: must not contain literal ${{CLAUDE_PLUGIN_ROOT}} in Codex launcher fields"
         )
 
 
@@ -211,8 +203,7 @@ def _check_plugin_manifest_contract(errors: list[str]) -> None:
     # Apple Mail ships workflow entry points as skills only.
     if "commands" in plugin:
         errors.append(
-            "plugin.json: unsupported strict-validator field 'commands'; "
-            "ship workflow entry points as skills only"
+            "plugin.json: unsupported strict-validator field 'commands'; ship workflow entry points as skills only"
         )
 
     commands_dir = ROOT / "plugin/commands"
@@ -226,6 +217,63 @@ def _check_plugin_manifest_contract(errors: list[str]) -> None:
         "${CLAUDE_PLUGIN_ROOT}/start_mcp.sh",
         errors,
     )
+
+
+def _iter_json_strings(value: object) -> Iterator[str]:
+    """Yield every string value inside a JSON-like object."""
+    if isinstance(value, str):
+        yield value
+        return
+    if isinstance(value, list):
+        for item in value:
+            yield from _iter_json_strings(item)
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_json_strings(item)
+
+
+def _check_developer_only_skills_not_packaged(errors: list[str]) -> None:
+    """Prevent repo-local development skills from leaking into packaged plugin surfaces."""
+    manifest_paths = (
+        ROOT / "plugin/.codex-plugin/plugin.json",
+        ROOT / "plugin/.claude-plugin/plugin.json",
+        ROOT / ".agents/plugins/marketplace.json",
+        ROOT / ".claude-plugin/marketplace.json",
+    )
+    forbidden = (".agents/skills", ".claude/skills")
+
+    for path in manifest_paths:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        for value in _iter_json_strings(payload):
+            if any(marker in value for marker in forbidden):
+                label = f"{rel} skills" if "skills" in payload else rel
+                errors.append(
+                    f"{label}: must not reference repo-local developer skills (.agents/skills or .claude/skills)"
+                )
+                break
+
+    packaged_skills = ROOT / "plugin/skills"
+    if packaged_skills.exists():
+        resolved = packaged_skills.resolve()
+        for dev_dir in (ROOT / ".agents/skills", ROOT / ".claude/skills"):
+            if not dev_dir.exists():
+                continue
+            try:
+                resolved.relative_to(dev_dir.resolve())
+            except ValueError:
+                continue
+            errors.append(
+                "plugin/skills: must be packaged workflow skills, not a link into "
+                f"{dev_dir.relative_to(ROOT).as_posix()}"
+            )
+            break
 
 
 def _check_mcpb_runtime_contract(mcpb: dict, errors: list[str]) -> None:
@@ -250,10 +298,7 @@ def _check_mcpb_runtime_contract(mcpb: dict, errors: list[str]) -> None:
         errors.append("mcpb manifest server.mcp_config.args: expected list")
     else:
         if not args or args[0] != "${__dirname}/start_mcp.sh":
-            errors.append(
-                "mcpb manifest server.mcp_config.args: first arg must be "
-                "${__dirname}/start_mcp.sh"
-            )
+            errors.append("mcpb manifest server.mcp_config.args: first arg must be ${__dirname}/start_mcp.sh")
         if "--draft-safe" not in args:
             errors.append("mcpb manifest server.mcp_config.args: missing --draft-safe")
 
@@ -272,10 +317,7 @@ def _check_mcpb_runtime_contract(mcpb: dict, errors: list[str]) -> None:
             continue
         for config_key in re.findall(r"\$\{user_config\.([^}]+)\}", value):
             if config_key not in (mcpb.get("user_config") or {}):
-                errors.append(
-                    f"mcpb manifest server.mcp_config.env.{key}: "
-                    f"unknown user_config.{config_key}"
-                )
+                errors.append(f"mcpb manifest server.mcp_config.env.{key}: unknown user_config.{config_key}")
 
 
 def _check_marketplace_contract(expected_version: str, errors: list[str]) -> None:
@@ -293,18 +335,12 @@ def _check_marketplace_contract(expected_version: str, errors: list[str]) -> Non
     if not isinstance(source, str):
         errors.append("marketplace.json plugins[0].source: expected string")
     elif not source.startswith("./"):
-        errors.append(
-            "marketplace.json plugins[0].source: path must start with ./ "
-            f"(got {source})"
-        )
+        errors.append(f"marketplace.json plugins[0].source: path must start with ./ (got {source})")
     else:
         source_path = ROOT / source[2:]
         manifest_path = source_path / ".claude-plugin/plugin.json"
         if not manifest_path.exists():
-            errors.append(
-                "marketplace.json plugins[0].source: missing "
-                f"{source}/.claude-plugin/plugin.json"
-            )
+            errors.append(f"marketplace.json plugins[0].source: missing {source}/.claude-plugin/plugin.json")
         else:
             source_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
@@ -316,8 +352,7 @@ def _check_marketplace_contract(expected_version: str, errors: list[str]) -> Non
         )
     if plugin_ref.get("version") != expected_version:
         errors.append(
-            "marketplace.json plugins[0].version: got "
-            f"'{plugin_ref.get('version')}', expected '{expected_version}'"
+            f"marketplace.json plugins[0].version: got '{plugin_ref.get('version')}', expected '{expected_version}'"
         )
 
     skills = plugin_ref.get("skills") or []
@@ -326,25 +361,15 @@ def _check_marketplace_contract(expected_version: str, errors: list[str]) -> Non
             errors.append("marketplace.json plugins[0].skills: entries must be strings")
             continue
         if not skill_path.startswith("./"):
-            errors.append(
-                "marketplace.json plugins[0].skills: path must start with ./ "
-                f"(got {skill_path})"
-            )
+            errors.append(f"marketplace.json plugins[0].skills: path must start with ./ (got {skill_path})")
             continue
         skill_file = ROOT / skill_path[2:] / "SKILL.md"
         if not skill_file.exists():
-            errors.append(
-                "marketplace.json plugins[0].skills: missing "
-                f"{skill_path}/SKILL.md"
-            )
+            errors.append(f"marketplace.json plugins[0].skills: missing {skill_path}/SKILL.md")
 
     if source_manifest is not None:
-        market_components = [
-            f for f in MARKETPLACE_COMPONENT_FIELDS if plugin_ref.get(f)
-        ]
-        plugin_components = [
-            f for f in MARKETPLACE_COMPONENT_FIELDS if source_manifest.get(f)
-        ]
+        market_components = [f for f in MARKETPLACE_COMPONENT_FIELDS if plugin_ref.get(f)]
+        plugin_components = [f for f in MARKETPLACE_COMPONENT_FIELDS if source_manifest.get(f)]
         if market_components and plugin_components and not plugin_ref.get("strict"):
             errors.append(
                 "marketplace.json plugins[0]: component fields "
@@ -380,9 +405,7 @@ def _check_codex_plugin_contract(
     market = _read_json_contract(ROOT / market_label, market_label, errors)
     if market is not None:
         if market.get("name") != "apple-mail-mcp":
-            _append_mismatch(
-                errors, f"{market_label} name", market.get("name"), "apple-mail-mcp"
-            )
+            _append_mismatch(errors, f"{market_label} name", market.get("name"), "apple-mail-mcp")
         interface = market.get("interface") or {}
         if not isinstance(interface, dict):
             errors.append(f"{market_label} interface: expected object")
@@ -411,10 +434,7 @@ def _check_codex_plugin_contract(
                     )
                 expected_source = {"source": "local", "path": "./plugin"}
                 if plugin_ref.get("source") != expected_source:
-                    errors.append(
-                        f"{market_label} plugins[0].source: expected "
-                        f"{expected_source}"
-                    )
+                    errors.append(f"{market_label} plugins[0].source: expected {expected_source}")
                 policy = plugin_ref.get("policy") or {}
                 if not isinstance(policy, dict):
                     errors.append(f"{market_label} plugins[0].policy: expected object")
@@ -513,9 +533,7 @@ def _check_server_json_contract(
     project_name: str,
     errors: list[str],
 ) -> None:
-    expected_schema = (
-        "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
-    )
+    expected_schema = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
     if server.get("$schema") != expected_schema:
         errors.append(f"server.json $schema: expected {expected_schema}")
 
@@ -529,14 +547,10 @@ def _check_server_json_contract(
         errors.append("server.json packages[0].registryType: expected pypi")
     if package.get("identifier") != project_name:
         errors.append(
-            "server.json packages[0].identifier: got "
-            f"'{package.get('identifier')}', expected '{project_name}'"
+            f"server.json packages[0].identifier: got '{package.get('identifier')}', expected '{project_name}'"
         )
     if package.get("version") != expected_version:
-        errors.append(
-            "server.json packages[0].version: got "
-            f"'{package.get('version')}', expected '{expected_version}'"
-        )
+        errors.append(f"server.json packages[0].version: got '{package.get('version')}', expected '{expected_version}'")
     transport = package.get("transport") or {}
     if transport.get("type") != "stdio":
         errors.append("server.json packages[0].transport.type: expected stdio")
@@ -549,29 +563,18 @@ def _requirement_name(requirement: str) -> str:
 
 def _check_python_package_contract(errors: list[str]) -> None:
     """Ensure PyPI package metadata can run the same shipped runtime paths."""
-    pyproject_deps = {
-        _requirement_name(dep)
-        for dep in _read_pyproject_array("project", "dependencies")
-    }
+    pyproject_deps = {_requirement_name(dep) for dep in _read_pyproject_array("project", "dependencies")}
     requirements = {
         _requirement_name(line)
         for line in (ROOT / "plugin/requirements.txt").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     }
     for dep in sorted(requirements - pyproject_deps):
-        errors.append(
-            "pyproject.toml dependencies: missing runtime dependency "
-            f"{dep} from plugin/requirements.txt"
-        )
+        errors.append(f"pyproject.toml dependencies: missing runtime dependency {dep} from plugin/requirements.txt")
 
-    packages = set(
-        _read_pyproject_array("tool.hatch.build.targets.wheel", "packages")
-    )
+    packages = set(_read_pyproject_array("tool.hatch.build.targets.wheel", "packages"))
     if "plugin/ui" not in packages:
-        errors.append(
-            "pyproject.toml wheel packages: missing plugin/ui for "
-            "inbox_dashboard UI runtime"
-        )
+        errors.append("pyproject.toml wheel packages: missing plugin/ui for inbox_dashboard UI runtime")
 
 
 def _check_source_syntax(errors: list[str]) -> None:
@@ -608,9 +611,7 @@ def _is_excluded_payload_file(rel: Path) -> bool:
         return True
     if rel.name == ".env" or rel.name.startswith(".env."):
         return True
-    if rel.suffix in {".pyc", ".log", ".tmp", ".bak", ".swp"}:
-        return True
-    return False
+    return rel.suffix in {".pyc", ".log", ".tmp", ".bak", ".swp"}
 
 
 def _tracked_plugin_files(plugin_root: Path) -> list[Path] | None:
@@ -692,32 +693,20 @@ def _compare_zip_members(
             all_names = zf.namelist()
             names = set(all_names)
             expected_names = {member for _, member in expected}
-            duplicates = sorted(
-                name for name in names if all_names.count(name) > 1
-            )
+            duplicates = sorted(name for name in names if all_names.count(name) > 1)
             for duplicate in duplicates:
-                errors.append(
-                    f"{label}: duplicate member {duplicate}; rebuild {archive.name}"
-                )
+                errors.append(f"{label}: duplicate member {duplicate}; rebuild {archive.name}")
             for source, member in expected:
                 if member not in names:
                     errors.append(f"{label}: missing {member}")
                     continue
                 if source.read_bytes() != zf.read(member):
-                    errors.append(
-                        f"{label}: stale {member}; rebuild {archive.name}"
-                    )
+                    errors.append(f"{label}: stale {member}; rebuild {archive.name}")
             if exact_members:
                 allowed = allowed_extra_members or set()
-                unexpected = sorted(
-                    name
-                    for name in names - expected_names - allowed
-                    if not name.endswith("/")
-                )
+                unexpected = sorted(name for name in names - expected_names - allowed if not name.endswith("/"))
                 if unexpected:
-                    sample = ", ".join(unexpected[:3]) + (
-                        ", ..." if len(unexpected) > 3 else ""
-                    )
+                    sample = ", ".join(unexpected[:3]) + (", ..." if len(unexpected) > 3 else "")
                     errors.append(f"{label}: unexpected {sample}; rebuild {archive.name}")
     except zipfile.BadZipFile:
         errors.append(f"{label}: {archive.name} is not a valid zip archive")
@@ -860,10 +849,7 @@ def _check_no_stale_distribution_artifacts(expected_version: str, errors: list[s
     expected_name = f"apple-mail-mcp-v{expected_version}.mcpb"
     for path in sorted(ROOT.glob("apple-mail-mcp-v*.mcpb")):
         if path.name != expected_name:
-            errors.append(
-                f"stale distribution artifact: {path.name}; "
-                "remove or run tools/build-artifacts.sh"
-            )
+            errors.append(f"stale distribution artifact: {path.name}; remove or run tools/build-artifacts.sh")
 
 
 def _check_artifact_freshness(
@@ -875,10 +861,7 @@ def _check_artifact_freshness(
     # Zip is built from inside `plugin/` so contents sit at the zip root.
     # Cowork (and `claude plugin validate`) look for `.claude-plugin/plugin.json`
     # at the unzip root — a `plugin/` prefix breaks the upload.
-    plugin_expected = [
-        (ROOT / "plugin" / rel, rel.as_posix())
-        for rel in _iter_plugin_payload_files()
-    ]
+    plugin_expected = [(ROOT / "plugin" / rel, rel.as_posix()) for rel in _iter_plugin_payload_files()]
     _compare_zip_members(
         ROOT / "apple-mail-plugin.zip",
         plugin_expected,
@@ -957,6 +940,7 @@ def main() -> None:
 
     plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
     _check_plugin_manifest_contract(errors)
+    _check_developer_only_skills_not_packaged(errors)
     _check_tool_count_claim(plugin.get("description"), "plugin.json description", actual_count, errors)
 
     market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
@@ -979,9 +963,7 @@ def main() -> None:
 
     mcpb_names = [tool["name"] for tool in mcpb.get("tools", [])]
     if len(mcpb_names) != actual_count:
-        errors.append(
-            f"tool count mismatch: code={actual_count}, mcpb tools[]={len(mcpb_names)}"
-        )
+        errors.append(f"tool count mismatch: code={actual_count}, mcpb tools[]={len(mcpb_names)}")
 
     code_set = set(code_names)
     mcpb_set = set(mcpb_names)
@@ -1014,9 +996,7 @@ def main() -> None:
             print(f"  ERROR: {err}", file=sys.stderr)
         sys.exit(1)
 
-    print(
-        f"validate_manifests: OK (version={expected_version}, tools={actual_count})"
-    )
+    print(f"validate_manifests: OK (version={expected_version}, tools={actual_count})")
 
 
 if __name__ == "__main__":

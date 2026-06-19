@@ -323,7 +323,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
-| `reply_to_email` | Native Mail reply or reply-all draft with Mail-generated quoted thread context; prefer `message_id` from search/list results |
+| `reply_to_email` | Native Mail reply or reply-all draft; constructs and assigns `reply_body` above a quoted-original block, then verifies exact Drafts id first with bounded fallback; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
@@ -383,8 +383,8 @@ Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows a
 
 In draft-safe mode:
 
-- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies verify the saved draft in a bounded newest-Drafts check before reporting success
-- they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it
+- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies assign `reply_body` above the quoted original, verify exact Drafts id first when Mail exposes it, then use bounded newest-Drafts fallback only if needed
+- they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it. For replies, disabling signatures cannot skip `reply_body` insertion
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
 - reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
 - treat `subject_keyword` reply targeting or any degraded reply fallback as Cayman-approved-only for the specific message

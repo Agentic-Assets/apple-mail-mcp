@@ -153,8 +153,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 validate_manifests.ROOT = original_root
 
         self.assertIn(
-            "plugin.json: unsupported strict-validator field 'commands'; "
-            "ship workflow entry points as skills only",
+            "plugin.json: unsupported strict-validator field 'commands'; ship workflow entry points as skills only",
             errors,
         )
         self.assertIn("plugin.json mcpServers.apple-mail.command: expected /bin/bash", errors)
@@ -182,8 +181,8 @@ class ValidateManifestsTests(unittest.TestCase):
                         "USER_EMAIL_PREFERENCES": "${user_config.missing_preferences}",
                         "DEFAULT_MAIL_ACCOUNT": "${user_config.default_account}",
                     },
-                }
-            }
+                },
+            },
         }
         errors = []
 
@@ -219,7 +218,7 @@ class ValidateManifestsTests(unittest.TestCase):
                                     "./plugin/skills/good-skill",
                                     "./plugin/skills/missing-skill",
                                     "plugin/skills/not-relative",
-                                ]
+                                ],
                             }
                         ]
                     }
@@ -307,9 +306,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 root,
                 strict=False,
                 market_components={"skills": ["./plugin/skills/op"]},
-                plugin_components={
-                    "mcpServers": {"fixture": {"command": "/bin/true"}}
-                },
+                plugin_components={"mcpServers": {"fixture": {"command": "/bin/true"}}},
             )
 
             errors = []
@@ -335,9 +332,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 root,
                 strict=True,
                 market_components={"skills": ["./plugin/skills/op"]},
-                plugin_components={
-                    "mcpServers": {"fixture": {"command": "/bin/true"}}
-                },
+                plugin_components={"mcpServers": {"fixture": {"command": "/bin/true"}}},
             )
 
             errors = []
@@ -358,9 +353,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 root,
                 strict=False,
                 market_components={},
-                plugin_components={
-                    "mcpServers": {"fixture": {"command": "/bin/true"}}
-                },
+                plugin_components={"mcpServers": {"fixture": {"command": "/bin/true"}}},
             )
 
             errors = []
@@ -635,6 +628,46 @@ class ValidateManifestsTests(unittest.TestCase):
             ["plugin/commands: legacy slash commands are retired; ship skills only"],
         )
 
+    def test_developer_only_skills_are_not_packaged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel in (
+                ".agents/skills/mail-scripting-dictionary",
+                ".claude/skills",
+                "plugin/.codex-plugin",
+                "plugin/.claude-plugin",
+                "plugin/skills",
+                ".agents/plugins",
+                ".claude-plugin",
+            ):
+                (root / rel).mkdir(parents=True)
+            (root / "plugin/.mcp.json").write_text("{}", encoding="utf-8")
+
+            manifests = {
+                "plugin/.codex-plugin/plugin.json": {"skills": "../.agents/skills"},
+                "plugin/.claude-plugin/plugin.json": {"skills": "./skills"},
+                ".agents/plugins/marketplace.json": {"plugins": [{"source": "./plugin"}]},
+                ".claude-plugin/marketplace.json": {"plugins": [{"source": "./plugin"}]},
+            }
+            for path, payload in manifests.items():
+                (root / path).write_text(json.dumps(payload), encoding="utf-8")
+
+            errors = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_developer_only_skills_not_packaged(errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(
+            errors,
+            [
+                "plugin/.codex-plugin/plugin.json skills: must not reference repo-local developer skills "
+                "(.agents/skills or .claude/skills)"
+            ],
+        )
+
     def test_server_json_contract_rejects_package_install_drift(self):
         server_json = {
             "$schema": "bad",
@@ -805,9 +838,7 @@ packages = ["plugin/apple_mail_mcp"]
     def test_check_no_directory_entries_skips_absent_archive(self):
         with tempfile.TemporaryDirectory() as tmp:
             errors = []
-            validate_manifests._check_no_directory_entries(
-                Path(tmp) / "missing.mcpb", "missing.mcpb", errors
-            )
+            validate_manifests._check_no_directory_entries(Path(tmp) / "missing.mcpb", "missing.mcpb", errors)
         self.assertEqual(errors, [])
 
     def test_plugin_zip_has_no_directory_entries(self):
@@ -818,6 +849,7 @@ packages = ["plugin/apple_mail_mcp"]
         if not archive.exists():
             self.skipTest("apple-mail-plugin.zip not built; run tools/build-artifacts.sh")
         import zipfile as _zf
+
         with _zf.ZipFile(archive) as zf:
             offenders = [n for n in zf.namelist() if n.endswith("/")]
         self.assertEqual(
@@ -887,6 +919,7 @@ packages = ["plugin/apple_mail_mcp"]
         if not archive.exists():
             self.skipTest("apple-mail-plugin.zip not built; run tools/build-artifacts.sh")
         import zipfile as _zf
+
         with _zf.ZipFile(archive) as zf:
             names = zf.namelist()
         self.assertIn(
@@ -912,9 +945,7 @@ packages = ["plugin/apple_mail_mcp"]
             (tmp_path / "apple-mail.plugin").write_bytes(payload)
 
             errors: list[str] = []
-            validate_manifests._check_plugin_file_parity(
-                tmp_path, errors, require_present=True
-            )
+            validate_manifests._check_plugin_file_parity(tmp_path, errors, require_present=True)
 
         self.assertEqual(errors, [])
 
@@ -928,9 +959,7 @@ packages = ["plugin/apple_mail_mcp"]
             (tmp_path / "apple-mail.plugin").write_bytes(b"diverged-bytes")
 
             errors: list[str] = []
-            validate_manifests._check_plugin_file_parity(
-                tmp_path, errors, require_present=True
-            )
+            validate_manifests._check_plugin_file_parity(tmp_path, errors, require_present=True)
 
         self.assertEqual(len(errors), 1)
         self.assertIn("bytes diverge", errors[0])
@@ -944,9 +973,7 @@ packages = ["plugin/apple_mail_mcp"]
             (tmp_path / "apple-mail-plugin.zip").write_bytes(b"zip-bytes")
 
             errors: list[str] = []
-            validate_manifests._check_plugin_file_parity(
-                tmp_path, errors, require_present=True
-            )
+            validate_manifests._check_plugin_file_parity(tmp_path, errors, require_present=True)
 
         self.assertEqual(len(errors), 1)
         self.assertIn("apple-mail.plugin: missing artifact", errors[0])
@@ -961,9 +988,7 @@ packages = ["plugin/apple_mail_mcp"]
             (tmp_path / "apple-mail-plugin.zip").write_bytes(b"zip-bytes")
 
             errors: list[str] = []
-            validate_manifests._check_plugin_file_parity(
-                tmp_path, errors, require_present=False
-            )
+            validate_manifests._check_plugin_file_parity(tmp_path, errors, require_present=False)
 
         self.assertEqual(errors, [])
 
@@ -976,9 +1001,7 @@ packages = ["plugin/apple_mail_mcp"]
             (tmp_path / "apple-mail.plugin").write_bytes(b"plugin-bytes")
 
             errors: list[str] = []
-            validate_manifests._check_plugin_file_parity(
-                tmp_path, errors, require_present=False
-            )
+            validate_manifests._check_plugin_file_parity(tmp_path, errors, require_present=False)
 
         self.assertEqual(len(errors), 1)
         self.assertIn(
@@ -994,9 +1017,7 @@ packages = ["plugin/apple_mail_mcp"]
         zip_path = ROOT / "apple-mail-plugin.zip"
         plugin_path = ROOT / "apple-mail.plugin"
         if not zip_path.exists() or not plugin_path.exists():
-            self.skipTest(
-                "Run tools/build-artifacts.sh to produce both artifacts"
-            )
+            self.skipTest("Run tools/build-artifacts.sh to produce both artifacts")
         self.assertEqual(
             plugin_path.read_bytes(),
             zip_path.read_bytes(),
@@ -1016,9 +1037,7 @@ packages = ["plugin/apple_mail_mcp"]
             original_root = validate_manifests.ROOT
             try:
                 validate_manifests.ROOT = tmp_path
-                validate_manifests._check_no_stale_distribution_artifacts(
-                    "3.6.1", errors
-                )
+                validate_manifests._check_no_stale_distribution_artifacts("3.6.1", errors)
             finally:
                 validate_manifests.ROOT = original_root
 
@@ -1035,9 +1054,7 @@ packages = ["plugin/apple_mail_mcp"]
             original_root = validate_manifests.ROOT
             try:
                 validate_manifests.ROOT = tmp_path
-                validate_manifests._check_no_stale_distribution_artifacts(
-                    "3.6.1", errors
-                )
+                validate_manifests._check_no_stale_distribution_artifacts("3.6.1", errors)
             finally:
                 validate_manifests.ROOT = original_root
 
