@@ -751,7 +751,10 @@ class ListInboxEmailsTests(unittest.TestCase):
             captured["script"] = script
             return ""
 
-        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+        with (
+            self.assertWarns(DeprecationWarning),
+            patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run),
+        ):
             _run(
                 inbox_tools.list_inbox_emails(
                     account="Work",
