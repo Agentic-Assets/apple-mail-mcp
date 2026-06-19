@@ -68,7 +68,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 | Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list; `subject_keyword` is fallback only; verification requires `reply_body` above the quoted original |
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params — use plain compose tools when a named signature is required |
-| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, and accepts `hide_empty=True` plus `subject_contains="..."` (fast, case-insensitive "find the draft I just made") |
+| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, and accepts `hide_empty=True` plus `subject_contains="..."` (fast, case-insensitive "find the draft I just made"). For `send`, `open`, or `delete`, prefer exact `draft_id` from the list output over `draft_subject` |
 | Remove orphaned blank drafts | `manage_drafts(action="cleanup_empty")` | Deletes drafts with blank subject AND empty body; `dry_run=True` by default (preview first), capped by `max_deletes` (default 20). Confirm the preview count with the user before `dry_run=False` |
 
 ## Safety And Compliance
@@ -102,7 +102,8 @@ To verify a freshly-created draft, do **not** use `search_emails` — it runs a
 date-filtered scan that is slow on large accounts and silently drops brand-new
 drafts (an unsent `outgoing message` has a null received date). Instead use the
 bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
-(newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Confirm
+(newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Use
+the returned exact `draft_id` for `manage_drafts(action="open"|"delete"|"send")`. Confirm
 `to`/`cc` are the intended recipients and the body is present. For replies,
 `reply_body` must appear above the quoted original; mere presence below the
 quote is not enough.

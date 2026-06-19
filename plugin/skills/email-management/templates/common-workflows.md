@@ -530,7 +530,7 @@ manage_trash(
 ### Weekly Draft Review
 
 ```
-# 1. List all drafts
+# 1. List all drafts and keep the returned Id for each target draft
 manage_drafts(
     account="Work",
     action="list"
@@ -541,14 +541,14 @@ manage_drafts(
 manage_drafts(
     account="Work",
     action="send",
-    draft_subject="Ready to Send Draft"
+    draft_id="12345"
 )
 
 # 3. Delete outdated drafts
 manage_drafts(
     account="Work",
     action="delete",
-    draft_subject="Old Draft from Last Month"
+    draft_id="12346"
 )
 
 # 4. Edit others (do in Mail app)
@@ -814,7 +814,7 @@ manage_drafts(action="list")
 
 # 1. Complete pending replies
 manage_drafts(action="list")
-# Send or delete drafts
+# Send or delete drafts by exact draft_id from the list output
 
 # 2. Clean up flagged items
 search_emails(mailbox="All")  # Review flags

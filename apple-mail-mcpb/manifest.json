@@ -99,7 +99,7 @@
     },
     {
       "name": "manage_drafts",
-      "description": "Complete draft lifecycle: list, create, send, delete. action=create makes a standalone draft and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Send action is blocked in --read-only and --draft-safe mode."
+      "description": "Complete draft lifecycle: list, create, send, open, delete. action=list returns Drafts ids; send/open/delete prefer exact draft_id over subject matching. action=create makes a standalone draft and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Send action is blocked in --read-only and --draft-safe mode."
     },
     {
       "name": "list_email_attachments",

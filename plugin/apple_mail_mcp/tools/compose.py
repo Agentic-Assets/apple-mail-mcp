@@ -751,37 +751,23 @@ def _save_front_compose_window_as_draft(
     delay_seconds: float = 0.5,
     timeout: int | None = None,
 ) -> bool:
-    """Ask Mail to save the front compose window as a draft."""
+    """Ask Mail to save the newest open outgoing message as a draft."""
     close_script = ""
     if close_after_save:
         close_script = """
             delay 0.2
-            close window 1 saving no
+            try
+                close (window of targetMessage) saving no
+            end try
         """
     script = f"""
     tell application "Mail"
         try
-            activate
-            if (count of windows) is 0 then
+            if (count of outgoing messages) is 0 then
                 return "not-found"
             end if
-        on error errMsg
-            return "error: " & errMsg
-        end try
-    end tell
-
-    tell application "System Events"
-        try
-            set frontmost of process "Mail" to true
-            delay 0.2
-            keystroke "s" using command down
-        on error errMsg
-            return "error: " & errMsg
-        end try
-    end tell
-
-    tell application "Mail"
-        try
+            set targetMessage to item 1 of outgoing messages
+            save targetMessage
             delay 0.5
             {close_script}
             return "saved"
@@ -1008,8 +994,11 @@ def _send_html_email(
     # Mode-specific behaviour after paste
     if mode == "send":
         post_paste_script = """
-            -- Send via keyboard shortcut
-            keystroke "d" using {command down, shift down}
+            -- Send via Mail's object model after HTML paste lands.
+            delay 0.5
+            tell application "Mail"
+                send newMsg
+            end tell
         """
         success_text = "Email sent successfully (HTML)"
     elif mode == "draft":
@@ -1027,7 +1016,6 @@ def _send_html_email(
     else:  # open
         post_paste_script = """
             -- Save first, then leave open for review
-            keystroke "s" using command down
             delay 0.5
             tell application "Mail"
                 save newMsg
@@ -2134,6 +2122,7 @@ def manage_drafts(
     cc: str | None = None,
     bcc: str | None = None,
     draft_subject: str | None = None,
+    draft_id: str | None = None,
     from_address: str | None = None,
     timeout: int | None = None,
     standalone_confirmed: bool = False,
@@ -2153,7 +2142,8 @@ def manage_drafts(
         body: Email body (required for create)
         cc: Optional CC recipients for create
         bcc: Optional BCC recipients for create
-        draft_subject: Subject keyword to find draft (required for send/open/delete)
+        draft_subject: Subject keyword to find draft for send/open/delete when draft_id is unavailable
+        draft_id: Exact numeric Drafts message id for send/open/delete; preferred over draft_subject
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
@@ -2177,6 +2167,31 @@ def manage_drafts(
 
     # Escape account for all paths
     safe_account = escape_applescript(account)
+
+    def _draft_action_lookup() -> tuple[str, str, str] | tuple[None, str, None]:
+        if draft_id:
+            normalized_ids = normalize_message_ids([draft_id])
+            if not normalized_ids:
+                return None, "Error: 'draft_id' must be a numeric Mail Drafts message id", None
+            numeric_id = normalized_ids[0]
+            return (
+                f"""
+                set foundDraft to missing value
+                set targetDrafts to every message of draftsMailbox whose id is {numeric_id}
+                if (count of targetDrafts) > 0 then
+                    set foundDraft to item 1 of targetDrafts
+                end if
+                """,
+                f"draft_id={numeric_id}",
+                f"No draft found for draft_id={numeric_id}",
+            )
+        if not draft_subject:
+            return None, "Error: 'draft_subject' or 'draft_id' is required for this draft action", None
+        return (
+            _build_draft_lookup(draft_subject),
+            escape_applescript(draft_subject),
+            f"No draft found matching: {escape_applescript(draft_subject)}",
+        )
 
     if action == "list":
         hide_empty_flag = "true" if hide_empty else "false"
@@ -2351,12 +2366,17 @@ def manage_drafts(
                     {bcc_script}
                 end tell
 
-                -- Save to drafts (don't send)
-                -- The draft is automatically saved to Drafts folder
+                save newDraft
+                delay 0.5
+                set draftId to ""
+                try
+                    set draftId to id of newDraft as string
+                end try
 
                 set outputText to outputText & "✓ Draft created successfully!" & return & return
                 set outputText to outputText & "Subject: {escaped_subject}" & return
                 set outputText to outputText & "To: {safe_to}" & return
+                if draftId is not "" then set outputText to outputText & "Draft ID: " & draftId & return
 
             on error errMsg
                 return "Error: " & errMsg
@@ -2371,10 +2391,9 @@ def manage_drafts(
             return "Error: Sending drafts is disabled in read-only mode."
         if _server.DRAFT_SAFE:
             return "Error: Sending drafts is disabled in draft-safe mode."
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for sending drafts"
-
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, _draft_label, not_found_text = _draft_action_lookup()
+        if lookup_script is None:
+            return _draft_label
 
         script = f'''
         tell application "Mail"
@@ -2383,19 +2402,21 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set draftId to id of foundDraft as string
 
                     -- Send the draft
                     send foundDraft
 
                     set outputText to outputText & "✓ Draft sent successfully!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & draftId & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ {not_found_text}" & return
                 end if
 
             on error errMsg
@@ -2407,10 +2428,9 @@ def manage_drafts(
         '''
 
     elif action == "open":
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for opening drafts"
-
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, _draft_label, not_found_text = _draft_action_lookup()
+        if lookup_script is None:
+            return _draft_label
 
         script = f'''
         tell application "Mail"
@@ -2419,10 +2439,11 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set draftId to id of foundDraft as string
 
                     -- Open the draft in a visible compose window
                     set draftWindow to open foundDraft
@@ -2430,10 +2451,11 @@ def manage_drafts(
 
                     set outputText to outputText & "✓ Draft opened in Mail for review!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & draftId & return
                     set outputText to outputText & return & "Edit and send when ready." & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ {not_found_text}" & return
                 end if
 
             on error errMsg
@@ -2445,10 +2467,9 @@ def manage_drafts(
         '''
 
     elif action == "delete":
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for deleting drafts"
-
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, _draft_label, not_found_text = _draft_action_lookup()
+        if lookup_script is None:
+            return _draft_label
 
         script = f'''
         tell application "Mail"
@@ -2457,19 +2478,21 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set draftId to id of foundDraft as string
 
                     -- Delete the draft
                     delete foundDraft
 
                     set outputText to outputText & "✓ Draft deleted successfully!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & draftId & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ {not_found_text}" & return
                 end if
 
             on error errMsg

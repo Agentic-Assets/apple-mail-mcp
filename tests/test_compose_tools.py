@@ -259,13 +259,18 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Saved in Drafts: yes", result)
             mock_run.assert_called_once_with(["open", "-a", "Mail", str(output_path)], check=True)
             self.assertNotIn("every outgoing message whose subject is", scripts[1])
-            # FIX #1: single persist — Cmd+S for UI save, then close saving no (no re-persist)
+            # Save the opened .eml compose object through Mail's dictionary,
+            # then close the matching compose window without a second persist.
             _assert_ordered(
                 self,
                 scripts[1],
-                'keystroke "s" using command down',
-                "close window 1 saving no",
+                "set targetMessage to item 1 of outgoing messages",
+                "save targetMessage",
+                "close (window of targetMessage) saving no",
             )
+            self.assertNotIn("System Events", scripts[1])
+            self.assertNotIn('keystroke "s" using command down', scripts[1])
+            self.assertNotIn("close window 1 saving no", scripts[1])
             self.assertNotIn("close window 1 saving yes", scripts[1])
 
     def test_create_rich_email_draft_default_saves_and_closes_mail_window(self):
@@ -299,13 +304,18 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Saved in Drafts: yes", result)
             self.assertIn("Left open for review: no", result)
             self.assertNotIn("every outgoing message whose subject is", scripts[1])
-            # FIX #1: single persist — Cmd+S for UI save, then close saving no (no re-persist)
+            # Save the opened .eml compose object through Mail's dictionary,
+            # then close the matching compose window without a second persist.
             _assert_ordered(
                 self,
                 scripts[1],
-                'keystroke "s" using command down',
-                "close window 1 saving no",
+                "set targetMessage to item 1 of outgoing messages",
+                "save targetMessage",
+                "close (window of targetMessage) saving no",
             )
+            self.assertNotIn("System Events", scripts[1])
+            self.assertNotIn('keystroke "s" using command down', scripts[1])
+            self.assertNotIn("close window 1 saving no", scripts[1])
             self.assertNotIn("close window 1 saving yes", scripts[1])
 
     def test_create_rich_email_draft_allows_partial_details(self):
@@ -403,13 +413,17 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(len(captured), 1)
         self.assertNotIn("every outgoing message whose subject is", captured[0])
-        # FIX #1: single persist — Cmd+S for UI save, then close saving no (no re-persist)
+        # Save through Mail's outgoing-message object model, not System Events.
         _assert_ordered(
             self,
             captured[0],
-            'keystroke "s" using command down',
-            "close window 1 saving no",
+            "set targetMessage to item 1 of outgoing messages",
+            "save targetMessage",
+            "close (window of targetMessage) saving no",
         )
+        self.assertNotIn("System Events", captured[0])
+        self.assertNotIn('keystroke "s" using command down', captured[0])
+        self.assertNotIn("close window 1 saving no", captured[0])
         self.assertNotIn("close window 1 saving yes", captured[0])
 
     def test_can_leave_front_compose_window_open_for_review(self):
@@ -426,6 +440,10 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
             result = compose_tools._save_front_compose_window_as_draft(close_after_save=False)
 
         self.assertTrue(result)
+        self.assertIn("save targetMessage", captured[0])
+        self.assertNotIn("System Events", captured[0])
+        self.assertNotIn('keystroke "s" using command down', captured[0])
+        self.assertNotIn("close (window of targetMessage) saving no", captured[0])
         self.assertNotIn("close window 1 saving yes", captured[0])
 
 
@@ -1473,6 +1491,12 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
 
 
 class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
+    def test_manage_drafts_accepts_exact_draft_id_parameter(self):
+        params = inspect.signature(compose_tools.manage_drafts).parameters
+
+        self.assertIn("draft_id", params)
+        self.assertIsNone(params["draft_id"].default)
+
     def test_create_draft_blocks_reply_like_subject_without_confirmation(self):
         with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
             result = compose_tools.manage_drafts(
@@ -1509,6 +1533,9 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
 
         self.assertEqual(len(captured), 1)
         self.assertIn("CREATING DRAFT", captured[0])
+        self.assertIn("save newDraft", captured[0])
+        self.assertIn("set draftId to id of newDraft as string", captured[0])
+        self.assertIn('set outputText to outputText & "Draft ID: " & draftId', captured[0])
         self.assertIn("Draft created", result)
 
     def test_default_emits_single_alias_fallback_for_new_draft(self):
@@ -1534,6 +1561,8 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
         script = captured[0]
         self.assertIn("if (count of emailAddrs) is 1 then", script)
         self.assertIn("set sender of newDraft to item 1 of emailAddrs", script)
+        self.assertIn("save newDraft", script)
+        self.assertIn("set draftId to id of newDraft as string", script)
         self.assertNotIn('set sender of newDraft to "', script)
 
     def test_injects_sender_when_from_address_is_valid(self):
@@ -1585,6 +1614,66 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
 
         self.assertEqual(len(scripts), 1)
         self.assertTrue(result.startswith("Error: 'from_address'"))
+
+    def test_send_draft_prefers_exact_draft_id(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "✓ Draft sent successfully!"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="send",
+                draft_subject="Duplicate Subject",
+                draft_id="84053",
+            )
+
+        self.assertIn("Draft sent", result)
+        script = captured[0]
+        self.assertIn("every message of draftsMailbox whose id is 84053", script)
+        self.assertIn('set outputText to outputText & "Draft ID: " & draftId', script)
+        self.assertNotIn('contains "Duplicate Subject"', script)
+
+    def test_open_and_delete_drafts_can_target_exact_draft_id(self):
+        for action, expected_action in [("open", "open foundDraft"), ("delete", "delete foundDraft")]:
+            with self.subTest(action=action):
+                captured = []
+
+                def fake_run(script, timeout=120, captured=captured):
+                    captured.append(script)
+                    return "ok"
+
+                with patch(
+                    "apple_mail_mcp.tools.compose.run_applescript",
+                    side_effect=fake_run,
+                ):
+                    compose_tools.manage_drafts(
+                        account="Work",
+                        action=action,
+                        draft_id="84054",
+                    )
+
+                script = captured[0]
+                self.assertIn("every message of draftsMailbox whose id is 84054", script)
+                self.assertIn(expected_action, script)
+                self.assertIn('set outputText to outputText & "Draft ID: " & draftId', script)
+                self.assertNotIn("contains", script)
+
+    def test_invalid_draft_id_is_rejected_before_applescript(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="not-a-number",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("'draft_id' must be a numeric", result)
 
 
 class ManageDraftsListTests(unittest.TestCase):
@@ -1725,9 +1814,34 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
                 mode="open",
             )
 
-        self.assertIn('keystroke "s" using command down', captured["script"])
+        self.assertIn("save newMsg", captured["script"])
+        self.assertNotIn('keystroke "s" using command down', captured["script"])
         self.assertNotIn("close window 1 saving yes", captured["script"])
         self.assertIn("review", result)
+
+    def test_send_html_email_send_mode_uses_mail_object_model_send(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "Email sent successfully (HTML)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools._send_html_email(
+                account="Work",
+                to="team@example.com",
+                subject="Hi",
+                body_plain="Plain",
+                body_html="<p>Hi</p>",
+                mode="send",
+            )
+
+        self.assertIn("send newMsg", captured["script"])
+        self.assertNotIn('keystroke "d" using {command down, shift down}', captured["script"])
+        self.assertIn("Email sent successfully (HTML)", result)
 
     def test_forward_with_message_uses_run_applescript(self):
         captured = []

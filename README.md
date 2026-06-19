@@ -325,7 +325,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
 | `reply_to_email` | Native Mail reply or reply-all draft; constructs and assigns `reply_body` above a quoted-original block, then verifies exact Drafts id first with bounded fallback; prefer `message_id` from search/list results |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
-| `manage_drafts` | Create, list, send, and delete drafts; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
+| `manage_drafts` | Create, list, send, open, and delete drafts; list returns Drafts ids, and send/open/delete prefer exact `draft_id` over subject matching; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
@@ -390,7 +390,7 @@ In draft-safe mode:
 - treat `subject_keyword` reply targeting or any degraded reply fallback as Cayman-approved-only for the specific message
 - pass `message_id` from search/list tools for reply/forward when available; `subject_keyword` is fallback only
 - explicit `mode="send"` calls return an error
-- `manage_drafts action="send"` returns an error
+- `manage_drafts action="send"` returns an error; when send is enabled outside draft-safe mode, target drafts by exact `draft_id` from `manage_drafts(action="list")`
 
 ### Default Mail Account
 
@@ -534,7 +534,7 @@ send/delete shortcuts; use the MCP tools with `--draft-safe` for shared agents.
 Use `create_rich_email_draft` when you need a visually formatted email, newsletter, or leadership update.
 
 - It generates an unsent `.eml` file with multipart plain-text + HTML bodies
-- It saves the opened Mail compose window to Drafts by default, then closes the fresh window
+- It saves the opened Mail compose object to Drafts by default, then closes the fresh window
 - It can leave the saved draft open for explicit human review (`review_in_mail=True`)
 - It can write only the `.eml` artifact with `open_in_mail=False`
 - Blank subjects stay `.eml`-only until there is a subject to save safely through Mail

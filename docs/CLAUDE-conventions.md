@@ -137,7 +137,9 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 **Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id` whenever available. `subject_keyword` is a fallback when no id is known — never prefer subject matching when an id is already in context. `reply_to_email` uses Mail's native reply command, constructs and assigns `reply_body` above the quoted-original block, and verifies exact Drafts id first when Mail exposes one. `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
 
-**Rich `.eml` drafts:** `create_rich_email_draft` saves the front Mail compose window after opening the file (no subject-based outgoing-message lookup). Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
+**Rich `.eml` drafts:** `create_rich_email_draft` saves the opened Mail compose object after opening the file (no subject-based outgoing-message lookup and no `System Events` save keystroke). Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
+
+**Draft lifecycle targeting:** `manage_drafts(action="list")` returns each draft's id. For `send`, `open`, or `delete`, prefer `draft_id` over `draft_subject`; subject matching is a fallback when an exact id is unavailable.
 
 **Agent guidance:** skills under `plugin/skills/email-drafting/` and `plugin/skills/apple-mail-operator/` document the quiet-default vs saved-open review split. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
 
