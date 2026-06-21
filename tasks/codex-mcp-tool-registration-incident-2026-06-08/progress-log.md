@@ -21,6 +21,12 @@ Verification:
 
 ## Native Reply Follow-Up - 2026-06-08
 
+Superseded 2026-06-19: the current draft-mode implementation uses Mail's
+dictionary-backed `reply` command without `with opening window`, window close
+timing, or body paste. It constructs and assigns `reply_body` above the
+quoted-original block, captures the saved Drafts id when available, and verifies
+that exact artifact first with bounded fallback.
+
 - Reviewed the interrupted native-reply changes after Jason was stopped. The working tree was narrow and non-conflicted: `compose.py`, compose/bounded-scan tests, task notes, README/skill docs, and rebuilt plugin artifact.
 - Changed `reply_to_email` from synthetic `make new outgoing message` reply bodies to Mail's native `reply foundMessage with opening window` path. The tool now lets Mail generate the quoted prior conversation automatically by default.
 - Changed native reply-all to use Mail's native `reply to all` option instead of rebuilding recipient fan-out manually.
@@ -42,6 +48,11 @@ Verification:
 - `bash tools/validate-codex-plugin.sh` passed: fresh temp Codex marketplace install, installed-plugin venv bootstrap, registered MCP launch, and MCP `list_tools` showing all 28 tools including `reply_to_email`, `compose_email`, `manage_drafts`, `list_accounts`, and `get_inbox_overview`.
 
 ## Reply Signature and Saved-Draft Verification Follow-Up - 2026-06-08
+
+Superseded 2026-06-19: reply-body insertion is no longer a paste operation.
+The verifier now checks the exact Drafts artifact id first, uses bounded
+newest-Drafts fallback only when needed, and distinguishes body-missing from
+body-after-quote failures with structured artifact ids.
 
 - Audited the interrupted overlapping-agent state. The active diff was narrow and non-conflicting; the useful accidental change was preserving `reply_to_email(mode="draft")` from the stale outgoing-message cap probe.
 - Added signature preflight validation so a bad named signature fails before Mail creates a partial native reply.

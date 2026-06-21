@@ -131,13 +131,15 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 | Mode | Behavior | When agents should use it |
 |------|----------|---------------------------|
-| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. Native replies may briefly open a transient Mail compose window, then save, close, and verify the saved Drafts message before success. | Bulk drafting, background agent work, default under `--draft-safe` |
+| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. Native replies use Mail's dictionary-backed `reply` command, assign `reply_body` above the quoted original without clipboard/UI scripting, and verify exact Drafts id first with bounded fallback. | Bulk drafting, background agent work, default under `--draft-safe` |
 | `open` | Save first, then leave the compose window open for human review | User wants each draft to pop up in Mail (e.g. review 10 replies in sequence) |
 | `send` | Send immediately | Explicit user authorization only; blocked when `DRAFT_SAFE` or `READ_ONLY` |
 
-**Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id` whenever available. `subject_keyword` is a fallback when no id is known — never prefer subject matching when an id is already in context. `reply_to_email` uses Mail's native reply composer so the quoted prior conversation is automatic by default; `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
+**Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id` whenever available. `subject_keyword` is a fallback when no id is known — never prefer subject matching when an id is already in context. `reply_to_email` uses Mail's native reply command, constructs and assigns `reply_body` above the quoted-original block, and verifies exact Drafts id first when Mail exposes one. `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
 
-**Rich `.eml` drafts:** `create_rich_email_draft` saves the front Mail compose window after opening the file (no subject-based outgoing-message lookup). Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
+**Rich `.eml` drafts:** `create_rich_email_draft` saves the opened Mail compose object after opening the file (no subject-based outgoing-message lookup and no `System Events` save keystroke). Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
+
+**Draft lifecycle targeting:** `manage_drafts(action="list")` returns each draft's id. For `send`, `open`, or `delete`, prefer `draft_id` over `draft_subject`; subject matching is a fallback when an exact id is unavailable.
 
 **Agent guidance:** skills under `plugin/skills/email-drafting/` and `plugin/skills/apple-mail-operator/` document the quiet-default vs saved-open review split. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
 

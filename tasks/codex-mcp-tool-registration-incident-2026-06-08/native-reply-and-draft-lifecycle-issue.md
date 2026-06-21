@@ -2,17 +2,21 @@
 
 ## Summary
 
-`reply_to_email` now uses Mail's native reply composer instead of building a
-synthetic quoted block. This makes prior messages automatic by default: Mail owns
-the reply recipients, subject, and quoted thread body exactly as it does when the
-user presses Reply in Mail.app.
+The 2026-06-08 fix moved `reply_to_email` from synthetic reply construction to
+Mail's native reply command, so Mail owns reply recipients, subject, and quoted
+thread context.
 
-The fix also corrects the Drafts lifecycle issue found during live testing:
+The current 2026-06-19 contract is stricter: `reply_to_email` constructs and
+assigns `reply_body` above the quoted-original block, verifies exact Drafts id
+first when Mail exposes one, and only then falls back to bounded newest-Drafts
+verification.
+
+The 2026-06-08 fix also corrected the Drafts lifecycle issue found during live testing:
 `manage_drafts(action="list", subject_contains=...)` now checks the bounded
 front Drafts window where Mail placed freshly created native reply drafts. No
 Drafts lookup or list path uses `every message` or an unbounded folder scan.
-`reply_to_email(mode="draft")` also performs its own post-save verification in a
-fresh bounded newest-Drafts read before reporting success.
+At that point, `reply_to_email(mode="draft")` performed post-save verification in
+a fresh bounded newest-Drafts read before reporting success.
 
 ## Root Cause
 
@@ -25,7 +29,15 @@ Two separate behaviors combined into the visible failure:
    of the mailbox. Live Mail showed newly created native reply drafts at positions
    3 and 4 out of 975, so the bounded tail scan missed them.
 
-## Implemented Behavior
+## Historical Implemented Behavior
+
+Superseded 2026-06-19: current draft-mode reply creation omits `with opening
+window` unless `mode="open"` is requested. It constructs and assigns the
+intended `reply_body` above the quoted-original block before save, captures the
+saved Drafts id when Mail exposes one, and verifies that exact artifact before
+bounded fallback. Verification now distinguishes missing body from
+body-after-quote artifacts. The bullets below describe the 2026-06-08
+implementation, not the current contract.
 
 - `reply_to_email` calls `reply foundMessage with opening window` by default.
 - `reply_to_all=True` uses Mail's native `reply to all` option.

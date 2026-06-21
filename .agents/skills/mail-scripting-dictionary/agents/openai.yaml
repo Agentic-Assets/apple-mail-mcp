@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mail Scripting Dictionary"
+  short_description: "Developer-only Mail scripting guidance"
+  default_prompt: "Use $mail-scripting-dictionary to inspect Apple Mail scripting terminology before changing Mail AppleScript."

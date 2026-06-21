@@ -14,9 +14,12 @@ These tests:
 
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from apple_mail_mcp.tools import analytics as analytics_tools
+
+DESKTOP_PATH = str(Path("~/Desktop").expanduser())
 
 
 class _ScriptCapture:
@@ -37,14 +40,12 @@ class _ScriptCapture:
 
 def _generate_entire_mailbox_script(account: str = "Work") -> str:
     """Drive export_emails(scope='entire_mailbox') and return the captured AppleScript."""
-    import os
-    save_directory = os.path.expanduser("~/Desktop")
     capture = _ScriptCapture(return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!")
     with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture):
         analytics_tools.export_emails(
             account=account,
             scope="entire_mailbox",
-            save_directory=save_directory,
+            save_directory=DESKTOP_PATH,
             mailbox="INBOX",
             format="txt",
         )
@@ -141,8 +142,6 @@ class SingleEmailExportCloseTest(unittest.TestCase):
     def test_single_email_error_path_also_closes_file(self):
         capture = _ScriptCapture(return_value="EXPORTING EMAIL\n\n✓ Email exported successfully!")
         # For the single-email path we need search_emails to return a record.
-        import os
-        save_directory = os.path.expanduser("~/Desktop")
         with (
             patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture),
             patch(
@@ -154,7 +153,7 @@ class SingleEmailExportCloseTest(unittest.TestCase):
                 account="Work",
                 scope="single_email",
                 subject_keyword="Test",
-                save_directory=save_directory,
+                save_directory=DESKTOP_PATH,
                 mailbox="INBOX",
                 format="txt",
             )
@@ -168,6 +167,26 @@ class SingleEmailExportCloseTest(unittest.TestCase):
         self.assertIn("close access", error_block)
 
 
+class ListEmailAttachmentsDictionaryTests(unittest.TestCase):
+    def test_attachment_size_uses_mail_file_size_property(self):
+        capture = _ScriptCapture(return_value="ATTACHMENTS FOR: Test")
+
+        with (
+            patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture),
+            patch(
+                "apple_mail_mcp.tools.analytics._search_mail_records",
+                return_value=[{"subject": "Test", "message_id": "42"}],
+            ),
+        ):
+            analytics_tools.list_email_attachments(
+                account="Work",
+                subject_keyword="Test",
+            )
+
+        self.assertIn("file size of anAttachment", capture.last_script)
+        self.assertNotIn("set attachmentSize to size of anAttachment", capture.last_script)
+
+
 class ExportEmailsDefaultsAndWarningTests(unittest.TestCase):
     """Fix #4: entire_mailbox default max_emails=100; warn above 500."""
 
@@ -176,11 +195,10 @@ class ExportEmailsDefaultsAndWarningTests(unittest.TestCase):
         capture = _ScriptCapture(
             return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!"
         )
-        import os
         defaults = dict(
             account="Work",
             scope="entire_mailbox",
-            save_directory=os.path.expanduser("~/Desktop"),
+            save_directory=DESKTOP_PATH,
             mailbox="INBOX",
             format="txt",
         )

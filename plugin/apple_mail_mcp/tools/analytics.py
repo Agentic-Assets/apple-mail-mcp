@@ -43,7 +43,7 @@ def list_email_attachments(
     List attachments for emails matching a subject keyword or exact message ids.
 
     Scans the most-recent inbox messages (capped at ``max_results`` via
-    ``items 1 thru max_results``) and returns attachments for the messages
+    ``messages 1 thru max_results``) and returns attachments for the messages
     whose subject contains ``subject_keyword``. When ``message_ids`` is set,
     looks up exact messages by id and ignores ``subject_keyword``.
 
@@ -182,7 +182,7 @@ def list_email_attachments(
                             repeat with anAttachment in msgAttachments
                                 set attachmentName to name of anAttachment
                                 try
-                                    set attachmentSize to size of anAttachment
+                                    set attachmentSize to file size of anAttachment
                                     set sizeInKB to (attachmentSize / 1024) as integer
                                     set outputText to outputText & "   📎 " & attachmentName & " (" & sizeInKB & " KB)" & return
                                 on error

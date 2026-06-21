@@ -197,9 +197,12 @@ class ListInboxAliasTests(unittest.TestCase):
             captured["read_filter"] = read_filter
             return "listed"
 
-        with patch(
-            "apple_mail_mcp.tools.inbox._list_inbox_emails_text",
-            side_effect=fake_text,
+        with (
+            self.assertWarns(DeprecationWarning),
+            patch(
+                "apple_mail_mcp.tools.inbox._list_inbox_emails_text",
+                side_effect=fake_text,
+            ),
         ):
             result = self._run(account="Work", unread_only=True)
 

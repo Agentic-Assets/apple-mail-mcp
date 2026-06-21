@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass
 from email.message import EmailMessage
 from html import escape as html_escape
 from pathlib import Path
@@ -319,26 +320,126 @@ def _first_non_empty_line(value: str, *, max_chars: int = 500) -> str:
     return ""
 
 
+@dataclass(frozen=True)
+class _ReplyDraftVerification:
+    ok: bool
+    status: str = "not_found"
+    body_missing_artifact_id: str | None = None
+    matched_artifact_id: str | None = None
+
+
+def _split_reply_verification_output(output: str) -> tuple[str, str | None]:
+    """Return the verifier status prefix and optional Drafts artifact id."""
+    status, separator, artifact_id = output.partition("|")
+    if not separator:
+        return status, None
+    return status, artifact_id.strip() or None
+
+
+def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
+    """Parse the saved-reply verifier AppleScript response."""
+    status, artifact_id = _split_reply_verification_output(output.strip())
+    if status == "FOUND":
+        return _ReplyDraftVerification(ok=True, status="found", matched_artifact_id=artifact_id)
+    if status == "BODY_MISSING":
+        return _ReplyDraftVerification(
+            ok=False,
+            status="body_missing",
+            body_missing_artifact_id=artifact_id,
+        )
+    if status == "BODY_AFTER_QUOTE":
+        return _ReplyDraftVerification(
+            ok=False,
+            status="body_after_quote",
+            body_missing_artifact_id=artifact_id,
+        )
+    return _ReplyDraftVerification(ok=False, status="not_found")
+
+
 def _verify_saved_reply_draft(
     account: str,
     reply_subject: str,
     reply_body: str,
+    *,
+    draft_id: str | None = None,
+    quoted_needle: str | None = None,
     timeout: int | None = None,
-) -> bool:
+) -> _ReplyDraftVerification:
     """Confirm a native reply draft appears in a bounded newest Drafts window."""
     safe_account = escape_applescript(account)
     safe_reply_subject = escape_applescript(reply_subject)
     safe_body_needle = escape_applescript(_first_non_empty_line(reply_body))
+    safe_draft_id = escape_applescript(draft_id or "")
+    safe_quoted_needle = escape_applescript(_first_non_empty_line(quoted_needle or ""))
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
     script = f'''
+    on textOffset(haystackText, needleText)
+        if needleText is "" then return 0
+        set previousDelimiters to AppleScript's text item delimiters
+        try
+            set AppleScript's text item delimiters to needleText
+            set splitItems to text items of haystackText
+            if (count of splitItems) is 1 then
+                set AppleScript's text item delimiters to previousDelimiters
+                return 0
+            end if
+            set beforeNeedle to item 1 of splitItems
+            set AppleScript's text item delimiters to previousDelimiters
+            return ((count of characters of beforeNeedle) + 1)
+        on error
+            set AppleScript's text item delimiters to previousDelimiters
+            return 0
+        end try
+    end textOffset
+
+    on replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
+        set bodyOffset to my textOffset(draftContent, replyBodyNeedle)
+        if bodyOffset is 0 then return "missing"
+        if quotedNeedle is "" then return "found"
+        set quoteOffset to my textOffset(draftContent, quotedNeedle)
+        if quoteOffset is 0 then return "found"
+        if bodyOffset < quoteOffset then return "found"
+        return "after_quote"
+    end replyBodyIsBeforeQuote
+
+    on verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle)
+        set draftId to id of draftMessage as string
+        if replyBodyNeedle is "" then return "FOUND|" & draftId
+        set draftContent to content of draftMessage as string
+        set bodyStatus to my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
+        if bodyStatus is "found" then return "FOUND|" & draftId
+        if bodyStatus is "after_quote" then return "BODY_AFTER_QUOTE|" & draftId
+        return "BODY_MISSING|" & draftId
+    end verifyReplyDraft
+
     tell application "Mail"
         set targetAccount to account "{safe_account}"
+        set targetDraftIdText to "{safe_draft_id}"
         set replyBodyNeedle to "{safe_body_needle}"
+        set quotedNeedle to "{safe_quoted_needle}"
         set replyDraftVerified to false
+        set bodyMissingDraftId to ""
+        set bodyAfterQuoteDraftId to ""
+        set foundDraftId to ""
 
-        repeat with verifyAttempt from 1 to 8
+        repeat with verifyAttempt from 1 to 20
             try
                 set draftsMailbox to mailbox "Drafts" of targetAccount
+                if targetDraftIdText is not "" then
+                    try
+                        set targetDraftId to targetDraftIdText as integer
+                        set exactDraft to message id targetDraftId of draftsMailbox
+                        set exactResult to my verifyReplyDraft(exactDraft, replyBodyNeedle, quotedNeedle)
+                        if exactResult starts with "FOUND|" then
+                            set replyDraftVerified to true
+                            set foundDraftId to text 7 thru -1 of exactResult
+                            exit repeat
+                        else
+                            return exactResult
+                        end if
+                    end try
+                end if
+
                 set totalDrafts to count of messages of draftsMailbox
                 set headEnd to totalDrafts
                 if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
@@ -348,12 +449,15 @@ def _verify_saved_reply_draft(
                         try
                             set draftMatched to false
                             set draftSubject to subject of draftMessage as string
-                            if draftSubject is "{safe_reply_subject}" then
-                                if replyBodyNeedle is "" then
+                            if "{safe_reply_subject}" is "" or draftSubject is "{safe_reply_subject}" then
+                                set draftResult to my verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle)
+                                if draftResult starts with "FOUND|" then
                                     set draftMatched to true
-                                else
-                                    set draftContent to content of draftMessage as string
-                                    if draftContent contains replyBodyNeedle then set draftMatched to true
+                                    set foundDraftId to text 7 thru -1 of draftResult
+                                else if draftResult starts with "BODY_AFTER_QUOTE|" then
+                                    if bodyAfterQuoteDraftId is "" then set bodyAfterQuoteDraftId to text 18 thru -1 of draftResult
+                                else if draftResult starts with "BODY_MISSING|" then
+                                    if bodyMissingDraftId is "" then set bodyMissingDraftId to text 14 thru -1 of draftResult
                                 end if
                             end if
 
@@ -370,15 +474,22 @@ def _verify_saved_reply_draft(
         end repeat
 
         if replyDraftVerified then
-            return "FOUND"
+            return "FOUND|" & foundDraftId
+        end if
+        if bodyAfterQuoteDraftId is not "" then
+            return "BODY_AFTER_QUOTE|" & bodyAfterQuoteDraftId
+        end if
+        if bodyMissingDraftId is not "" then
+            return "BODY_MISSING|" & bodyMissingDraftId
         end if
         return "NOT_FOUND"
     end tell
     '''
     try:
-        return run_applescript(script, timeout=verification_timeout).strip() == "FOUND"
+        output = run_applescript(script, timeout=verification_timeout).strip()
     except Exception:  # noqa: BLE001 - caller converts verification failure into a safe error
-        return False
+        return _ReplyDraftVerification(ok=False, status="applescript_error")
+    return _reply_verification_from_output(output)
 
 
 def _split_addresses(value: str | None) -> list[str]:
@@ -640,37 +751,23 @@ def _save_front_compose_window_as_draft(
     delay_seconds: float = 0.5,
     timeout: int | None = None,
 ) -> bool:
-    """Ask Mail to save the front compose window as a draft."""
+    """Ask Mail to save the newest open outgoing message as a draft."""
     close_script = ""
     if close_after_save:
         close_script = """
             delay 0.2
-            close window 1 saving no
+            try
+                close (window of targetMessage) saving no
+            end try
         """
     script = f"""
     tell application "Mail"
         try
-            activate
-            if (count of windows) is 0 then
+            if (count of outgoing messages) is 0 then
                 return "not-found"
             end if
-        on error errMsg
-            return "error: " & errMsg
-        end try
-    end tell
-
-    tell application "System Events"
-        try
-            set frontmost of process "Mail" to true
-            delay 0.2
-            keystroke "s" using command down
-        on error errMsg
-            return "error: " & errMsg
-        end try
-    end tell
-
-    tell application "Mail"
-        try
+            set targetMessage to item 1 of outgoing messages
+            save targetMessage
             delay 0.5
             {close_script}
             return "saved"
@@ -897,8 +994,11 @@ def _send_html_email(
     # Mode-specific behaviour after paste
     if mode == "send":
         post_paste_script = """
-            -- Send via keyboard shortcut
-            keystroke "d" using {command down, shift down}
+            -- Send via Mail's object model after HTML paste lands.
+            delay 0.5
+            tell application "Mail"
+                send newMsg
+            end tell
         """
         success_text = "Email sent successfully (HTML)"
     elif mode == "draft":
@@ -916,7 +1016,6 @@ def _send_html_email(
     else:  # open
         post_paste_script = """
             -- Save first, then leave open for review
-            keystroke "s" using command down
             delay 0.5
             tell application "Mail"
                 save newMsg
@@ -1072,6 +1171,232 @@ def _validate_attachment_paths(attachments: str) -> tuple[list[str], str | None]
     return resolved_paths, None
 
 
+@dataclass(frozen=True)
+class _ReplyModePlan:
+    header_text: str
+    post_action: str
+    success_text: str
+
+
+def _reply_mode_plan(effective_mode: str) -> _ReplyModePlan:
+    """Return mode-specific output and Mail action script for replies."""
+    if effective_mode == "send":
+        return _ReplyModePlan("SENDING REPLY", "send replyMessage", "Reply sent successfully!")
+    if effective_mode == "open":
+        return _ReplyModePlan(
+            "OPENING REPLY FOR REVIEW",
+            """
+        save replyMessage
+        delay 0.8
+        activate
+        """,
+            "Reply opened in Mail for review. Edit and send when ready.",
+        )
+    return _ReplyModePlan(
+        "SAVING REPLY AS DRAFT",
+        """
+        save replyMessage
+        delay 1.0
+        """,
+        "Reply saved as draft!",
+    )
+
+
+def _reply_command_options(effective_mode: str, reply_to_all: bool) -> tuple[str, str]:
+    """Return Mail `reply` command options and any required settle delay."""
+    if effective_mode == "open":
+        reply_options = "with opening window"
+        if reply_to_all:
+            reply_options += " and reply to all"
+        return reply_options, "delay 0.6"
+    if reply_to_all:
+        return "with reply to all", ""
+    return "", ""
+
+
+def _reply_signature_script(
+    resolved_signature_name: str | None,
+    *,
+    include_signature: bool,
+) -> str:
+    """Return reply-specific signature AppleScript."""
+    if resolved_signature_name:
+        return _compose_signature_script("replyMessage", resolved_signature_name)
+    if not include_signature:
+        return "set message signature of replyMessage to missing value"
+    return ""
+
+
+def _reply_draft_verification_error(
+    verification: _ReplyDraftVerification,
+    *,
+    mode_text: str,
+    reply_body: str,
+) -> str:
+    """Serialize a structured draft-verification failure when an artifact id is known."""
+    artifact_id = verification.body_missing_artifact_id
+    if not artifact_id:
+        return (
+            f"Error: Reply draft was {mode_text}, but Mail did not verify it in the newest Drafts "
+            "window. No email was sent. Please check Mail Drafts and retry after Mail finishes saving."
+        )
+
+    if verification.status == "body_after_quote":
+        code = "REPLY_DRAFT_BODY_AFTER_QUOTE"
+        detail = "contains the inserted reply body after the quoted original instead of above it"
+    else:
+        code = "REPLY_DRAFT_BODY_MISSING"
+        detail = "does not contain the inserted reply body"
+
+    return serialize_tool_error(
+        ToolError(
+            code=code,
+            message=(
+                f"Reply draft was {mode_text}, but saved Drafts artifact {artifact_id} {detail}. No email was sent."
+            ),
+            remediation={
+                "artifact_message_id": artifact_id,
+                "mailbox": "Drafts",
+                "verification_status": verification.status,
+                "expected_body_needle": _first_non_empty_line(reply_body),
+                "preferred": (
+                    "Inspect or delete the artifact by exact Drafts message_id, then retry after Mail finishes saving."
+                ),
+            },
+        )
+    )
+
+
+def _reply_extra_output_lines(
+    *,
+    safe_cc: str,
+    safe_bcc: str,
+    safe_attachment_info: str,
+    has_cc: bool,
+    has_bcc: bool,
+    has_attachments: bool,
+) -> str:
+    """Build optional status lines appended to native reply output."""
+    lines: list[str] = []
+    if has_cc:
+        lines.append(f'set outputText to outputText & "CC: {safe_cc}" & return')
+    if has_bcc:
+        lines.append(f'set outputText to outputText & "BCC: {safe_bcc}" & return')
+    if has_attachments:
+        lines.append(f'set outputText to outputText & "Attachments:" & return & "{safe_attachment_info}" & return')
+    return "\n        ".join(lines)
+
+
+def _build_native_reply_applescript(
+    *,
+    header_text: str,
+    success_text: str,
+    safe_account: str,
+    lookup_script: str,
+    not_found_message: str,
+    body_temp_path: str,
+    reply_options: str,
+    reply_settle_delay: str,
+    sender_script: str,
+    signature_script: str,
+    cc_script: str,
+    bcc_script: str,
+    attachment_script: str,
+    post_action: str,
+    cleanup_script: str,
+    safe_cc: str,
+    safe_bcc: str,
+    safe_attachment_info: str,
+    has_cc: bool,
+    has_bcc: bool,
+    has_attachments: bool,
+) -> str:
+    """Build the Mail dictionary-backed native reply script."""
+    extra_output_lines = _reply_extra_output_lines(
+        safe_cc=safe_cc,
+        safe_bcc=safe_bcc,
+        safe_attachment_info=safe_attachment_info,
+        has_cc=has_cc,
+        has_bcc=has_bcc,
+        has_attachments=has_attachments,
+    )
+
+    return f'''
+tell application "Mail"
+    set outputText to "{header_text}" & return & return
+
+    try
+        set targetAccount to account "{safe_account}"
+        {inbox_mailbox_script("inboxMailbox", "targetAccount")}
+        {lookup_script}
+
+        if foundMessage is missing value then
+            return "{not_found_message}"
+        end if
+
+        set sourceSubject to subject of foundMessage as string
+        if sourceSubject starts with "Re:" or sourceSubject starts with "RE:" or sourceSubject starts with "re:" then
+            set replySubject to sourceSubject
+        else
+            set replySubject to "Re: " & sourceSubject
+        end if
+        set sourceSender to sender of foundMessage as string
+        set sourceDate to date received of foundMessage as string
+        set sourceContent to content of foundMessage as string
+        set replyBodyText to do shell script "cat " & quoted form of "{body_temp_path}"
+
+        -- Native Mail reply: Mail creates an outgoing reply message from the
+        -- source message, then this script assigns the intended plain-text body
+        -- above the quoted original before the draft is saved.
+        set replyMessage to reply foundMessage {reply_options}
+        {reply_settle_delay}
+
+        {sender_script}
+        {signature_script}
+
+        set quotedOriginalNeedle to ""
+        if replyBodyText is not "" then
+            set quotedOriginalNeedle to "On " & sourceDate & ", " & sourceSender & " wrote:"
+            set quotedOriginalText to quotedOriginalNeedle & return & sourceContent
+            set composedReplyContent to replyBodyText & return & return & quotedOriginalText
+            set content of replyMessage to (composedReplyContent as rich text)
+        end if
+
+        -- Optional extra recipients, on top of Mail's native reply recipients.
+        {cc_script}
+        {bcc_script}
+
+        -- Add attachments
+        {attachment_script}
+
+        {post_action}
+
+        set replyDraftId to ""
+        try
+            set replyDraftId to id of replyMessage as string
+        end try
+
+        set outputText to outputText & "{success_text}" & return
+        set outputText to outputText & "To: native reply recipients" & return
+        set outputText to outputText & "Subject: " & replySubject & return
+        if replyDraftId is not "" then set outputText to outputText & "Draft ID: " & replyDraftId & return
+        if quotedOriginalNeedle is not "" then set outputText to outputText & "Quote Needle: " & quotedOriginalNeedle & return
+        {extra_output_lines}
+
+        -- Clean up temp file
+        {cleanup_script}
+
+        return outputText
+    on error errMsg
+        try
+            {cleanup_script}
+        end try
+        return "Error: " & errMsg & return & "Please check that the account name is correct and the email exists."
+    end try
+    end tell
+    '''
+
+
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def reply_to_email(
@@ -1219,152 +1544,58 @@ def reply_to_email(
         if cap_err:
             return cap_err
 
-    if effective_mode == "send":
-        header_text = "SENDING REPLY"
-        post_action = "send replyMessage"
-        success_text = "Reply sent successfully!"
-    elif effective_mode == "open":
-        header_text = "OPENING REPLY FOR REVIEW"
-        post_action = """
-        save replyMessage
-        delay 0.8
-        activate
-        """
-        success_text = "Reply opened in Mail for review. Edit and send when ready."
-    else:  # draft
-        header_text = "SAVING REPLY AS DRAFT"
-        post_action = """
-        save replyMessage
-        delay 1.0
-        try
-            close (window of replyMessage) saving yes
-        on error
-            try
-                close front window saving yes
-            end try
-        end try
-        delay 0.5
-        try
-            save replyMessage
-        end try
-        """
-        success_text = "Reply saved as draft!"
+    mode_plan = _reply_mode_plan(effective_mode)
 
     cleanup_script = f'do shell script "rm -f " & quoted form of "{body_temp_path}"'
 
     sender_script = _compose_sender_script("replyMessage", "targetAccount", sender_override)
-    signature_script = _compose_signature_script("replyMessage", resolved_signature_name)
+    signature_script = _reply_signature_script(resolved_signature_name, include_signature=include_signature)
+    reply_options, reply_settle_delay = _reply_command_options(effective_mode, reply_to_all)
 
-    open_clause = "with opening window"
-    reply_all_clause = " and reply to all" if reply_to_all else ""
-
-    script = f'''
-tell application "Mail"
-    set outputText to "{header_text}" & return & return
-    set hadClipboard to false
-    set savedClipboard to missing value
-
-    try
-        set targetAccount to account "{safe_account}"
-        {inbox_mailbox_script("inboxMailbox", "targetAccount")}
-        {lookup_script}
-
-        if foundMessage is missing value then
-            return "{not_found_message}"
-        end if
-
-        set origSender to sender of foundMessage
-        set replyBodyText to do shell script "cat " & quoted form of "{body_temp_path}"
-
-        -- Native Mail reply: Mail builds the quoted prior conversation and
-        -- reply metadata exactly as the user would see from the Reply button.
-        set replyMessage to reply foundMessage {open_clause}{reply_all_clause}
-        delay 0.6
-        set replySubject to ""
-        try
-            set replySubject to subject of replyMessage as string
-        end try
-
-        {sender_script}
-        {signature_script}
-
-        if replyBodyText is not "" then
-            try
-                set savedClipboard to the clipboard
-                set hadClipboard to true
-            end try
-            set the clipboard to replyBodyText
-            activate
-            delay 0.2
-            tell application "System Events"
-                keystroke "v" using command down
-            end tell
-            delay 0.3
-            try
-                if hadClipboard then set the clipboard to savedClipboard
-            end try
-        end if
-
-        -- Optional extra recipients, on top of Mail's native reply recipients.
-        {cc_script}
-        {bcc_script}
-
-        -- Add attachments
-        {attachment_script}
-
-        {post_action}
-
-        set outputText to outputText & "{success_text}" & return
-        set outputText to outputText & "To: " & origSender & return
-        set outputText to outputText & "Subject: " & replySubject & return
-    '''
-
-    if cc:
-        script += f"""
-        set outputText to outputText & "CC: {safe_cc}" & return
-    """
-
-    if bcc:
-        script += f"""
-        set outputText to outputText & "BCC: {safe_bcc}" & return
-    """
-
-    if attachments:
-        script += f'''
-        set outputText to outputText & "Attachments:" & return & "{safe_attachment_info}" & return
-    '''
-
-    script += f"""
-        -- Clean up temp file
-        {cleanup_script}
-
-        return outputText
-    on error errMsg
-        try
-            if hadClipboard then set the clipboard to savedClipboard
-        end try
-        try
-            {cleanup_script}
-        end try
-        return "Error: " & errMsg & return & "Please check that the account name is correct and the email exists."
-    end try
-    end tell
-    """
+    script = _build_native_reply_applescript(
+        header_text=mode_plan.header_text,
+        success_text=mode_plan.success_text,
+        safe_account=safe_account,
+        lookup_script=lookup_script,
+        not_found_message=not_found_message,
+        body_temp_path=body_temp_path,
+        reply_options=reply_options,
+        reply_settle_delay=reply_settle_delay,
+        sender_script=sender_script,
+        signature_script=signature_script,
+        cc_script=cc_script,
+        bcc_script=bcc_script,
+        attachment_script=attachment_script,
+        post_action=mode_plan.post_action,
+        cleanup_script=cleanup_script,
+        safe_cc=safe_cc,
+        safe_bcc=safe_bcc,
+        safe_attachment_info=safe_attachment_info,
+        has_cc=bool(cc),
+        has_bcc=bool(bcc),
+        has_attachments=bool(attachments),
+    )
 
     try:
         result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
-        if effective_mode in ("draft", "open") and success_text in result:
+        if effective_mode in ("draft", "open") and mode_plan.success_text in result:
             reply_subject = _extract_output_field(result, "Subject")
-            if not reply_subject or not _verify_saved_reply_draft(
+            draft_id = _extract_output_field(result, "Draft ID")
+            quoted_needle = _extract_output_field(result, "Quote Needle")
+            verification = _verify_saved_reply_draft(
                 account,
-                reply_subject,
+                reply_subject or "",
                 reply_body,
+                draft_id=draft_id,
+                quoted_needle=quoted_needle,
                 timeout=timeout,
-            ):
+            )
+            if not verification.ok:
                 mode_text = "opened" if effective_mode == "open" else "created"
-                return (
-                    f"Error: Reply draft was {mode_text}, but Mail did not verify it in the newest Drafts "
-                    "window. No email was sent. Please check Mail Drafts and retry after Mail finishes saving."
+                return _reply_draft_verification_error(
+                    verification,
+                    mode_text=mode_text,
+                    reply_body=reply_body,
                 )
         return result
     except AppleScriptTimeout:
@@ -1891,6 +2122,7 @@ def manage_drafts(
     cc: str | None = None,
     bcc: str | None = None,
     draft_subject: str | None = None,
+    draft_id: str | None = None,
     from_address: str | None = None,
     timeout: int | None = None,
     standalone_confirmed: bool = False,
@@ -1910,7 +2142,8 @@ def manage_drafts(
         body: Email body (required for create)
         cc: Optional CC recipients for create
         bcc: Optional BCC recipients for create
-        draft_subject: Subject keyword to find draft (required for send/open/delete)
+        draft_subject: Subject keyword to find draft for send/open/delete when draft_id is unavailable
+        draft_id: Exact numeric Drafts message id for send/open/delete; preferred over draft_subject
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
@@ -1934,6 +2167,31 @@ def manage_drafts(
 
     # Escape account for all paths
     safe_account = escape_applescript(account)
+
+    def _draft_action_lookup() -> tuple[str, str, str] | tuple[None, str, None]:
+        if draft_id:
+            normalized_ids = normalize_message_ids([draft_id])
+            if not normalized_ids:
+                return None, "Error: 'draft_id' must be a numeric Mail Drafts message id", None
+            numeric_id = normalized_ids[0]
+            return (
+                f"""
+                set foundDraft to missing value
+                set targetDrafts to every message of draftsMailbox whose id is {numeric_id}
+                if (count of targetDrafts) > 0 then
+                    set foundDraft to item 1 of targetDrafts
+                end if
+                """,
+                f"draft_id={numeric_id}",
+                f"No draft found for draft_id={numeric_id}",
+            )
+        if not draft_subject:
+            return None, "Error: 'draft_subject' or 'draft_id' is required for this draft action", None
+        return (
+            _build_draft_lookup(draft_subject),
+            escape_applescript(draft_subject),
+            f"No draft found matching: {escape_applescript(draft_subject)}",
+        )
 
     if action == "list":
         hide_empty_flag = "true" if hide_empty else "false"
@@ -2108,12 +2366,17 @@ def manage_drafts(
                     {bcc_script}
                 end tell
 
-                -- Save to drafts (don't send)
-                -- The draft is automatically saved to Drafts folder
+                save newDraft
+                delay 0.5
+                set draftId to ""
+                try
+                    set draftId to id of newDraft as string
+                end try
 
                 set outputText to outputText & "✓ Draft created successfully!" & return & return
                 set outputText to outputText & "Subject: {escaped_subject}" & return
                 set outputText to outputText & "To: {safe_to}" & return
+                if draftId is not "" then set outputText to outputText & "Draft ID: " & draftId & return
 
             on error errMsg
                 return "Error: " & errMsg
@@ -2128,10 +2391,9 @@ def manage_drafts(
             return "Error: Sending drafts is disabled in read-only mode."
         if _server.DRAFT_SAFE:
             return "Error: Sending drafts is disabled in draft-safe mode."
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for sending drafts"
-
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, _draft_label, not_found_text = _draft_action_lookup()
+        if lookup_script is None:
+            return _draft_label
 
         script = f'''
         tell application "Mail"
@@ -2140,19 +2402,21 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set draftId to id of foundDraft as string
 
                     -- Send the draft
                     send foundDraft
 
                     set outputText to outputText & "✓ Draft sent successfully!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & draftId & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ {not_found_text}" & return
                 end if
 
             on error errMsg
@@ -2164,10 +2428,9 @@ def manage_drafts(
         '''
 
     elif action == "open":
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for opening drafts"
-
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, _draft_label, not_found_text = _draft_action_lookup()
+        if lookup_script is None:
+            return _draft_label
 
         script = f'''
         tell application "Mail"
@@ -2176,10 +2439,11 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set draftId to id of foundDraft as string
 
                     -- Open the draft in a visible compose window
                     set draftWindow to open foundDraft
@@ -2187,10 +2451,11 @@ def manage_drafts(
 
                     set outputText to outputText & "✓ Draft opened in Mail for review!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & draftId & return
                     set outputText to outputText & return & "Edit and send when ready." & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ {not_found_text}" & return
                 end if
 
             on error errMsg
@@ -2202,10 +2467,9 @@ def manage_drafts(
         '''
 
     elif action == "delete":
-        if not draft_subject:
-            return "Error: 'draft_subject' is required for deleting drafts"
-
-        safe_draft_subject = escape_applescript(draft_subject)
+        lookup_script, _draft_label, not_found_text = _draft_action_lookup()
+        if lookup_script is None:
+            return _draft_label
 
         script = f'''
         tell application "Mail"
@@ -2214,19 +2478,21 @@ def manage_drafts(
             try
                 set targetAccount to account "{safe_account}"
                 set draftsMailbox to mailbox "Drafts" of targetAccount
-                {_build_draft_lookup(draft_subject)}
+                {lookup_script}
 
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
+                    set draftId to id of foundDraft as string
 
                     -- Delete the draft
                     delete foundDraft
 
                     set outputText to outputText & "✓ Draft deleted successfully!" & return
                     set outputText to outputText & "Subject: " & draftSubject & return
+                    set outputText to outputText & "Draft ID: " & draftId & return
 
                 else
-                    set outputText to outputText & "⚠ No draft found matching: {safe_draft_subject}" & return
+                    set outputText to outputText & "⚠ {not_found_text}" & return
                 end if
 
             on error errMsg

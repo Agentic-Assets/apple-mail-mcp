@@ -59,14 +59,21 @@ APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh
 # Extra MCPB structural smoke: the manifest validator already checks for
 # directory entries, but a successful `mcpb unpack` proves Claude Desktop
 # will accept the bundle.
+MCPB_CMD=()
 if command -v mcpb >/dev/null 2>&1; then
+  MCPB_CMD=(mcpb)
+elif command -v npx >/dev/null 2>&1; then
+  MCPB_CMD=(npx -y @anthropic-ai/mcpb)
+fi
+
+if [[ ${#MCPB_CMD[@]} -gt 0 ]]; then
   TMP_MCPB="$(mktemp -d)"
   trap 'rm -rf "${TMP_MCPB}" "${TMP_ZIP:-}"' EXIT
-  mcpb unpack "${MCPB_OUT}" "${TMP_MCPB}" >/dev/null
-  mcpb validate apple-mail-mcpb/manifest.json >/dev/null
+  "${MCPB_CMD[@]}" unpack "${MCPB_OUT}" "${TMP_MCPB}" >/dev/null
+  "${MCPB_CMD[@]}" validate apple-mail-mcpb/manifest.json >/dev/null
   echo "→ mcpb unpack + validate OK"
 else
-  echo "→ mcpb CLI not installed; skipping unpack smoke (npm install -g @anthropic-ai/mcpb)"
+  echo "→ mcpb CLI not installed and npx not found; skipping unpack smoke"
 fi
 
 # Plugin-zip structural smoke: unzip and validate as Cowork's plugin

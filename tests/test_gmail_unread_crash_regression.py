@@ -158,7 +158,9 @@ class TestListInboxReadStatusParamAccepted(unittest.TestCase):
                 )
             )
 
-        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=cap_old):
+        with self.assertWarns(DeprecationWarning), patch(
+            "apple_mail_mcp.tools.inbox.run_applescript", side_effect=cap_old
+        ):
             _run(
                 inbox_tools.list_inbox_emails(
                     account="Work", max_emails=5, include_read=False
@@ -386,9 +388,12 @@ class TestGmailUnreadCrashDoesNotReproduce(unittest.TestCase):
     def test_gmail_unread_crash_does_not_reproduce(self):
         from apple_mail_mcp.tools import inbox as inbox_tools
 
-        with patch(
-            "apple_mail_mcp.tools.inbox.run_applescript",
-            side_effect=_gmail_simulating_runner,
+        with (
+            self.assertWarns(DeprecationWarning),
+            patch(
+                "apple_mail_mcp.tools.inbox.run_applescript",
+                side_effect=_gmail_simulating_runner,
+            ),
         ):
             result = _run(
                 inbox_tools.list_inbox_emails(

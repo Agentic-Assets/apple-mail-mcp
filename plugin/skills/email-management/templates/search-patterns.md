@@ -621,7 +621,7 @@ manage_drafts(
     action="list"
 )
 
-# Inspect the returned subjects manually; use action="open" only after choosing one.
+# Inspect the returned Id values; use action="open" with draft_id after choosing one.
 ```
 
 ### Fuzzy Matching

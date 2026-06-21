@@ -83,7 +83,7 @@
     },
     {
       "name": "reply_to_email",
-      "description": "Reply to an email by message_id (preferred) or subject keyword using Mail's native reply composer, so quoted prior messages are included automatically. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED. Default mode saves to Drafts, closes the transient compose window, and verifies the saved draft in a bounded newest-Drafts window before success; mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, and CC/BCC. body_html is accepted for backward compatibility but ignored for native replies."
+      "description": "Reply to an email by message_id (preferred) or subject keyword using Mail's native reply command. The tool constructs and assigns reply_body above the quoted-original block before save. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED. Default mode saves to Drafts, verifies exact Drafts id first when Mail exposes one, and uses bounded newest-Drafts fallback only when needed. Verification fails with a structured artifact id if the body is missing or appears after the quote. mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, and CC/BCC; include_signature=false cannot skip body insertion. body_html is accepted for backward compatibility but ignored for native replies."
     },
     {
       "name": "compose_email",
@@ -99,7 +99,7 @@
     },
     {
       "name": "manage_drafts",
-      "description": "Complete draft lifecycle: list, create, send, delete. action=create makes a standalone draft and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Send action is blocked in --read-only and --draft-safe mode."
+      "description": "Complete draft lifecycle: list, create, send, open, delete. action=list returns Drafts ids; send/open/delete prefer exact draft_id over subject matching. action=create makes a standalone draft and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Send action is blocked in --read-only and --draft-safe mode."
     },
     {
       "name": "list_email_attachments",
