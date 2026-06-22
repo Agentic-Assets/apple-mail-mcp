@@ -35,7 +35,7 @@ hook in `.claude/hooks/dev_mode_reminder.sh` reflects the same map.
 ## Out of scope
 
 - New feature implementation
-- Version bump across five files unless user explicitly requests a release
+- Version bump across six files unless user explicitly requests a release
 - Force push or amending pushed commits
 
 ## Workflow
@@ -129,7 +129,7 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 | Plugin wiring / flags | `plugin/docs/CLAUDE.md`, `plugin/apple_mail_mcp/CLAUDE.md`, `README.md` Configuration |
 | Agent workflows | `plugin/skills/*/SKILL.md`, `plugin/skills/CLAUDE.md`, `docs/CLAUDE.md` skill map |
 | Test count | Root `CLAUDE.md`, `README.md`, any doc citing test totals — use `pytest tests/ -q` result from step 3 |
-| Tool count | Five version files only on release; always sync **claims**: `grep -c '^@mcp.tool' plugin/apple_mail_mcp/tools/*.py` vs `plugin.json`, marketplace, MCPB `tools[]` |
+| Tool count | Six version files only on release; always sync **claims** with `rg '@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l` (or sum per-file `grep -c`) vs `plugin.json`, marketplace, MCPB `tools[]` |
 
 **CLAUDE.md hubs to spot-check** (stale cross-links or wrong counts):
 
