@@ -43,6 +43,27 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 **Prerequisites:** macOS with Apple Mail configured, Python 3.10+
 
+### One command: install or update the MCP server, Claude Code, and Codex
+
+From a local checkout, run one command to install or update the Apple Mail MCP
+server command for the current user plus the Claude Code and Codex plugin
+surfaces:
+
+```bash
+cd /path/to/apple-mail-mcp && bash tools/refresh-local-plugins.sh
+```
+
+The command is safe to re-run. It fast-forwards the checkout with
+`git pull --ff-only` when the current branch has an upstream, installs or updates
+the `mcp-apple-mail` server command with `pipx` when available or a dedicated
+venv at `~/.local/share/apple-mail-mcp/venv` otherwise, symlinks it into
+`~/.local/bin`, refreshes both plugin marketplaces from this checkout, installs
+`apple-mail@apple-mail-mcp` in Claude Code user scope, installs the same plugin
+for the current Codex user, and verifies that both clients can see the plugin
+registration. It does not replace a generated `apple-mail` wrapper if you have
+one. Restart Claude Code, Codex Desktop / CLI, and Cursor after it finishes so
+their MCP schemas reload.
+
 ### Claude Code Plugin (Recommended)
 
 One install — MCP server (29 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
@@ -89,24 +110,12 @@ Use this when another computer has an older Apple Mail plugin install, stale
 marketplace cache, or you want to prove both Codex and Claude Code are using the
 same current checkout.
 
-1. Get the current code:
-
 ```bash
-cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp
-git switch main && git pull --ff-only
+cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp && bash tools/refresh-local-plugins.sh
 ```
 
-2. Refresh Codex from the local checkout:
-
-```bash
-codex plugin remove apple-mail@apple-mail-mcp || true
-codex plugin marketplace remove apple-mail-mcp || true
-codex plugin marketplace add ./
-codex plugin add apple-mail@apple-mail-mcp
-codex mcp get apple-mail --json
-```
-
-The Codex MCP registration should show:
+The command refreshes the user MCP server command plus both clients from the
+local checkout. The Codex MCP registration should show:
 
 ```json
 {
@@ -134,19 +143,9 @@ python3 -m venv .venv
   --required-tool get_inbox_overview
 ```
 
-3. Refresh Claude Code from the local checkout:
-
-```bash
-claude plugin uninstall apple-mail@apple-mail-mcp --scope user --keep-data -y || true
-claude plugin marketplace remove apple-mail-mcp || true
-claude plugin marketplace add ./ --scope user
-claude plugin install apple-mail@apple-mail-mcp --scope user
-claude plugin details apple-mail@apple-mail-mcp
-```
-
-Prefer `--scope user` for personal machine setup. Project-scope marketplace
-entries can write an absolute local path into `.claude/settings.json`, which is
-usually not what you want to commit.
+Prefer this user-scope installer for personal machine setup. Project-scope
+marketplace entries can write an absolute local path into `.claude/settings.json`,
+which is usually not what you want to commit.
 
 `claude plugin details apple-mail@apple-mail-mcp` should report version `3.7.1`
 and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
@@ -166,9 +165,7 @@ replace the path below if the details output shows a different install path:
   --required-tool get_inbox_overview
 ```
 
-4. Restart clients:
-
-After either refresh, restart Codex Desktop / start a fresh Codex CLI session and
+After the refresh, restart Codex Desktop / start a fresh Codex CLI session and
 restart Claude Code so they load the refreshed plugin process.
 
 ### Claude Desktop Cowork (plugin marketplace)
