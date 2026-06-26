@@ -1,6 +1,7 @@
 """Tests for --read-only tool registry behavior and MCP tool annotations."""
 
 import unittest
+from contextlib import suppress
 from unittest.mock import MagicMock
 
 import apple_mail_mcp  # noqa: F401 — registers tools
@@ -27,6 +28,7 @@ READ_ONLY_TOOLS = {
     "get_needs_response",
     "get_top_senders",
     "list_email_attachments",
+    "verify_draft",
     "get_statistics",
     "inbox_dashboard",
     "full_inbox_export",
@@ -62,17 +64,15 @@ class ReadOnlyRegistryTests(unittest.TestCase):
     def test_send_tools_registered_by_default(self):
         names = set(self.by_name)
         self.assertTrue(set(SEND_TOOLS).issubset(names))
-        self.assertGreaterEqual(len(names), 27)
+        self.assertGreaterEqual(len(names), 29)
 
     def test_remove_send_tools_drops_only_send_tools(self):
         mock_mcp = MagicMock()
         mock_mcp.remove_tool = MagicMock()
 
         for name in SEND_TOOLS:
-            try:
+            with suppress(KeyError, ValueError):
                 mock_mcp.remove_tool(name)
-            except (KeyError, ValueError):
-                pass
 
         self.assertEqual(mock_mcp.remove_tool.call_count, len(SEND_TOOLS))
         removed = {call.args[0] for call in mock_mcp.remove_tool.call_args_list}
@@ -104,12 +104,7 @@ class ReadOnlyRegistryTests(unittest.TestCase):
             self.assertEqual(tool.annotations, DESTRUCTIVE_TOOL_ANNOTATIONS, name)
 
     def test_annotation_matrix_covers_all_tools(self):
-        covered = (
-            READ_ONLY_TOOLS
-            | WRITE_TOOLS
-            | IDEMPOTENT_WRITE_TOOLS
-            | DESTRUCTIVE_TOOLS
-        )
+        covered = READ_ONLY_TOOLS | WRITE_TOOLS | IDEMPOTENT_WRITE_TOOLS | DESTRUCTIVE_TOOLS
         self.assertEqual(covered, set(self.by_name.keys()))
 
 

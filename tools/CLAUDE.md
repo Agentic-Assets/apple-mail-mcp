@@ -12,7 +12,7 @@ Dev-infra guardrails — not MCP tools (`plugin/apple_mail_mcp/tools/` is the se
 Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].name`):
 
 1. **Version sync** — Claude/Codex `plugin.json`, Claude marketplace `plugins[0].version`, `server.json` (×2), `apple-mail-mcpb/manifest.json`
-2. **Tool count claims** — descriptions must match `rg "^@mcp\.tool" … | wc -l` (**28**)
+2. **Tool count claims** — descriptions must match `rg "^@mcp\.tool" … | wc -l` (**29**)
 3. **MCPB name parity** — `@mcp.tool` names ↔ `apple-mail-mcpb/manifest.json` `tools[]`
 4. **Install contracts** — Claude plugin `mcpServers`, Codex `.mcp.json`, marketplace `source`/skills, MCPB `server` config, `server.json` package metadata, and PyPI package deps/packages must point at the shipped runtime
 5. **Payload syntax** — `plugin/start_mcp.sh` and shipped Python files must parse before release

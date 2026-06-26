@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **28 tools**, **822 tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **29 tools**, **822 tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -45,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (28 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
+One install — MCP server (29 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -126,7 +126,7 @@ python3 -m venv .venv
   --arg ./start_mcp.sh \
   --arg=--draft-safe \
   --cwd "$PWD/plugin" \
-  --expect-count 28 \
+  --expect-count 29 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -158,7 +158,7 @@ replace the path below if the details output shows a different install path:
   --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
   --arg=--draft-safe \
   --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1" \
-  --expect-count 28 \
+  --expect-count 29 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -295,7 +295,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 
 </details>
 
-## Tools (28)
+## Tools (29)
 
 ### Reading & Search
 | Tool | Description |
@@ -323,9 +323,10 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
-| `reply_to_email` | Native Mail reply or reply-all draft; constructs and assigns `reply_body` above a quoted-original block, then verifies exact Drafts id first with bounded fallback; prefer `message_id` from search/list results |
+| `reply_to_email` | Native Mail reply or reply-all draft; constructs and assigns `reply_body` above a quoted-original block, then verifies exact Drafts id first with bounded fallback; returns verification status, verified draft id, attachment status, and signature status for draft/open modes |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, open, and delete drafts; list returns Drafts ids, and send/open/delete prefer exact `draft_id` over subject matching; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
+| `verify_draft` | Verify one exact Drafts message id; returns JSON snapshot for recipients, body sentinel, attachments, signature state, quoted-original status, and thread headers |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
@@ -383,7 +384,7 @@ Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows a
 
 In draft-safe mode:
 
-- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies assign `reply_body` above the quoted original, verify exact Drafts id first when Mail exposes it, then use bounded newest-Drafts fallback only if needed
+- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies assign `reply_body` above the quoted original, verify exact Drafts id first when Mail exposes it, return verification metadata, then use bounded newest-Drafts fallback only if needed
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it. For replies, disabling signatures cannot skip `reply_body` insertion
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
 - reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
@@ -606,7 +607,7 @@ apple-mail-mcp/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
-│   ├── apple_mail_mcp/        # Python MCP server package (28 tools)
+│   ├── apple_mail_mcp/        # Python MCP server package (29 tools)
 │   ├── apple_mail_mcp.py      # Entry point
 │   ├── start_mcp.sh           # Startup wrapper (auto-creates venv)
 │   └── requirements.txt

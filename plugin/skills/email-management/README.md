@@ -4,7 +4,7 @@ Part of the **Apple Mail Claude Code plugin** skill suite. This directory is the
 
 ## What this skill is
 
-- **Apple Mail MCP** = 28 tools (read, search, compose, organize, analyze)
+- **Apple Mail MCP** = 29 tools (read, search, compose, organize, analyze, verify drafts)
 - **This skill** = when to use those tools for long-running inbox discipline, plus references/examples for deep workflows
 - **Sibling skills** = faster, sharper entry points (triage scan, taxonomy, archive campaigns, drafting, etc.)
 

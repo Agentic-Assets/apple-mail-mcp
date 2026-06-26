@@ -41,7 +41,7 @@ trap 'rm -rf "$TMP_HOME"' EXIT
   --arg "$ROOT/plugin/start_mcp.sh" \
   --arg=--draft-safe \
   --cwd "$ROOT" \
-  --expect-count 28 \
+  --expect-count 29 \
   "${SMOKE_TOOL_ARGS[@]}"
 
 export CODEX_HOME="$TMP_HOME"
@@ -56,7 +56,7 @@ codex mcp get apple-mail --json > "$SERVER_JSON"
 "$SMOKE_PYTHON" tools/mcp_tool_smoke.py \
   --server-json "$SERVER_JSON" \
   --reject-literal '${CLAUDE_PLUGIN_ROOT}' \
-  --expect-count 28 \
+  --expect-count 29 \
   "${SMOKE_TOOL_ARGS[@]}"
 
 echo "Codex plugin install + MCP runtime smoke OK"

@@ -130,7 +130,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 json.dumps(
                     {
                         "name": "apple-mail",
-                        "description": "Apple Mail with 28 tools",
+                        "description": "Apple Mail with 29 tools",
                         "version": "1.0.0",
                         "commands": "./commands",
                         "mcpServers": {
@@ -413,7 +413,7 @@ class ValidateManifestsTests(unittest.TestCase):
             original_root = validate_manifests.ROOT
             validate_manifests.ROOT = root
             try:
-                validate_manifests._check_codex_plugin_contract("3.6.0", 28, errors)
+                validate_manifests._check_codex_plugin_contract("3.6.0", 29, errors)
             finally:
                 validate_manifests.ROOT = original_root
 
@@ -430,7 +430,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 "plugin/.codex-plugin/plugin.json: missing author",
                 "plugin/.codex-plugin/plugin.json name: got 'wrong-plugin', expected 'apple-mail'",
                 "plugin/.codex-plugin/plugin.json version: got '9.9.9', expected '3.6.0'",
-                "plugin/.codex-plugin/plugin.json description: description claims 27 tools, registry has 28",
+                "plugin/.codex-plugin/plugin.json description: description claims 27 tools, registry has 29",
                 "plugin/.codex-plugin/plugin.json skills: got 'skills', expected './skills'",
                 "plugin/.codex-plugin/plugin.json mcpServers: got './missing.json', expected './.mcp.json'",
                 "plugin/.mcp.json mcpServers.apple-mail.command: expected /bin/bash",
@@ -465,7 +465,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 manifest={
                     "name": "apple-mail",
                     "version": "3.6.0",
-                    "description": "Apple Mail with 28 MCP tools",
+                    "description": "Apple Mail with 29 MCP tools",
                     "author": {"name": "Agentic Assets"},
                     "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",
                     "repository": "https://github.com/Agentic-Assets/apple-mail-mcp",
@@ -493,7 +493,7 @@ class ValidateManifestsTests(unittest.TestCase):
             original_root = validate_manifests.ROOT
             validate_manifests.ROOT = root
             try:
-                validate_manifests._check_codex_plugin_contract("3.6.0", 28, errors)
+                validate_manifests._check_codex_plugin_contract("3.6.0", 29, errors)
             finally:
                 validate_manifests.ROOT = original_root
 
@@ -533,7 +533,7 @@ class ValidateManifestsTests(unittest.TestCase):
                 manifest={
                     "name": "apple-mail",
                     "version": "3.6.0",
-                    "description": "Apple Mail with 28 MCP tools",
+                    "description": "Apple Mail with 29 MCP tools",
                     "author": {"name": "Agentic Assets"},
                     "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",
                     "repository": "https://github.com/Agentic-Assets/apple-mail-mcp",
@@ -562,7 +562,7 @@ class ValidateManifestsTests(unittest.TestCase):
             original_root = validate_manifests.ROOT
             validate_manifests.ROOT = root
             try:
-                validate_manifests._check_codex_plugin_contract("3.6.0", 28, errors)
+                validate_manifests._check_codex_plugin_contract("3.6.0", 29, errors)
             finally:
                 validate_manifests.ROOT = original_root
 
