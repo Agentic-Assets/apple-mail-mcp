@@ -384,9 +384,18 @@ class AppleMailCliTests(unittest.TestCase):
         with (
             patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+            patch("time.sleep"),
             patch("builtins.print") as mock_print,
         ):
-            code = cli.main(self._draft_verify_smoke_args("--cleanup"))
+            code = cli.main(
+                self._draft_verify_smoke_args(
+                    "--cleanup",
+                    "--poll-timeout",
+                    "0.01",
+                    "--poll-interval",
+                    "0.01",
+                )
+            )
 
         self.assertEqual(code, 0)
         payload = self._printed_json_payload(mock_print)
@@ -472,6 +481,45 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertFalse(any(call["action"] == "delete" for call in manage_calls))
         mock_verify.assert_not_called()
+
+    def test_draft_verify_smoke_cleans_single_unverified_candidate_but_fails(self):
+        manage_calls = []
+        verify_calls = []
+
+        def fake_manage(**kwargs):
+            manage_calls.append(kwargs)
+            if kwargs["action"] == "create":
+                return "Draft created"
+            if kwargs["action"] == "list":
+                return "Id: 777   To: smoke@example.invalid"
+            if kwargs["action"] == "delete":
+                return "Draft deleted"
+            raise AssertionError(kwargs)
+
+        def fake_verify(**kwargs):
+            verify_calls.append(kwargs)
+            if "expected_subject" in kwargs:
+                return json.dumps({"found": True, "warnings": ["expected_body_missing"]})
+            return json.dumps({"found": False, "warnings": ["draft_not_found"]})
+
+        with (
+            patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
+            patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+            patch("builtins.print") as mock_print,
+        ):
+            code = cli.main(self._draft_verify_smoke_args("--cleanup"))
+
+        self.assertEqual(code, 1)
+        payload = self._printed_json_payload(mock_print)
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["verified"])
+        self.assertEqual(payload["persisted_draft_id"], "777")
+        self.assertTrue(payload["cleanup"]["confirmed"])
+        delete_calls = [call for call in manage_calls if call["action"] == "delete"]
+        self.assertEqual(len(delete_calls), 1)
+        self.assertEqual(delete_calls[0]["draft_id"], "777")
+        self.assertEqual(verify_calls[0]["draft_id"], "777")
+        self.assertEqual(verify_calls[1]["draft_id"], "777")
 
     def test_draft_verify_smoke_leave_draft_skips_delete(self):
         manage_calls = []
