@@ -232,6 +232,139 @@ def _resolve_draft_smoke_from_address(
     return None, f"Account {account!r} has multiple sender addresses; pass --from-address"
 
 
+def _append_stage_error(payload: dict[str, Any], stage: str, detail: Any, **extra: Any) -> None:
+    error = {"stage": stage, "detail": detail}
+    error.update(extra)
+    payload["errors"].append(error)
+
+
+def _verify_smoke_candidates(
+    *,
+    account: str,
+    subject: str,
+    body_sentinel: str,
+    candidate_ids: list[str],
+    tool_timeout: int,
+    verify_draft: Callable[..., Any],
+) -> tuple[list[str], Any]:
+    verified_ids: list[str] = []
+    last_verify_result: Any = None
+    for draft_id in candidate_ids:
+        verify_result = verify_draft(
+            account=account,
+            draft_id=draft_id,
+            expected_subject=subject,
+            expected_body_contains=body_sentinel,
+            timeout=tool_timeout,
+        )
+        last_verify_result = _parse_tool_result(verify_result)
+        if _draft_verification_passed(verify_result):
+            verified_ids.append(draft_id)
+    return verified_ids, last_verify_result
+
+
+def _create_smoke_draft(
+    *,
+    account: str,
+    subject: str,
+    to: str,
+    body: str,
+    from_address: str | None,
+    tool_timeout: int,
+    manage_drafts: Callable[..., Any],
+) -> tuple[Any, str | None]:
+    create_result = manage_drafts(
+        account=account,
+        action="create",
+        subject=subject,
+        to=to,
+        body=body,
+        from_address=from_address,
+        timeout=tool_timeout,
+        standalone_confirmed=True,
+    )
+    draft_id_match = re.search(r"\bDraft ID:\s*(\d+)\b", str(create_result))
+    provisional_id = draft_id_match.group(1) if draft_id_match else None
+    return create_result, provisional_id
+
+
+def _poll_for_verified_smoke_draft(
+    *,
+    account: str,
+    subject: str,
+    body_sentinel: str,
+    list_limit: int,
+    tool_timeout: int,
+    poll_timeout: float,
+    poll_interval: float,
+    manage_drafts: Callable[..., Any],
+    verify_draft: Callable[..., Any],
+    payload: dict[str, Any],
+) -> tuple[str | None, list[str], Any]:
+    deadline = time.monotonic() + poll_timeout
+    candidate_ids: list[str] = []
+    last_verify_result: Any = None
+    while True:
+        payload["poll_attempts"] = int(payload["poll_attempts"]) + 1
+        list_result = manage_drafts(
+            account=account,
+            action="list",
+            subject_contains=subject,
+            limit=list_limit,
+            timeout=tool_timeout,
+        )
+        if _result_is_error(list_result):
+            _append_stage_error(payload, "list", _parse_tool_result(list_result))
+        else:
+            candidate_ids = _extract_draft_ids(str(list_result))
+            verified_ids, last_verify_result = _verify_smoke_candidates(
+                account=account,
+                subject=subject,
+                body_sentinel=body_sentinel,
+                candidate_ids=candidate_ids,
+                tool_timeout=tool_timeout,
+                verify_draft=verify_draft,
+            )
+            if len(verified_ids) == 1:
+                return verified_ids[0], candidate_ids, last_verify_result
+            if len(verified_ids) > 1:
+                _append_stage_error(payload, "verify", "multiple_verified_candidates")
+                return None, [], last_verify_result
+
+        if time.monotonic() >= deadline:
+            return None, candidate_ids, last_verify_result
+        time.sleep(poll_interval)
+
+
+def _cleanup_smoke_draft(
+    *,
+    account: str,
+    draft_id: str,
+    tool_timeout: int,
+    manage_drafts: Callable[..., Any],
+    verify_draft: Callable[..., Any],
+    payload: dict[str, Any],
+) -> None:
+    delete_result = manage_drafts(
+        account=account,
+        action="delete",
+        draft_id=draft_id,
+        timeout=tool_timeout,
+    )
+    payload["cleanup"]["delete_result"] = _parse_tool_result(delete_result)
+    if _result_is_error(delete_result):
+        _append_stage_error(payload, "cleanup_delete", _parse_tool_result(delete_result))
+    confirm_result = verify_draft(
+        account=account,
+        draft_id=draft_id,
+        timeout=tool_timeout,
+    )
+    payload["cleanup"]["confirmation"] = _parse_tool_result(confirm_result)
+    payload["cleanup"]["confirmed"] = _draft_cleanup_confirmed(confirm_result)
+    if not payload["cleanup"]["confirmed"]:
+        _append_stage_error(payload, "cleanup_confirm", _parse_tool_result(confirm_result))
+
+
 def _resolve_test_account(explicit: str | None) -> tuple[str | None, str | None]:
     from apple_mail_mcp import server as _server
     from apple_mail_mcp.tools.inbox import list_accounts
@@ -1259,103 +1392,62 @@ def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
     )
     payload["from_address"] = from_address
     if from_error:
-        payload["errors"].append({"stage": "sender", "detail": from_error})
+        _append_stage_error(payload, "sender", from_error)
         _print_result(payload, json_mode=args.json)
         return 2
 
-    create_result = manage_drafts(
+    create_result, provisional_id = _create_smoke_draft(
         account=args.account,
-        action="create",
         subject=subject,
         to=args.to,
         body=body,
         from_address=from_address,
-        timeout=tool_timeout,
-        standalone_confirmed=True,
+        tool_timeout=tool_timeout,
+        manage_drafts=manage_drafts,
     )
-    create_text = str(create_result)
-    draft_id_match = re.search(r"\bDraft ID:\s*(\d+)\b", create_text)
-    if draft_id_match:
-        payload["created_draft_id_provisional"] = draft_id_match.group(1)
+    payload["created_draft_id_provisional"] = provisional_id
     if _result_is_error(create_result):
-        payload["errors"].append({"stage": "create", "detail": _parse_tool_result(create_result)})
+        _append_stage_error(payload, "create", _parse_tool_result(create_result))
         _print_result(payload, json_mode=args.json)
         return 1
 
-    deadline = time.monotonic() + poll_timeout
-    candidate_ids: list[str] = []
-    last_verify_result: Any = None
-    while True:
-        payload["poll_attempts"] = int(payload["poll_attempts"]) + 1
-        list_result = manage_drafts(
-            account=args.account,
-            action="list",
-            subject_contains=subject,
-            limit=list_limit,
-            timeout=tool_timeout,
-        )
-        if _result_is_error(list_result):
-            payload["errors"].append({"stage": "list", "detail": _parse_tool_result(list_result)})
-        else:
-            candidate_ids = _extract_draft_ids(str(list_result))
-            verified_ids: list[str] = []
-            for draft_id in candidate_ids:
-                verify_result = verify_draft(
-                    account=args.account,
-                    draft_id=draft_id,
-                    expected_subject=subject,
-                    expected_body_contains=body_sentinel,
-                    timeout=tool_timeout,
-                )
-                last_verify_result = _parse_tool_result(verify_result)
-                if _draft_verification_passed(verify_result):
-                    verified_ids.append(draft_id)
-            if len(verified_ids) == 1:
-                payload["persisted_draft_id"] = verified_ids[0]
-                payload["verified"] = True
-                break
-            if len(verified_ids) > 1:
-                payload["errors"].append({"stage": "verify", "detail": "multiple_verified_candidates"})
-                candidate_ids = []
-                break
+    persisted_id, candidate_ids, last_verify_result = _poll_for_verified_smoke_draft(
+        account=args.account,
+        subject=subject,
+        body_sentinel=body_sentinel,
+        list_limit=list_limit,
+        tool_timeout=tool_timeout,
+        poll_timeout=poll_timeout,
+        poll_interval=poll_interval,
+        manage_drafts=manage_drafts,
+        verify_draft=verify_draft,
+        payload=payload,
+    )
 
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(poll_interval)
-
-    persisted_id = payload["persisted_draft_id"]
+    if persisted_id is not None:
+        payload["persisted_draft_id"] = persisted_id
+        payload["verified"] = True
     if not payload["verified"]:
-        payload["errors"].append(
-            {
-                "stage": "verify",
-                "detail": "no_verified_persisted_draft",
-                "candidate_ids": candidate_ids,
-                "last_result": last_verify_result,
-            }
+        _append_stage_error(
+            payload,
+            "verify",
+            "no_verified_persisted_draft",
+            candidate_ids=candidate_ids,
+            last_result=last_verify_result,
         )
         if args.cleanup and len(candidate_ids) == 1:
-            persisted_id = candidate_ids[0]
-            payload["persisted_draft_id"] = persisted_id
+            payload["persisted_draft_id"] = candidate_ids[0]
 
-    if args.cleanup and persisted_id:
-        delete_result = manage_drafts(
+    cleanup_draft_id = payload["persisted_draft_id"]
+    if args.cleanup and cleanup_draft_id:
+        _cleanup_smoke_draft(
             account=args.account,
-            action="delete",
-            draft_id=str(persisted_id),
-            timeout=tool_timeout,
+            draft_id=str(cleanup_draft_id),
+            tool_timeout=tool_timeout,
+            manage_drafts=manage_drafts,
+            verify_draft=verify_draft,
+            payload=payload,
         )
-        payload["cleanup"]["delete_result"] = _parse_tool_result(delete_result)
-        if _result_is_error(delete_result):
-            payload["errors"].append({"stage": "cleanup_delete", "detail": _parse_tool_result(delete_result)})
-        confirm_result = verify_draft(
-            account=args.account,
-            draft_id=str(persisted_id),
-            timeout=tool_timeout,
-        )
-        payload["cleanup"]["confirmation"] = _parse_tool_result(confirm_result)
-        payload["cleanup"]["confirmed"] = _draft_cleanup_confirmed(confirm_result)
-        if not payload["cleanup"]["confirmed"]:
-            payload["errors"].append({"stage": "cleanup_confirm", "detail": _parse_tool_result(confirm_result)})
 
     payload["ok"] = bool(payload["verified"]) and (not args.cleanup or bool(payload["cleanup"]["confirmed"]))
     _print_result(payload, json_mode=args.json)

@@ -10,6 +10,20 @@ from apple_mail_mcp import cli
 
 
 class AppleMailCliTests(unittest.TestCase):
+    def _draft_verify_smoke_args(self, *extra: str) -> list[str]:
+        return [
+            "draft-verify-smoke",
+            "--account",
+            "Work",
+            "--from-address",
+            "work@example.com",
+            *extra,
+            "--json",
+        ]
+
+    def _printed_json_payload(self, mock_print):
+        return json.loads(mock_print.call_args.args[0])
+
     def test_accounts_json_prints_structured_output(self):
         with (
             patch(
@@ -372,20 +386,10 @@ class AppleMailCliTests(unittest.TestCase):
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
             patch("builtins.print") as mock_print,
         ):
-            code = cli.main(
-                [
-                    "draft-verify-smoke",
-                    "--account",
-                    "Work",
-                    "--from-address",
-                    "work@example.com",
-                    "--cleanup",
-                    "--json",
-                ]
-            )
+            code = cli.main(self._draft_verify_smoke_args("--cleanup"))
 
         self.assertEqual(code, 0)
-        payload = json.loads(mock_print.call_args.args[0])
+        payload = self._printed_json_payload(mock_print)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["created_draft_id_provisional"], "111")
         self.assertEqual(payload["persisted_draft_id"], "222")
@@ -423,23 +427,17 @@ class AppleMailCliTests(unittest.TestCase):
             patch("builtins.print") as mock_print,
         ):
             code = cli.main(
-                [
-                    "draft-verify-smoke",
-                    "--account",
-                    "Work",
-                    "--from-address",
-                    "work@example.com",
+                self._draft_verify_smoke_args(
                     "--cleanup",
                     "--poll-timeout",
                     "5",
                     "--poll-interval",
                     "0.1",
-                    "--json",
-                ]
+                )
             )
 
         self.assertEqual(code, 0)
-        payload = json.loads(mock_print.call_args.args[0])
+        payload = self._printed_json_payload(mock_print)
         self.assertEqual(payload["poll_attempts"], 2)
 
     def test_draft_verify_smoke_timeout_never_deletes_without_candidate(self):
@@ -460,23 +458,17 @@ class AppleMailCliTests(unittest.TestCase):
             patch("builtins.print") as mock_print,
         ):
             code = cli.main(
-                [
-                    "draft-verify-smoke",
-                    "--account",
-                    "Work",
-                    "--from-address",
-                    "work@example.com",
+                self._draft_verify_smoke_args(
                     "--cleanup",
                     "--poll-timeout",
                     "0.01",
                     "--poll-interval",
                     "0.01",
-                    "--json",
-                ]
+                )
             )
 
         self.assertEqual(code, 1)
-        payload = json.loads(mock_print.call_args.args[0])
+        payload = self._printed_json_payload(mock_print)
         self.assertFalse(payload["ok"])
         self.assertFalse(any(call["action"] == "delete" for call in manage_calls))
         mock_verify.assert_not_called()
@@ -499,20 +491,10 @@ class AppleMailCliTests(unittest.TestCase):
             ),
             patch("builtins.print") as mock_print,
         ):
-            code = cli.main(
-                [
-                    "draft-verify-smoke",
-                    "--account",
-                    "Work",
-                    "--from-address",
-                    "work@example.com",
-                    "--leave-draft",
-                    "--json",
-                ]
-            )
+            code = cli.main(self._draft_verify_smoke_args("--leave-draft"))
 
         self.assertEqual(code, 0)
-        payload = json.loads(mock_print.call_args.args[0])
+        payload = self._printed_json_payload(mock_print)
         self.assertTrue(payload["cleanup"]["skipped"])
         self.assertFalse(any(call["action"] == "delete" for call in manage_calls))
 
@@ -534,20 +516,10 @@ class AppleMailCliTests(unittest.TestCase):
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
             patch("builtins.print") as mock_print,
         ):
-            code = cli.main(
-                [
-                    "draft-verify-smoke",
-                    "--account",
-                    "Work",
-                    "--from-address",
-                    "work@example.com",
-                    "--cleanup",
-                    "--json",
-                ]
-            )
+            code = cli.main(self._draft_verify_smoke_args("--cleanup"))
 
         self.assertEqual(code, 1)
-        payload = json.loads(mock_print.call_args.args[0])
+        payload = self._printed_json_payload(mock_print)
         self.assertEqual(payload["persisted_draft_id"], "555")
         self.assertFalse(payload["cleanup"]["confirmed"])
 
