@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 from apple_mail_mcp import server as _server
+from apple_mail_mcp.applescript_snippets import recipient_addresses_block, sanitize_field_handler, thread_headers_block
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
 from apple_mail_mcp.constants import SCAN_BOUNDS, THREAD_PREFIXES
@@ -1291,26 +1292,34 @@ def _fetch_email_record_by_id(
     safe_account = escape_applescript(account)
     numeric_id = normalized_ids[0]
     effective_timeout = timeout if timeout is not None else 120
+    sanitize_script = sanitize_field_handler()
+    to_recipients_script = recipient_addresses_block(
+        message_var="aMessage",
+        recipient_kind="to",
+        output_var="toRecips",
+        include_on_error=True,
+    )
+    cc_recipients_script = recipient_addresses_block(
+        message_var="aMessage",
+        recipient_kind="cc",
+        output_var="ccRecips",
+        include_on_error=True,
+    )
+    bcc_recipients_script = recipient_addresses_block(
+        message_var="aMessage",
+        recipient_kind="bcc",
+        output_var="bccRecips",
+        include_on_error=True,
+    )
+    thread_headers_script = thread_headers_block(
+        message_var="aMessage",
+        in_reply_to_var="inReplyTo",
+        references_var="refsValue",
+        include_on_error=True,
+    )
 
     script = f'''
-    on sanitize_field(value)
-        try
-            set valueText to value as string
-        on error
-            set valueText to ""
-        end try
-
-        set AppleScript's text item delimiters to {{return, linefeed, tab}}
-        set valueParts to text items of valueText
-        set AppleScript's text item delimiters to " "
-        set valueText to valueParts as string
-        set AppleScript's text item delimiters to "|||"
-        set valueParts to text items of valueText
-        set AppleScript's text item delimiters to " | "
-        set valueText to valueParts as string
-        set AppleScript's text item delimiters to ""
-        return valueText
-    end sanitize_field
+    {sanitize_script}
 
     on pad2(numberValue)
         if numberValue < 10 then
@@ -1386,72 +1395,13 @@ def _fetch_email_record_by_id(
                     set readValue to "true"
                 end if
 
-                set toRecips to ""
-                try
-                    set toAddrs to {{}}
-                    repeat with aRecip in (to recipients of aMessage)
-                        try
-                            set end of toAddrs to (address of aRecip)
-                        end try
-                    end repeat
-                    set AppleScript's text item delimiters to ", "
-                    set toRecips to my sanitize_field(toAddrs as string)
-                    set AppleScript's text item delimiters to ""
-                on error
-                    set toRecips to ""
-                end try
+                {to_recipients_script}
 
-                set ccRecips to ""
-                try
-                    set ccAddrs to {{}}
-                    repeat with aRecip in (cc recipients of aMessage)
-                        try
-                            set end of ccAddrs to (address of aRecip)
-                        end try
-                    end repeat
-                    set AppleScript's text item delimiters to ", "
-                    set ccRecips to my sanitize_field(ccAddrs as string)
-                    set AppleScript's text item delimiters to ""
-                on error
-                    set ccRecips to ""
-                end try
+                {cc_recipients_script}
 
-                set inReplyTo to ""
-                set refsValue to ""
-                try
-                    set msgHeaders to all headers of aMessage
-                    set AppleScript's text item delimiters to {{return, linefeed}}
-                    set headerLines to text items of msgHeaders
-                    set AppleScript's text item delimiters to ""
-                    repeat with headerLine in headerLines
-                        set headerLineText to headerLine as string
-                        ignoring case
-                            if headerLineText starts with "In-Reply-To:" and length of headerLineText > 12 then
-                                set inReplyTo to my sanitize_field(text 13 thru -1 of headerLineText)
-                            else if headerLineText starts with "References:" and length of headerLineText > 11 then
-                                set refsValue to my sanitize_field(text 12 thru -1 of headerLineText)
-                            end if
-                        end ignoring
-                    end repeat
-                on error
-                    set inReplyTo to ""
-                    set refsValue to ""
-                end try
+                {thread_headers_script}
 
-                set bccRecips to ""
-                try
-                    set bccAddrs to {{}}
-                    repeat with aRecip in (bcc recipients of aMessage)
-                        try
-                            set end of bccAddrs to (address of aRecip)
-                        end try
-                    end repeat
-                    set AppleScript's text item delimiters to ", "
-                    set bccRecips to my sanitize_field(bccAddrs as string)
-                    set AppleScript's text item delimiters to ""
-                on error
-                    set bccRecips to ""
-                end try
+                {bcc_recipients_script}
 
                 return messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips
             on error errMsg

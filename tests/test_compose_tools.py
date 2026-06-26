@@ -948,14 +948,16 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             return "ok"
 
         with (
-            tempfile.TemporaryDirectory(dir=Path.home()) as tmpdir,
+            tempfile.TemporaryDirectory() as tmpdir,
             patch(
                 "apple_mail_mcp.tools.compose.run_applescript",
                 side_effect=fake_run,
             ),
+            patch("apple_mail_mcp.tools.compose._validate_attachment_paths") as mock_validate,
         ):
             attachment = Path(tmpdir) / "support.pdf"
             attachment.write_text("pdf")
+            mock_validate.return_value = ([str(attachment)], None)
             result = compose_tools.reply_to_email(
                 account="Work",
                 subject_keyword="test",
@@ -1809,6 +1811,51 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
 
 
 class ManageDraftsListTests(unittest.TestCase):
+    def test_subject_filter_builder_escapes_input_and_keeps_in_loop_filter(self):
+        script = compose_tools._build_manage_drafts_subject_filter_script('Q3 "Report"', indent=4)
+
+        self.assertIn("ignoring case", script)
+        self.assertIn('does not contain "Q3 \\"Report\\""', script)
+        self.assertIn("set skipThisDraft to true", script)
+        self.assertNotIn("whose", script)
+
+    def test_subject_filter_builder_omits_filter_when_unset(self):
+        self.assertEqual(compose_tools._build_manage_drafts_subject_filter_script(None, indent=4), "")
+
+    def test_list_builder_uses_clamped_limit_and_no_unbounded_enumeration(self):
+        script = compose_tools._build_manage_drafts_list_script(
+            safe_account="Work",
+            list_limit=10,
+            hide_empty=True,
+            subject_contains="Q3",
+        )
+
+        self.assertIn("set hideEmpty to true", script)
+        self.assertIn("if headEnd > 10 then set headEnd to 10", script)
+        self.assertIn("if totalDrafts is 0 then", script)
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
+        self.assertIn("if shownCount >= 10 then exit repeat", script)
+        self.assertIn('does not contain "Q3"', script)
+        self.assertNotIn("every message of draftsMailbox", script)
+        self.assertNotIn("current date", script)
+
+    def test_find_builder_uses_bounded_header_scan(self):
+        script = compose_tools._build_manage_drafts_find_script(
+            safe_account="Work",
+            list_limit=12,
+            in_reply_to="<source@example.com>",
+            subject_contains="Q3",
+        )
+
+        self.assertIn("if headEnd > 12 then set headEnd to 12", script)
+        self.assertIn("if totalDrafts is 0 then", script)
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
+        self.assertIn("all headers of aDraft", script)
+        self.assertIn('starts with "In-Reply-To:"', script)
+        self.assertIn('starts with "References:"', script)
+        self.assertIn('contains "source@example.com"', script)
+        self.assertNotIn("every message of draftsMailbox", script)
+
     def test_verify_draft_returns_snapshot_json_with_expectation_warnings(self):
         captured = []
 

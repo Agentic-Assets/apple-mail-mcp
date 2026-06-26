@@ -30,6 +30,116 @@ class ValidateManifestsTests(unittest.TestCase):
         )
         self.assertIn("validate_manifests: OK", result.stdout)
 
+    def test_active_doc_tool_count_claims_pass_on_current_repo(self):
+        errors = []
+        actual_count = len(validate_manifests._extract_registered_tool_names())
+
+        validate_manifests._check_active_doc_tool_count_claims(actual_count, errors)
+
+        self.assertEqual(errors, [])
+
+    def test_active_doc_tool_count_claims_rejects_stale_required_doc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Apple Mail MCP has 28 tools\n", encoding="utf-8")
+            errors = []
+
+            validate_manifests._check_active_doc_tool_count_claims(
+                29,
+                errors,
+                root=root,
+                required_docs=("AGENTS.md",),
+                scan_only_docs=(),
+            )
+
+        self.assertEqual(errors, ["AGENTS.md:1: tool-count claim 28, registry has 29"])
+
+    def test_active_doc_tool_count_claims_requires_required_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Apple Mail MCP active guidance\n", encoding="utf-8")
+            errors = []
+
+            validate_manifests._check_active_doc_tool_count_claims(
+                29,
+                errors,
+                root=root,
+                required_docs=("AGENTS.md",),
+                scan_only_docs=(),
+            )
+
+        self.assertEqual(errors, ["AGENTS.md: missing active tool-count claim"])
+
+    def test_active_doc_tool_count_claims_allows_scan_only_without_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs_dir = root / "docs"
+            docs_dir.mkdir()
+            (docs_dir / "CLAUDE-conventions.md").write_text("Policy text without a numeric count\n", encoding="utf-8")
+            errors = []
+
+            validate_manifests._check_active_doc_tool_count_claims(
+                29,
+                errors,
+                root=root,
+                required_docs=(),
+                scan_only_docs=("docs/CLAUDE-conventions.md",),
+            )
+
+        self.assertEqual(errors, [])
+
+    def test_active_doc_tool_count_claims_ignores_historical_task_docs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "AGENTS.md").write_text("Apple Mail MCP has 29 tools\n", encoding="utf-8")
+            tasks_dir = root / "tasks"
+            tasks_dir.mkdir()
+            (tasks_dir / "old-plan.md").write_text("Historical note from when there were 28 tools\n", encoding="utf-8")
+            errors = []
+
+            validate_manifests._check_active_doc_tool_count_claims(
+                29,
+                errors,
+                root=root,
+                required_docs=("AGENTS.md",),
+                scan_only_docs=(),
+            )
+
+        self.assertEqual(errors, [])
+
+    def test_active_doc_tool_count_claims_checks_tools_module_sum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tools_dir = root / "plugin/apple_mail_mcp/tools"
+            tools_dir.mkdir(parents=True)
+            (tools_dir / "CLAUDE.md").write_text(
+                "\n".join(
+                    [
+                        "All handlers. **29 tools**.",
+                        "| Module | # | Purpose |",
+                        "| --- | --- | --- |",
+                        "| `inbox.py` | 6 | Listing |",
+                        "| `search.py` | 3 | Search |",
+                        "| `compose.py` | 6 | Compose |",
+                        "| `manage.py` | 6 | Manage |",
+                        "| `analytics.py` | 4 | Analytics |",
+                        "| `smart_inbox.py` | 3 | Smart |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            errors = []
+
+            validate_manifests._check_active_doc_tool_count_claims(
+                29,
+                errors,
+                root=root,
+                required_docs=("plugin/apple_mail_mcp/tools/CLAUDE.md",),
+                scan_only_docs=(),
+            )
+
+        self.assertEqual(errors, ["plugin/apple_mail_mcp/tools/CLAUDE.md: module table sums to 28, registry has 29"])
+
     def test_compare_zip_members_reports_stale_member(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

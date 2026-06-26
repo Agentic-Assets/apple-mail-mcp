@@ -14,6 +14,12 @@ from typing import Any
 
 from apple_mail_mcp import server  # public alias used by tests
 from apple_mail_mcp import server as _server
+from apple_mail_mcp.applescript_snippets import (
+    recipient_addresses_block,
+    sanitize_field_handler,
+    text_offset_handler,
+    thread_headers_block,
+)
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import (
     build_bounded_message_scan,
@@ -31,6 +37,11 @@ from apple_mail_mcp.core import (
     validate_save_path,
 )
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
+from apple_mail_mcp.tools.draft_verification import (
+    _build_verify_draft_payload,
+    _parse_expected_attachments,
+    _split_csv_addresses,
+)
 
 # Backwards-compat aliases; centralized in constants.SCAN_BOUNDS so a single
 # edit retunes every tool. Tests assert literal "items 1 thru 100" /
@@ -403,25 +414,9 @@ def _verify_saved_reply_draft(
         "missing value" if signature_requested is None else ("true" if signature_requested else "false")
     )
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
+    text_offset_script = text_offset_handler()
     script = f'''
-    on textOffset(haystackText, needleText)
-        if needleText is "" then return 0
-        set previousDelimiters to AppleScript's text item delimiters
-        try
-            set AppleScript's text item delimiters to needleText
-            set splitItems to text items of haystackText
-            if (count of splitItems) is 1 then
-                set AppleScript's text item delimiters to previousDelimiters
-                return 0
-            end if
-            set beforeNeedle to item 1 of splitItems
-            set AppleScript's text item delimiters to previousDelimiters
-            return ((count of characters of beforeNeedle) + 1)
-        on error
-            set AppleScript's text item delimiters to previousDelimiters
-            return 0
-        end try
-    end textOffset
+    {text_offset_script}
 
     on replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
         set bodyOffset to my textOffset(draftContent, replyBodyNeedle)
@@ -496,11 +491,7 @@ def _verify_saved_reply_draft(
                         if (count of targetDrafts) > 0 then
                             set exactDraft to item 1 of targetDrafts
                             set exactResult to my verifyReplyDraft(exactDraft, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, signatureWasRequested)
-                            if exactResult starts with "FOUND|" then
-                                return exactResult
-                            else
-                                return exactResult
-                            end if
+                            return exactResult
                         end if
                     end try
                 end if
@@ -1462,47 +1453,6 @@ tell application "Mail"
     '''
 
 
-def _parse_expected_attachments(expected_attachments: str | list[str] | None) -> list[str]:
-    """Normalize expected attachment filenames or paths to basenames."""
-    if expected_attachments is None:
-        return []
-    if isinstance(expected_attachments, str):
-        raw_values = [item.strip() for item in expected_attachments.split(",")]
-    else:
-        raw_values = [str(item).strip() for item in expected_attachments]
-    return [Path(value).name for value in raw_values if value]
-
-
-def _split_csv_addresses(value: str | None) -> list[str]:
-    """Return lowercase addresses from a comma-separated expected-recipient string."""
-    if not value:
-        return []
-    return [item.strip().lower() for item in value.split(",") if item.strip()]
-
-
-def _csv_contains_all(actual: str, expected: list[str]) -> bool | None:
-    """Return whether all expected values appear in actual, or None when not checked."""
-    if not expected:
-        return None
-    actual_addresses = set(_split_csv_addresses(actual))
-    return all(item in actual_addresses for item in expected)
-
-
-def _normalize_attachment_rows(raw_rows: str) -> list[dict[str, Any]]:
-    """Parse attachment rows emitted as name::size pairs."""
-    attachments: list[dict[str, Any]] = []
-    for row in raw_rows.split(";;"):
-        if not row:
-            continue
-        name, _, size_text = row.partition("::")
-        try:
-            size = int(size_text)
-        except ValueError:
-            size = None
-        attachments.append({"filename": name, "size": size})
-    return attachments
-
-
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def verify_draft(
@@ -1540,48 +1490,23 @@ def verify_draft(
     expected_cc_values = _split_csv_addresses(expected_cc)
     safe_account = escape_applescript(account)
     effective_timeout = timeout if timeout is not None else 120
+    sanitize_script = sanitize_field_handler(include_attachment_row_delimiter=True)
+    text_offset_script = text_offset_handler()
+    to_recipients_script = recipient_addresses_block(message_var="aDraft", recipient_kind="to", output_var="toRecips")
+    cc_recipients_script = recipient_addresses_block(message_var="aDraft", recipient_kind="cc", output_var="ccRecips")
+    bcc_recipients_script = recipient_addresses_block(
+        message_var="aDraft", recipient_kind="bcc", output_var="bccRecips"
+    )
+    thread_headers_script = thread_headers_block(
+        message_var="aDraft",
+        in_reply_to_var="inReplyTo",
+        references_var="refsValue",
+    )
 
     script = f'''
-    on sanitize_field(value)
-        try
-            set valueText to value as string
-        on error
-            set valueText to ""
-        end try
-        set AppleScript's text item delimiters to {{return, linefeed, tab}}
-        set valueParts to text items of valueText
-        set AppleScript's text item delimiters to " "
-        set valueText to valueParts as string
-        set AppleScript's text item delimiters to "|||"
-        set valueParts to text items of valueText
-        set AppleScript's text item delimiters to " | "
-        set valueText to valueParts as string
-        set AppleScript's text item delimiters to ";;"
-        set valueParts to text items of valueText
-        set AppleScript's text item delimiters to "; "
-        set valueText to valueParts as string
-        set AppleScript's text item delimiters to ""
-        return valueText
-    end sanitize_field
+    {sanitize_script}
 
-    on textOffset(haystackText, needleText)
-        if needleText is "" then return 0
-        set previousDelimiters to AppleScript's text item delimiters
-        try
-            set AppleScript's text item delimiters to needleText
-            set splitItems to text items of haystackText
-            if (count of splitItems) is 1 then
-                set AppleScript's text item delimiters to previousDelimiters
-                return 0
-            end if
-            set beforeNeedle to item 1 of splitItems
-            set AppleScript's text item delimiters to previousDelimiters
-            return ((count of characters of beforeNeedle) + 1)
-        on error
-            set AppleScript's text item delimiters to previousDelimiters
-            return 0
-        end try
-    end textOffset
+    {text_offset_script}
 
     tell application "Mail"
         with timeout of {effective_timeout} seconds
@@ -1600,63 +1525,13 @@ def verify_draft(
                 set draftBodyPreview to my sanitize_field(draftBody)
                 if length of draftBodyPreview > 5000 then set draftBodyPreview to text 1 thru 5000 of draftBodyPreview
 
-                set toRecips to ""
-                try
-                    set toAddrs to {{}}
-                    repeat with aRecip in (to recipients of aDraft)
-                        try
-                            set end of toAddrs to address of aRecip
-                        end try
-                    end repeat
-                    set AppleScript's text item delimiters to ", "
-                    set toRecips to my sanitize_field(toAddrs as string)
-                    set AppleScript's text item delimiters to ""
-                end try
+                {to_recipients_script}
 
-                set ccRecips to ""
-                try
-                    set ccAddrs to {{}}
-                    repeat with aRecip in (cc recipients of aDraft)
-                        try
-                            set end of ccAddrs to address of aRecip
-                        end try
-                    end repeat
-                    set AppleScript's text item delimiters to ", "
-                    set ccRecips to my sanitize_field(ccAddrs as string)
-                    set AppleScript's text item delimiters to ""
-                end try
+                {cc_recipients_script}
 
-                set bccRecips to ""
-                try
-                    set bccAddrs to {{}}
-                    repeat with aRecip in (bcc recipients of aDraft)
-                        try
-                            set end of bccAddrs to address of aRecip
-                        end try
-                    end repeat
-                    set AppleScript's text item delimiters to ", "
-                    set bccRecips to my sanitize_field(bccAddrs as string)
-                    set AppleScript's text item delimiters to ""
-                end try
+                {bcc_recipients_script}
 
-                set inReplyTo to ""
-                set refsValue to ""
-                try
-                    set msgHeaders to all headers of aDraft
-                    set AppleScript's text item delimiters to {{return, linefeed}}
-                    set headerLines to text items of msgHeaders
-                    set AppleScript's text item delimiters to ""
-                    repeat with headerLine in headerLines
-                        set headerLineText to headerLine as string
-                        ignoring case
-                            if headerLineText starts with "In-Reply-To:" and length of headerLineText > 12 then
-                                set inReplyTo to my sanitize_field(text 13 thru -1 of headerLineText)
-                            else if headerLineText starts with "References:" and length of headerLineText > 11 then
-                                set refsValue to my sanitize_field(text 12 thru -1 of headerLineText)
-                            end if
-                        end ignoring
-                    end repeat
-                end try
+                {thread_headers_script}
 
                 set quotedOriginal to "false"
                 if (my textOffset(draftBody, " wrote:")) > 0 then set quotedOriginal to "true"
@@ -1713,73 +1588,26 @@ def verify_draft(
     if len(parts) < 11 or parts[0] != "FOUND":
         return json.dumps({"draft_id": numeric_id, "found": False, "error": "unexpected verifier output"})
 
-    subject, to_recips, cc_recips, bcc_recips, body_preview = parts[1:6]
-    in_reply_to, references, quoted_text, signature_text, attachment_rows = parts[6:11]
-    attachments_found = _normalize_attachment_rows(attachment_rows)
-    found_attachment_names = {item["filename"] for item in attachments_found}
-
-    warnings: list[str] = []
-    body_contains_expected = None
-    if expected_body_contains is not None:
-        body_contains_expected = expected_body_contains in body_preview
-        if not body_contains_expected:
-            warnings.append("expected_body_missing")
-
-    subject_matches = None
-    if expected_subject is not None:
-        subject_matches = subject == expected_subject
-        if not subject_matches:
-            warnings.append("subject_mismatch")
-
-    to_matches = _csv_contains_all(to_recips, expected_to_values)
-    if to_matches is False:
-        warnings.append("to_mismatch")
-    cc_matches = _csv_contains_all(cc_recips, expected_cc_values)
-    if cc_matches is False:
-        warnings.append("cc_mismatch")
-
-    missing_attachments = [name for name in expected_attachment_names if name not in found_attachment_names]
-    attachment_status = "not_requested"
-    if expected_attachment_names:
-        attachment_status = "verified" if not missing_attachments else "missing"
-        if missing_attachments:
-            warnings.append("expected_attachments_missing")
-
-    signature_detected = signature_text == "true"
-    if expected_signature is True and not signature_detected:
-        warnings.append("signature_missing")
-    if expected_signature is False and signature_detected:
-        warnings.append("signature_unexpected")
-
-    quoted_original_detected = quoted_text == "true"
-    if require_quoted_original is True and not quoted_original_detected:
-        warnings.append("quoted_original_missing")
-    if require_quoted_original is False and quoted_original_detected:
-        warnings.append("quoted_original_unexpected")
-
-    payload = {
-        "draft_id": numeric_id,
-        "found": True,
-        "recipients": {"to": to_recips, "cc": cc_recips, "bcc": bcc_recips},
-        "subject": subject,
-        "subject_matches_expected": subject_matches,
-        "body_preview": body_preview,
-        "body_contains_expected": body_contains_expected,
-        "signature": {
-            "requested": expected_signature,
-            "detected_above_quote": signature_detected,
-        },
-        "attachments": {
-            "expected": expected_attachment_names,
-            "found": attachments_found,
-            "missing": missing_attachments,
-            "status": attachment_status,
-        },
-        "quoted_original": {"detected": quoted_original_detected, "required": require_quoted_original},
-        "threading": {"in_reply_to": in_reply_to, "references": references},
-        "checks": {"to_matches_expected": to_matches, "cc_matches_expected": cc_matches},
-        "warnings": warnings,
-    }
+    payload = _build_verify_draft_payload(
+        numeric_id=numeric_id,
+        subject=parts[1],
+        to_recips=parts[2],
+        cc_recips=parts[3],
+        bcc_recips=parts[4],
+        body_preview=parts[5],
+        in_reply_to=parts[6],
+        references=parts[7],
+        quoted_text=parts[8],
+        signature_text=parts[9],
+        attachment_rows=parts[10],
+        expected_to_values=expected_to_values,
+        expected_cc_values=expected_cc_values,
+        expected_subject=expected_subject,
+        expected_body_contains=expected_body_contains,
+        expected_attachment_names=expected_attachment_names,
+        expected_signature=expected_signature,
+        require_quoted_original=require_quoted_original,
+    )
     return json.dumps(payload)
 
 
@@ -2501,6 +2329,180 @@ tell application "Mail"
                 fwd_msg_path.unlink()
 
 
+def _indent_applescript_block(block: str, spaces: int) -> str:
+    """Indent a generated AppleScript block for readable f-string insertion."""
+    prefix = " " * spaces
+    return "\n".join(f"{prefix}{line}" if line else line for line in block.splitlines())
+
+
+def _build_manage_drafts_subject_filter_script(subject_contains: str | None, *, indent: int) -> str:
+    """Build the in-loop subject filter shared by Drafts list and find actions."""
+    if not subject_contains:
+        return ""
+    safe_subject_contains = escape_applescript(subject_contains)
+    block = f'''ignoring case
+    if draftSubject does not contain "{safe_subject_contains}" then
+        set skipThisDraft to true
+    end if
+end ignoring'''
+    return _indent_applescript_block(block, indent)
+
+
+def _build_manage_drafts_list_script(
+    *,
+    safe_account: str,
+    list_limit: int,
+    hide_empty: bool,
+    subject_contains: str | None,
+) -> str:
+    """Build AppleScript for bounded newest-first Drafts listing."""
+    hide_empty_flag = "true" if hide_empty else "false"
+    subject_filter_script = _build_manage_drafts_subject_filter_script(subject_contains, indent=24)
+    to_recipients_script = recipient_addresses_block(
+        message_var="aDraft",
+        recipient_kind="to",
+        output_var="draftTo",
+        sanitize_fn=None,
+    )
+    return f'''
+        tell application "Mail"
+            set hideEmpty to {hide_empty_flag}
+            set draftLines to ""
+            set shownCount to 0
+
+            try
+                set targetAccount to account "{safe_account}"
+                set draftsMailbox to mailbox "Drafts" of targetAccount
+
+                -- Bounded newest-first window. Real Mail Drafts accounts have
+                -- shown just-created native replies near the front; never use
+                -- `every message` or an unbounded folder scan here.
+                set totalDrafts to count of messages of draftsMailbox
+                set headEnd to totalDrafts
+                if headEnd > {list_limit} then set headEnd to {list_limit}
+                if totalDrafts is 0 then
+                    set draftMessages to {{}}
+                else
+                    set draftMessages to messages 1 thru headEnd of draftsMailbox
+                end if
+
+                repeat with aDraft in draftMessages
+                    if shownCount >= {list_limit} then exit repeat
+                    try
+                        set skipThisDraft to false
+                        set draftSubject to subject of aDraft
+                        set draftId to (id of aDraft) as string
+                        set draftDate to "(unsent)"
+                        try
+                            set draftDate to (date sent of aDraft) as string
+                        end try
+
+                        -- Body snippet (first 140 chars, whitespace collapsed)
+                        set draftBody to ""
+                        try
+                            set draftBody to content of aDraft
+                        end try
+                        set AppleScript's text item delimiters to {{return, linefeed, tab}}
+                        set bodyParts to text items of draftBody
+                        set AppleScript's text item delimiters to " "
+                        set bodySnippet to bodyParts as string
+                        set AppleScript's text item delimiters to ""
+                        if length of bodySnippet > 140 then
+                            set bodySnippet to (text 1 thru 140 of bodySnippet) & "..."
+                        end if
+
+                        {subject_filter_script}
+
+                        if skipThisDraft then
+                            -- filtered out by subject_contains
+                        else if hideEmpty and draftSubject is "" and bodySnippet is "" then
+                            -- skip orphaned blank draft
+                        else
+                            -- Recipients (Drafts is a small, bounded mailbox)
+                            {to_recipients_script}
+
+                            set shownCount to shownCount + 1
+                            set draftLines to draftLines & "✉ " & draftSubject & return
+                            set draftLines to draftLines & "   Id: " & draftId & "   To: " & draftTo & return
+                            set draftLines to draftLines & "   Created: " & (draftDate as string) & return
+                            if bodySnippet is not "" then
+                                set draftLines to draftLines & "   " & bodySnippet & return
+                            end if
+                            set draftLines to draftLines & return
+                        end if
+                    end try
+                end repeat
+
+            on error errMsg
+                return "Error: " & errMsg
+            end try
+
+            return "DRAFT EMAILS - {safe_account}" & return & return & "Found " & shownCount & " draft(s)" & return & return & draftLines
+        end tell
+        '''
+
+
+def _build_manage_drafts_find_script(
+    *,
+    safe_account: str,
+    list_limit: int,
+    in_reply_to: str,
+    subject_contains: str | None,
+) -> str:
+    """Build AppleScript for bounded Drafts header lookup."""
+    safe_in_reply_to = escape_applescript(in_reply_to.strip("<> "))
+    subject_filter_script = _build_manage_drafts_subject_filter_script(subject_contains, indent=28)
+    thread_headers_script = thread_headers_block(
+        message_var="aDraft",
+        in_reply_to_var="inReplyToValue",
+        references_var="referencesValue",
+        sanitize_fn=None,
+    )
+    return f'''
+        tell application "Mail"
+            set outputText to "FIND DRAFTS BY THREAD HEADER - {safe_account}" & return & return
+            set shownCount to 0
+            try
+                set targetAccount to account "{safe_account}"
+                set draftsMailbox to mailbox "Drafts" of targetAccount
+                set totalDrafts to count of messages of draftsMailbox
+                set headEnd to totalDrafts
+                if headEnd > {list_limit} then set headEnd to {list_limit}
+                if totalDrafts is 0 then
+                    set draftMessages to {{}}
+                else
+                    set draftMessages to messages 1 thru headEnd of draftsMailbox
+                end if
+
+                repeat with aDraft in draftMessages
+                    try
+                        set skipThisDraft to false
+                        set draftSubject to subject of aDraft as string
+                        {subject_filter_script}
+                        if skipThisDraft then
+                            -- subject filter excluded this draft
+                        else
+                            {thread_headers_script}
+
+                            if inReplyToValue contains "{safe_in_reply_to}" or referencesValue contains "{safe_in_reply_to}" then
+                                set draftId to id of aDraft as string
+                                set outputText to outputText & "✉ " & draftSubject & return
+                                set outputText to outputText & "   Id: " & draftId & return
+                                set outputText to outputText & "   In-Reply-To: " & inReplyToValue & return
+                                set outputText to outputText & "   References: " & referencesValue & return & return
+                                set shownCount to shownCount + 1
+                            end if
+                        end if
+                    end try
+                end repeat
+            on error errMsg
+                return "Error: " & errMsg
+            end try
+            return outputText & "Found " & shownCount & " matching draft(s)" & return
+        end tell
+        '''
+
+
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def manage_drafts(
@@ -2589,179 +2591,22 @@ def manage_drafts(
         )
 
     if action == "list":
-        hide_empty_flag = "true" if hide_empty else "false"
-        # Optional case-insensitive subject filter — the fast, reliable way to
-        # find a just-created draft. No date filter is added (new drafts have a
-        # null date and would be dropped by one).
-        if subject_contains:
-            safe_subject_contains = escape_applescript(subject_contains)
-            subject_filter_script = f"""ignoring case
-                            if draftSubject does not contain "{safe_subject_contains}" then
-                                set skipThisDraft to true
-                            end if
-                        end ignoring"""
-        else:
-            subject_filter_script = ""
-        script = f'''
-        tell application "Mail"
-            set hideEmpty to {hide_empty_flag}
-            set draftLines to ""
-            set shownCount to 0
-
-            try
-                set targetAccount to account "{safe_account}"
-                set draftsMailbox to mailbox "Drafts" of targetAccount
-
-                -- Bounded newest-first window. Real Mail Drafts accounts have
-                -- shown just-created native replies near the front; never use
-                -- `every message` or an unbounded folder scan here.
-                set totalDrafts to count of messages of draftsMailbox
-                set headEnd to totalDrafts
-                if headEnd > {list_limit} then set headEnd to {list_limit}
-                if totalDrafts is 0 then
-                    set draftMessages to {{}}
-                else
-                    set draftMessages to messages 1 thru headEnd of draftsMailbox
-                end if
-
-                repeat with aDraft in draftMessages
-                    if shownCount >= {list_limit} then exit repeat
-                    try
-                        set skipThisDraft to false
-                        set draftSubject to subject of aDraft
-                        set draftId to (id of aDraft) as string
-                        set draftDate to "(unsent)"
-                        try
-                            set draftDate to (date sent of aDraft) as string
-                        end try
-
-                        -- Body snippet (first 140 chars, whitespace collapsed)
-                        set draftBody to ""
-                        try
-                            set draftBody to content of aDraft
-                        end try
-                        set AppleScript's text item delimiters to {{return, linefeed, tab}}
-                        set bodyParts to text items of draftBody
-                        set AppleScript's text item delimiters to " "
-                        set bodySnippet to bodyParts as string
-                        set AppleScript's text item delimiters to ""
-                        if length of bodySnippet > 140 then
-                            set bodySnippet to (text 1 thru 140 of bodySnippet) & "..."
-                        end if
-
-                        {subject_filter_script}
-
-                        if skipThisDraft then
-                            -- filtered out by subject_contains
-                        else if hideEmpty and draftSubject is "" and bodySnippet is "" then
-                            -- skip orphaned blank draft
-                        else
-                            -- Recipients (Drafts is a small, bounded mailbox)
-                            set draftTo to ""
-                            try
-                                set toAddrs to {{}}
-                                repeat with aRecip in (to recipients of aDraft)
-                                    try
-                                        set end of toAddrs to (address of aRecip)
-                                    end try
-                                end repeat
-                                set AppleScript's text item delimiters to ", "
-                                set draftTo to toAddrs as string
-                                set AppleScript's text item delimiters to ""
-                            end try
-
-                            set shownCount to shownCount + 1
-                            set draftLines to draftLines & "✉ " & draftSubject & return
-                            set draftLines to draftLines & "   Id: " & draftId & "   To: " & draftTo & return
-                            set draftLines to draftLines & "   Created: " & (draftDate as string) & return
-                            if bodySnippet is not "" then
-                                set draftLines to draftLines & "   " & bodySnippet & return
-                            end if
-                            set draftLines to draftLines & return
-                        end if
-                    end try
-                end repeat
-
-            on error errMsg
-                return "Error: " & errMsg
-            end try
-
-            return "DRAFT EMAILS - {safe_account}" & return & return & "Found " & shownCount & " draft(s)" & return & return & draftLines
-        end tell
-        '''
+        script = _build_manage_drafts_list_script(
+            safe_account=safe_account,
+            list_limit=list_limit,
+            hide_empty=hide_empty,
+            subject_contains=subject_contains,
+        )
 
     elif action == "find":
         if not in_reply_to:
             return "Error: 'in_reply_to' is required for manage_drafts(action='find')"
-        safe_in_reply_to = escape_applescript(in_reply_to.strip("<> "))
-        subject_filter_script = ""
-        if subject_contains:
-            safe_subject_contains = escape_applescript(subject_contains)
-            subject_filter_script = f"""ignoring case
-                                if draftSubject does not contain "{safe_subject_contains}" then
-                                    set skipThisDraft to true
-                                end if
-                            end ignoring"""
-        script = f'''
-        tell application "Mail"
-            set outputText to "FIND DRAFTS BY THREAD HEADER - {safe_account}" & return & return
-            set shownCount to 0
-            try
-                set targetAccount to account "{safe_account}"
-                set draftsMailbox to mailbox "Drafts" of targetAccount
-                set totalDrafts to count of messages of draftsMailbox
-                set headEnd to totalDrafts
-                if headEnd > {list_limit} then set headEnd to {list_limit}
-                if totalDrafts is 0 then
-                    set draftMessages to {{}}
-                else
-                    set draftMessages to messages 1 thru headEnd of draftsMailbox
-                end if
-
-                repeat with aDraft in draftMessages
-                    try
-                        set skipThisDraft to false
-                        set draftSubject to subject of aDraft as string
-                        {subject_filter_script}
-                        if skipThisDraft then
-                            -- subject filter excluded this draft
-                        else
-                            set inReplyToValue to ""
-                            set referencesValue to ""
-                            try
-                                set msgHeaders to all headers of aDraft
-                                set AppleScript's text item delimiters to {{return, linefeed}}
-                                set headerLines to text items of msgHeaders
-                                set AppleScript's text item delimiters to ""
-                                repeat with headerLine in headerLines
-                                    set headerLineText to headerLine as string
-                                    ignoring case
-                                        if headerLineText starts with "In-Reply-To:" and length of headerLineText > 12 then
-                                            set inReplyToValue to text 13 thru -1 of headerLineText
-                                        else if headerLineText starts with "References:" and length of headerLineText > 11 then
-                                            set referencesValue to text 12 thru -1 of headerLineText
-                                        end if
-                                    end ignoring
-                                end repeat
-                            end try
-
-                            if inReplyToValue contains "{safe_in_reply_to}" or referencesValue contains "{safe_in_reply_to}" then
-                                set draftId to id of aDraft as string
-                                set outputText to outputText & "✉ " & draftSubject & return
-                                set outputText to outputText & "   Id: " & draftId & return
-                                set outputText to outputText & "   In-Reply-To: " & inReplyToValue & return
-                                set outputText to outputText & "   References: " & referencesValue & return & return
-                                set shownCount to shownCount + 1
-                            end if
-                        end if
-                    end try
-                end repeat
-            on error errMsg
-                return "Error: " & errMsg
-            end try
-            return outputText & "Found " & shownCount & " matching draft(s)" & return
-        end tell
-        '''
+        script = _build_manage_drafts_find_script(
+            safe_account=safe_account,
+            list_limit=list_limit,
+            in_reply_to=in_reply_to,
+            subject_contains=subject_contains,
+        )
 
     elif action == "create":
         if not subject or not to or not body:
