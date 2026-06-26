@@ -1,5 +1,6 @@
 """Composition tools: sending, replying, forwarding, and drafts."""
 
+import json
 import os
 import re
 import subprocess
@@ -9,9 +10,16 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from html import escape as html_escape
 from pathlib import Path
+from typing import Any
 
 from apple_mail_mcp import server  # public alias used by tests
 from apple_mail_mcp import server as _server
+from apple_mail_mcp.applescript_snippets import (
+    recipient_addresses_block,
+    sanitize_field_handler,
+    text_offset_handler,
+    thread_headers_block,
+)
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import (
     build_bounded_message_scan,
@@ -28,7 +36,12 @@ from apple_mail_mcp.core import (
     validate_account_name,
     validate_save_path,
 )
-from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
+from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
+from apple_mail_mcp.tools.draft_verification import (
+    _build_verify_draft_payload,
+    _parse_expected_attachments,
+    _split_csv_addresses,
+)
 
 # Backwards-compat aliases; centralized in constants.SCAN_BOUNDS so a single
 # edit retunes every tool. Tests assert literal "items 1 thru 100" /
@@ -326,21 +339,25 @@ class _ReplyDraftVerification:
     status: str = "not_found"
     body_missing_artifact_id: str | None = None
     matched_artifact_id: str | None = None
-
-
-def _split_reply_verification_output(output: str) -> tuple[str, str | None]:
-    """Return the verifier status prefix and optional Drafts artifact id."""
-    status, separator, artifact_id = output.partition("|")
-    if not separator:
-        return status, None
-    return status, artifact_id.strip() or None
+    attachment_status: str | None = None
+    signature_status: str | None = None
 
 
 def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     """Parse the saved-reply verifier AppleScript response."""
-    status, artifact_id = _split_reply_verification_output(output.strip())
+    parts = output.strip().split("|")
+    status = parts[0] if parts else ""
+    artifact_id = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+    attachment_status = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+    signature_status = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
     if status == "FOUND":
-        return _ReplyDraftVerification(ok=True, status="found", matched_artifact_id=artifact_id)
+        return _ReplyDraftVerification(
+            ok=True,
+            status="found",
+            matched_artifact_id=artifact_id,
+            attachment_status=attachment_status,
+            signature_status=signature_status,
+        )
     if status == "BODY_MISSING":
         return _ReplyDraftVerification(
             ok=False,
@@ -356,6 +373,25 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     return _ReplyDraftVerification(ok=False, status="not_found")
 
 
+def _format_reply_verification_lines(verification: _ReplyDraftVerification, fallback_draft_id: str | None) -> str:
+    """Return stable success metadata lines for a verified reply draft."""
+    verified_id = verification.matched_artifact_id or fallback_draft_id or ""
+    lines = [
+        f"Verification Status: {verification.status}",
+    ]
+    if verified_id:
+        lines.append(f"Verified Draft ID: {verified_id}")
+    if verification.attachment_status:
+        lines.append(f"Attachment Verification Status: {verification.attachment_status}")
+        if verification.attachment_status in {"missing", "unsupported"}:
+            lines.append("Warning: requested attachments could not be verified on the saved draft")
+    if verification.signature_status:
+        lines.append(f"Signature Verification Status: {verification.signature_status}")
+        if verification.signature_status == "missing":
+            lines.append("Warning: requested Mail signature was not detected above the quoted original")
+    return "\n".join(lines) + "\n"
+
+
 def _verify_saved_reply_draft(
     account: str,
     reply_subject: str,
@@ -363,6 +399,8 @@ def _verify_saved_reply_draft(
     *,
     draft_id: str | None = None,
     quoted_needle: str | None = None,
+    expected_attachment_count: int | None = None,
+    signature_requested: bool | None = None,
     timeout: int | None = None,
 ) -> _ReplyDraftVerification:
     """Confirm a native reply draft appears in a bounded newest Drafts window."""
@@ -371,26 +409,14 @@ def _verify_saved_reply_draft(
     safe_body_needle = escape_applescript(_first_non_empty_line(reply_body))
     safe_draft_id = escape_applescript(draft_id or "")
     safe_quoted_needle = escape_applescript(_first_non_empty_line(quoted_needle or ""))
+    expected_attachment_count_value = -1 if expected_attachment_count is None else max(0, expected_attachment_count)
+    signature_requested_flag = (
+        "missing value" if signature_requested is None else ("true" if signature_requested else "false")
+    )
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
+    text_offset_script = text_offset_handler()
     script = f'''
-    on textOffset(haystackText, needleText)
-        if needleText is "" then return 0
-        set previousDelimiters to AppleScript's text item delimiters
-        try
-            set AppleScript's text item delimiters to needleText
-            set splitItems to text items of haystackText
-            if (count of splitItems) is 1 then
-                set AppleScript's text item delimiters to previousDelimiters
-                return 0
-            end if
-            set beforeNeedle to item 1 of splitItems
-            set AppleScript's text item delimiters to previousDelimiters
-            return ((count of characters of beforeNeedle) + 1)
-        on error
-            set AppleScript's text item delimiters to previousDelimiters
-            return 0
-        end try
-    end textOffset
+    {text_offset_script}
 
     on replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
         set bodyOffset to my textOffset(draftContent, replyBodyNeedle)
@@ -402,12 +428,43 @@ def _verify_saved_reply_draft(
         return "after_quote"
     end replyBodyIsBeforeQuote
 
-    on verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle)
+    on attachmentStatus(draftMessage, expectedAttachmentCount)
+        if expectedAttachmentCount < 0 then return "not_requested"
+        try
+            set draftAttachments to mail attachments of draftMessage
+            set actualAttachmentCount to count of draftAttachments
+            if actualAttachmentCount >= expectedAttachmentCount then return "verified"
+            return "missing"
+        on error
+            return "unsupported"
+        end try
+    end attachmentStatus
+
+    on signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
+        if signatureWasRequested is missing value then return "not_requested"
+        if signatureWasRequested is false then return "not_requested"
+        set newBodyText to draftContent
+        if quotedNeedle is not "" then
+            set quoteOffset to my textOffset(draftContent, quotedNeedle)
+            if quoteOffset > 1 then set newBodyText to text 1 thru (quoteOffset - 1) of draftContent
+        end if
+        try
+            repeat with sig in signatures
+                set sigText to content of sig as string
+                if sigText is not "" and newBodyText contains sigText then return "detected"
+            end repeat
+        end try
+        return "missing"
+    end signatureStatus
+
+    on verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, signatureWasRequested)
         set draftId to id of draftMessage as string
-        if replyBodyNeedle is "" then return "FOUND|" & draftId
         set draftContent to content of draftMessage as string
+        set draftAttachmentStatus to my attachmentStatus(draftMessage, expectedAttachmentCount)
+        set draftSignatureStatus to my signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
+        if replyBodyNeedle is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus
         set bodyStatus to my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
-        if bodyStatus is "found" then return "FOUND|" & draftId
+        if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus
         if bodyStatus is "after_quote" then return "BODY_AFTER_QUOTE|" & draftId
         return "BODY_MISSING|" & draftId
     end verifyReplyDraft
@@ -417,6 +474,8 @@ def _verify_saved_reply_draft(
         set targetDraftIdText to "{safe_draft_id}"
         set replyBodyNeedle to "{safe_body_needle}"
         set quotedNeedle to "{safe_quoted_needle}"
+        set expectedAttachmentCount to {expected_attachment_count_value}
+        set signatureWasRequested to {signature_requested_flag}
         set replyDraftVerified to false
         set bodyMissingDraftId to ""
         set bodyAfterQuoteDraftId to ""
@@ -428,13 +487,10 @@ def _verify_saved_reply_draft(
                 if targetDraftIdText is not "" then
                     try
                         set targetDraftId to targetDraftIdText as integer
-                        set exactDraft to message id targetDraftId of draftsMailbox
-                        set exactResult to my verifyReplyDraft(exactDraft, replyBodyNeedle, quotedNeedle)
-                        if exactResult starts with "FOUND|" then
-                            set replyDraftVerified to true
-                            set foundDraftId to text 7 thru -1 of exactResult
-                            exit repeat
-                        else
+                        set targetDrafts to every message of draftsMailbox whose id is targetDraftId
+                        if (count of targetDrafts) > 0 then
+                            set exactDraft to item 1 of targetDrafts
+                            set exactResult to my verifyReplyDraft(exactDraft, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, signatureWasRequested)
                             return exactResult
                         end if
                     end try
@@ -450,10 +506,10 @@ def _verify_saved_reply_draft(
                             set draftMatched to false
                             set draftSubject to subject of draftMessage as string
                             if "{safe_reply_subject}" is "" or draftSubject is "{safe_reply_subject}" then
-                                set draftResult to my verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle)
+                                set draftResult to my verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, signatureWasRequested)
                                 if draftResult starts with "FOUND|" then
                                     set draftMatched to true
-                                    set foundDraftId to text 7 thru -1 of draftResult
+                                    set foundDraftId to draftResult
                                 else if draftResult starts with "BODY_AFTER_QUOTE|" then
                                     if bodyAfterQuoteDraftId is "" then set bodyAfterQuoteDraftId to text 18 thru -1 of draftResult
                                 else if draftResult starts with "BODY_MISSING|" then
@@ -474,7 +530,7 @@ def _verify_saved_reply_draft(
         end repeat
 
         if replyDraftVerified then
-            return "FOUND|" & foundDraftId
+            return foundDraftId
         end if
         if bodyAfterQuoteDraftId is not "" then
             return "BODY_AFTER_QUOTE|" & bodyAfterQuoteDraftId
@@ -1397,6 +1453,164 @@ tell application "Mail"
     '''
 
 
+@mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@inject_preferences
+def verify_draft(
+    account: str | None = None,
+    draft_id: str = "",
+    expected_to: str | None = None,
+    expected_cc: str | None = None,
+    expected_subject: str | None = None,
+    expected_body_contains: str | None = None,
+    expected_attachments: str | list[str] | None = None,
+    expected_signature: bool | None = None,
+    require_quoted_original: bool | None = None,
+    timeout: int | None = None,
+) -> str:
+    """
+    Verify one saved Apple Mail Drafts message by exact draft id.
+
+    This tool is bounded to a single Drafts message id. It reports recipients,
+    subject, body preview, attachment names and sizes, threading headers, quoted
+    original detection, and optional expectation checks for agent-safe draft
+    readiness decisions.
+    """
+    account, account_error = _resolve_account(account, timeout=timeout)
+    if account_error:
+        return account_error
+    assert account is not None
+
+    normalized_ids = normalize_message_ids([draft_id])
+    if not normalized_ids:
+        return "Error: 'draft_id' must be a numeric Mail Drafts message id"
+    numeric_id = normalized_ids[0]
+
+    expected_attachment_names = _parse_expected_attachments(expected_attachments)
+    expected_to_values = _split_csv_addresses(expected_to)
+    expected_cc_values = _split_csv_addresses(expected_cc)
+    safe_account = escape_applescript(account)
+    effective_timeout = timeout if timeout is not None else 120
+    sanitize_script = sanitize_field_handler(include_attachment_row_delimiter=True)
+    text_offset_script = text_offset_handler()
+    to_recipients_script = recipient_addresses_block(message_var="aDraft", recipient_kind="to", output_var="toRecips")
+    cc_recipients_script = recipient_addresses_block(message_var="aDraft", recipient_kind="cc", output_var="ccRecips")
+    bcc_recipients_script = recipient_addresses_block(
+        message_var="aDraft", recipient_kind="bcc", output_var="bccRecips"
+    )
+    thread_headers_script = thread_headers_block(
+        message_var="aDraft",
+        in_reply_to_var="inReplyTo",
+        references_var="refsValue",
+    )
+
+    script = f'''
+    {sanitize_script}
+
+    {text_offset_script}
+
+    tell application "Mail"
+        with timeout of {effective_timeout} seconds
+            try
+                set targetAccount to account "{safe_account}"
+                set draftsMailbox to mailbox "Drafts" of targetAccount
+                set targetDrafts to every message of draftsMailbox whose id is {numeric_id}
+                if (count of targetDrafts) is 0 then return "NOT_FOUND"
+                set aDraft to item 1 of targetDrafts
+
+                set draftSubject to my sanitize_field(subject of aDraft)
+                set draftBody to ""
+                try
+                    set draftBody to content of aDraft as string
+                end try
+                set draftBodyPreview to my sanitize_field(draftBody)
+                if length of draftBodyPreview > 5000 then set draftBodyPreview to text 1 thru 5000 of draftBodyPreview
+
+                {to_recipients_script}
+
+                {cc_recipients_script}
+
+                {bcc_recipients_script}
+
+                {thread_headers_script}
+
+                set quotedOriginal to "false"
+                if (my textOffset(draftBody, " wrote:")) > 0 then set quotedOriginal to "true"
+                if (my textOffset(draftBody, "-----Original Message-----")) > 0 then set quotedOriginal to "true"
+
+                set signatureDetected to "false"
+                try
+                    set quoteOffset to my textOffset(draftBody, " wrote:")
+                    set newBodyText to draftBody
+                    if quoteOffset > 1 then set newBodyText to text 1 thru (quoteOffset - 1) of draftBody
+                    repeat with sig in signatures
+                        set sigText to content of sig as string
+                        if sigText is not "" and newBodyText contains sigText then set signatureDetected to "true"
+                    end repeat
+                end try
+
+                set attachmentRows to ""
+                try
+                    repeat with anAttachment in mail attachments of aDraft
+                        set attachmentName to my sanitize_field(name of anAttachment)
+                        set attachmentSize to ""
+                        try
+                            set attachmentSize to file size of anAttachment as string
+                        end try
+                        set attachmentRows to attachmentRows & attachmentName & "::" & attachmentSize & ";;"
+                    end repeat
+                end try
+
+                return "FOUND|||" & draftSubject & "|||" & toRecips & "|||" & ccRecips & "|||" & bccRecips & "|||" & draftBodyPreview & "|||" & inReplyTo & "|||" & refsValue & "|||" & quotedOriginal & "|||" & signatureDetected & "|||" & attachmentRows
+            on error errMsg
+                return "ERROR|||" & errMsg
+            end try
+        end timeout
+    end tell
+    '''
+
+    try:
+        raw = run_applescript(script, timeout=effective_timeout).strip()
+    except AppleScriptTimeout:
+        return json.dumps(
+            {
+                "draft_id": numeric_id,
+                "found": False,
+                "error": f"AppleScript timed out while verifying draft_id={numeric_id} on account {account!r}",
+            }
+        )
+
+    if raw == "NOT_FOUND":
+        return json.dumps({"draft_id": numeric_id, "found": False, "warnings": ["draft_not_found"]})
+    if raw.startswith("ERROR|||"):
+        return json.dumps({"draft_id": numeric_id, "found": False, "error": raw.split("|||", 1)[1]})
+
+    parts = raw.split("|||")
+    if len(parts) < 11 or parts[0] != "FOUND":
+        return json.dumps({"draft_id": numeric_id, "found": False, "error": "unexpected verifier output"})
+
+    payload = _build_verify_draft_payload(
+        numeric_id=numeric_id,
+        subject=parts[1],
+        to_recips=parts[2],
+        cc_recips=parts[3],
+        bcc_recips=parts[4],
+        body_preview=parts[5],
+        in_reply_to=parts[6],
+        references=parts[7],
+        quoted_text=parts[8],
+        signature_text=parts[9],
+        attachment_rows=parts[10],
+        expected_to_values=expected_to_values,
+        expected_cc_values=expected_cc_values,
+        expected_subject=expected_subject,
+        expected_body_contains=expected_body_contains,
+        expected_attachment_names=expected_attachment_names,
+        expected_signature=expected_signature,
+        require_quoted_original=require_quoted_original,
+    )
+    return json.dumps(payload)
+
+
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def reply_to_email(
@@ -1508,6 +1722,7 @@ def reply_to_email(
     # Build attachment script if provided (object model: attach to replyMessage)
     attachment_script = ""
     attachment_info = ""
+    validated_paths: list[str] = []
     if attachments:
         validated_paths, error = _validate_attachment_paths(attachments)
         if error:
@@ -1588,6 +1803,8 @@ def reply_to_email(
                 reply_body,
                 draft_id=draft_id,
                 quoted_needle=quoted_needle,
+                expected_attachment_count=len(validated_paths) if validated_paths else None,
+                signature_requested=resolved_signature_name is not None,
                 timeout=timeout,
             )
             if not verification.ok:
@@ -1597,6 +1814,7 @@ def reply_to_email(
                     mode_text=mode_text,
                     reply_body=reply_body,
                 )
+            result += _format_reply_verification_lines(verification, draft_id)
         return result
     except AppleScriptTimeout:
         return (
@@ -2111,103 +2329,42 @@ tell application "Mail"
                 fwd_msg_path.unlink()
 
 
-@mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
-@inject_preferences
-def manage_drafts(
-    account: str | None = None,
-    action: str = "list",
-    subject: str | None = None,
-    to: str | None = None,
-    body: str | None = None,
-    cc: str | None = None,
-    bcc: str | None = None,
-    draft_subject: str | None = None,
-    draft_id: str | None = None,
-    from_address: str | None = None,
-    timeout: int | None = None,
-    standalone_confirmed: bool = False,
-    hide_empty: bool = False,
-    dry_run: bool = True,
-    max_deletes: int = 20,
-    subject_contains: str | None = None,
+def _indent_applescript_block(block: str, spaces: int) -> str:
+    """Indent a generated AppleScript block for readable f-string insertion."""
+    prefix = " " * spaces
+    return "\n".join(f"{prefix}{line}" if line else line for line in block.splitlines())
+
+
+def _build_manage_drafts_subject_filter_script(subject_contains: str | None, *, indent: int) -> str:
+    """Build the in-loop subject filter shared by Drafts list and find actions."""
+    if not subject_contains:
+        return ""
+    safe_subject_contains = escape_applescript(subject_contains)
+    block = f'''ignoring case
+    if draftSubject does not contain "{safe_subject_contains}" then
+        set skipThisDraft to true
+    end if
+end ignoring'''
+    return _indent_applescript_block(block, indent)
+
+
+def _build_manage_drafts_list_script(
+    *,
+    safe_account: str,
+    list_limit: int,
+    hide_empty: bool,
+    subject_contains: str | None,
 ) -> str:
-    """
-    Manage draft emails - list, create, send, open, delete, or cleanup_empty drafts.
-
-    Args:
-        account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
-        action: Action to perform: "list", "create", "send", "open", "delete", "cleanup_empty". Use "open" to open a draft in a visible compose window for review before sending. Use "cleanup_empty" to remove orphaned blank drafts (preview-only by default).
-        subject: Email subject (required for create)
-        to: Recipient email(s) for create (comma-separated)
-        body: Email body (required for create)
-        cc: Optional CC recipients for create
-        bcc: Optional BCC recipients for create
-        draft_subject: Subject keyword to find draft for send/open/delete when draft_id is unavailable
-        draft_id: Exact numeric Drafts message id for send/open/delete; preferred over draft_subject
-        from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
-        timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
-        standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
-        hide_empty: For action="list", skip drafts whose subject AND body are both blank (orphaned compose windows). Default False (show everything).
-        subject_contains: For action="list", only show drafts whose subject contains this keyword (case-insensitive). This is the fast, reliable way to find a draft you just created — the list scans the newest drafts first and applies the filter in-loop (no date filter is added). Default None (show everything).
-        dry_run: For action="cleanup_empty", when True (default) only previews which blank drafts would be removed without deleting. Set False to actually delete. Ignored by other actions.
-        max_deletes: For action="cleanup_empty", maximum number of blank drafts to delete in one call (safety cap). Default 20. Ignored by other actions.
-
-    Returns:
-        Formatted output based on action. For action="list" each draft now reports
-        its message id, To recipients, and a short body snippet so the list is
-        directly triageable; verify full threading with `get_email_by_id`.
-    """
-
-    account, account_error = _resolve_account(account, timeout=timeout)
-    if account_error:
-        return account_error
-    assert account is not None  # _resolve_account guarantees non-None when error is None
-
-    body = _strip_cdata_wrappers(body)
-
-    # Escape account for all paths
-    safe_account = escape_applescript(account)
-
-    def _draft_action_lookup() -> tuple[str, str, str] | tuple[None, str, None]:
-        if draft_id:
-            normalized_ids = normalize_message_ids([draft_id])
-            if not normalized_ids:
-                return None, "Error: 'draft_id' must be a numeric Mail Drafts message id", None
-            numeric_id = normalized_ids[0]
-            return (
-                f"""
-                set foundDraft to missing value
-                set targetDrafts to every message of draftsMailbox whose id is {numeric_id}
-                if (count of targetDrafts) > 0 then
-                    set foundDraft to item 1 of targetDrafts
-                end if
-                """,
-                f"draft_id={numeric_id}",
-                f"No draft found for draft_id={numeric_id}",
-            )
-        if not draft_subject:
-            return None, "Error: 'draft_subject' or 'draft_id' is required for this draft action", None
-        return (
-            _build_draft_lookup(draft_subject),
-            escape_applescript(draft_subject),
-            f"No draft found matching: {escape_applescript(draft_subject)}",
-        )
-
-    if action == "list":
-        hide_empty_flag = "true" if hide_empty else "false"
-        # Optional case-insensitive subject filter — the fast, reliable way to
-        # find a just-created draft. No date filter is added (new drafts have a
-        # null date and would be dropped by one).
-        if subject_contains:
-            safe_subject_contains = escape_applescript(subject_contains)
-            subject_filter_script = f"""ignoring case
-                            if draftSubject does not contain "{safe_subject_contains}" then
-                                set skipThisDraft to true
-                            end if
-                        end ignoring"""
-        else:
-            subject_filter_script = ""
-        script = f'''
+    """Build AppleScript for bounded newest-first Drafts listing."""
+    hide_empty_flag = "true" if hide_empty else "false"
+    subject_filter_script = _build_manage_drafts_subject_filter_script(subject_contains, indent=24)
+    to_recipients_script = recipient_addresses_block(
+        message_var="aDraft",
+        recipient_kind="to",
+        output_var="draftTo",
+        sanitize_fn=None,
+    )
+    return f'''
         tell application "Mail"
             set hideEmpty to {hide_empty_flag}
             set draftLines to ""
@@ -2222,7 +2379,7 @@ def manage_drafts(
                 -- `every message` or an unbounded folder scan here.
                 set totalDrafts to count of messages of draftsMailbox
                 set headEnd to totalDrafts
-                if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
+                if headEnd > {list_limit} then set headEnd to {list_limit}
                 if totalDrafts is 0 then
                     set draftMessages to {{}}
                 else
@@ -2230,6 +2387,7 @@ def manage_drafts(
                 end if
 
                 repeat with aDraft in draftMessages
+                    if shownCount >= {list_limit} then exit repeat
                     try
                         set skipThisDraft to false
                         set draftSubject to subject of aDraft
@@ -2261,18 +2419,7 @@ def manage_drafts(
                             -- skip orphaned blank draft
                         else
                             -- Recipients (Drafts is a small, bounded mailbox)
-                            set draftTo to ""
-                            try
-                                set toAddrs to {{}}
-                                repeat with aRecip in (to recipients of aDraft)
-                                    try
-                                        set end of toAddrs to (address of aRecip)
-                                    end try
-                                end repeat
-                                set AppleScript's text item delimiters to ", "
-                                set draftTo to toAddrs as string
-                                set AppleScript's text item delimiters to ""
-                            end try
+                            {to_recipients_script}
 
                             set shownCount to shownCount + 1
                             set draftLines to draftLines & "✉ " & draftSubject & return
@@ -2293,6 +2440,173 @@ def manage_drafts(
             return "DRAFT EMAILS - {safe_account}" & return & return & "Found " & shownCount & " draft(s)" & return & return & draftLines
         end tell
         '''
+
+
+def _build_manage_drafts_find_script(
+    *,
+    safe_account: str,
+    list_limit: int,
+    in_reply_to: str,
+    subject_contains: str | None,
+) -> str:
+    """Build AppleScript for bounded Drafts header lookup."""
+    safe_in_reply_to = escape_applescript(in_reply_to.strip("<> "))
+    subject_filter_script = _build_manage_drafts_subject_filter_script(subject_contains, indent=28)
+    thread_headers_script = thread_headers_block(
+        message_var="aDraft",
+        in_reply_to_var="inReplyToValue",
+        references_var="referencesValue",
+        sanitize_fn=None,
+    )
+    return f'''
+        tell application "Mail"
+            set outputText to "FIND DRAFTS BY THREAD HEADER - {safe_account}" & return & return
+            set shownCount to 0
+            try
+                set targetAccount to account "{safe_account}"
+                set draftsMailbox to mailbox "Drafts" of targetAccount
+                set totalDrafts to count of messages of draftsMailbox
+                set headEnd to totalDrafts
+                if headEnd > {list_limit} then set headEnd to {list_limit}
+                if totalDrafts is 0 then
+                    set draftMessages to {{}}
+                else
+                    set draftMessages to messages 1 thru headEnd of draftsMailbox
+                end if
+
+                repeat with aDraft in draftMessages
+                    try
+                        set skipThisDraft to false
+                        set draftSubject to subject of aDraft as string
+                        {subject_filter_script}
+                        if skipThisDraft then
+                            -- subject filter excluded this draft
+                        else
+                            {thread_headers_script}
+
+                            if inReplyToValue contains "{safe_in_reply_to}" or referencesValue contains "{safe_in_reply_to}" then
+                                set draftId to id of aDraft as string
+                                set outputText to outputText & "✉ " & draftSubject & return
+                                set outputText to outputText & "   Id: " & draftId & return
+                                set outputText to outputText & "   In-Reply-To: " & inReplyToValue & return
+                                set outputText to outputText & "   References: " & referencesValue & return & return
+                                set shownCount to shownCount + 1
+                            end if
+                        end if
+                    end try
+                end repeat
+            on error errMsg
+                return "Error: " & errMsg
+            end try
+            return outputText & "Found " & shownCount & " matching draft(s)" & return
+        end tell
+        '''
+
+
+@mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
+@inject_preferences
+def manage_drafts(
+    account: str | None = None,
+    action: str = "list",
+    subject: str | None = None,
+    to: str | None = None,
+    body: str | None = None,
+    cc: str | None = None,
+    bcc: str | None = None,
+    draft_subject: str | None = None,
+    draft_id: str | None = None,
+    from_address: str | None = None,
+    timeout: int | None = None,
+    standalone_confirmed: bool = False,
+    hide_empty: bool = False,
+    dry_run: bool = True,
+    max_deletes: int = 20,
+    subject_contains: str | None = None,
+    limit: int | None = None,
+    in_reply_to: str | None = None,
+) -> str:
+    """
+    Manage draft emails - list, create, send, open, delete, or cleanup_empty drafts.
+
+    Args:
+        account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
+        action: Action to perform: "list", "find", "create", "send", "open", "delete", or "cleanup_empty". Use "open" to open a draft in a visible compose window for review before sending. Use "cleanup_empty" to remove orphaned blank drafts (preview-only by default).
+        subject: Email subject (required for create)
+        to: Recipient email(s) for create (comma-separated)
+        body: Email body (required for create)
+        cc: Optional CC recipients for create
+        bcc: Optional BCC recipients for create
+        draft_subject: Subject keyword to find draft for send/open/delete when draft_id is unavailable
+        draft_id: Exact numeric Drafts message id for send/open/delete; preferred over draft_subject
+        from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
+        timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
+        standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
+        hide_empty: For action="list", skip drafts whose subject AND body are both blank (orphaned compose windows). Default False (show everything).
+        subject_contains: For action="list", only show drafts whose subject contains this keyword (case-insensitive). This is the fast, reliable way to find a draft you just created — the list scans the newest drafts first and applies the filter in-loop (no date filter is added). Default None (show everything).
+        dry_run: For action="cleanup_empty", when True (default) only previews which blank drafts would be removed without deleting. Set False to actually delete. Ignored by other actions.
+        max_deletes: For action="cleanup_empty", maximum number of blank drafts to delete in one call (safety cap). Default 20. Ignored by other actions.
+        limit: For action="list" and action="find", maximum newest Drafts messages to show or inspect. Defaults to the repo scan cap.
+        in_reply_to: For action="find", source Internet Message-ID to match against Drafts In-Reply-To or References headers.
+
+    Returns:
+        Formatted output based on action. For action="list" each draft now reports
+        its message id, To recipients, and a short body snippet so the list is
+        directly triageable; verify full threading with `get_email_by_id`.
+    """
+
+    account, account_error = _resolve_account(account, timeout=timeout)
+    if account_error:
+        return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
+
+    body = _strip_cdata_wrappers(body)
+
+    # Escape account for all paths
+    safe_account = escape_applescript(account)
+    list_limit = DRAFT_LIST_CAP if limit is None else max(1, min(int(limit), DRAFT_LIST_CAP))
+
+    def _draft_action_lookup() -> tuple[str, str, str] | tuple[None, str, None]:
+        if draft_id:
+            normalized_ids = normalize_message_ids([draft_id])
+            if not normalized_ids:
+                return None, "Error: 'draft_id' must be a numeric Mail Drafts message id", None
+            numeric_id = normalized_ids[0]
+            return (
+                f"""
+                set foundDraft to missing value
+                set targetDrafts to every message of draftsMailbox whose id is {numeric_id}
+                if (count of targetDrafts) > 0 then
+                    set foundDraft to item 1 of targetDrafts
+                end if
+                """,
+                f"draft_id={numeric_id}",
+                f"No draft found for draft_id={numeric_id}",
+            )
+        if not draft_subject:
+            return None, "Error: 'draft_subject' or 'draft_id' is required for this draft action", None
+        return (
+            _build_draft_lookup(draft_subject),
+            escape_applescript(draft_subject),
+            f"No draft found matching: {escape_applescript(draft_subject)}",
+        )
+
+    if action == "list":
+        script = _build_manage_drafts_list_script(
+            safe_account=safe_account,
+            list_limit=list_limit,
+            hide_empty=hide_empty,
+            subject_contains=subject_contains,
+        )
+
+    elif action == "find":
+        if not in_reply_to:
+            return "Error: 'in_reply_to' is required for manage_drafts(action='find')"
+        script = _build_manage_drafts_find_script(
+            safe_account=safe_account,
+            list_limit=list_limit,
+            in_reply_to=in_reply_to,
+            subject_contains=subject_contains,
+        )
 
     elif action == "create":
         if not subject or not to or not body:
@@ -2572,7 +2886,7 @@ def manage_drafts(
         '''
 
     else:
-        return f"Error: Invalid action '{action}'. Use: list, create, send, open, delete, cleanup_empty"
+        return f"Error: Invalid action '{action}'. Use: list, find, create, send, open, delete, cleanup_empty"
 
     try:
         result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)

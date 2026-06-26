@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -16,6 +17,7 @@ from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 NO_HIT_SUBJECT = "NO_SUCH_SUBJECT_APPLE_MAIL_CLI_SMOKE_20991231"
 INVALID_ACCOUNT = "__INVALID_APPLE_MAIL_CLI_ACCOUNT__"
@@ -176,6 +178,191 @@ def _is_expected_account_not_found(value: Any) -> bool:
     if isinstance(parsed, str):
         return "account_not_found" in parsed
     return False
+
+
+def _extract_draft_ids(text: str) -> list[str]:
+    """Extract Drafts ids from manage_drafts(action='list') text output."""
+    seen: set[str] = set()
+    ids: list[str] = []
+    for match in re.finditer(r"\b(?:Draft ID|Id):\s*(\d+)\b", text):
+        draft_id = match.group(1)
+        if draft_id not in seen:
+            seen.add(draft_id)
+            ids.append(draft_id)
+    return ids
+
+
+def _draft_verification_passed(value: Any) -> bool:
+    parsed = _parse_tool_result(value)
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("found") is not True:
+        return False
+    warnings = set(parsed.get("warnings") or [])
+    return not {"subject_mismatch", "expected_body_missing"} & warnings and not parsed.get("error")
+
+
+def _draft_cleanup_confirmed(value: Any) -> bool:
+    parsed = _parse_tool_result(value)
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("found") is False:
+        return True
+    return "draft_not_found" in (parsed.get("warnings") or [])
+
+
+def _resolve_draft_smoke_from_address(
+    *,
+    account: str,
+    explicit_from_address: str | None,
+    timeout: int,
+) -> tuple[str | None, str | None]:
+    """Return a sender address that pins the smoke draft to the requested account."""
+    if explicit_from_address:
+        return explicit_from_address, None
+
+    from apple_mail_mcp.tools.inbox import list_account_addresses
+
+    account_addresses = list_account_addresses(timeout=timeout)
+    addresses = account_addresses.get(account) or []
+    if len(addresses) == 1:
+        return addresses[0], None
+    if not addresses:
+        return None, f"Account {account!r} has no configured sender address; pass --from-address"
+    return None, f"Account {account!r} has multiple sender addresses; pass --from-address"
+
+
+def _append_stage_error(payload: dict[str, Any], stage: str, detail: Any, **extra: Any) -> None:
+    error = {"stage": stage, "detail": detail}
+    error.update(extra)
+    payload["errors"].append(error)
+
+
+def _verify_smoke_candidates(
+    *,
+    account: str,
+    subject: str,
+    body_sentinel: str,
+    candidate_ids: list[str],
+    tool_timeout: int,
+    verify_draft: Callable[..., Any],
+) -> tuple[list[str], Any]:
+    verified_ids: list[str] = []
+    last_verify_result: Any = None
+    for draft_id in candidate_ids:
+        verify_result = verify_draft(
+            account=account,
+            draft_id=draft_id,
+            expected_subject=subject,
+            expected_body_contains=body_sentinel,
+            timeout=tool_timeout,
+        )
+        last_verify_result = _parse_tool_result(verify_result)
+        if _draft_verification_passed(verify_result):
+            verified_ids.append(draft_id)
+    return verified_ids, last_verify_result
+
+
+def _create_smoke_draft(
+    *,
+    account: str,
+    subject: str,
+    to: str,
+    body: str,
+    from_address: str | None,
+    tool_timeout: int,
+    manage_drafts: Callable[..., Any],
+) -> tuple[Any, str | None]:
+    create_result = manage_drafts(
+        account=account,
+        action="create",
+        subject=subject,
+        to=to,
+        body=body,
+        from_address=from_address,
+        timeout=tool_timeout,
+        standalone_confirmed=True,
+    )
+    draft_id_match = re.search(r"\bDraft ID:\s*(\d+)\b", str(create_result))
+    provisional_id = draft_id_match.group(1) if draft_id_match else None
+    return create_result, provisional_id
+
+
+def _poll_for_verified_smoke_draft(
+    *,
+    account: str,
+    subject: str,
+    body_sentinel: str,
+    list_limit: int,
+    tool_timeout: int,
+    poll_timeout: float,
+    poll_interval: float,
+    manage_drafts: Callable[..., Any],
+    verify_draft: Callable[..., Any],
+    payload: dict[str, Any],
+) -> tuple[str | None, list[str], Any]:
+    deadline = time.monotonic() + poll_timeout
+    candidate_ids: list[str] = []
+    last_verify_result: Any = None
+    while True:
+        payload["poll_attempts"] = int(payload["poll_attempts"]) + 1
+        list_result = manage_drafts(
+            account=account,
+            action="list",
+            subject_contains=subject,
+            limit=list_limit,
+            timeout=tool_timeout,
+        )
+        if _result_is_error(list_result):
+            _append_stage_error(payload, "list", _parse_tool_result(list_result))
+        else:
+            candidate_ids = _extract_draft_ids(str(list_result))
+            verified_ids, last_verify_result = _verify_smoke_candidates(
+                account=account,
+                subject=subject,
+                body_sentinel=body_sentinel,
+                candidate_ids=candidate_ids,
+                tool_timeout=tool_timeout,
+                verify_draft=verify_draft,
+            )
+            if len(verified_ids) == 1:
+                return verified_ids[0], candidate_ids, last_verify_result
+            if len(verified_ids) > 1:
+                _append_stage_error(payload, "verify", "multiple_verified_candidates")
+                return None, [], last_verify_result
+
+        if time.monotonic() >= deadline:
+            return None, candidate_ids, last_verify_result
+        time.sleep(poll_interval)
+
+
+def _cleanup_smoke_draft(
+    *,
+    account: str,
+    draft_id: str,
+    tool_timeout: int,
+    manage_drafts: Callable[..., Any],
+    verify_draft: Callable[..., Any],
+    payload: dict[str, Any],
+) -> None:
+    delete_result = manage_drafts(
+        account=account,
+        action="delete",
+        draft_id=draft_id,
+        timeout=tool_timeout,
+    )
+    payload["cleanup"]["delete_result"] = _parse_tool_result(delete_result)
+    if _result_is_error(delete_result):
+        _append_stage_error(payload, "cleanup_delete", _parse_tool_result(delete_result))
+    confirm_result = verify_draft(
+        account=account,
+        draft_id=draft_id,
+        timeout=tool_timeout,
+    )
+    payload["cleanup"]["confirmation"] = _parse_tool_result(confirm_result)
+    payload["cleanup"]["confirmed"] = _draft_cleanup_confirmed(confirm_result)
+    if not payload["cleanup"]["confirmed"]:
+        _append_stage_error(payload, "cleanup_confirm", _parse_tool_result(confirm_result))
 
 
 def _resolve_test_account(explicit: str | None) -> tuple[str | None, str | None]:
@@ -729,6 +916,37 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_account_flag(smoke)
     _add_json_flag(smoke)
 
+    draft_smoke = subparsers.add_parser(
+        "draft-verify-smoke",
+        help="Create, verify, and optionally clean up one persisted Drafts smoke artifact",
+    )
+    _add_account_flag(draft_smoke, required=True)
+    cleanup_group = draft_smoke.add_mutually_exclusive_group(required=True)
+    cleanup_group.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Delete the exact persisted Drafts id after verification",
+    )
+    cleanup_group.add_argument(
+        "--leave-draft",
+        action="store_true",
+        help="Verify and report the exact persisted id without deleting it",
+    )
+    draft_smoke.add_argument(
+        "--to",
+        default="apple-mail-mcp-smoke@example.invalid",
+        help="Smoke draft recipient address",
+    )
+    draft_smoke.add_argument(
+        "--from-address",
+        help="Sender address for the requested account. Required when the account has multiple aliases.",
+    )
+    draft_smoke.add_argument("--poll-timeout", type=float, default=45.0, help="Seconds to poll Drafts")
+    draft_smoke.add_argument("--poll-interval", type=float, default=1.5, help="Seconds between polls")
+    draft_smoke.add_argument("--list-limit", type=int, default=25, help="Newest Drafts window to inspect")
+    draft_smoke.add_argument("--tool-timeout", type=int, default=30, help="Per-tool AppleScript timeout")
+    _add_json_flag(draft_smoke)
+
     perf = subparsers.add_parser(
         "perf-test",
         help="Time safe read-only checks against Mail.app with pass/fail thresholds",
@@ -1143,6 +1361,99 @@ def _cmd_smoke_test(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
+    from apple_mail_mcp.tools.compose import manage_drafts, verify_draft
+
+    token = uuid4().hex[:8]
+    subject = f"APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_{int(time.time())}_{token}"
+    body_sentinel = f"APPLE_MAIL_MCP_BODY_SENTINEL_{token}"
+    body = f"Apple Mail MCP draft verification smoke.\nBody sentinel: {body_sentinel}"
+    poll_timeout = max(1.0, float(args.poll_timeout))
+    poll_interval = max(0.1, float(args.poll_interval))
+    list_limit = max(1, int(args.list_limit))
+    tool_timeout = max(1, int(args.tool_timeout))
+
+    payload: dict[str, Any] = {
+        "ok": False,
+        "account": args.account,
+        "from_address": None,
+        "subject": subject,
+        "created_draft_id_provisional": None,
+        "persisted_draft_id": None,
+        "poll_attempts": 0,
+        "verified": False,
+        "cleanup": {"requested": bool(args.cleanup), "confirmed": False, "skipped": bool(args.leave_draft)},
+        "errors": [],
+    }
+    from_address, from_error = _resolve_draft_smoke_from_address(
+        account=args.account,
+        explicit_from_address=args.from_address,
+        timeout=tool_timeout,
+    )
+    payload["from_address"] = from_address
+    if from_error:
+        _append_stage_error(payload, "sender", from_error)
+        _print_result(payload, json_mode=args.json)
+        return 2
+
+    create_result, provisional_id = _create_smoke_draft(
+        account=args.account,
+        subject=subject,
+        to=args.to,
+        body=body,
+        from_address=from_address,
+        tool_timeout=tool_timeout,
+        manage_drafts=manage_drafts,
+    )
+    payload["created_draft_id_provisional"] = provisional_id
+    if _result_is_error(create_result):
+        _append_stage_error(payload, "create", _parse_tool_result(create_result))
+        _print_result(payload, json_mode=args.json)
+        return 1
+
+    persisted_id, candidate_ids, last_verify_result = _poll_for_verified_smoke_draft(
+        account=args.account,
+        subject=subject,
+        body_sentinel=body_sentinel,
+        list_limit=list_limit,
+        tool_timeout=tool_timeout,
+        poll_timeout=poll_timeout,
+        poll_interval=poll_interval,
+        manage_drafts=manage_drafts,
+        verify_draft=verify_draft,
+        payload=payload,
+    )
+
+    if persisted_id is not None:
+        payload["persisted_draft_id"] = persisted_id
+        payload["verified"] = True
+    if not payload["verified"]:
+        _append_stage_error(
+            payload,
+            "verify",
+            "no_verified_persisted_draft",
+            candidate_ids=candidate_ids,
+            last_result=last_verify_result,
+        )
+        if args.cleanup and len(candidate_ids) == 1:
+            payload["persisted_draft_id"] = candidate_ids[0]
+
+    cleanup_draft_id = payload["persisted_draft_id"]
+    if args.cleanup and cleanup_draft_id:
+        _cleanup_smoke_draft(
+            account=args.account,
+            draft_id=str(cleanup_draft_id),
+            tool_timeout=tool_timeout,
+            manage_drafts=manage_drafts,
+            verify_draft=verify_draft,
+            payload=payload,
+        )
+
+    payload["ok"] = bool(payload["verified"]) and (not args.cleanup or bool(payload["cleanup"]["confirmed"]))
+    _print_result(payload, json_mode=args.json)
+    return 0 if payload["ok"] else 1
+
+
 def _print_perf_report(payload: dict[str, Any], *, json_mode: bool) -> None:
     if json_mode:
         _print_result(payload, json_mode=True)
@@ -1216,6 +1527,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "draft": _cmd_draft,
     "mcp-config": _cmd_mcp_config,
     "smoke-test": _cmd_smoke_test,
+    "draft-verify-smoke": _cmd_draft_verify_smoke,
     "perf-test": _cmd_perf_test,
     "quick-check": _cmd_quick_check,
 }

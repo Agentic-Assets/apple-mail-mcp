@@ -913,7 +913,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             if "reply foundMessage" in script:
                 return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
             if 'set targetDraftIdText to "84053"' in script:
-                return "FOUND|84053"
+                return "FOUND|84053|not_requested|not_requested"
             return "ok"
 
         with patch(
@@ -927,10 +927,52 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         self.assertIn("Draft ID: 84053", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 84053", result)
         verifier_script = next(script for script in captured if "set targetDraftId to" in script)
         self.assertIn('set targetDraftIdText to "84053"', verifier_script)
-        self.assertIn("message id targetDraftId of draftsMailbox", verifier_script)
+        self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
         self.assertIn("return exactResult", verifier_script)
+
+    def test_reply_draft_success_outputs_attachment_and_signature_verification(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return ""
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|verified|missing"
+            return "ok"
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
+                "apple_mail_mcp.tools.compose.run_applescript",
+                side_effect=fake_run,
+            ),
+            patch("apple_mail_mcp.tools.compose._validate_attachment_paths") as mock_validate,
+        ):
+            attachment = Path(tmpdir) / "support.pdf"
+            attachment.write_text("pdf")
+            mock_validate.return_value = ([str(attachment)], None)
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                attachments=str(attachment),
+                include_signature=True,
+                signature_name="TU",
+            )
+
+        self.assertIn("Attachment Verification Status: verified", result)
+        self.assertIn("Signature Verification Status: missing", result)
+        self.assertIn("requested Mail signature was not detected", result)
+        verifier_script = next(script for script in captured if "set expectedAttachmentCount to" in script)
+        self.assertIn("set expectedAttachmentCount to 1", verifier_script)
+        self.assertIn("set signatureWasRequested to true", verifier_script)
 
     def test_reply_defaults_to_draft_mode(self):
         captured = []
@@ -996,12 +1038,65 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         self.assertIn("Reply saved as draft!", result)
+        self.assertIn("Verification Status: found", result)
         verifier_script = next(script for script in captured if "repeat with verifyAttempt from 1 to 20" in script)
         self.assertIn("messages 1 thru headEnd of draftsMailbox", verifier_script)
         self.assertIn('set replyBodyNeedle to "Reply body"', verifier_script)
         self.assertIn('if "Re: Test" is "" or draftSubject is "Re: Test" then', verifier_script)
         self.assertIn("my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)", verifier_script)
         self.assertIn('return "BODY_MISSING|" & bodyMissingDraftId', verifier_script)
+
+    def test_reply_draft_verifier_falls_back_when_exact_id_is_not_yet_resolvable(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84054|not_requested|not_requested"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+            )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.matched_artifact_id, "84054")
+        script = captured[0]
+        exact_lookup = script.index("set targetDrafts to every message of draftsMailbox whose id is targetDraftId")
+        fallback_lookup = script.index("set candidateDrafts to messages 1 thru headEnd of draftsMailbox")
+        self.assertLess(exact_lookup, fallback_lookup)
+        exact_branch = script[exact_lookup:fallback_lookup]
+        self.assertNotIn('return "NOT_FOUND"', exact_branch)
+
+    def test_reply_signature_verification_only_runs_for_resolved_signature(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                include_signature=True,
+            )
+
+        verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
+        self.assertIn("set signatureWasRequested to false", verifier_script)
 
     def test_reply_draft_success_reports_structured_artifact_error_when_body_missing(self):
         sentinel = "AA-REPLY-BODY-SENTINEL-84053"
@@ -1125,6 +1220,45 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("reply foundMessage with opening window", reply_scripts[0])
         self.assertIn("save replyMessage", reply_scripts[0])
         self.assertIn("review", result)
+
+    def test_reply_open_success_outputs_verification_status(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
+            if "OPENING REPLY FOR REVIEW" in script:
+                return (
+                    _saved_reply_draft_output(
+                        subject="Re: Test",
+                        draft_id="84053",
+                        quote_needle="On Today, Sender <sender@example.com> wrote:",
+                    )
+                    .replace("SAVING REPLY AS DRAFT", "OPENING REPLY FOR REVIEW")
+                    .replace(
+                        "Reply saved as draft!",
+                        "Reply opened in Mail for review. Edit and send when ready.",
+                    )
+                )
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                mode="open",
+            )
+
+        self.assertIn("Draft ID: 84053", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 84053", result)
 
     def test_default_emits_single_alias_fallback_for_reply_message(self):
         captured = []
@@ -1677,6 +1811,118 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
 
 
 class ManageDraftsListTests(unittest.TestCase):
+    def test_subject_filter_builder_escapes_input_and_keeps_in_loop_filter(self):
+        script = compose_tools._build_manage_drafts_subject_filter_script('Q3 "Report"', indent=4)
+
+        self.assertIn("ignoring case", script)
+        self.assertIn('does not contain "Q3 \\"Report\\""', script)
+        self.assertIn("set skipThisDraft to true", script)
+        self.assertNotIn("whose", script)
+
+    def test_subject_filter_builder_omits_filter_when_unset(self):
+        self.assertEqual(compose_tools._build_manage_drafts_subject_filter_script(None, indent=4), "")
+
+    def test_list_builder_uses_clamped_limit_and_no_unbounded_enumeration(self):
+        script = compose_tools._build_manage_drafts_list_script(
+            safe_account="Work",
+            list_limit=10,
+            hide_empty=True,
+            subject_contains="Q3",
+        )
+
+        self.assertIn("set hideEmpty to true", script)
+        self.assertIn("if headEnd > 10 then set headEnd to 10", script)
+        self.assertIn("if totalDrafts is 0 then", script)
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
+        self.assertIn("if shownCount >= 10 then exit repeat", script)
+        self.assertIn('does not contain "Q3"', script)
+        self.assertNotIn("every message of draftsMailbox", script)
+        self.assertNotIn("current date", script)
+
+    def test_find_builder_uses_bounded_header_scan(self):
+        script = compose_tools._build_manage_drafts_find_script(
+            safe_account="Work",
+            list_limit=12,
+            in_reply_to="<source@example.com>",
+            subject_contains="Q3",
+        )
+
+        self.assertIn("if headEnd > 12 then set headEnd to 12", script)
+        self.assertIn("if totalDrafts is 0 then", script)
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
+        self.assertIn("all headers of aDraft", script)
+        self.assertIn('starts with "In-Reply-To:"', script)
+        self.assertIn('starts with "References:"', script)
+        self.assertIn('contains "source@example.com"', script)
+        self.assertNotIn("every message of draftsMailbox", script)
+
+    def test_verify_draft_returns_snapshot_json_with_expectation_warnings(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return (
+                "FOUND|||Re: Test|||sender@example.com|||cc@example.com|||"
+                "|||"
+                "Hi there On Today, Sender wrote: Original|||<source@example.com>|||"
+                "<source@example.com> <older@example.com>|||true|||false|||support.pdf::2048;;"
+            )
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.verify_draft(
+                account="Work",
+                draft_id="84053",
+                expected_to="sender@example.com",
+                expected_cc="cc@example.com",
+                expected_subject="Re: Test",
+                expected_body_contains="Hi there",
+                expected_attachments="support.pdf,missing.docx",
+                expected_signature=True,
+                require_quoted_original=True,
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["found"])
+        self.assertEqual(payload["draft_id"], "84053")
+        self.assertEqual(payload["attachments"]["status"], "missing")
+        self.assertEqual(payload["attachments"]["found"][0]["filename"], "support.pdf")
+        self.assertEqual(payload["threading"]["in_reply_to"], "<source@example.com>")
+        self.assertIn("expected_attachments_missing", payload["warnings"])
+        self.assertIn("signature_missing", payload["warnings"])
+        script = captured[0]
+        self.assertIn('mailbox "Drafts" of targetAccount', script)
+        self.assertIn("every message of draftsMailbox whose id is 84053", script)
+        self.assertIn("all headers of aDraft", script)
+        self.assertIn("mail attachments of aDraft", script)
+
+    def test_verify_draft_rejects_non_numeric_draft_id(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.verify_draft(account="Work", draft_id="abc")
+
+        mock_run.assert_not_called()
+        self.assertIn("'draft_id' must be a numeric", result)
+
+    def test_verify_draft_recipient_expectation_requires_exact_address(self):
+        def fake_run(script, timeout=120):
+            return "FOUND|||Subject|||joann@example.com|||||||||Body|||||||||false|||false|||"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.verify_draft(
+                account="Work",
+                draft_id="84053",
+                expected_to="ann@example.com",
+            )
+
+        payload = json.loads(result)
+        self.assertFalse(payload["checks"]["to_matches_expected"])
+        self.assertIn("to_mismatch", payload["warnings"])
+
     def test_list_uses_newest_first_slice(self):
         captured = []
 
@@ -1697,8 +1943,26 @@ class ManageDraftsListTests(unittest.TestCase):
         self.assertIn("set totalDrafts to count of messages of draftsMailbox", script)
         self.assertIn("if headEnd > 75 then set headEnd to 75", script)
         self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
+        self.assertIn("if shownCount >= 75 then exit repeat", script)
         self.assertNotIn("messages startIdx thru totalDrafts of draftsMailbox", script)
         self.assertNotIn("every message of draftsMailbox", script)
+
+    def test_list_limit_caps_head_window_and_result_count(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "Found 0 draft(s)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.manage_drafts(account="Work", action="list", limit=10)
+
+        script = captured[0]
+        self.assertIn("if headEnd > 10 then set headEnd to 10", script)
+        self.assertIn("if shownCount >= 10 then exit repeat", script)
 
     def test_list_subject_contains_adds_case_insensitive_filter_only(self):
         captured = []
@@ -1737,6 +2001,35 @@ class ManageDraftsListTests(unittest.TestCase):
 
         self.assertEqual(len(captured), 1)
         self.assertNotIn("ignoring case", captured[0])
+
+    def test_find_by_in_reply_to_uses_bounded_header_scan(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "Found 1 matching draft(s)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="find",
+                in_reply_to="<source@example.com>",
+                subject_contains="Q3",
+                limit=12,
+            )
+
+        self.assertIn("Found 1", result)
+        script = captured[0]
+        self.assertIn("if headEnd > 12 then set headEnd to 12", script)
+        self.assertIn("messages 1 thru headEnd of draftsMailbox", script)
+        self.assertNotIn("every message of draftsMailbox", script)
+        self.assertIn("all headers of aDraft", script)
+        self.assertIn('starts with "In-Reply-To:"', script)
+        self.assertIn('starts with "References:"', script)
+        self.assertIn('contains "source@example.com"', script)
 
 
 class ComposeRunApplescriptMigrationTests(unittest.TestCase):

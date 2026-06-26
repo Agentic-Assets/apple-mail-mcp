@@ -1,6 +1,6 @@
 {
   "name": "apple-mail",
-  "description": "Natural language interface for Apple Mail — search, compose, triage, organize, and analyze email with 28 MCP tools plus bundled Claude Code workflow skills (Mail operator, triage, inbox zero, taxonomy, archiving, Mail rules advisor, drafting, attachments, writing style)",
+  "description": "Natural language interface for Apple Mail — search, compose, triage, organize, analyze, and verify email drafts with 29 MCP tools plus bundled Claude Code workflow skills (Mail operator, triage, inbox zero, taxonomy, archiving, Mail rules advisor, drafting, attachments, writing style)",
   "version": "3.7.1",
   "license": "MIT",
   "homepage": "https://github.com/Agentic-Assets/apple-mail-mcp",

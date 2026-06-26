@@ -1,6 +1,6 @@
 ---
 name: email-drafting
-description: 'This skill should be used when the user asks to "draft an email", "reply to this message", "forward the thread", "write a weekly update email", "leave the draft open for review", "why did my compose draft refuse to save", or needs HTML-rich drafts saved quietly to Mail Drafts (mode="draft" default; mode="open" or review_in_mail=True only when explicitly requested). Uses compose_email, reply_to_email, forward_email, create_rich_email_draft, manage_drafts, plus get_email_by_id and search_emails when a message handle is missing; standalone draft tools refuse Re:/Fwd: subjects or quoted-thread bodies unless standalone_confirmed=True (CLI exposes --standalone-confirmed); applies DEFAULT_MAIL_SIGNATURE when configured unless include_signature=False. Do NOT use for daily inbox scanning (see inbox-triage), Mail MCP setup errors (apple-mail-operator), voice capture before writing (email-style-profile first), folder taxonomy only (mailbox-taxonomy), Mail rule prose (mail-rules-advisor), staged bulk moves (email-archive-cleanup), or attachment extraction (email-attachments).'
+description: 'Use when drafting, replying, forwarding, or verifying Apple Mail drafts. Covers compose_email, reply_to_email, forward_email, create_rich_email_draft, manage_drafts, and verify_draft with draft-safe defaults, exact message ids for replies, standalone-draft guardrails, signatures, and post-draft verification. Do NOT use for inbox triage, Mail MCP setup, folder taxonomy, Mail rules, staged bulk moves, or attachment extraction.'
 ---
 
 # Email Drafting
@@ -68,7 +68,8 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 | Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list; `subject_keyword` is fallback only; verification requires `reply_body` above the quoted original |
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is fallback only |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params — use plain compose tools when a named signature is required |
-| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, and accepts `hide_empty=True` plus `subject_contains="..."` (fast, case-insensitive "find the draft I just made"). For `send`, `open`, or `delete`, prefer exact `draft_id` from the list output over `draft_subject` |
+| Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, accepts `limit=...`, and accepts `subject_contains="..."` (case-insensitive "find the draft I just made"). `action="find"` locates reply drafts by bounded In-Reply-To / References header scan. For `send`, `open`, or `delete`, prefer exact `draft_id` from the list output over `draft_subject` |
+| Exact draft readiness check | `verify_draft` | Read-only JSON snapshot for one Drafts id: recipients, body sentinel, attachments, signature state, quoted original, and thread headers |
 | Remove orphaned blank drafts | `manage_drafts(action="cleanup_empty")` | Deletes drafts with blank subject AND empty body; `dry_run=True` by default (preview first), capped by `max_deletes` (default 20). Confirm the preview count with the user before `dry_run=False` |
 
 ## Safety And Compliance
@@ -101,7 +102,8 @@ Summarize artifacts for the operator:
 To verify a freshly-created draft, do **not** use `search_emails` — it runs a
 date-filtered scan that is slow on large accounts and silently drops brand-new
 drafts (an unsent `outgoing message` has a null received date). Instead use the
-bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
+exact Drafts verification: `verify_draft(draft_id="...", expected_body_contains="...")`
+or bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
 (newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Use
 the returned exact `draft_id` for `manage_drafts(action="open"|"delete"|"send")`. Confirm
 `to`/`cc` are the intended recipients and the body is present. For replies,
