@@ -489,6 +489,11 @@ class _NeedsResponseRow:
     is_flagged: bool
     has_question: bool
 
+    @property
+    def message_id(self) -> str:
+        """Backward-compatible alias for older internal tests/helpers."""
+        return self.internet_message_id
+
 
 def _parse_needs_response_inbox_rows(raw: str) -> list[_NeedsResponseRow]:
     """Parse ``MSG|||...`` lines into ``_NeedsResponseRow`` instances.

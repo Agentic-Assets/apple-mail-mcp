@@ -348,7 +348,7 @@ class _ReplyDraftVerification:
 
 def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     """Parse the saved-reply verifier AppleScript response."""
-    parts = output.strip().split("|")
+    parts = output.strip().split("|", 5)
     status = parts[0] if parts else ""
     artifact_id = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
     attachment_status = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None

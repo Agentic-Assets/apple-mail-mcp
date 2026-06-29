@@ -1048,6 +1048,19 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("Attachments Applied Count: 0", result)
         self.assertIn("requested attachments could not be verified", result)
 
+    def test_reply_verification_parser_preserves_pipe_in_attachment_filename(self):
+        verification = compose_tools._reply_verification_from_output(
+            "FOUND|84053|verified|not_requested|1|support|final.pdf::2048;;"
+        )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "verified")
+        self.assertEqual(verification.attachment_count, 1)
+        self.assertEqual(
+            verification.attachments_applied,
+            [{"filename": "support|final.pdf", "size": 2048}],
+        )
+
     def test_reply_draft_success_json_includes_attachment_and_signature_status(self):
         captured = []
 
