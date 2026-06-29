@@ -1090,6 +1090,70 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["signature_status"], "missing")
         self.assertFalse(payload["sent"])
 
+    def test_reply_all_with_attachment_preserves_single_body_and_verifies_exact_draft(self):
+        captured = []
+        body_sentinel = "AA-REPLY-ALL-BODY-SENTINEL-84053"
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id="84053",
+                    quote_needle="On Today, Sender <sender@example.com> wrote:",
+                )
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|verified|not_requested"
+            return "ok"
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
+                "apple_mail_mcp.tools.compose.run_applescript",
+                side_effect=fake_run,
+            ),
+            patch("apple_mail_mcp.tools.compose._validate_attachment_paths") as mock_validate,
+        ):
+            attachment = Path(tmpdir) / "support.pdf"
+            attachment.write_text("pdf")
+            mock_validate.return_value = ([str(attachment)], None)
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body=f"{body_sentinel}\n\nReply body",
+                reply_to_all=True,
+                attachments=str(attachment),
+                include_signature=False,
+            )
+
+        self.assertIn("Reply saved as draft!", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 84053", result)
+        self.assertIn("Attachment Verification Status: verified", result)
+
+        reply_script = _main_reply_script(captured)
+        self.assertIn("set replyMessage to reply foundMessage with reply to all", reply_script)
+        self.assertNotIn("System Events", reply_script)
+        self.assertNotIn('keystroke "v"', reply_script)
+        self.assertNotIn("set the clipboard to replyBodyText", reply_script)
+        self.assertEqual(reply_script.count("set content of replyMessage to"), 1)
+        self.assertEqual(reply_script.count("replyBodyText & return & return & quotedOriginalText"), 1)
+        _assert_ordered(
+            self,
+            reply_script,
+            "set replyMessage to reply foundMessage with reply to all",
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "set content of replyMessage to (composedReplyContent as rich text)",
+            "make new attachment with properties {file name:theFile} at after the last paragraph of content",
+            "save replyMessage",
+        )
+
+        verifier_script = next(script for script in captured if "set targetDraftIdText" in script)
+        self.assertIn('set targetDraftIdText to "84053"', verifier_script)
+        self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
+        self.assertIn("set expectedAttachmentCount to 1", verifier_script)
+        self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
+
     def test_reply_defaults_to_draft_mode(self):
         captured = []
 
