@@ -88,6 +88,11 @@ class ReadOnlyRegistryTests(unittest.TestCase):
             tool = self.by_name[name]
             self.assertEqual(tool.annotations, READ_ONLY_TOOL_ANNOTATIONS, name)
 
+    def test_get_email_thread_schema_accepts_message_id(self):
+        tool = self.by_name["get_email_thread"]
+
+        self.assertIn("message_id", tool.parameters["properties"])
+
     def test_write_tools_annotated(self):
         for name in WRITE_TOOLS:
             tool = self.by_name[name]
