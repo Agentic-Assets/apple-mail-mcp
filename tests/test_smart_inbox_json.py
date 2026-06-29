@@ -92,9 +92,29 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
             self.assertIn("priority", entry)
             self.assertIn("already_replied", entry)
             self.assertIn("message_id", entry)
+            self.assertIn("internet_message_id", entry)
             self.assertFalse(entry["already_replied"])
         self.assertEqual(result["skipped_replied_count"], 0)
         self.assertEqual(result["errors"], [])
+
+    def test_json_mode_returns_numeric_message_id_and_internet_message_id(self):
+        inbox_raw = (
+            "MSG|||301|||<flagged-1@example.com>|||URGENT review|||"
+            "boss@example.com|||2026-05-20|||true|||false"
+        )
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=inbox_raw
+        ):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=2,
+                max_results=10,
+                output_format="json",
+            )
+
+        entry = result["high_priority"][0]
+        self.assertEqual(entry["message_id"], "301")
+        self.assertEqual(entry["internet_message_id"], "<flagged-1@example.com>")
 
     def test_json_mode_marks_already_replied_when_replied_set_matches(self):
         # Two inbox candidates; the second was already replied to.
@@ -341,6 +361,14 @@ class NeedsResponseRowParsingTests(unittest.TestCase):
         self.assertEqual(subjects, ["Good", "Another"])
         self.assertTrue(rows[1].is_flagged)
         self.assertTrue(rows[1].has_question)
+
+    def test_parser_supports_numeric_and_internet_message_ids(self):
+        raw = "MSG|||301|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false"
+
+        rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
+
+        self.assertEqual(rows[0].mail_app_id, "301")
+        self.assertEqual(rows[0].internet_message_id, "<a@example.com>")
 
     def test_parser_ignores_non_msg_prefixed_lines(self):
         raw = (
