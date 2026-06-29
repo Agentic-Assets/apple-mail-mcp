@@ -397,7 +397,36 @@ class SearchToolTests(unittest.TestCase):
         self.assertEqual(response["item"]["message_id"], "12345")
         self.assertEqual(response["item"]["subject"], "Exact Ticket")
         self.assertEqual(response["item"]["content_preview"], "Full body preview")
+        self.assertEqual(response["item"]["content"], "Full body preview")
+        self.assertTrue(response["item"]["content_available"])
+        self.assertFalse(response["item"]["content_truncated"])
+        self.assertEqual(response["item"]["content_status"], "available")
         self.assertIn("whose id is 12345", captured["script"])
+
+    def test_get_email_by_id_json_marks_truncated_content(self):
+        def fake_run(script, timeout=120):
+            return _record_line(
+                12345,
+                "Exact Ticket",
+                content_preview="12345...",
+            )
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            response = json.loads(
+                search_tools.get_email_by_id(
+                    account="Work",
+                    message_id="12345",
+                    include_content=True,
+                    max_content_length=5,
+                    output_format="json",
+                )
+            )
+
+        self.assertEqual(response["item"]["content"], "12345...")
+        self.assertEqual(response["item"]["content_preview"], "12345...")
+        self.assertTrue(response["item"]["content_available"])
+        self.assertTrue(response["item"]["content_truncated"])
+        self.assertEqual(response["item"]["content_status"], "truncated")
 
     def test_get_email_by_id_rejects_non_numeric_ids(self):
         result = search_tools.get_email_by_id(

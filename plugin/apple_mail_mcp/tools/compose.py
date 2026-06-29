@@ -2478,43 +2478,45 @@ def _build_manage_drafts_list_script(
                         set skipThisDraft to false
                         set draftSubject to subject of aDraft
                         set draftId to (id of aDraft) as string
-                        set draftDate to "(unsent)"
-                        try
-                            set draftDate to (date sent of aDraft) as string
-                        end try
-
-                        -- Body snippet (first 140 chars, whitespace collapsed)
-                        set draftBody to ""
-                        try
-                            set draftBody to content of aDraft
-                        end try
-                        set AppleScript's text item delimiters to {{return, linefeed, tab}}
-                        set bodyParts to text items of draftBody
-                        set AppleScript's text item delimiters to " "
-                        set bodySnippet to bodyParts as string
-                        set AppleScript's text item delimiters to ""
-                        if length of bodySnippet > 140 then
-                            set bodySnippet to (text 1 thru 140 of bodySnippet) & "..."
-                        end if
-
                         {subject_filter_script}
 
                         if skipThisDraft then
                             -- filtered out by subject_contains
-                        else if hideEmpty and draftSubject is "" and bodySnippet is "" then
-                            -- skip orphaned blank draft
                         else
-                            -- Recipients (Drafts is a small, bounded mailbox)
-                            {to_recipients_script}
+                            set draftDate to "(unsent)"
+                            try
+                                set draftDate to (date sent of aDraft) as string
+                            end try
 
-                            set shownCount to shownCount + 1
-                            set draftLines to draftLines & "✉ " & draftSubject & return
-                            set draftLines to draftLines & "   Id: " & draftId & "   To: " & draftTo & return
-                            set draftLines to draftLines & "   Created: " & (draftDate as string) & return
-                            if bodySnippet is not "" then
-                                set draftLines to draftLines & "   " & bodySnippet & return
+                            -- Body snippet (first 140 chars, whitespace collapsed)
+                            set draftBody to ""
+                            try
+                                set draftBody to content of aDraft
+                            end try
+                            set AppleScript's text item delimiters to {{return, linefeed, tab}}
+                            set bodyParts to text items of draftBody
+                            set AppleScript's text item delimiters to " "
+                            set bodySnippet to bodyParts as string
+                            set AppleScript's text item delimiters to ""
+                            if length of bodySnippet > 140 then
+                                set bodySnippet to (text 1 thru 140 of bodySnippet) & "..."
                             end if
-                            set draftLines to draftLines & return
+
+                            if hideEmpty and draftSubject is "" and bodySnippet is "" then
+                                -- skip orphaned blank draft
+                            else
+                                -- Recipients (Drafts is a small, bounded mailbox)
+                                {to_recipients_script}
+
+                                set shownCount to shownCount + 1
+                                set draftLines to draftLines & "✉ " & draftSubject & return
+                                set draftLines to draftLines & "   Id: " & draftId & "   To: " & draftTo & return
+                                set draftLines to draftLines & "   Created: " & (draftDate as string) & return
+                                if bodySnippet is not "" then
+                                    set draftLines to draftLines & "   " & bodySnippet & return
+                                end if
+                                set draftLines to draftLines & return
+                            end if
                         end if
                     end try
                 end repeat

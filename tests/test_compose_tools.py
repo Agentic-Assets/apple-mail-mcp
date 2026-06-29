@@ -2255,7 +2255,11 @@ class ManageDraftsListTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            compose_tools.manage_drafts(account="Work", action="list", subject_contains="Q3 Report")
+            compose_tools.manage_drafts(
+                account="Work",
+                action="list",
+                subject_contains="Q3 Report",
+            )
 
         self.assertEqual(len(captured), 1)
         script = captured[0]
@@ -2265,6 +2269,28 @@ class ManageDraftsListTests(unittest.TestCase):
         # No date filter is ever added (would drop null-date new drafts).
         self.assertNotIn("recentCutoffDate", script)
         self.assertNotIn("current date", script)
+
+    def test_list_subject_contains_filters_before_body_and_recipient_reads(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "Found 0 draft(s)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.manage_drafts(account="Work", action="list", subject_contains="Q3 Report")
+
+        script = captured[0]
+        _assert_ordered(
+            self,
+            script,
+            'does not contain "Q3 Report"',
+            'set draftBody to ""',
+            'set draftTo to ""',
+        )
 
     def test_list_without_subject_contains_omits_filter(self):
         captured = []
