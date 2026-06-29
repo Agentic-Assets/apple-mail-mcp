@@ -412,6 +412,29 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
     return "\n".join(lines) + "\n"
 
 
+def _reply_success_payload(
+    *,
+    mode: str,
+    reply_subject: str | None,
+    draft_id: str | None,
+    verification: _ReplyDraftVerification,
+) -> dict[str, Any]:
+    """Return the machine-readable success contract for verified reply drafts."""
+    verified_id = verification.matched_artifact_id or draft_id
+    return {
+        "mode": mode,
+        "sent": False,
+        "subject": reply_subject or "",
+        "draft_id": draft_id,
+        "verified_draft_id": verified_id,
+        "verification_status": verification.status,
+        "body_present": verification.status == "found",
+        "attachment_status": verification.attachment_status,
+        "signature_status": verification.signature_status,
+        "mailbox": "Drafts",
+    }
+
+
 def _verify_saved_reply_draft(
     account: str,
     reply_subject: str,
@@ -1678,6 +1701,7 @@ def reply_to_email(
     timeout: int | None = None,
     include_signature: bool = True,
     signature_name: str | None = None,
+    output_format: str = "text",
 ) -> str:
     """
     Reply to an email by message_id (preferred) or subject keyword.
@@ -1700,10 +1724,15 @@ def reply_to_email(
         timeout: Optional per-AppleScript timeout in seconds. Defaults to 120s for the main reply script and up to 30s for alias validation.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
+        output_format: "text" (default) preserves the existing success output.
+            "json" returns machine-readable draft/open success metadata after
+            saved-draft verification succeeds.
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
     """
+    if output_format not in {"text", "json"}:
+        return "Error: Invalid output_format. Use: text, json"
 
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
@@ -1861,6 +1890,15 @@ def reply_to_email(
                     verification,
                     mode_text=mode_text,
                     reply_body=reply_body,
+                )
+            if output_format == "json":
+                return json.dumps(
+                    _reply_success_payload(
+                        mode=effective_mode,
+                        reply_subject=reply_subject,
+                        draft_id=draft_id,
+                        verification=verification,
+                    )
                 )
             result += _format_reply_verification_lines(verification, draft_id)
         return result

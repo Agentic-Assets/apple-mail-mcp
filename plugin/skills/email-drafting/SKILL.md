@@ -115,6 +115,8 @@ constructs and assigns the new plain-text `reply_body` above the quoted-original
 block, then saves. Verification checks the exact Drafts artifact id first when
 Mail exposes one, falls back to bounded newest-Drafts only when needed, and fails
 with a structured artifact id if the body is missing or appears after the quote.
+For machine-readable reply draft metadata, call `reply_to_email(..., output_format="json")`
+to get `draft_id`, `verified_draft_id`, verification status, mode, and `sent`.
 `body_html`
 on `reply_to_email` is accepted for compatibility but ignored; use
 `create_rich_email_draft` / `compose_email` only for rich HTML on a genuinely
