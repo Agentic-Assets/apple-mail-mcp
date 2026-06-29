@@ -1638,6 +1638,62 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             "save replyMessage",
         )
 
+    def test_include_signature_false_suppresses_default_signature_and_verifies_one_draft(self):
+        captured = []
+        body_sentinel = "AA-NO-SIGNATURE-BODY-SENTINEL-81121"
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id="81121",
+                    quote_needle="On Today, Sender <sender@example.com> wrote:",
+                )
+            if 'set targetDraftIdText to "81121"' in script:
+                return "FOUND|81121|not_requested|not_requested"
+            return "ok"
+
+        with (
+            patch.object(compose_tools.server, "DEFAULT_MAIL_SIGNATURE", "TU", create=True),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body=f"{body_sentinel}\n\nReply body",
+                include_signature=False,
+            )
+
+        self.assertIn("Draft ID: 81121", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 81121", result)
+        self.assertIn("Signature Verification Status: not_requested", result)
+
+        script = _main_reply_script(captured)
+        self.assertIn("set replyMessage to reply foundMessage", script)
+        self.assertIn("set message signature of replyMessage to missing value", script)
+        self.assertNotIn('set message signature of replyMessage to signature "TU"', script)
+        self.assertNotIn("with opening window", script)
+        self.assertNotIn("close (window of replyMessage)", script)
+        self.assertNotIn("close front window", script)
+        self.assertEqual(script.count("save replyMessage"), 1)
+        _assert_ordered(
+            self,
+            script,
+            "set message signature of replyMessage to missing value",
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "set content of replyMessage to (composedReplyContent as rich text)",
+            "save replyMessage",
+            "set replyDraftId to id of replyMessage as string",
+        )
+
+        verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
+        self.assertIn('set targetDraftIdText to "81121"', verifier_script)
+        self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
+        self.assertIn("set signatureWasRequested to false", verifier_script)
+        self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
+
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):
         captured = []
 
