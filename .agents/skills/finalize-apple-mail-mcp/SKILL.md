@@ -35,7 +35,7 @@ hook in `.claude/hooks/dev_mode_reminder.sh` reflects the same map.
 ## Out of scope
 
 - New feature implementation
-- Version bump across five files unless user explicitly requests a release
+- Version bump across six files unless user explicitly requests a release
 - Force push or amending pushed commits
 
 ## Workflow
@@ -128,8 +128,8 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 | MCP tools (`@mcp.tool`, params, defaults) | `plugin/apple_mail_mcp/tools/CLAUDE.md`, tool docstrings, `README.md` tool table, `docs/CLAUDE-conventions.md`, `apple-mail-mcpb/manifest.json` `tools[].description` |
 | Plugin wiring / flags | `plugin/docs/CLAUDE.md`, `plugin/apple_mail_mcp/CLAUDE.md`, `README.md` Configuration |
 | Agent workflows | `plugin/skills/*/SKILL.md`, `plugin/skills/CLAUDE.md`, `docs/CLAUDE.md` skill map |
-| Test count | Root `CLAUDE.md`, `README.md`, any doc citing test totals — use `pytest tests/ -q` result from step 3 |
-| Tool count | Five version files only on release; always sync **claims**: `grep -c '^@mcp.tool' plugin/apple_mail_mcp/tools/*.py` vs `plugin.json`, marketplace, MCPB `tools[]` |
+| Test count | Root `CLAUDE.md`, `README.md`, any doc citing test totals; use `.venv/bin/pytest tests/ --collect-only -q` |
+| Tool count | Six version files only on release; always sync **claims** with `rg '@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l` or `grep -h -c '^@mcp.tool' plugin/apple_mail_mcp/tools/*.py | awk '{s += $1} END {print s}'` vs `plugin.json`, marketplace, MCPB `tools[]` |
 
 **CLAUDE.md hubs to spot-check** (stale cross-links or wrong counts):
 
@@ -212,7 +212,7 @@ If `HEAD` is on a protected branch (e.g. `main` with branch-protection rules), s
 
 ## Release note
 
-If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/dev-check.sh release` (which rebuilds all three artifacts — `apple-mail-plugin.zip`, `apple-mail.plugin`, and the `.mcpb` — and runs the structural mcpb-unpack smoke plus the byte-parity check between the zip and `.plugin`).
+If shipping a version bump, bump all six version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/dev-check.sh release` (which rebuilds all three artifacts: `apple-mail-plugin.zip`, `apple-mail.plugin`, and the `.mcpb`, and runs the structural mcpb-unpack smoke plus the byte-parity check between the zip and `.plugin`).
 
 ## Additional resources
 

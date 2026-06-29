@@ -33,7 +33,7 @@ Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; desc
 | Artifact | `apple-mail-plugin.zip` | `apple-mail-mcp-v{VERSION}.mcpb` | `apple-mail.plugin` (byte-identical to the `.zip`) |
 | Entrypoint | `start_mcp.sh` via `mcpServers` in `plugin.json` | `start_mcp.sh` via `manifest.json` `server.mcp_config` | `start_mcp.sh` via `mcpServers` in `plugin.json` |
 
-Version sync: five files per [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md). Deferred release/backlog items live in [`tasks/robustness-backlog-2026-05-22.md`](../tasks/robustness-backlog-2026-05-22.md).
+Version sync: six files per [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md). Deferred release/backlog items live in [`tasks/robustness-backlog-2026-05-22.md`](../tasks/robustness-backlog-2026-05-22.md).
 
 ## Related
 

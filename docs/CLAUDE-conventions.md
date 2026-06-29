@@ -158,7 +158,7 @@ Version is duplicated across **six** files — bump all together when releasing.
 | `server.json` | `version` and `packages[0].version` |
 | `apple-mail-mcpb/manifest.json` | `version` |
 
-Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marketplace manifests, and `apple-mail-mcpb/manifest.json` must match `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. The mcpb manifest also embeds the full `tools[]` array — both count and names must match code. Run [`tools/validate_manifests.py`](../tools/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove; run `bash tools/dev-check.sh release` before shipping manifest, package, or artifact changes.
+Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marketplace manifests, and `apple-mail-mcpb/manifest.json` must match `rg '@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l` or `grep -h -c '^@mcp.tool' plugin/apple_mail_mcp/tools/*.py | awk '{s += $1} END {print s}'`. The mcpb manifest also embeds the full `tools[]` array; both count and names must match code. Run [`tools/validate_manifests.py`](../tools/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove; run `bash tools/dev-check.sh release` before shipping manifest, package, or artifact changes.
 
 ---
 

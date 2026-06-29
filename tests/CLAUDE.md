@@ -1,6 +1,6 @@
 # tests/ — pytest suite
 
-Mocked unit tests for the Apple Mail MCP server. **822 tests** (`pytest tests/ --collect-only -q`). CI runs on Ubuntu with no Mail.app — every test mocks AppleScript or tests pure Python.
+Mocked unit tests for the Apple Mail MCP server. Discover the current count with `.venv/bin/pytest tests/ --collect-only -q`; CI runs on Ubuntu with no Mail.app, and every test mocks AppleScript or tests pure Python.
 
 New tests and perf gates: delegate to a **`shell`** or **`generalPurpose`** subagent; parent runs full suite after merge. See root [`CLAUDE.md`](../CLAUDE.md) § Agent orchestration.
 
@@ -25,7 +25,7 @@ Autouse fixture `_pass_through_known_test_accounts` patches `validate_account_na
 
 ## Test files
 
-**40 test modules** on disk; discover via `pytest tests/ --collect-only -q`.
+Test modules change over time; discover the current set with `.venv/bin/pytest tests/ --collect-only -q`.
 
 **Core suites by domain:**
 
