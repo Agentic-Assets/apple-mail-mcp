@@ -17,6 +17,8 @@
 | [`v4-performance-consolidation-2026-05-27/progress-log.md`](v4-performance-consolidation-2026-05-27/progress-log.md) | v4 recon evidence, blocker record, and next action log | Active; latest strict-gate evidence recorded |
 | [`v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`](v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md) | v4 competitor prior art, hot-path findings, and parked risks | Active sidecar |
 | [`whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`](whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md) | Historical Phase A capability-token planning; current source/tests/docs are authoritative for bounded-scan rules and no routine full scans | Reference only; Phase B deferred |
+| [`id-first-search-retirement-recommendations-2026-06-29.md`](id-first-search-retirement-recommendations-2026-06-29.md) | Recommendation map for retiring keyword/substr target selection from action tools and keeping search as bounded discovery only | New recommendation |
+| [`id-first-search-retirement-todo-2026-06-29.md`](id-first-search-retirement-todo-2026-06-29.md) | Worker-ready todo list, skill routing, subagent lanes, and verification gates for ID-first search retirement | New todo |
 | [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) | Whole-plugin robustness goal and completion contract | Active (parent goal) |
 | [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md) | Detailed backlog sidecar moved out of `todo.md` | Active sidecar |
 | [`robustness-completion-audit-2026-05-22.md`](robustness-completion-audit-2026-05-22.md) | Command evidence, improvements, residual risks | Active report |
