@@ -1073,7 +1073,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         exact_branch = script[exact_lookup:fallback_lookup]
         self.assertNotIn('return "NOT_FOUND"', exact_branch)
 
-    def test_reply_signature_verification_only_runs_for_resolved_signature(self):
+    def test_reply_signature_verification_runs_when_signature_requested_without_resolved_name(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -1096,7 +1096,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
-        self.assertIn("set signatureWasRequested to false", verifier_script)
+        self.assertIn("set signatureWasRequested to true", verifier_script)
 
     def test_reply_draft_success_reports_structured_artifact_error_when_body_missing(self):
         sentinel = "AA-REPLY-BODY-SENTINEL-84053"

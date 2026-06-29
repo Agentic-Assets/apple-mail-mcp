@@ -1804,7 +1804,7 @@ def reply_to_email(
                 draft_id=draft_id,
                 quoted_needle=quoted_needle,
                 expected_attachment_count=len(validated_paths) if validated_paths else None,
-                signature_requested=resolved_signature_name is not None,
+                signature_requested=include_signature,
                 timeout=timeout,
             )
             if not verification.ok:
