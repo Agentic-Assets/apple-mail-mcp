@@ -39,6 +39,7 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools.draft_verification import (
     _build_verify_draft_payload,
+    _normalize_attachment_rows,
     _parse_expected_attachments,
     _split_csv_addresses,
 )
@@ -340,6 +341,8 @@ class _ReplyDraftVerification:
     body_missing_artifact_id: str | None = None
     matched_artifact_id: str | None = None
     attachment_status: str | None = None
+    attachment_count: int | None = None
+    attachments_applied: list[dict[str, Any]] | None = None
     signature_status: str | None = None
 
 
@@ -350,12 +353,20 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     artifact_id = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
     attachment_status = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
     signature_status = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+    attachment_count_text = parts[4].strip() if len(parts) > 4 and parts[4].strip() else None
+    try:
+        attachment_count = int(attachment_count_text) if attachment_count_text is not None else None
+    except ValueError:
+        attachment_count = None
+    attachments_applied = _normalize_attachment_rows(parts[5]) if len(parts) > 5 and parts[5].strip() else None
     if status == "FOUND":
         return _ReplyDraftVerification(
             ok=True,
             status="found",
             matched_artifact_id=artifact_id,
             attachment_status=attachment_status,
+            attachment_count=attachment_count,
+            attachments_applied=attachments_applied,
             signature_status=signature_status,
         )
     if status == "BODY_MISSING":
@@ -383,6 +394,15 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
         lines.append(f"Verified Draft ID: {verified_id}")
     if verification.attachment_status:
         lines.append(f"Attachment Verification Status: {verification.attachment_status}")
+        if verification.attachment_count is not None:
+            lines.append(f"Attachments Applied Count: {verification.attachment_count}")
+        if verification.attachments_applied:
+            lines.append("Attachments Applied:")
+            for attachment in verification.attachments_applied:
+                filename = attachment.get("filename") or ""
+                size = attachment.get("size")
+                size_text = f" ({size} bytes)" if size is not None else ""
+                lines.append(f"  {filename}{size_text}")
         if verification.attachment_status in {"missing", "unsupported"}:
             lines.append("Warning: requested attachments could not be verified on the saved draft")
     if verification.signature_status:
@@ -414,8 +434,11 @@ def _verify_saved_reply_draft(
         "missing value" if signature_requested is None else ("true" if signature_requested else "false")
     )
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
+    sanitize_script = sanitize_field_handler(include_attachment_row_delimiter=True)
     text_offset_script = text_offset_handler()
     script = f'''
+    {sanitize_script}
+
     {text_offset_script}
 
     on replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
@@ -440,6 +463,29 @@ def _verify_saved_reply_draft(
         end try
     end attachmentStatus
 
+    on attachmentCount(draftMessage)
+        try
+            return count of mail attachments of draftMessage
+        on error
+            return ""
+        end try
+    end attachmentCount
+
+    on attachmentRows(draftMessage)
+        set attachmentRowsText to ""
+        try
+            repeat with anAttachment in mail attachments of draftMessage
+                set attachmentName to my sanitize_field(name of anAttachment)
+                set attachmentSize to ""
+                try
+                    set attachmentSize to file size of anAttachment as string
+                end try
+                set attachmentRowsText to attachmentRowsText & attachmentName & "::" & attachmentSize & ";;"
+            end repeat
+        end try
+        return attachmentRowsText
+    end attachmentRows
+
     on signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
         if signatureWasRequested is missing value then return "not_requested"
         if signatureWasRequested is false then return "not_requested"
@@ -461,10 +507,12 @@ def _verify_saved_reply_draft(
         set draftId to id of draftMessage as string
         set draftContent to content of draftMessage as string
         set draftAttachmentStatus to my attachmentStatus(draftMessage, expectedAttachmentCount)
+        set draftAttachmentCount to my attachmentCount(draftMessage)
+        set draftAttachmentRows to my attachmentRows(draftMessage)
         set draftSignatureStatus to my signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
-        if replyBodyNeedle is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus
+        if replyBodyNeedle is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         set bodyStatus to my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
-        if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus
+        if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         if bodyStatus is "after_quote" then return "BODY_AFTER_QUOTE|" & draftId
         return "BODY_MISSING|" & draftId
     end verifyReplyDraft

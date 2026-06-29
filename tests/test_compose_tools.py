@@ -944,7 +944,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             if "reply foundMessage" in script:
                 return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
             if 'set targetDraftIdText to "84053"' in script:
-                return "FOUND|84053|verified|missing"
+                return "FOUND|84053|verified|missing|1|support.pdf::2048;;"
             return "ok"
 
         with (
@@ -968,11 +968,45 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         self.assertIn("Attachment Verification Status: verified", result)
+        self.assertIn("Attachments Applied Count: 1", result)
+        self.assertIn("support.pdf (2048 bytes)", result)
         self.assertIn("Signature Verification Status: missing", result)
         self.assertIn("requested Mail signature was not detected", result)
         verifier_script = next(script for script in captured if "set expectedAttachmentCount to" in script)
         self.assertIn("set expectedAttachmentCount to 1", verifier_script)
         self.assertIn("set signatureWasRequested to true", verifier_script)
+        self.assertIn("file size of anAttachment", verifier_script)
+
+    def test_reply_draft_attachment_warning_includes_applied_count(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|missing|not_requested|0|"
+            return "ok"
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
+                "apple_mail_mcp.tools.compose.run_applescript",
+                side_effect=fake_run,
+            ),
+            patch("apple_mail_mcp.tools.compose._validate_attachment_paths") as mock_validate,
+        ):
+            attachment = Path(tmpdir) / "support.pdf"
+            attachment.write_text("pdf")
+            mock_validate.return_value = ([str(attachment)], None)
+            result = compose_tools.reply_to_email(
+                account="Work",
+                subject_keyword="test",
+                reply_body="Reply body",
+                attachments=str(attachment),
+                include_signature=False,
+            )
+
+        self.assertIn("Attachment Verification Status: missing", result)
+        self.assertIn("Attachments Applied Count: 0", result)
+        self.assertIn("requested attachments could not be verified", result)
 
     def test_reply_defaults_to_draft_mode(self):
         captured = []
