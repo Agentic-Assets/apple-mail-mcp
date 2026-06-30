@@ -89,7 +89,7 @@ It is heavier than a compact `get_inbox_overview` on small inboxes, so keep `get
 This skill covers read/search navigation, not compose. When the user wants to reply after you have a `message_id`, load **`email-drafting`** and call `reply_to_email(message_id=..., reply_body=..., mode="draft")`.
 
 - **Default path:** `native_format=True` (Mail's native reply window, colored quote bar, logo signature). Requires Mail focus and Accessibility permission for the host process.
-- **On `REPLY_WINDOW_FOCUS_FAILED`:** no draft was saved. Retry with Mail visible and unfocused elsewhere, or retry with `native_format=False` (windowless fallback, plain-text quote, no logo signature, no Accessibility needed).
+- **On `REPLY_WINDOW_FOCUS_FAILED`:** no draft was saved. Retry with Mail visible and unfocused elsewhere. Do not switch off native formatting (the windowless `native_format=False` path is gated: `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True`, which agents must never set). If focus still cannot be acquired, stop and report the blocker.
 - **Never** substitute `compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")` for in-thread replies. Collect ids via `search_emails` / `list_inbox_emails`; never pass `subject_keyword` to `reply_to_email`.
 
 Full pre-draft verification, standalone-draft guards, and post-draft checks live in **`email-drafting`**.

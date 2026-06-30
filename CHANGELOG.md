@@ -3,6 +3,37 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
+## 3.9.0 - 2026-06-30
+
+Native-only reply drafting enforced. The windowless `native_format=False` path
+is now gated so agents can no longer drift into the plain-text fallback that
+drops Mail's colored quote bar and logo signature.
+
+### Added
+
+- **`allow_windowless_fallback` parameter on `reply_to_email`** (default
+  `False`). Passing `native_format=False` without
+  `allow_windowless_fallback=True` now returns the structured error
+  `WINDOWLESS_FALLBACK_DISABLED` before any AppleScript runs. The windowless
+  object-model path remains available for deliberate headless/bulk/CI runs
+  where no GUI focus or Accessibility permission is available; agents must
+  never set `allow_windowless_fallback=True` on their own.
+
+### Changed
+
+- **`REPLY_WINDOW_FOCUS_FAILED` remediation no longer offers the fallback.**
+  The `alternative` field now tells callers to retry with
+  `native_format=True` (the default) once Mail can take focus, or to stop and
+  report the blocker. It no longer mentions `native_format=False`, so the tool
+  itself no longer steers agents toward the plain-text path.
+- **Skill and docs guidance rewritten to native-only.** `email-drafting`,
+  `apple-mail-operator`, `inbox-triage`, `email-management` templates, the
+  shared `pre-draft-verification` and `agent-id-first-workflow` references,
+  `README.md`, `tools/CLAUDE.md`, `skills/CLAUDE.md`, and
+  `docs/CLAUDE-conventions.md` now state that native drafting is the only
+  supported reply method and that the windowless path is gated. The
+  `email-drafting` skill leads with a binding "Native drafting only" rule.
+
 ## 3.8.0 - 2026-06-30
 
 Native-format reply drafts. `reply_to_email` now defaults to Mail's native reply

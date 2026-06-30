@@ -30,4 +30,4 @@ Passing these to **action** tools returns `TARGET_SELECTOR_DEPRECATED` (even wit
 
 ## Native reply defaults
 
-`reply_to_email` defaults to `native_format=True` (rich quote + logo signature). Requires Mail window focus and Accessibility permission. On `REPLY_WINDOW_FOCUS_FAILED`, no draft was saved — retry visible Mail or use `native_format=False`.
+`reply_to_email` defaults to `native_format=True` (rich quote + logo signature). Requires Mail window focus and Accessibility permission. On `REPLY_WINDOW_FOCUS_FAILED`, no draft was saved. Retry with Mail visible and not being clicked. Do not switch to `native_format=False`; it is gated (`WINDOWLESS_FALLBACK_DISABLED`) and reserved for deliberate headless/CI via `allow_windowless_fallback=True`, which agents must never set. The windowless path is not a normal fallback.

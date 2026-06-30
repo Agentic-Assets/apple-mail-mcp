@@ -7,6 +7,10 @@ description: This skill should be used when the user asks to "draft an email", "
 
 Compose-first workflows against Apple Mail. Default plugin installs run **`--draft-safe`**: compose tools default to quiet `mode="draft"` (no leftover compose windows), and `mode="send"` returns a structured error until the server is reconfigured. When send is allowed, still confirm intent with the user before calling `mode="send"` or `manage_drafts(action="send")`.
 
+## Native drafting only (binding rule)
+
+**Always use the native drafting method for replies. Never use the windowless fallback.** `reply_to_email` defaults to `native_format=True`, and that is the only method to use. It composes in Mail's native reply window so drafts keep the colored quote bar and the account's default logo signature, which is the formatting the user requires. The windowless `native_format=False` path is gated: it returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed, and agents must never pass that flag. If a native reply fails with `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible and not being clicked; do not switch off native formatting. If focus still cannot be acquired, stop and report the blocker. This rule applies to every reply, every account, every pass, with no exceptions.
+
 ## Pre-draft verification (required before replying)
 
 Canonical rules: [`pre-draft-verification.md`](references/pre-draft-verification.md). Summary:
@@ -50,14 +54,14 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 
 `mode="open"` saves first then leaves the compose window open, so closing it should not trigger Mail's Save/Don't Save prompt.
 
-**Native reply focus:** the default native path (`native_format=True`) types `reply_body` into Mail's reply window, so Mail must be able to take focus and the host process needs Accessibility permission. If `reply_to_email` returns `REPLY_WINDOW_FOCUS_FAILED`, no draft was saved and nothing was sent: either retry with Mail visible and not being clicked, or retry with `native_format=False` (windowless object-model path, plain-text quote, no logo signature, no Accessibility needed). Prefer `native_format=False` up front for headless, bulk, or CI reply runs with no GUI focus available.
+**Native reply focus:** the default native path (`native_format=True`) is the only supported reply path for normal agent use. It types `reply_body` into Mail's reply window, so Mail must be able to take focus and the host process needs Accessibility permission. If `reply_to_email` returns `REPLY_WINDOW_FOCUS_FAILED`, no draft was saved and nothing was sent: retry with Mail visible and not being clicked. Do not switch to `native_format=False` (it is gated and returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed; the windowless path is for deliberate headless/CI runs only and agents must never set `allow_windowless_fallback=True`). If focus still cannot be acquired, stop and report the blocker.
 
 ## Tool Selection Pattern
 
 | Situation | Tool | Notes |
 |-----------|------|-------|
 | New outbound mail | `compose_email` | Standalone only; default `mode="draft"`; use `mode="open"` only for explicit saved-open review; `mode="send"` blocked under `--draft-safe` |
-| Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list. **Discovery-only:** use `subject_keyword` on `search_emails` only, never on `reply_to_email` (`TARGET_SELECTOR_DEPRECATED`). Defaults to `native_format=True` (rich quote bar + logo signature, typed body, needs Mail focus + Accessibility); use `native_format=False` for headless/bulk/CI or after a `REPLY_WINDOW_FOCUS_FAILED`. Verification requires `reply_body` above the quoted original |
+| Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list. **Discovery-only:** use `subject_keyword` on `search_emails` only, never on `reply_to_email` (`TARGET_SELECTOR_DEPRECATED`). `native_format=True` is the only supported path (rich quote bar + logo signature, typed body, needs Mail focus + Accessibility); `native_format=False` returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed (deliberate headless/CI only, never set by agents). Verification requires `reply_body` above the quoted original |
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list. **Discovery-only:** use `subject_keyword` on `search_emails` only, never on `forward_email` (`TARGET_SELECTOR_DEPRECATED`) |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params. Use plain compose tools when a named signature is required |
 | Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, accepts `limit=...`, and accepts `subject_contains="..."` (case-insensitive "find the draft I just made"). `action="find"` locates reply drafts by bounded In-Reply-To / References header scan. For `send`, `open`, or `delete`, prefer exact `draft_id` from the list output over `draft_subject` |
@@ -108,8 +112,10 @@ and the account's default reply signature (logo included), and types `reply_body
 above the quoted original via a System Events keystroke. This path needs the Mail
 reply window to take focus and Accessibility permission for the host process; if
 focus cannot be acquired it returns `REPLY_WINDOW_FOCUS_FAILED` without saving.
-`native_format=False` is a windowless fallback (object model, plain-text quote, no
-logo signature, no Accessibility needed) for headless, bulk, or CI use. Both paths
+`native_format=False` is gated: it returns `WINDOWLESS_FALLBACK_DISABLED` unless
+the caller explicitly passes `allow_windowless_fallback=True`, and that path is
+reserved for deliberate headless/CI runs only (agents must never set it). It is
+not a normal fallback. Both paths
 check the exact Drafts artifact id first when Mail exposes one, fall back to bounded
 newest-Drafts only when needed, and fail with a structured artifact id if the body
 is missing or appears after the quote.

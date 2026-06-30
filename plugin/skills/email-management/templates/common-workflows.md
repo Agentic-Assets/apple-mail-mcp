@@ -385,7 +385,7 @@ get_email_thread(
 )
 
 # 3. Create a reply draft (default native_format=True: rich quote + logo signature; needs Mail focus + Accessibility)
-#    Pass native_format=False only for headless/CI. On REPLY_WINDOW_FOCUS_FAILED, retry with visible Mail or native_format=False.
+#    On REPLY_WINDOW_FOCUS_FAILED, retry with visible Mail. Do not use native_format=False (gated: WINDOWLESS_FALLBACK_DISABLED).
 reply_to_email(
     account="Work",
     message_id="<message_id from search>",

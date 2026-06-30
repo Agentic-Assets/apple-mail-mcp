@@ -53,7 +53,7 @@ Already-replied safeguard — canonical rules in [`references/pre-draft-verifica
 | Match my tone | `email-style-profile` → `email-drafting` |
 | Save PDFs / zips | `email-attachments` |
 
-**Reply drafting after triage or operator navigation:** `inbox-triage` and `apple-mail-operator` stay read-first. When the user wants a reply, hand off to **`email-drafting`**: `reply_to_email(message_id=..., reply_body=..., mode="draft")` with default `native_format=True` (Mail focus + Accessibility). On `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible or `native_format=False`. Never pass `subject_keyword` to action tools; discover via `search_emails` / `list_inbox_emails` first.
+**Reply drafting after triage or operator navigation:** `inbox-triage` and `apple-mail-operator` stay read-first. When the user wants a reply, hand off to **`email-drafting`**: `reply_to_email(message_id=..., reply_body=..., mode="draft")` with default `native_format=True` (Mail focus + Accessibility). On `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible; do not switch to `native_format=False` (gated: `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True`, which agents must never set). If focus still cannot be acquired, stop and report the blocker. Never pass `subject_keyword` to action tools; discover via `search_emails` / `list_inbox_emails` first.
 
 ## SKILL.md conventions (summary)
 
