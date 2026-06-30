@@ -435,6 +435,105 @@ class SearchToolTests(unittest.TestCase):
 
         self.assertIn("message_id must be a numeric", result)
 
+    def test_get_email_by_ids_json_preserves_requested_order_and_missing_ids(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "\n".join(
+                [
+                    _record_line(202, "Second", sender="sender2@example.com"),
+                    _record_line(101, "First", sender="sender1@example.com"),
+                ]
+            )
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_ids(
+                account="Work",
+                message_ids=["101", "bad", "202", "101", "303"],
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["requested_ids"], ["101", "202", "303"])
+        self.assertEqual(payload["invalid_ids"], ["bad"])
+        self.assertEqual(payload["missing_ids"], ["303"])
+        self.assertEqual([item["message_id"] for item in payload["items"]], ["101", "202"])
+        self.assertFalse(payload["include_content"])
+        self.assertEqual(payload["chunk_size"], 50)
+        self.assertEqual(len(captured), 1)
+        self.assertIn("whose id is 101 or id is 202 or id is 303", captured[0])
+        self.assertNotIn("set msgContent to content of aMessage", captured[0])
+
+    def test_get_email_by_ids_keeps_50_ids_in_one_chunk(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return ""
+
+        ids = [str(i) for i in range(1, 51)]
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_ids(account="Work", message_ids=ids, output_format="json")
+
+        payload = json.loads(result)
+        self.assertEqual(payload["missing_ids"], ids)
+        self.assertEqual(len(captured), 1)
+        self.assertIn("whose id is 1 or id is 2", captured[0])
+        self.assertIn("id is 50", captured[0])
+
+    def test_get_email_by_ids_chunks_51_ids(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return ""
+
+        ids = [str(i) for i in range(1, 52)]
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_ids(account="Work", message_ids=ids, output_format="json")
+
+        payload = json.loads(result)
+        self.assertEqual(payload["requested_ids"], ids)
+        self.assertEqual(payload["missing_ids"], ids)
+        self.assertEqual(len(captured), 2)
+        self.assertIn("whose id is 1 or id is 2", captured[0])
+        self.assertIn("whose id is 51", captured[1])
+
+    def test_get_email_by_ids_chunks_120_ids(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return ""
+
+        ids = [str(i) for i in range(1, 121)]
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_ids(account="Work", message_ids=ids, output_format="json")
+
+        payload = json.loads(result)
+        self.assertEqual(payload["returned"], 0)
+        self.assertEqual(len(captured), 3)
+        self.assertIn("whose id is 1", captured[0])
+        self.assertIn("whose id is 51", captured[1])
+        self.assertIn("whose id is 101", captured[2])
+
+    def test_get_email_by_ids_include_content_reads_content_and_sets_quote_flag(self):
+        def fake_run(script, timeout=120):
+            self.assertIn("set msgContent to content of aMessage", script)
+            return _record_line(101, "Quoted", content_preview="On Monday, someone wrote: hello")
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_ids(
+                account="Work",
+                message_ids=["101"],
+                include_content=True,
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["items"][0]["has_quoted_original"])
+
     def test_search_emails_timeout_param_is_forwarded(self):
         """A3: an explicit `timeout=N` kwarg must reach run_applescript so the
         caller can extend (or shorten) the per-account budget."""

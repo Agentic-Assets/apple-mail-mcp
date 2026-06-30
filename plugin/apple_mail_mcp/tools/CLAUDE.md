@@ -1,12 +1,12 @@
 # tools/ — MCP tool registrations
-All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six modules (side-effect registration). **29 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l`.
+All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six modules (side-effect registration). **30 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l`.
 
 ## Module map
 
 | Module | # | Purpose / tools |
 |--------|---|-----------------|
 | `inbox.py` | 6 | Listing & overview: `list_inbox_emails`, `get_mailbox_unread_counts`, `list_accounts`, `list_account_addresses`, `list_mailboxes`, `get_inbox_overview` |
-| `search.py` | 3 | Find & fetch: `search_emails`, `get_email_by_id`, `get_email_thread` |
+| `search.py` | 4 | Find & fetch: `search_emails`, `get_email_by_id`, `get_email_by_ids`, `get_email_thread` |
 | `compose.py` | 6 | Send & drafts: `create_rich_email_draft`, `compose_email`, `reply_to_email`, `forward_email`, `manage_drafts`, `verify_draft` |
 | `manage.py` | 6 | Move/status/trash/sync: `move_email`, `save_email_attachment`, `update_email_status`, `manage_trash`, `create_mailbox`, `synchronize_account` |
 | `analytics.py` | 5 | Stats & export: `list_email_attachments`, `get_statistics`, `export_emails`, `inbox_dashboard`, `full_inbox_export` |

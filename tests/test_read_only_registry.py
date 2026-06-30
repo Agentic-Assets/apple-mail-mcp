@@ -23,6 +23,7 @@ READ_ONLY_TOOLS = {
     "get_inbox_overview",
     "search_emails",
     "get_email_by_id",
+    "get_email_by_ids",
     "get_email_thread",
     "get_awaiting_reply",
     "get_needs_response",
@@ -64,7 +65,7 @@ class ReadOnlyRegistryTests(unittest.TestCase):
     def test_send_tools_registered_by_default(self):
         names = set(self.by_name)
         self.assertTrue(set(SEND_TOOLS).issubset(names))
-        self.assertGreaterEqual(len(names), 29)
+        self.assertGreaterEqual(len(names), 30)
 
     def test_remove_send_tools_drops_only_send_tools(self):
         mock_mcp = MagicMock()

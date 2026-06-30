@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **29 tools**, **822 tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **30 tools**, **822 tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -45,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (29 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
+One install — MCP server (30 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -295,7 +295,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 
 </details>
 
-## Tools (29)
+## Tools (30)
 
 ### Reading & Search
 | Tool | Description |
@@ -307,6 +307,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `list_account_addresses` | List sender aliases configured for a Mail account |
 | `search_emails` | Unified search — subject, sender, body, dates, attachments. Defaults to last 48h and the default account |
 | `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results |
+| `get_email_by_ids` | Fetch multiple exact emails by reviewed Apple Mail message ids, chunked internally |
 | `get_email_thread` | Conversation thread view across Inbox + Sent; prefer `message_id` from search/list results |
 
 ### Organization
@@ -607,7 +608,7 @@ apple-mail-mcp/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
-│   ├── apple_mail_mcp/        # Python MCP server package (29 tools)
+│   ├── apple_mail_mcp/        # Python MCP server package (30 tools)
 │   ├── apple_mail_mcp.py      # Entry point
 │   ├── start_mcp.sh           # Startup wrapper (auto-creates venv)
 │   └── requirements.txt

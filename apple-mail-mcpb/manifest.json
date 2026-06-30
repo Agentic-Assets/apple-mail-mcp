@@ -2,7 +2,7 @@
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
   "version": "3.7.1",
-  "description": "Natural language interface for Apple Mail with 29 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, draft verification, attachments, Mail rules advising, full-inbox export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
+  "description": "Natural language interface for Apple Mail with 30 tools — email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, draft verification, attachments, Mail rules advising, full-inbox export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
   },
@@ -120,6 +120,10 @@
     {
       "name": "get_email_by_id",
       "description": "Fetch one exact email by the Apple Mail message id returned from search results. Use after search_emails when you need full body or stable metadata without another broad subject search."
+    },
+    {
+      "name": "get_email_by_ids",
+      "description": "Fetch multiple exact emails by reviewed Apple Mail message ids, chunked internally to avoid long AppleScript predicates. Returns JSON with items, missing_ids, and invalid_ids."
     },
     {
       "name": "get_email_thread",

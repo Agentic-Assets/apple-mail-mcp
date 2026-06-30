@@ -57,6 +57,13 @@ Completed in the exact Message-ID discovery pass:
 - Updated ID-first guidance to prefer exact Internet Message-ID discovery when a prior tool or note already exposed the header.
 - Added focused mocked tests for generated AppleScript conditions, warning behavior, and CLI forwarding.
 
+Completed in the batch exact-ID read pass:
+
+- Added `get_email_by_ids(message_ids=[...])` as a read-only exact-id batch fetch tool.
+- Chunked AppleScript exact-id predicates with `MAX_WHOSE_IDS`, preserving requested id order and returning missing and invalid id metadata.
+- Updated MCPB, README, guidance, and read-only registry surfaces for the 30-tool contract.
+- Added mocked tests for requested-order preservation, missing ids, invalid ids, 51-id and 120-id chunking, and content-preview quote detection.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
@@ -261,7 +268,7 @@ Todos:
 - [ ] Let `full_inbox_export` populate or refresh the index.
 - [ ] Let `search_emails` use the index only when provenance and freshness rules pass.
 - [ ] Add write invalidation after move, trash, status update, draft lifecycle, and send.
-- [ ] Add `get_email_by_ids`.
+- [x] Add `get_email_by_ids`.
 - [ ] Reassess direct Envelope Index after safer cache path proves useful.
 
 Verification:
@@ -275,16 +282,16 @@ Verification:
 
 Todos:
 
-- [ ] Design batch APIs around `MAX_WHOSE_IDS`.
-- [ ] Chunk internally.
-- [ ] Preserve input order.
-- [ ] Deduplicate safely.
-- [ ] Return per-id errors.
-- [ ] Add tests for 50, 51, and 120 ids.
+- [x] Design batch APIs around `MAX_WHOSE_IDS`.
+- [x] Chunk internally.
+- [x] Preserve input order.
+- [x] Deduplicate safely.
+- [x] Return per-id errors.
+- [x] Add tests for 50, 51, and 120 ids.
 
 Candidate APIs:
 
-- [ ] `get_email_by_ids(message_ids=[...])`
+- [x] `get_email_by_ids(message_ids=[...])`
 - [ ] `verify_drafts(draft_ids=[...])`
 - [ ] `list_email_attachments(message_ids=[...])`
 - [ ] `export_emails(message_ids=[...])`

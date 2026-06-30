@@ -190,7 +190,7 @@ Partial cache rows must not satisfy recipient, header, attachment, or thread que
 
 Add or extend:
 
-- `get_email_by_ids(message_ids=[...])`
+- `get_email_by_ids(message_ids=[...])` (implemented on `codex/id-first-search-retirement-implementation`)
 - `verify_drafts(draft_ids=[...])`
 - `list_email_attachments(message_ids=[...])`
 - `export_emails(message_ids=[...])`
@@ -320,7 +320,7 @@ The dashboard is a required dependency before runtime removal. Current quick act
 - [ ] Let `full_inbox_export` populate or refresh the index.
 - [ ] Let `search_emails` use the index for repeated broad discovery only when provenance and freshness rules pass.
 - [ ] Add invalidation after write tools: move, trash, status update, draft lifecycle, send.
-- [ ] Add `get_email_by_ids` for batch exact fetches.
+- [x] Add `get_email_by_ids` for batch exact fetches.
 - [ ] Reassess direct Envelope Index backend after this safer cache path proves out.
 
 ### Phase 5: Tests And Gates
