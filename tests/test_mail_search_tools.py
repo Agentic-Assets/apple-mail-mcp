@@ -6,9 +6,9 @@ import unittest
 from unittest.mock import patch
 
 from apple_mail_mcp.core import AppleScriptTimeout
+from apple_mail_mcp.tools import inbox as inbox_tools
 from apple_mail_mcp.tools import manage as manage_tools
 from apple_mail_mcp.tools import search as search_tools
-from apple_mail_mcp.tools import inbox as inbox_tools
 
 
 def _record_line(
@@ -327,9 +327,7 @@ class SearchToolTests(unittest.TestCase):
             # Subsequent per-account calls return no records.
             return ""
 
-        with _clear_default_mail_account(), patch(
-            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
+        with _clear_default_mail_account(), patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
             _run(
                 search_tools.search_emails(
                     account=None,
@@ -342,12 +340,8 @@ class SearchToolTests(unittest.TestCase):
         # 1 list-accounts call + 2 per-account search calls
         self.assertEqual(len(scripts), 3)
         per_account_scripts = scripts[1:]
-        self.assertTrue(
-            any('set searchAccounts to {account "Work"}' in s for s in per_account_scripts)
-        )
-        self.assertTrue(
-            any('set searchAccounts to {account "Personal"}' in s for s in per_account_scripts)
-        )
+        self.assertTrue(any('set searchAccounts to {account "Work"}' in s for s in per_account_scripts))
+        self.assertTrue(any('set searchAccounts to {account "Personal"}' in s for s in per_account_scripts))
 
     def test_search_emails_body_text_uses_ignoring_case_not_lowercase_handler(self):
         """A4c: body-search must no longer rely on the per-message shell-out
@@ -443,9 +437,7 @@ class SearchToolTests(unittest.TestCase):
             # Work returns one record.
             return _record_line(700, "Work email", account="Work")
 
-        with _clear_default_mail_account(), patch(
-            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
+        with _clear_default_mail_account(), patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
             response = json.loads(
                 _run(
                     search_tools.search_emails(
@@ -474,9 +466,7 @@ class SearchToolTests(unittest.TestCase):
                 raise RuntimeError("Mail permission denied")
             return _record_line(701, "Work email", account="Work")
 
-        with _clear_default_mail_account(), patch(
-            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
+        with _clear_default_mail_account(), patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
             response = json.loads(
                 _run(
                     search_tools.search_emails(
@@ -596,9 +586,7 @@ class SearchToolTests(unittest.TestCase):
         self.assertTrue(payload["error"])
         self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
         self.assertIn("recent_days", payload["message"])
-        self.assertEqual(
-            payload["remediation"]["fallback_tool"], "full_inbox_export"
-        )
+        self.assertEqual(payload["remediation"]["fallback_tool"], "full_inbox_export")
         mock_run.assert_not_called()
 
     def test_search_emails_explicit_date_from_overrides_default_window(self):
@@ -639,17 +627,17 @@ class SearchToolTests(unittest.TestCase):
 
         from apple_mail_mcp import server as _srv
 
-        with patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"):
-            with patch(
-                "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-            ):
-                _run(
-                    search_tools.search_emails(
-                        subject_keyword="Test",
-                        output_format="json",
-                        limit=5,
-                    )
+        with (
+            patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"),
+            patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run),
+        ):
+            _run(
+                search_tools.search_emails(
+                    subject_keyword="Test",
+                    output_format="json",
+                    limit=5,
                 )
+            )
 
         # Single-account fast path: only one AppleScript call, targeting "Work".
         self.assertEqual(len(captured["scripts"]), 1)
@@ -669,28 +657,24 @@ class SearchToolTests(unittest.TestCase):
 
         from apple_mail_mcp import server as _srv
 
-        with patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"):
-            with patch(
-                "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-            ):
-                _run(
-                    search_tools.search_emails(
-                        all_accounts=True,
-                        subject_keyword="Test",
-                        output_format="json",
-                        limit=5,
-                    )
+        with (
+            patch.object(_srv, "DEFAULT_MAIL_ACCOUNT", "Work"),
+            patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run),
+        ):
+            _run(
+                search_tools.search_emails(
+                    all_accounts=True,
+                    subject_keyword="Test",
+                    output_format="json",
+                    limit=5,
                 )
+            )
 
         # 1 account-listing probe + 2 per-account dispatches.
         self.assertEqual(len(captured["scripts"]), 3)
         per_account = captured["scripts"][1:]
-        self.assertTrue(
-            any('set searchAccounts to {account "Work"}' in s for s in per_account)
-        )
-        self.assertTrue(
-            any('set searchAccounts to {account "Personal"}' in s for s in per_account)
-        )
+        self.assertTrue(any('set searchAccounts to {account "Work"}' in s for s in per_account))
+        self.assertTrue(any('set searchAccounts to {account "Personal"}' in s for s in per_account))
 
     def test_search_emails_parallel_dispatch_uses_to_thread(self):
         """A4b: per-account searches must be dispatched via asyncio.to_thread
@@ -705,21 +689,22 @@ class SearchToolTests(unittest.TestCase):
                 return "A\nB\nC"
             return ""
 
-        with _clear_default_mail_account(), patch(
-            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
-            with patch(
+        with (
+            _clear_default_mail_account(),
+            patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run),
+            patch(
                 "apple_mail_mcp.tools.search.asyncio.to_thread",
                 wraps=asyncio.to_thread,
-            ) as to_thread_spy:
-                _run(
-                    search_tools.search_emails(
-                        account=None,
-                        subject_keyword="X",
-                        output_format="json",
-                        limit=5,
-                    )
+            ) as to_thread_spy,
+        ):
+            _run(
+                search_tools.search_emails(
+                    account=None,
+                    subject_keyword="X",
+                    output_format="json",
+                    limit=5,
                 )
+            )
 
         # 1 list-accounts dispatch + 3 per-account dispatches
         self.assertGreaterEqual(to_thread_spy.call_count, 4)
@@ -810,12 +795,8 @@ class ListInboxEmailsTests(unittest.TestCase):
             # Schema: subject|||sender|||date|||read|||account|||mail_app_id
             return "Hello|||sender@example.com|||today|||false|||Work|||1"
 
-        with _clear_default_mail_account(), patch(
-            "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run
-        ):
-            payload = _run(
-                inbox_tools.list_inbox_emails(output_format="json", max_emails=5)
-            )
+        with _clear_default_mail_account(), patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
+            payload = _run(inbox_tools.list_inbox_emails(output_format="json", max_emails=5))
 
         # v3.2.x: JSON path returns a dict directly (no json.loads needed).
         self.assertIsInstance(payload, dict)
@@ -828,22 +809,23 @@ class ListInboxEmailsTests(unittest.TestCase):
 
 class ManageToolTests(unittest.TestCase):
     def test_move_email_dry_run_uses_search_helper(self):
-        with patch(
-            "apple_mail_mcp.tools.manage._search_mail_records",
-            return_value=[
-                {
-                    "subject": "Ticket",
-                    "sender": "sender@example.com",
-                    "received_date": "2026-03-07T10:00:00",
-                }
-            ],
-        ) as mock_search, patch(
-            "apple_mail_mcp.tools.manage.run_applescript"
-        ) as mock_run:
+        with (
+            patch(
+                "apple_mail_mcp.tools.manage._search_mail_records",
+                return_value=[
+                    {
+                        "subject": "Ticket",
+                        "sender": "sender@example.com",
+                        "received_date": "2026-03-07T10:00:00",
+                    }
+                ],
+            ) as mock_search,
+            patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run,
+        ):
             result = manage_tools.move_email(
                 account="Work",
                 to_mailbox="Archive",
-                subject_keyword="Ticket",
+                older_than_days=30,
                 dry_run=True,
                 max_moves=1,
                 allow_filter_scan=True,
@@ -856,16 +838,17 @@ class ManageToolTests(unittest.TestCase):
         self.assertIn("Would move: Ticket", result)
 
     def test_manage_trash_dry_run_uses_search_helper(self):
-        with patch(
-            "apple_mail_mcp.tools.manage._search_mail_records",
-            return_value=[],
-        ) as mock_search, patch(
-            "apple_mail_mcp.tools.manage.run_applescript"
-        ) as mock_run:
+        with (
+            patch(
+                "apple_mail_mcp.tools.manage._search_mail_records",
+                return_value=[],
+            ) as mock_search,
+            patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run,
+        ):
             result = manage_tools.manage_trash(
                 account="Work",
                 action="move_to_trash",
-                subject_keyword="Ticket",
+                older_than_days=30,
                 dry_run=True,
                 max_deletes=1,
                 allow_filter_scan=True,
@@ -879,21 +862,15 @@ class ManageToolTests(unittest.TestCase):
 
     def test_manage_trash_permanent_delete_dry_run_preserves_preview(self):
         with patch(
-            "apple_mail_mcp.tools.manage._search_message_ids",
-            return_value=["101"],
-        ) as mock_search, patch(
             "apple_mail_mcp.tools.manage.run_applescript",
             return_value="preview",
         ) as mock_run:
             result = manage_tools.manage_trash(
                 account="Work",
                 action="delete_permanent",
-                subject_keyword="Ticket",
-                allow_filter_scan=True,
+                message_ids=["101"],
             )
 
-        mock_search.assert_called_once()
-        self.assertIn("WARNING: filter scan enabled", result)
         self.assertIn("preview", result)
         script = mock_run.call_args.args[0]
         self.assertIn("DRY RUN - PREVIEW PERMANENT DELETE BY IDS", script)
@@ -991,6 +968,7 @@ class GetEmailThreadTests(unittest.TestCase):
         # JSON-encoded so callers always get the structured remediation.
         self.assertIsInstance(result, str)
         import json as _json
+
         parsed = _json.loads(result)
         self.assertIsInstance(parsed, dict)
         self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
@@ -1064,11 +1042,13 @@ class MailboxAllCapTests(unittest.TestCase):
 
     def _run(self, coro):
         import asyncio
+
         return asyncio.run(coro)
 
     def test_mailbox_all_script_contains_cap_guard(self):
         """Generated AppleScript must truncate searchMailboxes when > 10."""
         from apple_mail_mcp.constants import SCAN_BOUNDS
+
         cap = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH_ALL"]
 
         captured = {}
@@ -1078,12 +1058,14 @@ class MailboxAllCapTests(unittest.TestCase):
             return ""
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
-            self._run(search_tools.search_emails(
-                account="Work",
-                mailbox="All",
-                sender="test@example.com",
-                recent_days=7,
-            ))
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailbox="All",
+                    sender="test@example.com",
+                    recent_days=7,
+                )
+            )
 
         script = captured.get("script", "")
         self.assertIn(f"items 1 thru {cap} of searchMailboxes", script)
@@ -1091,17 +1073,20 @@ class MailboxAllCapTests(unittest.TestCase):
 
     def test_mailbox_all_json_response_contains_warning(self):
         """JSON response for mailbox='All' must include a mailbox cap warning."""
+
         def fake_run(script, timeout=180):
             return ""
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
-            raw = self._run(search_tools.search_emails(
-                account="Work",
-                mailbox="All",
-                sender="test@example.com",
-                recent_days=7,
-                output_format="json",
-            ))
+            raw = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailbox="All",
+                    sender="test@example.com",
+                    recent_days=7,
+                    output_format="json",
+                )
+            )
 
         payload = json.loads(raw)
         self.assertIn("warnings", payload)
@@ -1112,6 +1097,7 @@ class MailboxAllCapTests(unittest.TestCase):
     def test_mailbox_inbox_script_has_no_cap_guard(self):
         """For mailbox='INBOX' the cap guard must NOT appear in the script."""
         from apple_mail_mcp.constants import SCAN_BOUNDS
+
         cap = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH"]
 
         captured = {}
@@ -1121,29 +1107,34 @@ class MailboxAllCapTests(unittest.TestCase):
             return ""
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
-            self._run(search_tools.search_emails(
-                account="Work",
-                mailbox="INBOX",
-                sender="test@example.com",
-                recent_days=7,
-            ))
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailbox="INBOX",
+                    sender="test@example.com",
+                    recent_days=7,
+                )
+            )
 
         script = captured.get("script", "")
         self.assertNotIn(f"items 1 thru {cap} of searchMailboxes", script)
 
     def test_mailbox_inbox_json_response_has_no_mailbox_warning(self):
         """JSON response for mailbox='INBOX' must NOT include a mailbox cap warning."""
+
         def fake_run(script, timeout=180):
             return ""
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
-            raw = self._run(search_tools.search_emails(
-                account="Work",
-                mailbox="INBOX",
-                sender="test@example.com",
-                recent_days=7,
-                output_format="json",
-            ))
+            raw = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailbox="INBOX",
+                    sender="test@example.com",
+                    recent_days=7,
+                    output_format="json",
+                )
+            )
 
         payload = json.loads(raw)
         warnings = payload.get("warnings", [])
@@ -1198,20 +1189,20 @@ class NewFieldsTests(unittest.TestCase):
         def fake_run(script, timeout=120):
             captured["script"] = script
             parts = [
-                "999",                          # 0 message_id
-                "<msg@example.com>",            # 1 internet_message_id
-                "Hello Subject",                # 2 subject
-                "sender@example.com",           # 3 sender
-                "INBOX",                        # 4 mailbox
-                "Work",                         # 5 account
-                "false",                        # 6 read
-                "2026-06-01T10:00:00",          # 7 received_date
-                "Body preview",                 # 8 content_preview
+                "999",  # 0 message_id
+                "<msg@example.com>",  # 1 internet_message_id
+                "Hello Subject",  # 2 subject
+                "sender@example.com",  # 3 sender
+                "INBOX",  # 4 mailbox
+                "Work",  # 5 account
+                "false",  # 6 read
+                "2026-06-01T10:00:00",  # 7 received_date
+                "Body preview",  # 8 content_preview
                 "alice@example.com, bob@example.com",  # 9 to
-                "carol@example.com",            # 10 cc
-                "",                             # 11 in_reply_to
-                "",                             # 12 references
-                "",                             # 13 bcc
+                "carol@example.com",  # 10 cc
+                "",  # 11 in_reply_to
+                "",  # 12 references
+                "",  # 13 bcc
             ]
             return "|||".join(parts)
 
@@ -1465,6 +1456,7 @@ class SearchGuardrailTests(unittest.TestCase):
 
     def _run(self, coro):
         import asyncio
+
         return asyncio.run(coro)
 
     def test_body_text_without_allow_body_scan_returns_structured_error(self):

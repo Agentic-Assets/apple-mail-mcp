@@ -101,6 +101,33 @@ def serialize_tool_error(error: ToolError) -> str:
     return json.dumps(error.to_dict(), indent=2)
 
 
+def target_selector_deprecated_error(
+    tool_name: str,
+    selectors: tuple[str, ...],
+    *,
+    preferred: str,
+    discovery: str,
+    exact_selector: str,
+) -> str:
+    """Return a standard deprecation error for legacy target selectors."""
+    selector_text = ", ".join(selectors)
+    return serialize_tool_error(
+        ToolError(
+            code="TARGET_SELECTOR_DEPRECATED",
+            message=(
+                f"{tool_name} no longer selects target messages by {selector_text}. "
+                "Use discovery tools to collect exact ids, then call the action tool by id."
+            ),
+            remediation={
+                "preferred": preferred,
+                "discovery": discovery,
+                "exact_selector": exact_selector,
+                "deprecated_selectors": list(selectors),
+            },
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------

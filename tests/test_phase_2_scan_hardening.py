@@ -6,12 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from apple_mail_mcp.core import AppleScriptTimeout
+from apple_mail_mcp.tools import analytics as analytics_tools
 from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools import inbox as inbox_tools
 from apple_mail_mcp.tools import manage as manage_tools
 from apple_mail_mcp.tools import search as search_tools
 from apple_mail_mcp.tools import smart_inbox as smart_inbox_tools
-from apple_mail_mcp.tools import analytics as analytics_tools
 
 
 def _make_subprocess_result(returncode=0, stdout=b"ok", stderr=b""):
@@ -46,7 +46,9 @@ class ComposeScanCapTests(unittest.TestCase):
         self.assertIn("if headEnd > 75 then set headEnd to 75", captured[0])
         self.assertNotIn("every message of draftsMailbox", captured[0])
 
-    def test_reply_to_email_subject_lookup_uses_in_loop_filter_and_cap(self):
+    def test_reply_to_email_subject_lookup_returns_deprecation_error(self):
+        import json
+
         captured = []
 
         def fake_run(script, timeout=120):
@@ -57,22 +59,16 @@ class ComposeScanCapTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            compose_tools.reply_to_email(
+            result = compose_tools.reply_to_email(
                 account="Work",
                 subject_keyword="Invoice",
                 reply_body="Thanks",
             )
 
-        # Bounded-slice-then-filter: bind a capped newest-first window
-        # FIRST (messages 1 thru MESSAGE_LOOKUP cap), THEN apply the in-loop if filter.
-        script = _main_reply_script(captured)
-        self.assertIn("messages 1 thru 75 of inboxMailbox", script)
-        # Safe in-loop subject check (no `whose`).
-        self.assertIn("if messageSubject contains", script)
-        # Early-exit date guard must be present.
-        self.assertIn("if messageDate < recentCutoffDate then exit repeat", script)
-        # The old `candidateMessages whose subject contains` must NOT appear.
-        self.assertNotIn("candidateMessages whose subject contains", script)
+        self.assertEqual(captured, [])
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "message_id")
 
     def test_reply_to_email_message_id_skips_subject_scan(self):
         captured = []
@@ -95,7 +91,9 @@ class ComposeScanCapTests(unittest.TestCase):
         self.assertIn("whose id is 12345", script)
         self.assertNotIn("messages 1 thru 75 of inboxMailbox", script)
 
-    def test_forward_email_subject_lookup_uses_in_loop_filter_and_cap(self):
+    def test_forward_email_subject_lookup_returns_deprecation_error(self):
+        import json
+
         captured = []
 
         def fake_run(script, timeout=120):
@@ -103,19 +101,16 @@ class ComposeScanCapTests(unittest.TestCase):
             return "ok"
 
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
-            compose_tools.forward_email(
+            result = compose_tools.forward_email(
                 account="Work",
                 subject_keyword="Invoice",
                 to="other@example.com",
             )
 
-        self.assertIn("messages 1 thru 75 of targetMailbox", captured[0])
-        # Safe in-loop subject check (no `whose`).
-        self.assertIn("if messageSubject contains", captured[0])
-        # Early-exit date guard must be present.
-        self.assertIn("if messageDate < recentCutoffDate then exit repeat", captured[0])
-        # The old `candidateMessages whose subject contains` must NOT appear.
-        self.assertNotIn("candidateMessages whose subject contains", captured[0])
+        self.assertEqual(captured, [])
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "message_id")
 
     def test_forward_email_forwards_timeout_to_run_applescript(self):
         captured = {}
@@ -127,7 +122,7 @@ class ComposeScanCapTests(unittest.TestCase):
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="Invoice",
+                message_id="888",
                 to="other@example.com",
                 timeout=240,
             )
@@ -251,10 +246,6 @@ class TimeoutForwardingTests(unittest.TestCase):
     def test_save_email_attachment_forwards_timeout(self):
         captured = {}
 
-        def fake_search(**kwargs):
-            captured["search_timeout"] = kwargs["timeout"]
-            return [{"message_id": "777"}]
-
         def fake_run(script, timeout=120):
             captured["run_timeout"] = timeout
             return "saved"
@@ -262,19 +253,15 @@ class TimeoutForwardingTests(unittest.TestCase):
         home = __import__("os").path.expanduser("~")
         save_path = f"{home}/Downloads/test-file.bin"
 
-        with (
-            patch("apple_mail_mcp.tools.manage._search_mail_records", side_effect=fake_search),
-            patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run),
-        ):
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
             manage_tools.save_email_attachment(
                 account="Work",
-                subject_keyword="Invoice",
                 attachment_name="file.bin",
                 save_path=save_path,
+                message_ids=["777"],
                 timeout=90,
             )
 
-        self.assertEqual(captured["search_timeout"], 90)
         self.assertEqual(captured["run_timeout"], 90)
 
     def test_save_email_attachment_handles_timeout(self):
@@ -282,14 +269,14 @@ class TimeoutForwardingTests(unittest.TestCase):
         save_path = f"{home}/Downloads/test-file.bin"
 
         with patch(
-            "apple_mail_mcp.tools.manage._search_mail_records",
+            "apple_mail_mcp.tools.manage.run_applescript",
             side_effect=AppleScriptTimeout("slow"),
         ):
             result = manage_tools.save_email_attachment(
                 account="Work",
-                subject_keyword="Invoice",
                 attachment_name="file.bin",
                 save_path=save_path,
+                message_ids=["777"],
             )
 
         self.assertIn("timed out", result.lower())
@@ -476,76 +463,42 @@ class HeavyScanGuardTests(unittest.TestCase):
         self.assertNotIn("every message of aMailbox whose date received", captured["script"])
         self.assertNotIn("set mailboxMessages to messages of aMailbox", captured["script"])
 
-    def test_save_email_attachment_subject_lookup_avoids_unbounded_whose(self):
-        captured = {}
-
-        def fake_search(**kwargs):
-            captured["search"] = kwargs
-            return [{"message_id": "777"}]
-
-        def fake_run(script, timeout=120):
-            captured["script"] = script
-            return "saved"
+    def test_save_email_attachment_subject_lookup_returns_deprecation_error(self):
+        import json
 
         home = __import__("os").path.expanduser("~")
         save_path = f"{home}/Downloads/test-file.bin"
 
-        with (
-            patch("apple_mail_mcp.tools.manage._search_mail_records", side_effect=fake_search),
-            patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run),
-        ):
-            manage_tools.save_email_attachment(
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.save_email_attachment(
                 account="Work",
                 subject_keyword="Invoice",
                 attachment_name="file.bin",
                 save_path=save_path,
             )
 
-        self.assertEqual(captured["search"]["account"], "Work")
-        self.assertEqual(captured["search"]["mailbox"], "INBOX")
-        self.assertEqual(captured["search"]["subject_terms"], ["Invoice"])
-        self.assertEqual(captured["search"]["limit"], 1)
-        self.assertEqual(captured["search"]["timeout"], 45)
-        self.assertNotIn(
-            'every message of inboxMailbox whose subject contains "Invoice"',
-            captured["script"],
-        )
-        self.assertIn("id is 777", captured["script"])
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "message_ids")
 
-    def test_export_single_email_subject_lookup_avoids_unbounded_whose(self):
-        captured = {}
-
-        def fake_search(**kwargs):
-            captured["search"] = kwargs
-            return [{"message_id": "888"}]
-
-        def fake_run(script, timeout=120):
-            captured["script"] = script
-            return "exported"
+    def test_export_single_email_subject_lookup_returns_deprecation_error(self):
+        import json
 
         home = __import__("os").path.expanduser("~")
 
-        with (
-            patch("apple_mail_mcp.tools.analytics._search_mail_records", side_effect=fake_search),
-            patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run),
-        ):
-            analytics_tools.export_emails(
+        with patch("apple_mail_mcp.tools.analytics.run_applescript") as mock_run:
+            result = analytics_tools.export_emails(
                 account="Work",
                 scope="single_email",
                 subject_keyword="Invoice",
                 save_directory=f"{home}/Downloads",
             )
 
-        self.assertEqual(captured["search"]["account"], "Work")
-        self.assertEqual(captured["search"]["mailbox"], "INBOX")
-        self.assertEqual(captured["search"]["subject_terms"], ["Invoice"])
-        self.assertEqual(captured["search"]["limit"], 1)
-        self.assertEqual(captured["search"]["timeout"], 45)
-        self.assertNotIn(
-            'every message of targetMailbox whose subject contains "Invoice"',
-            captured["script"],
-        )
-        self.assertIn("id is 888", captured["script"])
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "message_id")
 
 
 class FixAUnreadCountsExchangeParentTests(unittest.TestCase):
@@ -621,17 +574,15 @@ class FixBListInboxIdFallbackTests(unittest.IsolatedAsyncioTestCase):
         from transient sync failures. Rows with a non-empty id are kept.
         """
         # Row with empty id (6th field)
-        raw_empty_id = 'Hello|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||'
+        raw_empty_id = "Hello|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||"
         # Row with a valid numeric id
-        raw_valid_id = 'Hello2|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||42'
+        raw_valid_id = "Hello2|||sender@example.com|||Monday, January 1, 2024 at 12:00:00 PM|||false|||Work|||42"
 
         def fake_run(script, timeout=120):
             return raw_empty_id + "\n" + raw_valid_id
 
         with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
-            data = await inbox_tools.list_inbox_emails(
-                account="Work", max_emails=5, output_format="json"
-            )
+            data = await inbox_tools.list_inbox_emails(account="Work", max_emails=5, output_format="json")
 
         # v3.2.x: JSON path returns a dict with stable shape directly.
         self.assertIsInstance(data, dict)
@@ -675,7 +626,7 @@ class FixDRepliedIdsSubjectCapTests(unittest.TestCase):
     """
 
     def test_script_contains_header_cap_but_no_subject_cap(self):
-        from apple_mail_mcp.core import replied_ids_script, REPLIED_HEADER_READ_CAP
+        from apple_mail_mcp.core import REPLIED_HEADER_READ_CAP, replied_ids_script
 
         script = replied_ids_script()
         self.assertIn(f"set headerReadCap to {REPLIED_HEADER_READ_CAP}", script)
@@ -755,9 +706,7 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
         """When AppleScript returns N+1 rows and cap=N, result has exactly N."""
         cap = 3
         # Simulate N+1 rows returned by AppleScript
-        lines = "\n".join(
-            f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(cap + 1)
-        )
+        lines = "\n".join(f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(cap + 1))
 
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
@@ -770,6 +719,7 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
             )
 
         import json as _json
+
         data = _json.loads(raw)
         self.assertEqual(len(data["mailboxes"]), cap)
         self.assertTrue(data["truncated"])
@@ -778,9 +728,7 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
     def test_exact_cap_rows_still_truncated_flag(self):
         """When AppleScript returns exactly max_mailboxes rows, truncated=True."""
         cap = 2
-        lines = "\n".join(
-            f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(cap)
-        )
+        lines = "\n".join(f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(cap))
 
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
@@ -793,6 +741,7 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
             )
 
         import json as _json
+
         data = _json.loads(raw)
         self.assertEqual(len(data["mailboxes"]), cap)
         self.assertTrue(data["truncated"])
@@ -801,7 +750,7 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
 class FilterScanGateTests(unittest.TestCase):
     """Mutation tools require message_ids unless allow_filter_scan=True."""
 
-    def test_move_email_filter_without_opt_in_returns_filter_scan_disabled(self):
+    def test_move_email_filter_without_opt_in_returns_target_selector_deprecated(self):
         import json
 
         with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
@@ -813,17 +762,20 @@ class FilterScanGateTests(unittest.TestCase):
 
         mock_run.assert_not_called()
         payload = json.loads(result)
-        self.assertEqual(payload["code"], "FILTER_SCAN_DISABLED")
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
         self.assertIn("message_ids", payload["remediation"]["preferred"])
 
-    def test_move_email_filter_with_opt_in_invokes_search(self):
-        with patch(
-            "apple_mail_mcp.tools.manage._search_mail_records",
-            return_value=[],
-        ) as mock_search, patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+    def test_move_email_date_filter_with_opt_in_invokes_search(self):
+        with (
+            patch(
+                "apple_mail_mcp.tools.manage._search_mail_records",
+                return_value=[],
+            ) as mock_search,
+            patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run,
+        ):
             result = manage_tools.move_email(
                 account="Work",
-                subject_keyword="Promo",
+                older_than_days=30,
                 to_mailbox="Archive",
                 dry_run=True,
                 allow_filter_scan=True,
@@ -848,7 +800,7 @@ class FilterScanGateTests(unittest.TestCase):
         mock_run.assert_called_once()
         self.assertNotIn("FILTER_SCAN_DISABLED", result)
 
-    def test_update_email_status_filter_without_opt_in_blocked(self):
+    def test_update_email_status_filter_without_opt_in_returns_target_selector_deprecated(self):
         import json
 
         with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
@@ -860,9 +812,9 @@ class FilterScanGateTests(unittest.TestCase):
 
         mock_run.assert_not_called()
         payload = json.loads(result)
-        self.assertEqual(payload["code"], "FILTER_SCAN_DISABLED")
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
 
-    def test_manage_trash_filter_without_opt_in_blocked(self):
+    def test_manage_trash_filter_without_opt_in_returns_target_selector_deprecated(self):
         import json
 
         with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
@@ -874,7 +826,7 @@ class FilterScanGateTests(unittest.TestCase):
 
         mock_run.assert_not_called()
         payload = json.loads(result)
-        self.assertEqual(payload["code"], "FILTER_SCAN_DISABLED")
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
 
 
 class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
@@ -896,9 +848,8 @@ class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
         mock_run.assert_not_called()
         payload = json.loads(result)
         self.assertTrue(payload.get("error"))
-        self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
-        self.assertIn("recent_days=7", payload["remediation"]["preferred"])
-        self.assertEqual(payload["remediation"]["fallback_tool"], "full_inbox_export")
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "message_ids")
 
     def test_move_email_recent_days_zero_with_older_than_days_is_allowed(self):
         """older_than_days overrides the recent_days window — should proceed."""
@@ -908,22 +859,24 @@ class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
             captured.append(script)
             return ""
 
-        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
-            with patch(
+        with (
+            patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run),
+            patch(
                 "apple_mail_mcp.tools.manage._search_mail_records",
                 return_value=[],
-            ):
-                result = manage_tools.move_email(
-                    account="Work",
-                    sender="newsletter@example.com",
-                    to_mailbox="Archive",
-                    recent_days=0,
-                    older_than_days=30,
-                    allow_filter_scan=True,
-                )
+            ),
+        ):
+            result = manage_tools.move_email(
+                account="Work",
+                to_mailbox="Archive",
+                recent_days=0,
+                older_than_days=30,
+                allow_filter_scan=True,
+            )
 
         # Should NOT return a structured error
         import json
+
         try:
             payload = json.loads(result)
             self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
@@ -947,6 +900,7 @@ class MoveEmailUnboundedScanGuardTests(unittest.TestCase):
             )
 
         import json
+
         try:
             payload = json.loads(result)
             self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
@@ -965,7 +919,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
             result = manage_tools.manage_trash(
                 account="Work",
                 action="move_to_trash",
-                sender="newsletter@example.com",
+                apply_to_all=True,
                 recent_days=0,
                 allow_filter_scan=True,
             )
@@ -985,7 +939,6 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
             result = manage_tools.manage_trash(
                 account="Work",
                 action="delete_permanent",
-                sender="newsletter@example.com",
                 apply_to_all=True,
                 recent_days=0,
                 allow_filter_scan=True,
@@ -1013,6 +966,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
             )
 
         import json
+
         try:
             payload = json.loads(result)
             self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
@@ -1036,6 +990,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
             )
 
         import json
+
         try:
             payload = json.loads(result)
             self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")
@@ -1051,7 +1006,6 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
             result = manage_tools.manage_trash(
                 account="Work",
                 action="move_to_trash",
-                sender="newsletter@example.com",
                 recent_days=0,
                 older_than_days=30,
                 dry_run=True,
@@ -1059,6 +1013,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
             )
 
         import json
+
         try:
             payload = json.loads(result)
             self.assertNotEqual(payload.get("code"), "UNBOUNDED_SCAN_REQUIRED")

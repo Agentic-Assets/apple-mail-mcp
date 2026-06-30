@@ -17,7 +17,7 @@ See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonic
 
 ## ID-first flow (mandatory for bulk moves, status, and trash)
 
-`move_email`, `update_email_status`, and `manage_trash` **require `message_ids` by default**. Passing `subject_keyword=`, `sender=`, or `apply_to_all=True` without `message_ids` returns `code: FILTER_SCAN_DISABLED` unless you opt in with `allow_filter_scan=True`.
+`move_email`, `update_email_status`, and `manage_trash` **require `message_ids` by default**. Passing `subject_keyword=` or `sender=` to action tools returns `code: TARGET_SELECTOR_DEPRECATED`; collect `message_ids` first. Date-only or explicit bulk paths still require `allow_filter_scan=True`.
 
 On a 24k inbox, filter-based mutations re-pay the scan cost for every batch and often time out. Always:
 
@@ -30,7 +30,7 @@ Repeat in batches until stop conditions. Re-run a narrower search between batche
 
 ### `allow_filter_scan=True` (rare escape hatch only)
 
-Use only when the user has explicitly approved a bulk campaign and ID collection is impractical (e.g. migrating an entire sender across years). The tool prefixes responses with a slow-scan warning. Pair `sender=` with `subject_keyword=` or a tight `recent_days≤30` ceiling; never bare `sender=` on a 24k inbox.
+Use only when the user has explicitly approved a bulk campaign and ID collection is impractical (e.g. migrating an entire sender across years). The tool prefixes responses with a slow-scan warning. Do not use `sender=` or `subject_keyword=` on action tools. Use `search_emails(...)` to collect ids, then act by `message_ids`.
 
 ## Standard Campaign Shape
 
@@ -60,7 +60,7 @@ move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=50)
 
 Trash paths: **`manage_trash(action="move_to_trash", dry_run=True, message_ids=ids, ...)`** before committing. Status paths: **`update_email_status(dry_run=True, message_ids=ids, action="mark_read", ...)`**.
 
-Quote expected totals from the dry-run response. Discuss raising `max_moves` / `max_deletes`; defaults protect against catastrophe. If you hit `FILTER_SCAN_DISABLED`, you forgot `message_ids` — go back to search/list, do not flip `allow_filter_scan=True` without user approval.
+Quote expected totals from the dry-run response. Discuss raising `max_moves` / `max_deletes`; defaults protect against catastrophe. If you hit `TARGET_SELECTOR_DEPRECATED`, you used a search selector on an action tool. Go back to search/list and collect ids.
 
 ### 4. Execute In Batches (`message_ids` only)
 

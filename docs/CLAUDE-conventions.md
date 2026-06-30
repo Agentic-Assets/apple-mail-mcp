@@ -16,19 +16,27 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ### ID-first mutations and scan opt-in gates (v3.7.0)
 
-Destructive and bulk mutation tools default to **exact `message_ids`** from a prior `list_inbox_emails` or `search_emails` call. Filter-based paths (subject, sender, `apply_to_all`, etc.) are **off by default** and require an explicit escape hatch.
+Destructive and bulk mutation tools default to **exact `message_ids`** from a prior `list_inbox_emails` or `search_emails` call. Subject and sender substring target selectors are deprecated on action tools and return `code: TARGET_SELECTOR_DEPRECATED`. Date-only or explicit bulk paths remain off by default and require an explicit escape hatch.
 
 | Gate | Tools | Default | Opt-in kwarg | Structured error when blocked |
 |------|-------|---------|--------------|-------------------------------|
-| Filter scan | `move_email`, `update_email_status`, `manage_trash` | `message_ids` preferred; filter path disabled | `allow_filter_scan=True` | `code: FILTER_SCAN_DISABLED` |
+| Filter scan | `move_email`, `update_email_status`, `manage_trash` | `message_ids` preferred; date/bulk filter path disabled | `allow_filter_scan=True` | `code: FILTER_SCAN_DISABLED` |
 | Body scan | `search_emails` | `body_text` ignored unless opted in | `allow_body_scan=True` | `code: BODY_SCAN_DISABLED` |
+| Deprecated target selector | `reply_to_email`, `forward_email`, `move_email`, `update_email_status`, `manage_trash`, `list_email_attachments`, `save_email_attachment`, `export_emails(scope="single_email")`, `manage_drafts(send/open/delete)` | Exact ids required | None | `code: TARGET_SELECTOR_DEPRECATED` |
 
 **`FILTER_SCAN_DISABLED` contract** (`manage.py` → `_filter_scan_disabled_error`):
 
-- Raised when a mutation tool is called with filter kwargs (`subject_keyword`, `sender`, `apply_to_all`, etc.) but **without** `message_ids` and **without** `allow_filter_scan=True`.
+- Raised when a mutation tool is called with date-only or explicit bulk filter kwargs but **without** `message_ids` and **without** `allow_filter_scan=True`.
 - `remediation.preferred`: collect ids via `search_emails` / `list_inbox_emails`, then call the mutation with `message_ids=[...]`.
-- `remediation.escape_hatch`: `allow_filter_scan=True` (slow; timeout-prone on 24k+ inboxes; approved bulk campaigns only).
+- `remediation.escape_hatch`: `allow_filter_scan=True` (slow; timeout-prone on 24k+ inboxes; approved bulk/date campaigns only).
 - When the escape hatch is used, responses are prefixed with `FILTER_SCAN_WARNING` so agents see the slow-path notice in plain text.
+
+**`TARGET_SELECTOR_DEPRECATED` contract** (`backend/base.py` -> `target_selector_deprecated_error`):
+
+- Raised before AppleScript runs when an action tool is called with `subject_keyword`, `subject_keywords`, `sender`, or `draft_subject` instead of exact ids.
+- `remediation.discovery`: the read/search/list tool to call first.
+- `remediation.exact_selector`: the id parameter required by the action tool.
+- Keep these legacy kwargs in v3.x schemas for compatibility, but do not route them into target lookup.
 
 **`BODY_SCAN_DISABLED` contract** (`search.py` → `_body_scan_disabled_error`):
 
@@ -43,7 +51,7 @@ Destructive and bulk mutation tools default to **exact `message_ids`** from a pr
 - Lists longer than `MAX_WHOSE_IDS` (50) → `code: WHOSE_ID_LIST_TOO_LARGE`; chunk with `bounded_scan.iter_id_chunks`.
 - Filter paths still honor `recent_days` defaults and refuse unbounded scans with `UNBOUNDED_SCAN_REQUIRED` when no date window is set.
 
-Agent workflow: **search/list → collect `message_id` → mutate by ids**. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk or full-text campaigns.
+Agent workflow: **search/list -> collect `message_id` -> mutate by ids**. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk/date or full-text campaigns.
 
 ### Centralized scan caps (`SCAN_BOUNDS`, v3.7.1)
 
@@ -135,11 +143,11 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 | `open` | Save first, then leave the compose window open for human review | User wants each draft to pop up in Mail (e.g. review 10 replies in sequence) |
 | `send` | Send immediately | Explicit user authorization only; blocked when `DRAFT_SAFE` or `READ_ONLY` |
 
-**Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id` whenever available. `subject_keyword` is a fallback when no id is known — never prefer subject matching when an id is already in context. `reply_to_email` uses Mail's native reply command, constructs and assigns `reply_body` above the quoted-original block, and verifies exact Drafts id first when Mail exposes one. `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
+**Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id`. `subject_keyword` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`; run discovery first. `reply_to_email` uses Mail's native reply command, constructs and assigns `reply_body` above the quoted-original block, and verifies exact Drafts id first when Mail exposes one. `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
 
 **Rich `.eml` drafts:** `create_rich_email_draft` saves the opened Mail compose object after opening the file (no subject-based outgoing-message lookup and no `System Events` save keystroke). Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
 
-**Draft lifecycle targeting:** `manage_drafts(action="list")` returns each draft's id. For `send`, `open`, or `delete`, prefer `draft_id` over `draft_subject`; subject matching is a fallback when an exact id is unavailable.
+**Draft lifecycle targeting:** `manage_drafts(action="list")` returns each draft's id. For `send`, `open`, or `delete`, pass `draft_id`; `draft_subject` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`.
 
 **Agent guidance:** skills under `plugin/skills/email-drafting/` and `plugin/skills/apple-mail-operator/` document the quiet-default vs saved-open review split. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
 

@@ -120,7 +120,7 @@ Goal: keep folder structure healthy and archive aging messages.
 4. Adjust folders: collaborate with **`mailbox-taxonomy`** for naming; create net-new folders with `create_mailbox` after explicit confirmation (rename/delete heavy work still occurs in Mail UI when needed).
 5. Bulk-organize by sender or date (ID-first — see **`email-archive-cleanup`**):
    - `search_emails(sender="...", recent_days=30)` → collect `message_id`s → `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` → execute.
-   - Filter-only `move_email(sender=...)` requires `allow_filter_scan=True` (slow; rarely use).
+   - Action tools do not target by `sender=`; collect ids with `search_emails(sender="...", ...)`, then call `move_email(message_ids=[...])`.
 6. Archive read mail older than 30 days into `Archive/<year>`.
 
 Detailed safe bulk operations are documented in `references/bulk-cleanup.md`.

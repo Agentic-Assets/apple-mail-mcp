@@ -25,16 +25,15 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-
 import apple_mail_mcp  # noqa: F401  (registers tools as side effect)
+import pytest
 from apple_mail_mcp.backend.base import ScanWindow, ToolError
 from apple_mail_mcp.bounded_scan import (
     MAX_SCAN_DAYS,
     MAX_SCAN_LIMIT,
     bounded_inbox_scan,
-    build_bounded_message_scan,
     build_bounded_filtered_scan,
+    build_bounded_message_scan,
     build_whose_id_list,
     compute_scan_upper_bound,
 )
@@ -90,27 +89,19 @@ class BoundedInboxScanTests(unittest.TestCase):
         err = ctx.exception
         self.assertEqual(err.code, "UNBOUNDED_SCAN_REQUIRED")
         self.assertIsNotNone(err.remediation)
-        self.assertEqual(
-            err.remediation["fallback_tool"], "full_inbox_export"
-        )
+        self.assertEqual(err.remediation["fallback_tool"], "full_inbox_export")
 
     def test_bounded_inbox_scan_rejects_over_max_recent_days(self):
         with self.assertRaises(ToolError) as ctx:
-            bounded_inbox_scan(
-                mailbox="INBOX", recent_days=MAX_SCAN_DAYS + 1
-            )
+            bounded_inbox_scan(mailbox="INBOX", recent_days=MAX_SCAN_DAYS + 1)
         self.assertEqual(ctx.exception.code, "UNBOUNDED_SCAN_REQUIRED")
-        self.assertEqual(
-            ctx.exception.remediation["fallback_tool"], "full_inbox_export"
-        )
+        self.assertEqual(ctx.exception.remediation["fallback_tool"], "full_inbox_export")
 
     def test_bounded_inbox_scan_rejects_over_max_limit(self):
         with self.assertRaises(ToolError) as ctx:
             bounded_inbox_scan(mailbox="INBOX", limit=MAX_SCAN_LIMIT + 1)
         self.assertEqual(ctx.exception.code, "UNBOUNDED_SCAN_REQUIRED")
-        self.assertEqual(
-            ctx.exception.remediation["fallback_tool"], "full_inbox_export"
-        )
+        self.assertEqual(ctx.exception.remediation["fallback_tool"], "full_inbox_export")
 
     def test_bounded_inbox_scan_rejects_blank_mailbox(self):
         with self.assertRaises(ToolError) as ctx:
@@ -130,10 +121,9 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         # callers must use build_bounded_filtered_scan instead.
         # Verify it raises UNSAFE_WHOSE_ON_LIST when whose_condition is passed.
         from apple_mail_mcp.backend.base import ToolError
+
         with self.assertRaises(ToolError) as ctx:
-            build_bounded_message_scan(
-                "inboxMailbox", 100, whose_condition="read status is false"
-            )
+            build_bounded_message_scan("inboxMailbox", 100, whose_condition="read status is false")
         self.assertEqual(ctx.exception.code, "UNSAFE_WHOSE_ON_LIST")
 
         # The safe pattern is build_bounded_filtered_scan:
@@ -214,13 +204,9 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         self.assertIn("messages 1 thru headEnd of draftsMailbox", snippet)
         self.assertIn("messages tailStart thru totalDrafts of draftsMailbox", snippet)
         self.assertIn("repeat with aMessage in candidateMessages", snippet)
-        self.assertIn(
-            '(subject of aMessage) contains "invoice question"', snippet
-        )
+        self.assertIn('(subject of aMessage) contains "invoice question"', snippet)
         # The unsafe forms must NEVER appear.
-        self.assertNotIn(
-            "every message of draftsMailbox whose subject contains", snippet
-        )
+        self.assertNotIn("every message of draftsMailbox whose subject contains", snippet)
         self.assertNotIn("draftMessages whose subject contains", snippet)
         self.assertNotIn("candidateMessages whose", snippet)
 
@@ -247,30 +233,6 @@ RETIRED_UNBOUNDED_CASES = [
         True,
     ),
     (
-        "reply_to_email",
-        "apple_mail_mcp.tools.compose",
-        "reply_to_email",
-        {
-            "account": "Work",
-            "subject_keyword": "anything",
-            "reply_body": "x",
-            "recent_days": 0,
-        },
-        False,
-    ),
-    (
-        "forward_email",
-        "apple_mail_mcp.tools.compose",
-        "forward_email",
-        {
-            "account": "Work",
-            "subject_keyword": "anything",
-            "to": "a@b.c",
-            "recent_days": 0,
-        },
-        False,
-    ),
-    (
         "get_top_senders",
         "apple_mail_mcp.tools.smart_inbox",
         "get_top_senders",
@@ -292,9 +254,7 @@ RETIRED_UNBOUNDED_CASES = [
     RETIRED_UNBOUNDED_CASES,
     ids=[case[0] for case in RETIRED_UNBOUNDED_CASES],
 )
-def test_each_retired_tool_returns_structured_unbounded_error(
-    label, module_path, fn_name, kwargs, is_async
-):
+def test_each_retired_tool_returns_structured_unbounded_error(label, module_path, fn_name, kwargs, is_async):
     """Every retired tool must surface UNBOUNDED_SCAN_REQUIRED + fallback."""
     import importlib
 
@@ -315,16 +275,12 @@ def test_each_retired_tool_returns_structured_unbounded_error(
 
     payload = _coerce_result_dict(result)
     assert payload.get("code") == "UNBOUNDED_SCAN_REQUIRED", (
-        f"{label} returned {payload!r}; expected "
-        "code='UNBOUNDED_SCAN_REQUIRED'."
+        f"{label} returned {payload!r}; expected code='UNBOUNDED_SCAN_REQUIRED'."
     )
-    assert payload.get("error") is True, (
-        f"{label} returned {payload!r}; expected error=True flag."
-    )
+    assert payload.get("error") is True, f"{label} returned {payload!r}; expected error=True flag."
     remediation = payload.get("remediation") or {}
     assert remediation.get("fallback_tool") == "full_inbox_export", (
-        f"{label} remediation must name full_inbox_export as the audited "
-        f"fallback. Got: {remediation!r}"
+        f"{label} remediation must name full_inbox_export as the audited fallback. Got: {remediation!r}"
     )
 
 
@@ -356,9 +312,7 @@ def test_get_email_thread_returns_structured_unbounded_error():
     RETIRED_UNBOUNDED_CASES,
     ids=[case[0] for case in RETIRED_UNBOUNDED_CASES],
 )
-def test_retired_tool_unbounded_envelope_is_json_string(
-    label, module_path, fn_name, kwargs, is_async
-):
+def test_retired_tool_unbounded_envelope_is_json_string(label, module_path, fn_name, kwargs, is_async):
     """Every retired tool's `-> str` signature requires a JSON-encoded string."""
     import importlib
 
@@ -373,9 +327,7 @@ def test_retired_tool_unbounded_envelope_is_json_string(
         f"`-> str` and the unbounded-scan envelope must be JSON-encoded."
     )
     parsed = json.loads(result)
-    assert isinstance(parsed, dict), (
-        f"{label} JSON did not decode to a dict: {parsed!r}"
-    )
+    assert isinstance(parsed, dict), f"{label} JSON did not decode to a dict: {parsed!r}"
     assert parsed.get("code") == "UNBOUNDED_SCAN_REQUIRED"
 
 

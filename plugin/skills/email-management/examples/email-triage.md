@@ -75,7 +75,7 @@ search_emails(subject_keyword="immediate", read_status="unread")
 **Actions**:
 - Read and assess immediately
 - Respond if quick (<2 min)
-- Flag for immediate action: `update_email_status(action="flag", subject_keyword="...")`
+- Flag for immediate action: `update_email_status(action="flag", message_ids=[...])`
 - Move to "Action Required" folder if you have one
 
 ### Step 3: Scan for Important Senders (P1) (3-5 min)
@@ -109,8 +109,8 @@ list_inbox_emails(max_emails=50, include_content=False)
 - **CCs you're on**: Quickly assess relevance
 
 **Batch operations**:
-- Trash newsletters: `manage_trash(action="move_to_trash", sender="newsletter@...")`
-- Mark read automated: `update_email_status(action="mark_read", sender="no-reply@...")`
+- Trash newsletters: collect ids with `search_emails(sender="newsletter@...", ...)`, then `manage_trash(action="move_to_trash", message_ids=[...])`
+- Mark read automated: collect ids with `search_emails(sender="no-reply@...", ...)`, then `update_email_status(action="mark_read", message_ids=[...])`
 
 ### Step 5: Set Context for Later (1-2 min)
 ```
@@ -133,7 +133,7 @@ get_mailbox_unread_counts(summary_only=True)
    - Promotions, old automated emails, spam
    ```
    search_emails(sender="promotions@", read_status="unread")
-   manage_trash(action="move_to_trash", sender="promotions@", max_deletes=20)
+   manage_trash(action="move_to_trash", message_ids=[...], max_deletes=20)
    ```
 
 2. **Second Pass - Flag Urgent (5 min)**
@@ -141,14 +141,14 @@ get_mailbox_unread_counts(summary_only=True)
    - Use multiple search terms
    ```
    search_emails(subject_keyword="urgent", read_status="unread")
-   update_email_status(action="flag", subject_keyword="urgent", max_updates=10)
+   update_email_status(action="flag", message_ids=[...], max_updates=10)
    ```
 
 3. **Third Pass - Mark Read FYIs (3 min)**
    - Bulk mark read items you don't need to open
    - CCs, automated reports you'll skip
    ```
-   update_email_status(action="mark_read", sender="automated@", max_updates=20)
+   update_email_status(action="mark_read", message_ids=[...], max_updates=20)
    ```
 
 4. **Fourth Pass - Categorize Rest (7 min)**
@@ -260,12 +260,12 @@ search_emails(subject_keyword="response needed")
 
 **Flag all urgent for processing**:
 ```
-update_email_status(action="flag", subject_keyword="urgent", max_updates=10)
+update_email_status(action="flag", message_ids=[...], max_updates=10)
 ```
 
 **Mark read all automated**:
 ```
-update_email_status(action="mark_read", sender="automated@", max_updates=20)
+update_email_status(action="mark_read", message_ids=[...], max_updates=20)
 ```
 
 **Unflag old items** (weekly cleanup):
@@ -273,7 +273,7 @@ update_email_status(action="mark_read", sender="automated@", max_updates=20)
 # Find flagged items
 search_emails(mailbox="All")  # Look for flags manually
 # Unflag completed ones
-update_email_status(action="unflag", subject_keyword="...", max_updates=10)
+update_email_status(action="unflag", message_ids=[...], max_updates=10)
 ```
 
 ## Daily Triage Schedules

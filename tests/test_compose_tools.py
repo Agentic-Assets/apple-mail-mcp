@@ -147,12 +147,12 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
             (
                 compose_tools.reply_to_email,
                 "replyMessage",
-                {"subject_keyword": "test", "reply_body": "Thanks"},
+                {"message_id": "12345", "reply_body": "Thanks"},
             ),
             (
                 compose_tools.forward_email,
                 "forwardMessage",
-                {"subject_keyword": "test", "to": "recipient@example.com"},
+                {"message_id": "12345", "to": "recipient@example.com"},
             ),
         ]:
             with self.subTest(tool=tool.__name__):
@@ -856,7 +856,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -897,7 +897,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="",
             )
 
@@ -922,7 +922,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -960,7 +960,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             mock_validate.return_value = ([str(attachment)], None)
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 attachments=str(attachment),
                 include_signature=True,
@@ -989,7 +989,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -1033,7 +1033,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -1090,7 +1090,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 include_signature=True,
             )
@@ -1114,7 +1114,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body=f"{sentinel}\n\nReply body",
             )
 
@@ -1163,7 +1163,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Unique body sentinel",
             )
 
@@ -1186,7 +1186,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -1209,7 +1209,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 mode="open",
             )
@@ -1251,7 +1251,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 mode="open",
             )
@@ -1275,7 +1275,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 send=False,
             )
@@ -1300,7 +1300,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 reply_to_all=True,
             )
@@ -1332,7 +1332,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 reply_to_all=False,
             )
@@ -1364,7 +1364,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 signature_name="TU",
             )
@@ -1397,7 +1397,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Unique body sentinel 84053",
                 include_signature=False,
             )
@@ -1431,7 +1431,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 signature_name="Missing",
             )
@@ -1457,7 +1457,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 from_address="secondary@example.org",
                 send=False,
@@ -1481,7 +1481,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 from_address="unknown@example.com",
                 send=False,
@@ -1505,7 +1505,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
             )
 
@@ -1540,7 +1540,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 mode="open",
             )
@@ -1564,7 +1564,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
             )
 
@@ -1589,7 +1589,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 from_address="secondary@example.org",
             )
@@ -1615,7 +1615,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 from_address="unknown@example.com",
             )
@@ -1772,6 +1772,40 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
         self.assertIn("every message of draftsMailbox whose id is 84053", script)
         self.assertIn('set outputText to outputText & "Draft ID: " & draftId', script)
         self.assertNotIn('contains "Duplicate Subject"', script)
+
+    def test_send_draft_subject_returns_deprecation_before_read_only_send_guard(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", True),
+            patch.object(compose_tools._server, "DRAFT_SAFE", False),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="send",
+                draft_subject="Duplicate Subject",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "draft_id")
+
+    def test_send_draft_subject_returns_deprecation_before_draft_safe_send_guard(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", False),
+            patch.object(compose_tools._server, "DRAFT_SAFE", True),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="send",
+                draft_subject="Duplicate Subject",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "draft_id")
 
     def test_open_and_delete_drafts_can_target_exact_draft_id(self):
         for action, expected_action in [("open", "open foundDraft"), ("delete", "delete foundDraft")]:
@@ -2046,7 +2080,7 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="Invoice",
+                message_id="888",
                 reply_body="Thanks",
                 timeout=240,
             )
@@ -2149,7 +2183,7 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 message="Please review",
             )

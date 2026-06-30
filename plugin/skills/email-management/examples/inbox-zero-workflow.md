@@ -15,7 +15,7 @@ For every email in your inbox, choose ONE action:
 
 ### 1. Delete (or Trash)
 **When**: Email has no value, spam, unwanted newsletters
-**Tool**: collect `message_id` from `list_inbox_emails` or `search_emails`, then `manage_trash(action="move_to_trash", message_ids=[...])`. Do not pass `subject_keyword=` or `sender=` to `manage_trash` (returns `FILTER_SCAN_DISABLED` without `allow_filter_scan=True`).
+**Tool**: collect `message_id` from `list_inbox_emails` or `search_emails`, then `manage_trash(action="move_to_trash", message_ids=[...])`. Do not pass `subject_keyword=` or `sender=` to `manage_trash` (returns `TARGET_SELECTOR_DEPRECATED`).
 **Examples**:
 - Spam and promotional emails you'll never read
 - Automated notifications you don't need
@@ -26,7 +26,7 @@ For every email in your inbox, choose ONE action:
 
 ### 2. Delegate (or Forward)
 **When**: Someone else should handle this email
-**Tool**: `forward_email(to="colleague@example.com", subject_keyword="...", message="Can you handle this? Thanks!")`
+**Tool**: collect `message_id` with search or list, then `forward_email(to="colleague@example.com", message_id="12345", message="Can you handle this? Thanks!")`
 **Examples**:
 - Questions someone else can answer better
 - Tasks that belong to another team member
@@ -73,7 +73,7 @@ For every email in your inbox, choose ONE action:
 
 **For downloads**:
 ```
-list_email_attachments(subject_keyword="...")
+list_email_attachments(message_ids=[12345])
 save_email_attachment(attachment_name="...", save_path="...")
 ```
 

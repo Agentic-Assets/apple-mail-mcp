@@ -36,7 +36,7 @@ Override: if the user explicitly says "include already-replied" or "I want to re
 
 ## Setup (once)
 
-Set **`DEFAULT_MAIL_ACCOUNT`** to the user's primary Mail account name (e.g. `Work`, `cayman@agenticassets.ai`). Without it, tools may fan out across every account and run slowly.
+Set **`DEFAULT_MAIL_ACCOUNT`** to the user's primary Mail account name (e.g. `Work`, `primary@example.com`). Without it, tools may fan out across every account and run slowly.
 
 For agent testing, run the MCP server with **`--draft-safe`** so send tools stay blocked.
 
@@ -110,7 +110,7 @@ Do not bulk-move or trash during triage unless the user explicitly asks.
 
 ## Archive handoff (when the user asks mid-triage)
 
-Triage stays read-first, but a quick "archive these" request is common. Do not call `move_email(subject_keyword=...)` or `move_email(sender=...)` from triage — those return `FILTER_SCAN_DISABLED` unless `allow_filter_scan=True`.
+Triage stays read-first, but a quick "archive these" request is common. Do not call `move_email(subject_keyword=...)` or `move_email(sender=...)` from triage — those return `TARGET_SELECTOR_DEPRECATED`.
 
 1. Collect `message_id`s from the triage pass you already ran (`list_inbox_emails`, `get_needs_response`, or `search_emails` JSON).
 2. Confirm the subject/sender list with the user.

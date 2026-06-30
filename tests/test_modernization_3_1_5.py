@@ -81,42 +81,30 @@ class DefaultAccountFallbackTests(unittest.TestCase):
 
     def test_get_awaiting_reply_uses_default_account(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
             result = smart_inbox_tools.get_awaiting_reply(days_back=1, max_results=1)
         self.assertNotIn("No account specified", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
     def test_get_needs_response_uses_default_account(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
             result = smart_inbox_tools.get_needs_response(days_back=1, max_results=1)
         self.assertNotIn("No account specified", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
     def test_get_top_senders_uses_default_account(self):
         # AppleScript returns the aggregation payload; tool sorts in Python.
-        cap = _ScriptCapture(
-            return_value="TOTAL|||0\nUNIQUE|||0"
-        )
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
+        cap = _ScriptCapture(return_value="TOTAL|||0\nUNIQUE|||0")
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
             result = smart_inbox_tools.get_top_senders(days_back=1, top_n=3)
         self.assertNotIn("No account specified", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
     def test_get_top_senders_uses_newest_slice_not_whose(self):
         cap = _ScriptCapture(return_value="TOTAL|||0")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
-            smart_inbox_tools.get_top_senders(
-                account=self.ACCOUNT, days_back=30, top_n=10
-        )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
+            smart_inbox_tools.get_top_senders(account=self.ACCOUNT, days_back=30, top_n=10)
         script = cap.last_script
         self.assertIn("messages 1 thru mailboxUpperBound of targetMailbox", script)
         self.assertIn("if mailboxCount > 15 then", script)
@@ -131,7 +119,7 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=cap):
             result = manage_tools.move_email(
                 to_mailbox="Archive",
-                subject_keyword="Promo",
+                older_than_days=30,
                 max_moves=1,
                 dry_run=True,
                 allow_filter_scan=True,
@@ -155,7 +143,7 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=cap):
             result = manage_tools.manage_trash(
                 action="move_to_trash",
-                subject_keyword="Promo",
+                older_than_days=30,
                 max_deletes=1,
                 dry_run=True,
                 allow_filter_scan=True,
@@ -177,37 +165,28 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         # before invoking analytics.run_applescript. Patch both so the
         # preflight returns a hit and we capture the analytics-side script.
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.analytics._search_mail_records",
-            return_value=[{"subject": "Invoice"}],
-        ), patch(
-            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
+        with (
+            patch(
+                "apple_mail_mcp.tools.analytics._search_mail_records",
+                return_value=[{"subject": "Invoice"}],
+            ),
+            patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap),
         ):
-            result = analytics_tools.list_email_attachments(
-                subject_keyword="Invoice", max_results=5
-            )
+            result = analytics_tools.list_email_attachments(message_ids=["42"], max_results=5)
         self.assertNotIn("DEFAULT_MAIL_ACCOUNT", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
     def test_get_statistics_uses_default_account(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
-        ):
-            result = analytics_tools.get_statistics(
-                scope="account_overview", days_back=1
-            )
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap):
+            result = analytics_tools.get_statistics(scope="account_overview", days_back=1)
         self.assertNotIn("DEFAULT_MAIL_ACCOUNT", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
     def test_export_emails_uses_default_account(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
-        ):
-            result = analytics_tools.export_emails(
-                scope="entire_mailbox", max_emails=1
-            )
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap):
+            result = analytics_tools.export_emails(scope="entire_mailbox", max_emails=1)
         self.assertNotIn("DEFAULT_MAIL_ACCOUNT", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
 
@@ -235,7 +214,7 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         cap = _ScriptCapture(return_value="Reply sent successfully!")
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap):
             result = compose_tools.reply_to_email(
-                subject_keyword="Foo",
+                message_id="12345",
                 reply_body="hi",
             )
         self.assertNotIn("No account specified", result)
@@ -246,7 +225,7 @@ class DefaultAccountFallbackTests(unittest.TestCase):
         cap = _ScriptCapture(return_value="ok")
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap):
             result = compose_tools.forward_email(
-                subject_keyword="Foo",
+                message_id="12345",
                 to="other@example.com",
             )
         self.assertNotIn("No account specified", result)
@@ -267,12 +246,8 @@ class WhoseAndCapTests(unittest.TestCase):
 
     def test_smart_inbox_get_awaiting_reply_emits_bounded_slices(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ) as mock_run:
-            smart_inbox_tools.get_awaiting_reply(
-                account="X", days_back=7, max_results=5
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap) as mock_run:
+            smart_inbox_tools.get_awaiting_reply(account="X", days_back=7, max_results=5)
         self.assertEqual(mock_run.call_count, 2)
         scripts = [call.args[0] for call in mock_run.call_args_list]
         inbox_script, sent_script = scripts
@@ -289,7 +264,7 @@ class WhoseAndCapTests(unittest.TestCase):
             manage_tools.move_email(
                 account="X",
                 to_mailbox="Archive",
-                subject_keywords=["test"],
+                older_than_days=30,
                 max_moves=5,
                 dry_run=True,
                 allow_filter_scan=True,
@@ -300,24 +275,16 @@ class WhoseAndCapTests(unittest.TestCase):
 
     def test_analytics_get_statistics_uses_documented_caps(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
-        ):
-            analytics_tools.get_statistics(
-                account="X", scope="account_overview", days_back=30
-            )
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap):
+            analytics_tools.get_statistics(account="X", scope="account_overview", days_back=30)
         script = cap.last_script
         self.assertIn("1 thru 20", script)
         self.assertIn("set mailboxUpperBound to 250", script)
 
     def test_analytics_get_statistics_short_window_uses_tighter_caps(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
-        ):
-            analytics_tools.get_statistics(
-                account="X", scope="account_overview", days_back=2
-            )
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap):
+            analytics_tools.get_statistics(account="X", scope="account_overview", days_back=2)
         script = cap.last_script
         self.assertIn("1 thru 10", script)
         self.assertIn("set mailboxUpperBound to 75", script)
@@ -329,13 +296,13 @@ class NoAccountErrorTests(unittest.TestCase):
     AppleScript against an empty account name."""
 
     def test_smart_inbox_without_account_errors(self):
-        with patch.object(_server, "DEFAULT_MAIL_ACCOUNT", None):
+        with (
+            patch.object(_server, "DEFAULT_MAIL_ACCOUNT", None),
+            patch("apple_mail_mcp.tools.smart_inbox.run_applescript") as mock_run,
+        ):
             # run_applescript should NOT be called when resolution fails.
-            with patch(
-                "apple_mail_mcp.tools.smart_inbox.run_applescript"
-            ) as mock_run:
-                result = smart_inbox_tools.get_awaiting_reply(days_back=1)
-                mock_run.assert_not_called()
+            result = smart_inbox_tools.get_awaiting_reply(days_back=1)
+            mock_run.assert_not_called()
         # Implementation wording: "Error: No account specified and ..."
         self.assertTrue(
             result.startswith("Error") or result.startswith("ERROR"),
@@ -351,19 +318,13 @@ class SmartInboxPerfTests(unittest.TestCase):
 
     def test_get_needs_response_scan_body_false_skips_content_in_script(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
-            smart_inbox_tools.get_needs_response(
-                account=self.ACCOUNT, days_back=1, max_results=1
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
+            smart_inbox_tools.get_needs_response(account=self.ACCOUNT, days_back=1, max_results=1)
         self.assertNotIn("content of aMessage", cap.last_script)
 
     def test_get_needs_response_scan_body_true_includes_content(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
             smart_inbox_tools.get_needs_response(
                 account=self.ACCOUNT,
                 days_back=1,
@@ -389,9 +350,7 @@ class SmartInboxPerfTests(unittest.TestCase):
                 return inbox_raw
             return sent_raw
 
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
-        ) as mock_run:
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run) as mock_run:
             result = smart_inbox_tools.get_awaiting_reply(
                 account=self.ACCOUNT,
                 days_back=7,
@@ -406,19 +365,10 @@ class SmartInboxPerfTests(unittest.TestCase):
         self.assertNotIn("Need update", result)
 
     def test_get_top_senders_parses_row_lines_and_aggregates(self):
-        raw = (
-            "ROW|||alice@a.com\n"
-            "ROW|||bob@b.com\n"
-            "ROW|||alice@a.com\n"
-            "TOTAL|||3"
-        )
+        raw = "ROW|||alice@a.com\nROW|||bob@b.com\nROW|||alice@a.com\nTOTAL|||3"
         cap = _ScriptCapture(return_value=raw)
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
-            result = smart_inbox_tools.get_top_senders(
-                account=self.ACCOUNT, days_back=1, top_n=10
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
+            result = smart_inbox_tools.get_top_senders(account=self.ACCOUNT, days_back=1, top_n=10)
         self.assertIn("1. alice@a.com: 2 emails", result)
         self.assertIn("2. bob@b.com: 1 emails", result)
         self.assertIn("Total emails analysed: 3", result)
@@ -437,9 +387,7 @@ class AppleScriptTimeoutHandlingTests(unittest.TestCase):
             "apple_mail_mcp.tools.smart_inbox.run_applescript",
             side_effect=self._timeout,
         ):
-            result = smart_inbox_tools.get_awaiting_reply(
-                account="X", days_back=1, max_results=1
-            )
+            result = smart_inbox_tools.get_awaiting_reply(account="X", days_back=1, max_results=1)
         self.assertIn("timed out", result.lower())
 
     def test_manage_move_email_handles_timeout(self):
@@ -453,7 +401,7 @@ class AppleScriptTimeoutHandlingTests(unittest.TestCase):
             result = manage_tools.move_email(
                 account="X",
                 to_mailbox="Archive",
-                subject_keyword="Promo",
+                older_than_days=30,
                 max_moves=1,
                 dry_run=True,
                 allow_filter_scan=True,
@@ -465,12 +413,10 @@ class AppleScriptTimeoutHandlingTests(unittest.TestCase):
         # Patch search.run_applescript so the preflight times out — the tool
         # must surface this as a structured "timed out" error.
         with patch(
-            "apple_mail_mcp.tools.search.run_applescript",
+            "apple_mail_mcp.tools.analytics.run_applescript",
             side_effect=self._timeout,
         ):
-            result = analytics_tools.list_email_attachments(
-                account="X", subject_keyword="Invoice"
-            )
+            result = analytics_tools.list_email_attachments(account="X", message_ids=["42"])
         self.assertIn("timed out", result.lower())
 
     def test_compose_manage_drafts_handles_timeout(self):
@@ -499,12 +445,8 @@ class Fix1AsyncioLoopSafetyTests(unittest.TestCase):
         cap = _ScriptCapture(return_value="ok")
 
         async def _invoke():
-            with patch(
-                "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-            ):
-                return smart_inbox_tools.get_awaiting_reply(
-                    account="Work", days_back=1, max_results=1
-                )
+            with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
+                return smart_inbox_tools.get_awaiting_reply(account="Work", days_back=1, max_results=1)
 
         # If asyncio.run() is still called inside the tool this will raise.
         result = asyncio.run(_invoke())
@@ -515,12 +457,8 @@ class Fix1AsyncioLoopSafetyTests(unittest.TestCase):
 
     def test_get_awaiting_reply_makes_two_sequential_applescript_calls(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ) as mock_run:
-            smart_inbox_tools.get_awaiting_reply(
-                account="Work", days_back=1, max_results=1
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap) as mock_run:
+            smart_inbox_tools.get_awaiting_reply(account="Work", days_back=1, max_results=1)
         self.assertEqual(mock_run.call_count, 2)
 
 
@@ -531,12 +469,8 @@ class Fix2InboxAlwaysInStatisticsTests(unittest.TestCase):
 
     def test_account_overview_script_contains_inbox_reference(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap
-        ):
-            analytics_tools.get_statistics(
-                account="X", scope="account_overview", days_back=30
-            )
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap):
+            analytics_tools.get_statistics(account="X", scope="account_overview", days_back=30)
         script = cap.last_script
         # The INBOX guarantee block must be in the generated script.
         self.assertIn('mailbox "INBOX" of targetAccount', script)
@@ -569,27 +503,22 @@ class Fix3NeedsResponseDefaultsTests(unittest.TestCase):
 
     def test_default_check_already_replied_is_false(self):
         import inspect
+
         sig = inspect.signature(smart_inbox_tools.get_needs_response)
         default = sig.parameters["check_already_replied"].default
         self.assertIs(default, False, "check_already_replied default must be False")
 
     def test_default_invocation_does_not_touch_sent_mailbox(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
-            smart_inbox_tools.get_needs_response(
-                account="Work", days_back=1, max_results=1
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
+            smart_inbox_tools.get_needs_response(account="Work", days_back=1, max_results=1)
         # With check_already_replied=False (default), replied_ids_script should
         # NOT be included — no reference to sentMailbox in the generated script.
         self.assertNotIn("sentMailbox", cap.last_script)
 
     def test_explicit_check_already_replied_true_includes_sent_scan(self):
         cap = _ScriptCapture(return_value="ok")
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=cap):
             smart_inbox_tools.get_needs_response(
                 account="Work",
                 days_back=1,
@@ -616,9 +545,7 @@ class GetAwaitingReplyMessageIdTests(unittest.TestCase):
                 return inbox_raw
             return sent_raw
 
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
             return smart_inbox_tools.get_awaiting_reply(
                 account=self.ACCOUNT,
                 days_back=7,
@@ -664,12 +591,8 @@ class GetAwaitingReplyMessageIdTests(unittest.TestCase):
             captured_scripts.append(script)
             return ""
 
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
-        ):
-            smart_inbox_tools.get_awaiting_reply(
-                account=self.ACCOUNT, days_back=7, max_results=5
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
+            smart_inbox_tools.get_awaiting_reply(account=self.ACCOUNT, days_back=7, max_results=5)
 
         self.assertEqual(len(captured_scripts), 2)
         inbox_script, sent_script = captured_scripts

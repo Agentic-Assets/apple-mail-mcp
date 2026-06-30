@@ -41,19 +41,19 @@ list_email_attachments(message_ids=[12345, 12346], max_results=10)
 Fallback when ids are unknown (bounded subject scan):
 
 ```
-list_email_attachments(subject_keyword="...", max_results=10)
+list_email_attachments(message_ids=[12345], max_results=10)
 ```
 
 See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight.
 
-**Large-inbox caveat:** `list_email_attachments(subject_keyword=...)` widens into a full scan if `recent_days` is loose or omitted on a 24k inbox — always co-filter with a tight `recent_days` ceiling (≤7 if possible) or pass `message_ids=[...]` from a prior bounded `search_emails`.
+`list_email_attachments` and `save_email_attachment` require exact `message_ids`; use bounded `search_emails(..., has_attachments=True)` first when ids are unknown.
 
 If duplicates exist, escalate with `search_emails` + **`get_email_by_id`** targeting specific numeric ids prior to save.
 
 ### 3. Persist With Validation
 
 ```
-save_email_attachment(subject_keyword="...", attachment_name="Quarterly.pdf",
+save_email_attachment(message_ids=["12345"], attachment_name="Quarterly.pdf",
                       save_path="/Users/<user>/Documents/Finance/Quarterly.pdf",
                       message_ids=["12345"])
 ```

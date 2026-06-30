@@ -20,7 +20,7 @@ from apple_mail_mcp.applescript_snippets import (
     text_offset_handler,
     thread_headers_block,
 )
-from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.bounded_scan import (
     build_bounded_message_scan,
 )
@@ -1657,12 +1657,21 @@ def reply_to_email(
         Confirmation message with details of the reply sent, saved draft, or opened draft
     """
 
+    if not message_id and not subject_keyword:
+        return "Error: 'subject_keyword' or 'message_id' is required"
+    if not message_id and subject_keyword:
+        return target_selector_deprecated_error(
+            "reply_to_email",
+            ("subject_keyword",),
+            preferred="Call search_emails(...) or list_inbox_emails(...) first, then pass message_id.",
+            discovery="search_emails(subject_keyword=..., recent_days=..., limit=...)",
+            exact_selector="message_id",
+        )
+
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
         return account_error
     assert account is not None  # _resolve_account guarantees non-None when error is None
-    if not message_id and not subject_keyword:
-        return "Error: 'subject_keyword' or 'message_id' is required"
 
     lookup_script, lookup_error = _build_found_message_lookup(
         "inboxMailbox",
@@ -2103,14 +2112,23 @@ def forward_email(
         Confirmation message with details of forwarded email
     """
 
-    account, account_error = _resolve_account(account, timeout=timeout)
-    if account_error:
-        return account_error
-    assert account is not None  # _resolve_account guarantees non-None when error is None
     if not message_id and not subject_keyword:
         return "Error: 'subject_keyword' or 'message_id' is required"
     if not to:
         return "Error: 'to' is required"
+    if not message_id and subject_keyword:
+        return target_selector_deprecated_error(
+            "forward_email",
+            ("subject_keyword",),
+            preferred="Call search_emails(...) or list_inbox_emails(...) first, then pass message_id.",
+            discovery="search_emails(subject_keyword=..., recent_days=..., limit=...)",
+            exact_selector="message_id",
+        )
+
+    account, account_error = _resolve_account(account, timeout=timeout)
+    if account_error:
+        return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
 
     lookup_script, lookup_error = _build_found_message_lookup(
         "targetMailbox",
@@ -2553,6 +2571,15 @@ def manage_drafts(
         its message id, To recipients, and a short body snippet so the list is
         directly triageable; verify full threading with `get_email_by_id`.
     """
+
+    if action in {"send", "open", "delete"} and not draft_id and draft_subject:
+        return target_selector_deprecated_error(
+            "manage_drafts",
+            ("draft_subject",),
+            preferred="Call manage_drafts(action='list') or manage_drafts(action='find') first, then pass draft_id.",
+            discovery="manage_drafts(action='list', subject_contains=...) or manage_drafts(action='find', in_reply_to=...)",
+            exact_selector="draft_id",
+        )
 
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:

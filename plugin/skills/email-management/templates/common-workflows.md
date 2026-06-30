@@ -19,10 +19,10 @@ search_emails(sender="boss@company.com", read_status="unread")
 search_emails(sender="key-client@example.com", read_status="unread")
 
 # 4. Flag action items
-update_email_status(action="flag", subject_keyword="action required", max_updates=5)
+update_email_status(action="flag", message_ids=[...], max_updates=5)
 
 # 5. Quick cleanup
-manage_trash(action="move_to_trash", sender="newsletter@", mailbox="INBOX", max_deletes=10)
+manage_trash(action="move_to_trash", message_ids=[...], mailbox="INBOX", max_deletes=10)
 ```
 
 ### End of Day Cleanup (5 minutes)
@@ -35,7 +35,7 @@ get_mailbox_unread_counts(summary_only=True)
 list_inbox_emails(max_emails=20, include_content=False)
 
 # 3. Mark read non-essential
-update_email_status(action="mark_read", sender="automated@", mailbox="INBOX", max_updates=10)
+update_email_status(action="mark_read", message_ids=[...], mailbox="INBOX", max_updates=10)
 
 # 4. Archive processed emails
 move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=20)

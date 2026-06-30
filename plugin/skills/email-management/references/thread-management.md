@@ -27,11 +27,11 @@ The result is already chronological. Read top to bottom for context.
 
 1. `search_emails(...)` to identify the target message id, then `get_email_thread(message_id="...")` to surface related messages.
 2. Collect every `message_id` from the thread result (and any stragglers the user confirms).
-3. `move_email(dry_run=True, message_ids=[...], to_mailbox="Archive/2026", max_moves=N)` — quote the count; then `move_email(dry_run=False, message_ids=[...], ...)` after confirmation. Do not pass `subject_keyword=` to `move_email` (returns `FILTER_SCAN_DISABLED` without `allow_filter_scan=True`).
+3. `move_email(dry_run=True, message_ids=[...], to_mailbox="Archive/2026", max_moves=N)` — quote the count; then `move_email(dry_run=False, message_ids=[...], ...)` after confirmation. Do not pass `subject_keyword=` to `move_email` (returns `TARGET_SELECTOR_DEPRECATED`).
 
 ### Find the latest message in a long thread
 
-The last entry returned by `get_email_thread()` is the most recent. Prefer replying with `reply_to_email(message_id=...)` when search or list tools already returned the Mail id; use `subject_keyword` only when no id is available. For bulk human review, use `mode="open"` so each saved draft stays visible in Mail. See **`email-drafting`** for compose tool selection.
+The last entry returned by `get_email_thread()` is the most recent. Prefer replying with `reply_to_email(message_id=...)` when search or list tools already returned the Mail id; pass `message_id`; if no id is known, run search or list first. For bulk human review, use `mode="open"` so each saved draft stays visible in Mail. See **`email-drafting`** for compose tool selection.
 
 ## Cross-Account Threads
 

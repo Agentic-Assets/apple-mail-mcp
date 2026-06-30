@@ -13,7 +13,7 @@ from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTAT
 
 logger = logging.getLogger(__name__)
 
-from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.backend.base import ToolError, target_selector_deprecated_error
 from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
 from apple_mail_mcp.constants import SCAN_BOUNDS, SKIP_FOLDERS
 from apple_mail_mcp.core import (
@@ -69,6 +69,14 @@ def list_email_attachments(
 
     if message_ids is None and not subject_keyword:
         return "Error: subject_keyword or message_ids is required"
+    if message_ids is None and subject_keyword:
+        return target_selector_deprecated_error(
+            "list_email_attachments",
+            ("subject_keyword",),
+            preferred="Call search_emails(..., has_attachments=True) first, then pass message_ids=[...].",
+            discovery="search_emails(subject_keyword=..., has_attachments=True, recent_days=..., limit=...)",
+            exact_selector="message_ids",
+        )
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
@@ -1083,6 +1091,14 @@ def export_emails(
     if scope == "single_email":
         if not message_id and not subject_keyword:
             return "Error: 'message_id' or 'subject_keyword' required for single_email scope"
+        if not message_id and subject_keyword:
+            return target_selector_deprecated_error(
+                "export_emails",
+                ("subject_keyword",),
+                preferred="Call search_emails(...) first, then pass message_id for scope='single_email'.",
+                discovery="search_emails(subject_keyword=..., recent_days=..., limit=...)",
+                exact_selector="message_id",
+            )
 
         safe_subject_keyword = escape_applescript(subject_keyword or "")
         if message_id:
