@@ -392,6 +392,11 @@ def _reply_exact_id_verified(verification: _ReplyDraftVerification, draft_id: st
     return bool(verification.ok and draft_id and verification.matched_artifact_id == draft_id)
 
 
+def _reply_attachment_details_requested(verification: _ReplyDraftVerification) -> bool:
+    """Return whether attachment details describe a requested attachment check."""
+    return bool(verification.attachment_status and verification.attachment_status != "not_requested")
+
+
 def _format_reply_verification_lines(verification: _ReplyDraftVerification, fallback_draft_id: str | None) -> str:
     """Return stable success metadata lines for a verified reply draft."""
     verified_id = verification.matched_artifact_id or fallback_draft_id or ""
@@ -406,9 +411,9 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
         )
     if verification.attachment_status:
         lines.append(f"Attachment Verification Status: {verification.attachment_status}")
-        if verification.attachment_count is not None:
+        if _reply_attachment_details_requested(verification) and verification.attachment_count is not None:
             lines.append(f"Attachments Applied Count: {verification.attachment_count}")
-        if verification.attachments_applied:
+        if _reply_attachment_details_requested(verification) and verification.attachments_applied:
             lines.append("Attachments Applied:")
             for attachment in verification.attachments_applied:
                 filename = attachment.get("filename") or ""
@@ -443,6 +448,8 @@ def _reply_success_payload(
         "exact_id_verified": _reply_exact_id_verified(verification, draft_id),
         "body_present": verification.status == "found",
         "attachment_status": verification.attachment_status,
+        "attachment_count": verification.attachment_count,
+        "attachments_applied": verification.attachments_applied or [],
         "signature_status": verification.signature_status,
         "mailbox": "Drafts",
     }

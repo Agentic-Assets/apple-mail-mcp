@@ -217,6 +217,8 @@ signature name wherever this MCP runs.
 - `verification_status`
 - `body_present`
 - `attachment_status`
+- `attachment_count`
+- `attachments_applied`
 - `signature_status`
 - `mailbox`
 - `exact_id_verified`

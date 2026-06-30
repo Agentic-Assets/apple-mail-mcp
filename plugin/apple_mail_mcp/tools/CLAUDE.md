@@ -62,7 +62,7 @@ When in doubt, copy the pattern from `search.py`'s per-message loop — it has b
 
 Normalized dict JSON: `get_statistics`, `get_inbox_overview`, `list_inbox_emails`, `list_mailboxes`, `get_needs_response`, `get_awaiting_reply`, and `get_top_senders`.
 
-`reply_to_email(output_format="json")` is a compose contract for verified `mode="draft"` / `mode="open"` only. It returns reply artifact metadata including `draft_id`, `verified_draft_id`, `exact_id_verified`, and verification status fields. Effective `mode="send"` with JSON is rejected before mutation because sent replies do not produce a verifiable Drafts artifact.
+`reply_to_email(output_format="json")` is a compose contract for verified `mode="draft"` / `mode="open"` only. It returns reply artifact metadata including `draft_id`, `verified_draft_id`, `exact_id_verified`, `attachment_status`, `attachment_count`, `attachments_applied`, and verification status fields. Effective `mode="send"` with JSON is rejected before mutation because sent replies do not produce a verifiable Drafts artifact.
 
 ## Agent-facing selection
 

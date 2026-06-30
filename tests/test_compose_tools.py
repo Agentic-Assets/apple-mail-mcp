@@ -1111,6 +1111,17 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             [{"filename": "support|final.pdf", "size": 2048}],
         )
 
+    def test_reply_success_text_hides_attachment_count_when_not_requested(self):
+        verification = compose_tools._reply_verification_from_output(
+            "FOUND|84053|not_requested|not_requested|1|leftover.pdf::2048;;"
+        )
+
+        result = compose_tools._format_reply_verification_lines(verification, "84053")
+
+        self.assertIn("Attachment Verification Status: not_requested", result)
+        self.assertNotIn("Attachments Applied Count", result)
+        self.assertNotIn("leftover.pdf", result)
+
     def test_reply_draft_success_json_includes_attachment_and_signature_status(self):
         captured = []
 
@@ -1121,7 +1132,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             if "reply foundMessage" in script:
                 return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
             if 'set targetDraftIdText to "84053"' in script:
-                return "FOUND|84054|verified|missing"
+                return "FOUND|84054|verified|missing|1|support|final.pdf::2048;;"
             return "ok"
 
         with (
@@ -1151,6 +1162,11 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["verification_status"], "found")
         self.assertFalse(payload["exact_id_verified"])
         self.assertEqual(payload["attachment_status"], "verified")
+        self.assertEqual(payload["attachment_count"], 1)
+        self.assertEqual(
+            payload["attachments_applied"],
+            [{"filename": "support|final.pdf", "size": 2048}],
+        )
         self.assertEqual(payload["signature_status"], "missing")
         self.assertFalse(payload["sent"])
 
