@@ -51,6 +51,13 @@ The executable contract lives in:
 
 Direct Envelope Index reads remain a separate research lane. They may be useful for fast metadata-only queries, but they introduce Full Disk Access, schema drift, WAL consistency, and fallback behavior risks. This branch keeps direct Envelope Index work out of runtime code.
 
+A schema-only research helper now exists:
+
+- `tools/inspect_envelope_index_schema.py`
+- `tests/test_inspect_envelope_index_schema.py`
+
+The helper requires `--confirm-read-only-live-mail-index`, opens the SQLite file in read-only mode, sets `PRAGMA query_only`, and reports only table, column, index, and fingerprint metadata. It redacts the file path and does not read message rows. No local Mail index was inspected while adding the helper.
+
 ## Performance Measurement Boundary
 
 Actual header and attachment-count cost measurement needs a privacy-safe live read-only protocol before it can be treated as proof. The current branch adds the contract and unit tests only. A future measurement pass should record p50 and p95 for:
@@ -81,5 +88,6 @@ The helper requires `--confirm-read-only-live-mail`, exact numeric ids, and emit
 
 1. Review the contract and decide whether this cache policy is acceptable.
 2. Run `tools/measure_metadata_hydration.py` with approved dummy or selected exact ids before extending exporters.
-3. Only after review, implement Phase 4b integration behind opt-in runtime flags.
-4. Keep cache misses bounded: fall back only to bounded AppleScript paths or explicit `full_inbox_export`.
+3. Optionally run `tools/inspect_envelope_index_schema.py` after explicit approval if direct-index schema evidence is needed.
+4. Only after review, implement Phase 4b integration behind opt-in runtime flags.
+5. Keep cache misses bounded: fall back only to bounded AppleScript paths or explicit `full_inbox_export`.

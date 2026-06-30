@@ -108,10 +108,16 @@ Completed in the metadata hydration measurement-helper pass:
 - Required `--confirm-read-only-live-mail` before any Mail read.
 - Added mocked tests proving the helper does not run without confirmation and does not print private content, raw headers, raw message ids, subjects, senders, body text, or attachment names.
 
+Completed in the Envelope Index schema-spike helper pass:
+
+- Added `tools/inspect_envelope_index_schema.py` as a schema-only helper for direct Envelope Index risk assessment.
+- Required `--confirm-read-only-live-mail-index` before opening Mail's local index.
+- Added local SQLite tests proving the helper reports table/column/index metadata while redacting the file path and excluding message rows.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
-- Metadata index measurement and integration.
+- Approved live metadata measurement, optional live schema probe output, and metadata index integration.
 
 ## Required Skills
 
@@ -291,7 +297,8 @@ Todos:
 - [x] Split rows into `bulk_metadata` and `exact_hydrated`.
 - [x] Prove partial rows cannot answer recipient, header, thread, attachment, or body queries unless hydrated.
 - [ ] Measure header and attachment-count costs before extending exporters.
-- [ ] Keep direct Envelope Index as a parallel research spike only until permission and schema-drift risks are known.
+- [x] Add a gated schema-only Envelope Index helper for permission and schema-drift research.
+- [ ] Run the Envelope Index helper only after explicit approval to inspect local schema metadata.
 
 Verification:
 
@@ -311,7 +318,7 @@ Todos:
 - [ ] Let `search_emails` use the index only when provenance and freshness rules pass.
 - [ ] Add write invalidation after move, trash, status update, draft lifecycle, and send.
 - [x] Add `get_email_by_ids`.
-- [ ] Reassess direct Envelope Index after safer cache path proves useful.
+- [ ] Reassess direct Envelope Index after safer cache path proves useful and schema-probe evidence is reviewed.
 
 Verification:
 

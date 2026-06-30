@@ -75,6 +75,21 @@ python3 tools/measure_metadata_hydration.py \
 
 Use only with known dummy or approved exact ids. The output is suitable for deciding whether Phase 4b metadata-index hydration is worth implementing, but it is not a runtime cache and does not mutate Mail.
 
+## inspect_envelope_index_schema.py
+
+| Script | Role |
+|--------|------|
+| `inspect_envelope_index_schema.py` | Schema-only Envelope Index research helper for Phase 4a risk assessment |
+
+Inspects only SQLite schema metadata from Mail's local Envelope Index: table names, column names/types, index names/columns, and a schema fingerprint. It is not an MCP tool, does not read message rows, redacts the file path, and requires `--confirm-read-only-live-mail-index`.
+
+```bash
+python3 tools/inspect_envelope_index_schema.py \
+  --confirm-read-only-live-mail-index
+```
+
+Use this only to assess permission and schema-drift risk before any future direct-index backend work. Do not use it as a runtime query path or include its output in package artifacts.
+
 ## dev-check.sh
 
 Tiered local gate (no live Mail except `live` tier). Requires root `.venv/`.
