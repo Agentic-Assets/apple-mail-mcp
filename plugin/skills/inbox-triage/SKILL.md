@@ -124,7 +124,7 @@ For larger cleanups, hand off to **`email-archive-cleanup`**.
 - Keep `days_back` small (2 for needs-response, 7 for awaiting-reply).
 - Avoid `get_statistics(account_overview)` in the daily loop — use weekly in `email-management`.
 - Avoid `all_accounts=True` unless the user has no default account and wants every account.
-- To scope a scan across a few folders, use `search_emails(mailboxes=["INBOX", "Sent", ...])` instead of `mailbox="All"` — it avoids the whole-profile fan-out on large Exchange/Gmail accounts.
+- To scope a scan across a few folders, use `search_emails(mailboxes=["INBOX", "Sent", ...])` instead of whole-profile fan-out. This avoids the slow path on large Exchange/Gmail accounts.
 - Prefer `list_mailboxes(include_counts=false)` when listing folders.
 
 ## Related skills

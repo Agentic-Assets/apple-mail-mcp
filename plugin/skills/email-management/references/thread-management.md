@@ -35,7 +35,7 @@ The last entry returned by `get_email_thread()` is the most recent. Prefer reply
 
 ## Cross-Account Threads
 
-`get_email_thread()` honors the same account and mailbox scoping as `search_emails()`. For a thread that spans personal and work accounts, pass `account=None` and `mailbox="All"` to capture every match. This is slower; only do it when single-account scope is known to be incomplete.
+`get_email_thread()` honors the same account and mailbox scoping as `search_emails()`. For a thread that spans personal and work accounts, use explicit accounts and mailbox lists first. Whole-account thread scans are slower; use them only when single-account scope is known to be incomplete.
 
 ## Limitations
 

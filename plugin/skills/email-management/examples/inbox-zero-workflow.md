@@ -108,7 +108,7 @@ For each email, apply the 5 D's:
 
 **Step 4: Review Flagged Items**
 ```
-search_emails(mailbox="All", read_status="all")  # Look for flags
+search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Look for flags
 ```
 - Check items you flagged earlier
 - Take action if ready
@@ -165,7 +165,7 @@ Inbox (empty)
 **Solution**:
 1. Unsubscribe from newsletters: `get_statistics(scope="account_overview")` to see top senders
 2. Set up filters in Mail app for auto-filing
-3. Process in batches: `search_emails(sender="newsletter.com", recent_days=30, limit=50)` → collect `message_id`s → `manage_trash(action="move_to_trash", message_ids=[...])`
+3. Process in batches: `search_emails(sender_domain="newsletter.example.com", recent_days=30, limit=50)` → collect `message_id`s → `manage_trash(action="move_to_trash", message_ids=[...])`
 4. Delegate more: Forward emails that others can handle
 
 ### "I'm afraid to delete emails"
@@ -247,7 +247,7 @@ Track these to measure success:
 
 1. **Batch by Sender**: Group emails from the same person and process together
    ```
-   search_emails(sender="person@example.com", read_status="unread")
+   search_emails(sender_exact="person@example.com", read_status="unread")
    ```
 
 2. **Time-Box Processing**: Set a timer for 25 minutes (Pomodoro technique)
@@ -279,7 +279,7 @@ Track these to measure success:
 | Archive | `move_email(message_ids=[...], to_mailbox="Archive")` |
 | Flag for later | `update_email_status(action="flag", message_ids=[...])` |
 | List drafts | `manage_drafts(action="list")` |
-| Search all | `search_emails(mailbox="All", ...)` |
+| Search selected folders | `search_emails(mailboxes=["INBOX", "Archive"], ...)` |
 
 ---
 

@@ -68,7 +68,7 @@ search_emails(subject_keyword="immediate", read_status="unread")
 ```
 
 **Additional searches**:
-- Boss's name: `search_emails(sender="boss@company.com", read_status="unread")`
+- Boss's name: `search_emails(sender_exact="boss@company.com", read_status="unread")`
 - "action required": `search_emails(subject_keyword="action required", read_status="unread")`
 - "deadline": `search_emails(subject_keyword="deadline", read_status="unread")`
 
@@ -80,8 +80,8 @@ search_emails(subject_keyword="immediate", read_status="unread")
 
 ### Step 3: Scan for Important Senders (P1) (3-5 min)
 ```
-search_emails(sender="key-stakeholder@company.com", read_status="unread")
-search_emails(sender="important-client@client.com", read_status="unread")
+search_emails(sender_exact="key-stakeholder@company.com", read_status="unread")
+search_emails(sender_exact="important-client@client.com", read_status="unread")
 ```
 
 **VIP Senders to check**:
@@ -109,8 +109,8 @@ list_inbox_emails(max_emails=50, include_content=False)
 - **CCs you're on**: Quickly assess relevance
 
 **Batch operations**:
-- Trash newsletters: collect ids with `search_emails(sender="newsletter@...", ...)`, then `manage_trash(action="move_to_trash", message_ids=[...])`
-- Mark read automated: collect ids with `search_emails(sender="no-reply@...", ...)`, then `update_email_status(action="mark_read", message_ids=[...])`
+- Trash newsletters: collect ids with `search_emails(sender_domain="newsletter.example.com", ...)`, then `manage_trash(action="move_to_trash", message_ids=[...])`
+- Mark read automated: collect ids with `search_emails(sender_domain="notifications.example.com", ...)`, then `update_email_status(action="mark_read", message_ids=[...])`
 
 ### Step 5: Set Context for Later (1-2 min)
 ```
@@ -132,7 +132,7 @@ get_mailbox_unread_counts(summary_only=True)
    - Identify and bulk delete obvious noise
    - Promotions, old automated emails, spam
    ```
-   search_emails(sender="promotions@", read_status="unread")
+   search_emails(sender_domain="promotions.example.com", read_status="unread")
    manage_trash(action="move_to_trash", message_ids=[...], max_deletes=20)
    ```
 
@@ -243,8 +243,8 @@ search_emails(subject_keyword="deadline")
 **Noise Indicators (for bulk deletion)**:
 ```
 search_emails(subject_keyword="unsubscribe")  # Newsletters
-search_emails(sender="no-reply@")  # Automated
-search_emails(sender="noreply@")  # Automated
+search_emails(sender_domain="notifications.example.com")  # Automated
+search_emails(sender_domain="alerts.example.com")  # Automated
 search_emails(subject_keyword="[Automated]")
 ```
 
@@ -271,7 +271,7 @@ update_email_status(action="mark_read", message_ids=[...], max_updates=20)
 **Unflag old items** (weekly cleanup):
 ```
 # Find flagged items
-search_emails(mailbox="All")  # Look for flags manually
+search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Look for flags manually
 # Unflag completed ones
 update_email_status(action="unflag", message_ids=[...], max_updates=10)
 ```
@@ -362,7 +362,7 @@ update_email_status(action="unflag", message_ids=[...], max_updates=10)
 |------|------|---------|
 | Quick overview | `get_inbox_overview()` | Start here always |
 | Find urgent | `search_emails()` | subject_keyword="urgent" |
-| Check VIPs | `search_emails()` | sender="boss@company.com" |
+| Check VIPs | `search_emails()` | sender_exact="boss@company.com" |
 | Bulk flag | `update_email_status()` | action="flag" |
 | Bulk trash | `manage_trash()` | action="move_to_trash" |
 | Bulk mark read | `update_email_status()` | action="mark_read" |

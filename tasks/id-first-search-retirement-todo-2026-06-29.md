@@ -36,6 +36,7 @@ Completed in the CLI/dashboard follow-up pass:
 - Migrated dashboard quick actions to `message_ids` and added static/template tests.
 - Added `sender_exact` and `sender_domain` discovery filters to `search_emails` and the CLI.
 - Rewrote `search-patterns.md` as ID-first discovery guidance and added a static guard against copyable whole-account mailbox examples.
+- Rewrote `common-workflows.md` and adjacent packaged examples so action examples use reviewed ids, whole-account mailbox snippets are not copyable, and exact sender/domain discovery is preferred.
 
 Still open:
 
@@ -108,7 +109,7 @@ Todos:
 
 - [x] Update `docs/CLAUDE-conventions.md` to say action tools must target exact ids.
 - [x] Rewrite `plugin/skills/email-management/templates/search-patterns.md` as ID-first discovery guidance.
-- [ ] Remove fuzzy mutation examples from packaged skills, starting with `move_email`, `update_email_status`, and `manage_trash`.
+- [x] Remove fuzzy mutation examples from packaged skills, starting with `move_email`, `update_email_status`, and `manage_trash`.
 - [ ] Update reply, forward, Drafts, thread, attachment, and style-profile skills so subject fallback requires explicit degraded-path approval.
 - [x] Add static docs tests for action calls using `subject_keyword`, `sender`, `draft_subject`, or unqualified `mailbox="All"`.
 - [x] Add CLI `--allow-body-scan` for `search --body`.
