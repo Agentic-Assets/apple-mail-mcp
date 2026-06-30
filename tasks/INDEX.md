@@ -21,6 +21,7 @@
 | [`id-first-search-retirement-todo-2026-06-29.md`](id-first-search-retirement-todo-2026-06-29.md) | Worker-ready todo list, skill routing, subagent lanes, and verification gates for ID-first search retirement | New todo |
 | [`metadata-index-feasibility-spike-2026-06-30.md`](metadata-index-feasibility-spike-2026-06-30.md) | Phase 4a metadata-index contract, privacy rules, hydration tiers, and integration boundary for ID-first search retirement | New spike report |
 | [`id-first-search-retirement-completion-audit-2026-06-29.md`](id-first-search-retirement-completion-audit-2026-06-29.md) | Proof-backed completion audit for the ID-first implementation branch, plus decision/live-proof blockers | New audit |
+| [`id-first-search-retirement-decision-brief-2026-06-29.md`](id-first-search-retirement-decision-brief-2026-06-29.md) | Decision-ready options and recommended defaults for the remaining ID-first product gates | New decision brief |
 | [`apple-mail-plugin-robustness-goal-2026-05-22.md`](apple-mail-plugin-robustness-goal-2026-05-22.md) | Whole-plugin robustness goal and completion contract | Active (parent goal) |
 | [`robustness-backlog-2026-05-22.md`](robustness-backlog-2026-05-22.md) | Detailed backlog sidecar moved out of `todo.md` | Active sidecar |
 | [`robustness-completion-audit-2026-05-22.md`](robustness-completion-audit-2026-05-22.md) | Command evidence, improvements, residual risks | Active report |

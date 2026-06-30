@@ -119,6 +119,10 @@ Completed in the final verification audit pass:
 - Saved `tasks/id-first-search-retirement-completion-audit-2026-06-29.md` with explicit proof commands, passed results, branch-scope claims, and remaining Cayman/live-proof blockers.
 - Re-ran the Phase 6 focused bundle for compose, manage, analytics, search, smart-inbox, CLI, dashboard, no-unbounded-scan, bounded-scan, read-only registry, metadata-index, helper, and perf-budget coverage.
 
+Completed in the decision-brief pass:
+
+- Saved `tasks/id-first-search-retirement-decision-brief-2026-06-29.md` with concrete options and recommended defaults for v3.x selector behavior, `allow_filter_scan`, `mailbox="All"`, fuzzy `sender`, release boundary, and live read-only measurements.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
