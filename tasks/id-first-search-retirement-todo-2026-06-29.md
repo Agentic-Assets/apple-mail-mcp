@@ -13,6 +13,39 @@ Use a two-step contract:
 
 Do not treat search results as action authorization. Search or list first, review the candidate set, then mutate by exact ids.
 
+## Progress Log
+
+### 2026-06-29 Implementation Branch
+
+Branch: `codex/id-first-search-retirement-implementation`
+
+Completed in the first implementation pass:
+
+- Added schema-compatible `TARGET_SELECTOR_DEPRECATED` errors for legacy action selectors while keeping v3.x parameter compatibility.
+- Updated action-tool guidance in `docs/CLAUDE-conventions.md` and packaged skill examples for the highest-risk mutation paths.
+- Added static guidance coverage for legacy action selectors in packaged docs and skills.
+- Rebuilt and validated `apple-mail-plugin.zip`.
+
+Completed in the CLI/dashboard follow-up pass:
+
+- Added CLI `search --allow-body-scan` and wired it to `search_emails(allow_body_scan=True)`.
+- Added CLI `move-dry-run --message-ids` and `trash-dry-run --message-ids`.
+- Added CLI `--allow-filter-scan` flags for dry-run compatibility surfaces.
+- Converted CLI perf dry-run probes from no-hit subject selectors to exact dummy `message_ids`.
+- Added dashboard recent-email `message_id`, `internet_message_id`, and `mailbox` metadata.
+- Migrated dashboard quick actions to `message_ids` and added static/template tests.
+- Added `sender_exact` and `sender_domain` discovery filters to `search_emails` and the CLI.
+
+Still open:
+
+- Full rewrite of broad discovery examples such as `search-patterns.md`.
+- Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
+- Exact attachment selector design.
+- Forward draft id capture and verification.
+- Thread header graph work.
+- Metadata index feasibility and integration.
+- Batch exact-ID APIs.
+
 ## Required Skills
 
 Use these before or during implementation:
@@ -78,12 +111,12 @@ Todos:
 - [ ] Remove fuzzy mutation examples from packaged skills, starting with `move_email`, `update_email_status`, and `manage_trash`.
 - [ ] Update reply, forward, Drafts, thread, attachment, and style-profile skills so subject fallback requires explicit degraded-path approval.
 - [ ] Add static docs tests for action calls using `subject_keyword`, `sender`, `draft_subject`, or unqualified `mailbox="All"`.
-- [ ] Add CLI `--allow-body-scan` for `search --body`.
-- [ ] Add CLI `--message-ids` to `move-dry-run` and `trash-dry-run`.
-- [ ] Require explicit `--allow-filter-scan` for any remaining filter dry-run path.
-- [ ] Convert live/perf probes to ID-based dry-run coverage or label old subject probes as compatibility checks.
-- [ ] Add `message_id`, `internet_message_id`, and mailbox to dashboard recent-email data.
-- [ ] Migrate dashboard quick actions to `message_ids`.
+- [x] Add CLI `--allow-body-scan` for `search --body`.
+- [x] Add CLI `--message-ids` to `move-dry-run` and `trash-dry-run`.
+- [x] Require explicit `--allow-filter-scan` for any remaining filter dry-run path.
+- [x] Convert live/perf probes to ID-based dry-run coverage or label old subject probes as compatibility checks.
+- [x] Add `message_id`, `internet_message_id`, and mailbox to dashboard recent-email data.
+- [x] Migrate dashboard quick actions to `message_ids`.
 
 Verification:
 
@@ -104,20 +137,20 @@ Recommended subagents:
 
 Todos:
 
-- [ ] Keep legacy selector params in v3.x schemas.
-- [ ] Add structured `TARGET_SELECTOR_DEPRECATED` errors before AppleScript runs.
-- [ ] `reply_to_email`: deprecate `subject_keyword` without `message_id`.
-- [ ] `forward_email`: deprecate `subject_keyword` without `message_id`.
+- [x] Keep legacy selector params in v3.x schemas.
+- [x] Add structured `TARGET_SELECTOR_DEPRECATED` errors before AppleScript runs.
+- [x] `reply_to_email`: deprecate `subject_keyword` without `message_id`.
+- [x] `forward_email`: deprecate `subject_keyword` without `message_id`.
 - [ ] Add forward saved-draft id capture and verification work item.
-- [ ] `manage_drafts`: deprecate `draft_subject` for `send`, `open`, and `delete`.
-- [ ] `move_email`: keep `message_ids` normal path, decide fate of `allow_filter_scan=True`.
-- [ ] `update_email_status`: same migration shape as `move_email`.
-- [ ] `manage_trash`: same migration shape as `move_email`, keep `empty_trash` separate.
+- [x] `manage_drafts`: deprecate `draft_subject` for `send`, `open`, and `delete`.
+- [ ] `move_email`: keep `message_ids` normal path, decide fate of `allow_filter_scan=True`. Runtime migration done; product decision remains open.
+- [ ] `update_email_status`: same migration shape as `move_email`. Runtime migration done; product decision remains open.
+- [ ] `manage_trash`: same migration shape as `move_email`, keep `empty_trash` separate. Runtime migration done; product decision remains open.
 - [ ] `list_email_attachments`: deprecate `subject_keyword`, add JSON attachment metadata.
 - [ ] `save_email_attachment`: deprecate `subject_keyword`, add exact attachment selector design.
-- [ ] `export_emails(scope="single_email")`: deprecate `subject_keyword`.
-- [ ] Tests must prove no AppleScript call occurs for deprecated target selectors.
-- [ ] Read-only and draft-safe precedence tests for `manage_drafts(action="send", draft_subject=...)`.
+- [x] `export_emails(scope="single_email")`: deprecate `subject_keyword`.
+- [x] Tests must prove no AppleScript call occurs for deprecated target selectors.
+- [x] Read-only and draft-safe precedence tests for `manage_drafts(action="send", draft_subject=...)`.
 
 Verification:
 
@@ -157,7 +190,7 @@ Recommended subagents:
 
 Todos:
 
-- [ ] Add `sender_exact` and `sender_domain` to `search_emails`.
+- [x] Add `sender_exact` and `sender_domain` to `search_emails`.
 - [ ] Add `internet_message_id` lookup support where headers are available.
 - [ ] Decide future of fuzzy `sender`.
 - [ ] Add `get_email_thread` JSON output with message ids and headers.

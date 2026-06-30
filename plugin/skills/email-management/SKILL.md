@@ -119,7 +119,8 @@ Goal: keep folder structure healthy and archive aging messages.
 3. Analyze patterns: `get_statistics(scope="account_overview")` plus `get_top_senders()`. For per-folder volume, prefer `list_mailboxes(include_counts=True)`; when calling `get_statistics(scope="mailbox_breakdown")`, pass explicit `mailbox=` — omitting it scopes to the default Inbox in code. Full guidance lives in `references/analytics.md`.
 4. Adjust folders: collaborate with **`mailbox-taxonomy`** for naming; create net-new folders with `create_mailbox` after explicit confirmation (rename/delete heavy work still occurs in Mail UI when needed).
 5. Bulk-organize by sender or date (ID-first — see **`email-archive-cleanup`**):
-   - `search_emails(sender="...", recent_days=30)` → collect `message_id`s → `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` → execute.
+   - Prefer `search_emails(sender_exact="person@example.com", recent_days=30)` or `search_emails(sender_domain="example.com", recent_days=30)` when the exact sender/domain is known; use fuzzy `sender="..."` only for discovery when the address is uncertain.
+   - `search_emails(sender_exact="...", recent_days=30)` → collect `message_id`s → `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` → execute.
    - Action tools do not target by `sender=`; collect ids with `search_emails(sender="...", ...)`, then call `move_email(message_ids=[...])`.
 6. Archive read mail older than 30 days into `Archive/<year>`.
 

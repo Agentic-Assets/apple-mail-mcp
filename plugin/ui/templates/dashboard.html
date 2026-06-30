@@ -757,14 +757,35 @@
             renderEmails(filtered);
         }
 
+        function requireMessageId(email) {
+            const messageId = (email.message_id || '').toString().trim();
+            if (!messageId) {
+                throw new Error('Missing exact Mail message id for dashboard action');
+            }
+            return {
+                account: email.account || '',
+                mailbox: email.mailbox || 'INBOX',
+                message_ids: [messageId]
+            };
+        }
+
+        function removeEmailFromRecent(email) {
+            const originalIndex = recentEmails.indexOf(email);
+            if (originalIndex >= 0) {
+                recentEmails.splice(originalIndex, 1);
+            }
+        }
+
         // MCP Action handlers
         async function handleMarkRead(email, index) {
             try {
                 if (window.MCPAppsSDK) {
+                    const target = requireMessageId(email);
                     await window.MCPAppsSDK.callTool('update_email_status', {
-                        account: email.account || '',
+                        account: target.account,
+                        mailbox: target.mailbox,
                         action: email.is_read ? 'mark_unread' : 'mark_read',
-                        subject_keyword: email.subject
+                        message_ids: target.message_ids
                     });
                 }
 
@@ -781,15 +802,18 @@
         async function handleArchive(email, index) {
             try {
                 if (window.MCPAppsSDK) {
+                    const target = requireMessageId(email);
                     await window.MCPAppsSDK.callTool('move_email', {
-                        account: email.account || '',
-                        subject_keyword: email.subject,
-                        to_mailbox: 'Archive'
+                        account: target.account,
+                        from_mailbox: target.mailbox,
+                        message_ids: target.message_ids,
+                        to_mailbox: 'Archive',
+                        max_moves: 1
                     });
                 }
 
                 // Remove from local list
-                recentEmails.splice(index, 1);
+                removeEmailFromRecent(email);
                 renderEmails();
                 showToast('Email archived');
             } catch (error) {
@@ -801,15 +825,18 @@
         async function handleDelete(email, index) {
             try {
                 if (window.MCPAppsSDK) {
+                    const target = requireMessageId(email);
                     await window.MCPAppsSDK.callTool('manage_trash', {
-                        account: email.account || '',
+                        account: target.account,
                         action: 'move_to_trash',
-                        subject_keyword: email.subject
+                        mailbox: target.mailbox,
+                        message_ids: target.message_ids,
+                        max_deletes: 1
                     });
                 }
 
                 // Remove from local list
-                recentEmails.splice(index, 1);
+                removeEmailFromRecent(email);
                 renderEmails();
                 showToast('Email moved to trash');
             } catch (error) {

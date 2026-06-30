@@ -96,6 +96,13 @@ def _read_text_arg(value: str | None, file_value: str | None) -> str:
     return value or ""
 
 
+def _parse_csv_arg(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or None
+
+
 def _run_tool(func: Callable[..., Any], json_mode: bool, **kwargs: Any) -> int:
     try:
         result = func(**kwargs)
@@ -531,9 +538,9 @@ def build_perf_cases(
                 runner=lambda: move_email(
                     account=account,
                     to_mailbox="Archive",
-                    subject_keyword=NO_HIT_SUBJECT,
+                    message_ids=["0"],
                     dry_run=True,
-                    max_moves=3,
+                    max_moves=1,
                 ),
             ),
             PerfCase(
@@ -543,9 +550,9 @@ def build_perf_cases(
                 runner=lambda: manage_trash(
                     account=account,
                     action="move_to_trash",
-                    subject_keyword=NO_HIT_SUBJECT,
+                    message_ids=["0"],
                     dry_run=True,
-                    max_deletes=3,
+                    max_deletes=1,
                 ),
             ),
             PerfCase(
@@ -723,7 +730,7 @@ def _build_parser() -> argparse.ArgumentParser:
     inbox.add_argument("--content", action="store_true", help="Include content preview")
     _add_json_flag(inbox)
 
-    search = subparsers.add_parser("search", help="Search emails")
+    search = subparsers.add_parser("search", help="Discover candidate emails; use returned ids for actions")
     _add_account_flag(search)
     search.add_argument("--mailbox", default="INBOX", help="Mailbox path")
     search.add_argument(
@@ -734,7 +741,14 @@ def _build_parser() -> argparse.ArgumentParser:
     search.add_argument("--query", help="Subject keyword alias")
     search.add_argument("--subject", help="Subject keyword")
     search.add_argument("--sender", help="Sender substring")
-    search.add_argument("--body", help="Body text search, slower")
+    search.add_argument("--sender-exact", help="Exact sender address discovery filter")
+    search.add_argument("--sender-domain", help="Exact sender domain discovery filter")
+    search.add_argument("--body", help="Body text search, slower; requires --allow-body-scan")
+    search.add_argument(
+        "--allow-body-scan",
+        action="store_true",
+        help="Opt in to slow body scanning when --body is set",
+    )
     search.add_argument("--date-from", help="Start date YYYY-MM-DD")
     search.add_argument("--date-to", help="End date YYYY-MM-DD")
     search.add_argument("--limit", type=int, default=20, help="Maximum results")
@@ -830,20 +844,32 @@ def _build_parser() -> argparse.ArgumentParser:
     stats.add_argument("--days", type=int, default=30, dest="days_back")
     _add_json_flag(stats)
 
-    move_dry = subparsers.add_parser("move-dry-run", help="Preview emails that would be moved (no changes)")
+    move_dry = subparsers.add_parser("move-dry-run", help="Preview exact-id email moves (no changes)")
     _add_account_flag(move_dry, required=True)
     move_dry.add_argument("--to", required=True, dest="to_mailbox")
     move_dry.add_argument("--from", default="INBOX", dest="from_mailbox")
-    move_dry.add_argument("--subject", default=NO_HIT_SUBJECT)
-    move_dry.add_argument("--sender")
+    move_dry.add_argument("--message-ids", help="Comma-separated exact Mail message ids from list/search")
+    move_dry.add_argument("--subject", help="Deprecated selector; collect ids first")
+    move_dry.add_argument("--sender", help="Deprecated selector; collect ids first")
+    move_dry.add_argument(
+        "--allow-filter-scan",
+        action="store_true",
+        help="Opt in to remaining date/bulk filter scans where supported",
+    )
     move_dry.add_argument("--limit", type=int, default=10, dest="max_moves")
     _add_json_flag(move_dry)
 
-    trash_dry = subparsers.add_parser("trash-dry-run", help="Preview emails that would be trashed (no changes)")
+    trash_dry = subparsers.add_parser("trash-dry-run", help="Preview exact-id trash moves (no changes)")
     _add_account_flag(trash_dry, required=True)
     trash_dry.add_argument("--mailbox", default="INBOX")
-    trash_dry.add_argument("--subject", default=NO_HIT_SUBJECT)
-    trash_dry.add_argument("--sender")
+    trash_dry.add_argument("--message-ids", help="Comma-separated exact Mail message ids from list/search")
+    trash_dry.add_argument("--subject", help="Deprecated selector; collect ids first")
+    trash_dry.add_argument("--sender", help="Deprecated selector; collect ids first")
+    trash_dry.add_argument(
+        "--allow-filter-scan",
+        action="store_true",
+        help="Opt in to remaining date/bulk filter scans where supported",
+    )
     trash_dry.add_argument("--limit", type=int, default=5, dest="max_deletes")
     _add_json_flag(trash_dry)
 
@@ -1038,7 +1064,10 @@ def _cmd_search(args: argparse.Namespace) -> int:
         mailboxes=mailboxes,
         subject_keyword=subject,
         sender=args.sender,
+        sender_exact=args.sender_exact,
+        sender_domain=args.sender_domain,
         body_text=args.body,
+        allow_body_scan=args.allow_body_scan,
         date_from=args.date_from,
         date_to=args.date_to,
         include_content=args.content,
@@ -1168,8 +1197,10 @@ def _cmd_move_dry_run(args: argparse.Namespace) -> int:
         account=args.account,
         to_mailbox=args.to_mailbox,
         from_mailbox=args.from_mailbox,
+        message_ids=_parse_csv_arg(args.message_ids),
         subject_keyword=args.subject,
         sender=args.sender,
+        allow_filter_scan=args.allow_filter_scan,
         max_moves=args.max_moves,
         dry_run=True,
     )
@@ -1184,8 +1215,10 @@ def _cmd_trash_dry_run(args: argparse.Namespace) -> int:
         account=args.account,
         action="move_to_trash",
         mailbox=args.mailbox,
+        message_ids=_parse_csv_arg(args.message_ids),
         subject_keyword=args.subject,
         sender=args.sender,
+        allow_filter_scan=args.allow_filter_scan,
         max_deletes=args.max_deletes,
         dry_run=True,
     )

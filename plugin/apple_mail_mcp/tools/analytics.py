@@ -1673,8 +1673,13 @@ def _build_recent_one_account_script(
                     set messageSender to sender of aMessage
                     set messageDate to date received of aMessage
                     set messageRead to read status of aMessage
+                    set messageAppId to (id of aMessage) as string
+                    set messageInternetId to ""
+                    try
+                        set messageInternetId to message id of aMessage
+                    end try
                     {preview_block}
-                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & {preview_field}
+                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||INBOX|||" & messageAppId & "|||" & messageInternetId & "|||" & {preview_field}
                 end try
             end repeat
         end try
@@ -1691,8 +1696,9 @@ def _parse_recent_email_lines(result: str) -> list[dict[str, Any]]:
     for line in result.split("\n"):
         if "|||" not in line:
             continue
-        parts = line.split("|||", 5)
+        parts = line.split("|||", 8)
         if len(parts) >= 5:
+            legacy_preview = parts[5].strip() if len(parts) > 5 else ""
             emails.append(
                 {
                     "subject": parts[0].strip(),
@@ -1700,7 +1706,10 @@ def _parse_recent_email_lines(result: str) -> list[dict[str, Any]]:
                     "date": parts[2].strip(),
                     "is_read": parts[3].strip().lower() == "true",
                     "account": parts[4].strip(),
-                    "preview": parts[5].strip() if len(parts) > 5 else "",
+                    "mailbox": parts[5].strip() if len(parts) > 6 else "INBOX",
+                    "message_id": parts[6].strip() if len(parts) > 6 else "",
+                    "internet_message_id": parts[7].strip() if len(parts) > 7 else "",
+                    "preview": parts[8].strip() if len(parts) > 8 else legacy_preview,
                 }
             )
     return emails

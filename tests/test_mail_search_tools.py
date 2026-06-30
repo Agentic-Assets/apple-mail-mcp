@@ -1526,6 +1526,48 @@ class SearchGuardrailTests(unittest.TestCase):
         self.assertIn("WARNING:", result)
         self.assertIn("sender-only", result.lower())
 
+    def test_sender_exact_builds_exact_address_condition(self):
+        captured = {}
+
+        def fake_run(script, timeout=180):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    sender_exact="person@example.com",
+                    recent_days=7,
+                    output_format="json",
+                )
+            )
+
+        script = captured["script"]
+        self.assertIn('messageSender is "person@example.com"', script)
+        self.assertIn('messageSender contains "<person@example.com>"', script)
+
+    def test_sender_domain_builds_domain_condition_without_sender_only_warning(self):
+        captured = {}
+
+        def fake_run(script, timeout=180):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            raw = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    sender_domain="@example.com",
+                    recent_days=7,
+                    output_format="json",
+                )
+            )
+
+        payload = json.loads(raw)
+        self.assertNotIn("warnings", payload)
+        self.assertIn('messageSender contains "@example.com"', captured["script"])
+
 
 class GetEmailThreadMessageIdTests(unittest.TestCase):
     """Phase 2: get_email_thread(message_id=...) derives subject from anchor."""

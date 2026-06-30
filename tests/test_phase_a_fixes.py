@@ -151,6 +151,8 @@ class AccountValidationTests(unittest.TestCase):
             )
 
         self.assertIn("messages 1 thru 3", captured["script"])
+        self.assertIn("id of aMessage", captured["script"])
+        self.assertIn("message id of aMessage", captured["script"])
         self.assertNotIn("content of aMessage", captured["script"])
 
     def test_dashboard_recent_script_includes_content_when_requested(self):
@@ -174,6 +176,38 @@ class AccountValidationTests(unittest.TestCase):
             )
 
         self.assertIn("content of aMessage", captured["script"])
+
+    def test_dashboard_recent_parser_includes_exact_ids(self):
+        parsed = analytics_tools._parse_recent_email_lines(
+            "Subject|||Sender|||Mon Jun 29 12:00:00 2026|||false|||Work|||INBOX|||123|||<abc@example.com>|||Preview"
+        )
+
+        self.assertEqual(
+            parsed,
+            [
+                {
+                    "subject": "Subject",
+                    "sender": "Sender",
+                    "date": "Mon Jun 29 12:00:00 2026",
+                    "is_read": False,
+                    "account": "Work",
+                    "mailbox": "INBOX",
+                    "message_id": "123",
+                    "internet_message_id": "<abc@example.com>",
+                    "preview": "Preview",
+                }
+            ],
+        )
+
+    def test_dashboard_recent_parser_preserves_legacy_preview_shape(self):
+        parsed = analytics_tools._parse_recent_email_lines(
+            "Subject|||Sender|||Mon Jun 29 12:00:00 2026|||true|||Work|||Preview"
+        )
+
+        self.assertEqual(parsed[0]["mailbox"], "INBOX")
+        self.assertEqual(parsed[0]["message_id"], "")
+        self.assertEqual(parsed[0]["internet_message_id"], "")
+        self.assertEqual(parsed[0]["preview"], "Preview")
 
     def test_get_inbox_overview_compact_omits_suggestions(self):
         accounts = [

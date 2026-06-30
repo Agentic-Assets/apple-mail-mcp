@@ -51,7 +51,7 @@ Destructive and bulk mutation tools default to **exact `message_ids`** from a pr
 - Lists longer than `MAX_WHOSE_IDS` (50) → `code: WHOSE_ID_LIST_TOO_LARGE`; chunk with `bounded_scan.iter_id_chunks`.
 - Filter paths still honor `recent_days` defaults and refuse unbounded scans with `UNBOUNDED_SCAN_REQUIRED` when no date window is set.
 
-Agent workflow: **search/list -> collect `message_id` -> mutate by ids**. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk/date or full-text campaigns.
+Agent workflow: **search/list -> collect `message_id` -> mutate by ids**. Prefer `sender_exact="person@example.com"` or `sender_domain="example.com"` over fuzzy `sender="..."` when the exact address or domain is known. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk/date or full-text campaigns.
 
 ### Centralized scan caps (`SCAN_BOUNDS`, v3.7.1)
 
