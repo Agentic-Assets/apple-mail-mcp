@@ -8,15 +8,15 @@ Tool/CLI work: delegate to subagents when available and permitted; use **`plugin
 
 **MCP:** `__main__.py` → orphan watcher → `--read-only` / `--draft-safe` → set `server.READ_ONLY` / `server.DRAFT_SAFE` → import package (registers tools) → remove `SEND_TOOLS` if read-only → `mcp.run()`.
 
-**CLI:** `apple-mail` script → `cli.py:main` (same tool functions, no MCP transport). Entry points: `mcp-apple-mail` → `__main__:main`; `apple-mail` → `cli:main`.
+**CLI:** `apple-mail` script → `cli/__init__.py:main` (same tool functions, no MCP transport). Entry points: `mcp-apple-mail` → `__main__:main`; `apple-mail` → `cli:main`.
 
 ## Key modules
 
 | Module | Role |
 |--------|------|
 | `server.py` | Shared `FastMCP`, env config, `ToolAnnotations` presets, `SEND_TOOLS` |
-| `core.py` | `run_applescript`, `escape_applescript`, validation, `@inject_preferences`, script builders |
-| `cli.py` | `apple-mail` subcommands (search, inbox, draft, smoke-test, quick-check, …) |
+| `core/` | Facade package (`__init__.py` re-exports + `__all__`) over `applescript`/`escaping`/`preferences`/`normalization`/`validation`/`script_fragments`/`replied`: `run_applescript`, `escape_applescript`, validation, `@inject_preferences`, script builders |
+| `cli/` | `apple-mail` subcommands package (facade `__init__.py` + `constants`/`formatting`/`parser`/`perf`/`draft_smoke`/`commands`); search, inbox, draft, smoke-test, quick-check, … |
 | `__main__.py` | MCP stdio entry, orphan watcher (python-sdk#526), read-only tool removal |
 | `__init__.py` | Side-effect imports of six `tools/` modules; `UI_AVAILABLE` flag |
 | `constants.py` | Shared patterns (`SKIP_FOLDERS`, newsletter detection, `TIME_RANGES`, `SCAN_BOUNDS`) |
@@ -24,9 +24,9 @@ Tool/CLI work: delegate to subagents when available and permitted; use **`plugin
 
 ## `tools/` subfolder
 
-**31 tools** in **6 modules** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | awk -F: '{sum+=$NF} END {print sum}'`. For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
+**31 tools** in **6 surfaces** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools | awk -F: '{sum+=$NF} END {print sum}'` (recursive: `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` are packages). For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
 
-**Module line budget:** all six tool modules exceed **600 LOC** today; CI warns and blocks further growth (`docs/CLAUDE-conventions.md` § Module line budget).
+**Module line budget:** every tool surface (`compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`) is split into under-budget packages; no tool module exceeds **600 LOC**. CI warns and blocks further growth (`docs/CLAUDE-conventions.md` § Module line budget).
 
 ## Shared state (`server.py`)
 

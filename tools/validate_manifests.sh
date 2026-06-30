@@ -79,9 +79,12 @@ assert_version "server.json" "packages[0].version" "server.json packages[0].vers
 assert_version "apple-mail-mcpb/manifest.json" "version" "mcpb manifest.json version"
 
 # --- 2. Registered tool count vs description claims ---
-ACTUAL_TOOL_COUNT="$(rg "^@mcp\.tool" plugin/apple_mail_mcp/tools/*.py | wc -l | tr -d " ")"
+# Recurse: @mcp.tool decorators live in the tools/<group>/ packages, not just
+# flat tools/*.py. `|| true` keeps a zero match from tripping `set -o pipefail`
+# so the explicit guard below reports it cleanly instead of dying silently.
+ACTUAL_TOOL_COUNT="$({ rg "^@mcp\.tool" -g '*.py' plugin/apple_mail_mcp/tools || true; } | wc -l | tr -d " ")"
 if [[ -z "$ACTUAL_TOOL_COUNT" || "$ACTUAL_TOOL_COUNT" == "0" ]]; then
-  err "No @mcp.tool registrations found under plugin/apple_mail_mcp/tools/*.py"
+  err "No @mcp.tool registrations found under plugin/apple_mail_mcp/tools/"
 fi
 
 if ! python3 - "$ACTUAL_TOOL_COUNT" <<'PY'
@@ -143,7 +146,8 @@ from pathlib import Path
 
 def extract_registered_tool_names():
     names = []
-    for path in sorted(glob.glob("plugin/apple_mail_mcp/tools/*.py")):
+    # Recurse: @mcp.tool decorators live in the tools/<group>/ packages now.
+    for path in sorted(glob.glob("plugin/apple_mail_mcp/tools/**/*.py", recursive=True)):
         lines = Path(path).read_text(encoding="utf-8").splitlines()
         i = 0
         while i < len(lines):

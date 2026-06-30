@@ -15,13 +15,13 @@ python3 tools/sync_skill_references.py          # write copies
 python3 tools/sync_skill_references.py --check  # CI / dev-check parity gate
 ```
 
-Enforced by `tests/test_packaged_skill_paths.py` (link escape + byte parity).
+Enforced by `tests/infra/test_packaged_skill_paths.py` (link escape + byte parity).
 
 ## validate_tasks_layout
 
 | Script | Role |
 |--------|------|
-| `validate_tasks_layout.py` | Enforces `tasks/` bucket layout (`active/`, `reference/`, `archive/`); covered by `tests/test_tasks_layout.py` |
+| `validate_tasks_layout.py` | Enforces `tasks/` bucket layout (`active/`, `reference/`, `archive/`); covered by `tests/infra/test_tasks_layout.py` |
 
 Agents must read `tasks/CLAUDE.md` § Agent requirements before creating or moving planning artifacts. The gate fails when loose markdown or workstream folders appear at `tasks/` root, required buckets are missing, navigation files drop layout markers, or `todo.md` links to stale flat paths.
 
@@ -36,7 +36,10 @@ Runs in `bash tools/dev-check.sh` (default and release tiers).
 | Script | Role |
 |--------|------|
 | `validate_manifests.sh` | Bash entry; **CI calls this** |
-| `validate_manifests.py` | Python equivalent; covered by `tests/test_validate_manifests.py` |
+| `validate_manifests.py` | Python orchestrator (`main`); covered by `tests/infra/test_validate_manifests.py` |
+| `manifest_checks/` | Check implementations grouped by concern (see below) |
+
+The individual checks live in the sibling `manifest_checks/` package (`common.py` for the shared `ROOT`/constants/helpers, then `version.py`, `tool_count.py`, `install_contracts.py`, `codex.py`, `artifacts.py`, `module_budget.py`); `validate_manifests.py` imports and orchestrates them in `main` and re-exports them so the test suite keeps calling `validate_manifests.<check>`. `validate_manifests.ROOT` forwards to `manifest_checks.common.ROOT`, so monkeypatching it still redirects every check.
 
 Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].name`):
 
@@ -52,7 +55,7 @@ Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].n
 10. **Marketplace ↔ plugin.json component conflict** — fails if both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while marketplace `strict` is not `true`. Mirrors the Claude Code "conflicting manifests" install error. See [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json" for the rule and escape hatch.
 11. **Codex plugin surface** — `.agents/plugins/marketplace.json` must point at `./plugin`; `plugin/.codex-plugin/plugin.json` must expose `skills: "./skills"` and `mcpServers: "./.mcp.json"`; `plugin/.mcp.json` must launch `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."`.
 12. **Stale distribution artifacts** — fails if repo root contains `apple-mail-mcp-v*.mcpb` files other than the current `pyproject.toml` version; run `tools/build-artifacts.sh` to prune and rebuild.
-13. **Module line budget** — warns on modules over **600 LOC** in `plugin/apple_mail_mcp/` and `tools/`; **fails** on baseline regression (`tests/fixtures/module_line_budget/baseline.json`). Covered by `tests/test_module_line_budget.py` and `check_module_line_budget.py`.
+13. **Module line budget** — warns on modules over **600 LOC** in `plugin/apple_mail_mcp/` and `tools/`; **fails** on baseline regression (`tests/fixtures/module_line_budget/baseline.json`). Covered by `tests/infra/test_module_line_budget.py` and `check_module_line_budget.py`.
 
 ```bash
 bash tools/validate_manifests.sh
@@ -73,7 +76,7 @@ Skips Claude marketplace `metadata.version` (1.0.0) and Codex marketplace releas
 
 | Script | Role |
 |--------|------|
-| `validate_tasks_layout.py` | Enforces `tasks/` bucket layout (`active/`, `reference/`, `archive/`); covered by `tests/test_tasks_layout.py` |
+| `validate_tasks_layout.py` | Enforces `tasks/` bucket layout (`active/`, `reference/`, `archive/`); covered by `tests/infra/test_tasks_layout.py` |
 
 Agents must read `tasks/CLAUDE.md` § Agent requirements before creating or moving planning artifacts. The gate fails when:
 
@@ -92,7 +95,7 @@ Runs in `bash tools/dev-check.sh` (default and release tiers).
 
 | Script | Role |
 |--------|------|
-| `check_wrapper_surface.py` | Generated mcporter wrapper command-surface check; covered by `tests/test_wrapper_surface.py` |
+| `check_wrapper_surface.py` | Generated mcporter wrapper command-surface check; covered by `tests/infra/test_wrapper_surface.py` |
 
 Separate from **`validate_manifests`** — manifest validation checks Python `@mcp.tool` ↔ MCPB `tools[]` parity, but the generated `apple-mail` wrapper on PATH embeds schemas at generation time and can drift when new tools are added.
 
@@ -109,7 +112,7 @@ Run after regenerating the mcporter bundle or adding read tools agents rely on.
 
 | Script | Role |
 |--------|------|
-| `check_module_line_budget.py` | 600 LOC budget scanner for `plugin/apple_mail_mcp/` and `tools/`; covered by `tests/test_module_line_budget.py` |
+| `check_module_line_budget.py` | 600 LOC budget scanner for `plugin/apple_mail_mcp/` and `tools/`; covered by `tests/infra/test_module_line_budget.py` |
 
 Warn-only CLI (exit 0) listing oversized modules; **regression** enforced in pytest and `validate_manifests.py` via `tests/fixtures/module_line_budget/baseline.json`.
 

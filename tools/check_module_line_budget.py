@@ -3,7 +3,7 @@
 
 Counts physical lines (wc -l semantics) in production package and dev-tool
 scripts. The CLI is warn-only (exit 0); CI enforcement lives in
-``tests/test_module_line_budget.py``.
+``tests/infra/test_module_line_budget.py``.
 """
 
 from __future__ import annotations
