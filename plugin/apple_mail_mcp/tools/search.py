@@ -197,6 +197,13 @@ SENDER_ONLY_SEARCH_HINT = (
     "sender-only search can be slow on large mailboxes; add subject_keyword, "
     "date_from, has_attachments, or body_text (with allow_body_scan=True) to narrow the scan"
 )
+CONTENT_PREVIEW_SEARCH_HINT = (
+    "include_content=True adds body previews to results and can be slower or expose more message text; "
+    "leave it false for discovery, then fetch exact messages by id"
+)
+BODY_TEXT_SEARCH_HINT = (
+    "body_text scans message bodies and can be slow or broad; keep account, date, subject, and limit filters tight"
+)
 
 
 def _body_scan_disabled_error() -> str:
@@ -230,6 +237,8 @@ def _build_search_response(
     mailbox_count_capped: bool = False,
     mailboxes_truncated: bool = False,
     sender_only_hint: bool = False,
+    include_content_hint: bool = False,
+    body_text_hint: bool = False,
 ) -> str:
     """Return either JSON or text for search results."""
     sorted_records = _sort_search_records(records, sort)
@@ -269,6 +278,10 @@ def _build_search_response(
             )
         if sender_only_hint:
             payload.setdefault("warnings", []).append(SENDER_ONLY_SEARCH_HINT)
+        if include_content_hint:
+            payload.setdefault("warnings", []).append(CONTENT_PREVIEW_SEARCH_HINT)
+        if body_text_hint:
+            payload.setdefault("warnings", []).append(BODY_TEXT_SEARCH_HINT)
         if errors:
             payload["errors"] = errors
         if error_details:
@@ -297,6 +310,10 @@ def _build_search_response(
         text_result = mb_warning + text_result
     if sender_only_hint:
         text_result = f"WARNING: {SENDER_ONLY_SEARCH_HINT}\n" + text_result
+    if include_content_hint:
+        text_result = f"WARNING: {CONTENT_PREVIEW_SEARCH_HINT}\n" + text_result
+    if body_text_hint:
+        text_result = f"WARNING: {BODY_TEXT_SEARCH_HINT}\n" + text_result
     return text_result
 
 
@@ -1310,6 +1327,8 @@ async def search_emails(
             mailbox_count_capped=_mailbox_all,
             mailboxes_truncated=_mailbox_all,
             sender_only_hint=sender_only_hint,
+            include_content_hint=include_content,
+            body_text_hint=bool(body_text),
         )
     except ValueError as exc:
         return f"Error: {exc}"

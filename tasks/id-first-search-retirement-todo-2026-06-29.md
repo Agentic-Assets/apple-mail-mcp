@@ -39,6 +39,7 @@ Completed in the CLI/dashboard follow-up pass:
 - Rewrote `common-workflows.md` and adjacent packaged examples so action examples use reviewed ids, whole-account mailbox snippets are not copyable, and exact sender/domain discovery is preferred.
 - Updated reply, forward, Drafts, thread, attachment, and style-profile guidance so subject fallback is explicitly a degraded path after ids are unavailable.
 - Added JSON attachment listing metadata (`message_id`, `attachment_index`, filename, size) and exact `save_email_attachment(..., attachment_index=N)` support with duplicate-name ambiguity errors.
+- Added search warnings for sender-only, body, content-preview, and whole-account mailbox discovery paths.
 
 Still open:
 
@@ -200,7 +201,7 @@ Todos:
 - [ ] Make `get_email_thread(message_id=...)` header-first: exact anchor headers, cached headers where available, explicit mailbox set, subject fallback last.
 - [ ] Add `include_preview=False` default or option for `get_email_thread`.
 - [ ] Add examples for explicit `mailboxes=[...]`.
-- [ ] Add warnings for sender-only, body, content-preview, and All-mailbox searches.
+- [x] Add warnings for sender-only, body, content-preview, and All-mailbox searches.
 - [ ] Test renamed threads and common-subject overmatch.
 
 Verification:

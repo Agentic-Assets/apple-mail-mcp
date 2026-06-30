@@ -1490,6 +1490,29 @@ class SearchGuardrailTests(unittest.TestCase):
 
         self.assertNotIn("BODY_SCAN_DISABLED", result)
         self.assertIn("msgContent contains", captured["script"])
+        self.assertIn("WARNING:", result)
+        self.assertIn("body_text scans", result)
+
+    def test_body_text_with_explicit_date_emits_json_warning(self):
+        def fake_run(script, timeout=180):
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            raw = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    body_text="quarterly report",
+                    allow_body_scan=True,
+                    date_from="2026-06-01",
+                    recent_days=0,
+                    output_format="json",
+                )
+            )
+
+        payload = json.loads(raw)
+        self.assertNotIn("body_search_capped", payload)
+        warnings = payload.get("warnings", [])
+        self.assertTrue(any("body_text scans" in w for w in warnings))
 
     def test_sender_only_search_emits_json_warning(self):
         def fake_run(script, timeout=180):
@@ -1525,6 +1548,43 @@ class SearchGuardrailTests(unittest.TestCase):
 
         self.assertIn("WARNING:", result)
         self.assertIn("sender-only", result.lower())
+
+    def test_include_content_search_emits_json_warning(self):
+        def fake_run(script, timeout=180):
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            raw = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    subject_keyword="review",
+                    include_content=True,
+                    recent_days=7,
+                    output_format="json",
+                )
+            )
+
+        payload = json.loads(raw)
+        warnings = payload.get("warnings", [])
+        self.assertTrue(any("include_content=true" in w.lower() for w in warnings))
+
+    def test_include_content_search_emits_text_warning(self):
+        def fake_run(script, timeout=180):
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    subject_keyword="review",
+                    include_content=True,
+                    recent_days=7,
+                    output_format="text",
+                )
+            )
+
+        self.assertIn("WARNING:", result)
+        self.assertIn("include_content=True", result)
 
     def test_sender_exact_builds_exact_address_condition(self):
         captured = {}
