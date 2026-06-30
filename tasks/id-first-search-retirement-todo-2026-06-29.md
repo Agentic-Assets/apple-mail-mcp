@@ -114,6 +114,11 @@ Completed in the Envelope Index schema-spike helper pass:
 - Required `--confirm-read-only-live-mail-index` before opening Mail's local index.
 - Added local SQLite tests proving the helper reports table/column/index metadata while redacting the file path and excluding message rows.
 
+Completed in the final verification audit pass:
+
+- Saved `tasks/id-first-search-retirement-completion-audit-2026-06-29.md` with explicit proof commands, passed results, branch-scope claims, and remaining Cayman/live-proof blockers.
+- Re-ran the Phase 6 focused bundle for compose, manage, analytics, search, smart-inbox, CLI, dashboard, no-unbounded-scan, bounded-scan, read-only registry, metadata-index, helper, and perf-budget coverage.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
@@ -352,18 +357,20 @@ Use `reviewing-code`, `testing-python`, `Plugin Structure`, and `finalize-apple-
 
 Verification:
 
-- [ ] Focused tests for every touched tool.
-- [ ] Adjacent compose, manage, analytics, search, smart-inbox, CLI, and dashboard tests.
-- [ ] `test_no_unbounded_whose.py`.
-- [ ] `test_bounded_scan_contract.py`.
-- [ ] Read-only registry/schema tests.
-- [ ] Static docs and skill tests.
-- [ ] Manifest validation if plugin/package metadata changes.
-- [ ] `ruff check`.
-- [ ] `ruff format --check`.
-- [ ] `mypy --strict` for touched Python surfaces if consistent with repo gate.
-- [ ] `git diff --check`.
-- [ ] Sensitive-data scan over changed source, tests, docs, skills, UI, and package artifacts.
+- [x] Focused tests for every touched tool.
+- [x] Adjacent compose, manage, analytics, search, smart-inbox, CLI, and dashboard tests.
+- [x] `test_no_unbounded_whose.py`.
+- [x] `test_bounded_scan_contract.py`.
+- [x] Read-only registry/schema tests.
+- [x] Static docs and skill tests.
+- [x] Manifest validation if plugin/package metadata changes.
+- [x] `ruff check`.
+- [x] `ruff format --check`.
+- [x] `mypy --strict` for touched Python surfaces if consistent with repo gate.
+- [x] `git diff --check`.
+- [x] Sensitive-data scan over changed source, tests, docs, skills, UI, and package artifacts.
+
+Evidence: `tasks/id-first-search-retirement-completion-audit-2026-06-29.md`.
 
 ## Worker Prompt Template
 
