@@ -44,7 +44,6 @@ Completed in the CLI/dashboard follow-up pass:
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
-- Exact attachment selector design.
 - Forward draft id capture and verification.
 - Thread header graph work.
 - Metadata index feasibility and integration.
