@@ -16,7 +16,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 1. Pick module by domain; add `@mcp.tool(annotations=…)` using presets from `../server.py` (matrix: `tasks/phase-3-annotation-matrix.md`).
 2. `@inject_preferences` on user-facing tools; user strings → `core.escape_applescript()`; fan-out → `async` + `asyncio.to_thread`.
-3. New file → import in `__init__.py`; bump five version manifests + `apple-mail-mcpb/manifest.json` `tools[]` and advertised tool count.
+3. New file → import in `__init__.py`; update the root release version table files when releasing, plus `apple-mail-mcpb/manifest.json` `tools[]` and advertised tool count.
 
 ## Performance (summary)
 

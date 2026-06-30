@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **932 collected tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **958 collected tests**, Python **3.10+**.
 
 ## Documentation map
 
