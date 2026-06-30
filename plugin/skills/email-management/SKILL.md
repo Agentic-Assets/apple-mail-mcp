@@ -15,15 +15,15 @@ See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonic
 
 `full_inbox_export` is the only tool that walks the entire inbox. Reserve it for the rare full-inbox case — annual cleanup, complete audit, compliance archive, or pre-migration snapshot. It is slow (minutes on a 24k inbox); never use it inside a habitual triage loop. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
 
-## Already-replied safeguard (default)
+## Already-replied safeguard
 
-Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. The discovery tools enforce this by default:
+Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. Discovery tools can help, but the final pre-draft thread check is still required:
 
-- `get_needs_response()` filters out already-replied emails (Message-ID matched against the Sent mailbox). Pass `include_already_replied=True` only if the user explicitly asks to see them.
+- `get_needs_response(check_already_replied=True)` filters or annotates already-replied emails by matching each candidate `internet_message_id` against Sent `In-Reply-To` / `References` headers. Keep `include_already_replied=False` unless the user explicitly asks to see already-handled messages.
 - `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
 - As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
 
-Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` (on `get_needs_response`) or `exclude_replied=False` (elsewhere).
+Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` with `check_already_replied=True` on `get_needs_response`, or `exclude_replied=False` elsewhere.
 
 See **[[email-drafting]]** for the required pre-draft verification step.
 
@@ -94,7 +94,7 @@ Pattern: identify candidates with `search_emails()`, preview the count and sampl
 Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 minute scan** only, use the **`inbox-triage`** skill instead.
 
 1. Get overview: `get_inbox_overview()` to see unread counts, recent messages, and suggested actions.
-2. Surface priorities: `get_needs_response(days_back=2, max_results=20)` for likely replies (20 is the tool default); optionally `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
+2. Surface priorities: `get_needs_response(days_back=2, max_results=20, output_format="json")` for likely replies. Use each row's numeric `message_id` for downstream reads, replies, moves, and status updates; keep `internet_message_id` only for replied-header correlation. Optionally use `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
 3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(message_id=...)` for full content — do not re-search by subject.
 4. Decide per message using the four-option rule: respond, defer, file, or delete.
    - For responses, defer to **`email-drafting`** (compose MCP stack).
@@ -152,7 +152,7 @@ Mindset:
 |------|------|-------|
 | Inbox snapshot | `get_inbox_overview()` | Always the first call |
 | Daily 5-min scan | `inbox-triage` skill | Uses needs-response + list, not full cleanup |
-| Likely need reply | `get_needs_response(days_back=2)` | Fast subject-only by default |
+| Likely need reply | `get_needs_response(days_back=2, output_format="json")` | Fast subject-only by default; JSON `message_id` is the numeric Mail id for actions |
 | Follow-ups you sent | `get_awaiting_reply(days_back=7)` | Optional daily check |
 | Full dashboard | `inbox_dashboard()` | Heavier, richer view |
 | Find a specific email | `search_emails(subject_keyword="...")` | Defaults to last 48 hours |

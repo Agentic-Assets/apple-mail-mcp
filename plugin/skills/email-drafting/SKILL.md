@@ -7,15 +7,15 @@ description: 'Use when drafting, replying, forwarding, or verifying Apple Mail d
 
 Compose-first workflows against Apple Mail. Default plugin installs run **`--draft-safe`**: compose tools default to quiet `mode="draft"` (no leftover compose windows), and `mode="send"` returns a structured error until the server is reconfigured. When send is allowed, still confirm intent with the user before calling `mode="send"` or `manage_drafts(action="send")`.
 
-## Already-replied safeguard (default)
+## Already-replied safeguard
 
-Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. The discovery tools enforce this by default:
+Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. Discovery tools can help, but the final pre-draft thread check is still required:
 
-- `get_needs_response()` filters out already-replied emails (Message-ID matched against the Sent mailbox). Pass `include_already_replied=True` only if the user explicitly asks to see them.
+- `get_needs_response(check_already_replied=True)` filters or annotates already-replied emails by matching each candidate `internet_message_id` against Sent `In-Reply-To` / `References` headers. Keep `include_already_replied=False` unless the user explicitly asks to see already-handled messages.
 - `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
 - As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
 
-Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` (on `get_needs_response`) or `exclude_replied=False` (elsewhere).
+Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` with `check_already_replied=True` on `get_needs_response`, or `exclude_replied=False` elsewhere.
 
 ## Pre-draft verification (required before replying)
 
@@ -54,7 +54,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 3. **Mode** — `draft` (quiet save, default) vs `open` (saved + window stays open for review) vs `send` (blocked under `--draft-safe`). `mode="send"` requires explicit user confirmation and a non-draft-safe configuration.
 4. **Signature intent** — `include_signature=True` applies `DEFAULT_MAIL_SIGNATURE` if set; when unset, Mail may still apply the account's normal default signature. Pass `signature_name` to override, `include_signature=False` to suppress plugin-applied signatures. For replies, disabling signatures cannot skip body insertion above the quoted original. `create_rich_email_draft` does not accept signature params — switch to a plain compose tool when a named signature is required.
 5. **Source message id** (replies/forwards only) — pass the `message_id` returned by search/list. Use `subject_keyword` only as a degraded path after confirming no id is available and narrowing the search window.
-6. **Standalone-confirmed override** — `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` refuse `Re:`/`Fwd:` subjects or bodies containing quoted-thread markers and return a structured error. If the user genuinely wants a fresh standalone message that happens to look threaded (e.g. a new "Re: weekly review" note unrelated to any prior thread), pass `standalone_confirmed=True` (CLI: `--standalone-confirmed`); never use this override to substitute for `reply_to_email` / `forward_email`.
+6. **Standalone-confirmed override:** `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` refuse `Re:`/`Fwd:` subjects or bodies containing quoted-thread markers and return a structured error. If the user explicitly wants a fresh standalone message that happens to look threaded (e.g. a new "Re: weekly review" note unrelated to any prior thread), pass `standalone_confirmed=True` (CLI: `--standalone-confirmed`); never use this override to substitute for `reply_to_email` / `forward_email`.
 
 **Large-inbox caveat:** the pre-draft `get_email_thread` verification can stall on long threads in a 24k mailbox. Prefer fetching by `message_id` (`get_email_thread(message_id=...)` or `get_email_by_id(message_id=...)`) rather than re-resolving the thread via account + subject signature.
 
@@ -115,11 +115,9 @@ constructs and assigns the new plain-text `reply_body` above the quoted-original
 block, then saves. Verification checks the exact Drafts artifact id first when
 Mail exposes one, falls back to bounded newest-Drafts only when needed, and fails
 with a structured artifact id if the body is missing or appears after the quote.
-For machine-readable reply draft metadata, call `reply_to_email(..., output_format="json")`
-to get `draft_id`, `verified_draft_id`, verification status, mode, and `sent`.
-`body_html`
-on `reply_to_email` is accepted for compatibility but ignored; use
-`create_rich_email_draft` / `compose_email` only for rich HTML on a genuinely
+For machine-readable reply draft metadata, call `reply_to_email(..., output_format="json")` only with `mode="draft"` or `mode="open"`. The JSON payload includes `mode`, `sent`, `subject`, `draft_id`, `verified_draft_id`, `exact_id_verified`, `verification_status`, `body_present`, `attachment_status`, `signature_status`, and `mailbox`. `exact_id_verified=true` means the verifier matched Mail's returned `draft_id`; `false` means bounded fallback verified a Drafts artifact, so treat `draft_id` and `verified_draft_id` as distinct handles until manually checked. If verification times out or errors after Mail returned a Draft ID, the error preserves the known `draft_id` / Drafts artifact id for exact cleanup. `output_format="json"` with effective `mode="send"` is rejected before Mail mutation; send mode is not draft-verifiable.
+`body_html` on `reply_to_email` is accepted for compatibility but ignored; use
+`create_rich_email_draft` / `compose_email` only for rich HTML on a confirmed
 standalone message.
 
 ## Related Skills

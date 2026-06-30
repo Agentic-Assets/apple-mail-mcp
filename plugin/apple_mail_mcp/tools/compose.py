@@ -341,6 +341,7 @@ class _ReplyDraftVerification:
     ok: bool
     status: str = "not_found"
     body_missing_artifact_id: str | None = None
+    error_artifact_id: str | None = None
     matched_artifact_id: str | None = None
     attachment_status: str | None = None
     attachment_count: int | None = None
@@ -386,6 +387,11 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     return _ReplyDraftVerification(ok=False, status="not_found")
 
 
+def _reply_exact_id_verified(verification: _ReplyDraftVerification, draft_id: str | None) -> bool:
+    """Return whether verification proved the exact saved Drafts artifact."""
+    return bool(verification.ok and draft_id and verification.matched_artifact_id == draft_id)
+
+
 def _format_reply_verification_lines(verification: _ReplyDraftVerification, fallback_draft_id: str | None) -> str:
     """Return stable success metadata lines for a verified reply draft."""
     verified_id = verification.matched_artifact_id or fallback_draft_id or ""
@@ -394,6 +400,10 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
     ]
     if verified_id:
         lines.append(f"Verified Draft ID: {verified_id}")
+    if verification.ok and fallback_draft_id and verified_id and verified_id != fallback_draft_id:
+        lines.append(
+            "Warning: saved draft was verified by bounded Drafts fallback, not by the exact Draft ID returned by Mail"
+        )
     if verification.attachment_status:
         lines.append(f"Attachment Verification Status: {verification.attachment_status}")
         if verification.attachment_count is not None:
@@ -430,6 +440,7 @@ def _reply_success_payload(
         "draft_id": draft_id,
         "verified_draft_id": verified_id,
         "verification_status": verification.status,
+        "exact_id_verified": _reply_exact_id_verified(verification, draft_id),
         "body_present": verification.status == "found",
         "attachment_status": verification.attachment_status,
         "signature_status": verification.signature_status,
@@ -671,8 +682,10 @@ def _verify_saved_reply_draft(
     '''
     try:
         output = run_applescript(script, timeout=verification_timeout).strip()
+    except AppleScriptTimeout:
+        return _ReplyDraftVerification(ok=False, status="verification_timeout", error_artifact_id=draft_id)
     except Exception:  # noqa: BLE001 - caller converts verification failure into a safe error
-        return _ReplyDraftVerification(ok=False, status="applescript_error")
+        return _ReplyDraftVerification(ok=False, status="applescript_error", error_artifact_id=draft_id)
     return _reply_verification_from_output(output)
 
 
@@ -1418,7 +1431,7 @@ def _reply_draft_verification_error(
     reply_body: str,
 ) -> str:
     """Serialize a structured draft-verification failure when an artifact id is known."""
-    artifact_id = verification.body_missing_artifact_id
+    artifact_id = verification.body_missing_artifact_id or verification.error_artifact_id
     if not artifact_id:
         return (
             f"Error: Reply draft was {mode_text}, but Mail did not verify it in the newest Drafts "
@@ -1428,9 +1441,15 @@ def _reply_draft_verification_error(
     if verification.status == "body_after_quote":
         code = "REPLY_DRAFT_BODY_AFTER_QUOTE"
         detail = "contains the inserted reply body after the quoted original instead of above it"
-    else:
+    elif verification.status == "body_missing":
         code = "REPLY_DRAFT_BODY_MISSING"
         detail = "does not contain the inserted reply body"
+    elif verification.status == "verification_timeout":
+        code = "REPLY_DRAFT_VERIFICATION_TIMEOUT"
+        detail = "could not be verified before the verifier timed out"
+    else:
+        code = "REPLY_DRAFT_VERIFICATION_ERROR"
+        detail = "could not be verified because Mail returned a verifier error"
 
     return serialize_tool_error(
         ToolError(
@@ -1440,6 +1459,7 @@ def _reply_draft_verification_error(
             ),
             remediation={
                 "artifact_message_id": artifact_id,
+                "draft_id": artifact_id,
                 "mailbox": "Drafts",
                 "verification_status": verification.status,
                 "expected_body_needle": _first_non_empty_line(reply_body),
@@ -1912,6 +1932,26 @@ def reply_to_email(
     if signature_error:
         return signature_error
 
+    # Resolve delivery mode before creating temp files so early contract errors
+    # leave no local artifacts behind.
+    if mode is not None:
+        if mode not in ("send", "draft", "open"):
+            return f"Error: Invalid mode '{mode}'. Use: send, draft, open"
+        effective_mode = mode
+    else:
+        effective_mode = "send" if send else "draft"
+
+    blocked = _send_blocked(effective_mode)
+    if blocked:
+        return blocked
+    if output_format == "json" and effective_mode == "send":
+        return "Error: output_format='json' is only supported for mode='draft' or mode='open'."
+
+    if effective_mode == "open":
+        cap_err = _check_open_compose_window_cap()
+        if cap_err:
+            return cap_err
+
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
     safe_subject_keyword = escape_applescript(subject_keyword) if subject_keyword else ""
@@ -1957,23 +1997,6 @@ def reply_to_email(
     safe_cc = escape_applescript(cc) if cc else ""
     safe_bcc = escape_applescript(bcc) if bcc else ""
     safe_attachment_info = escape_applescript(attachment_info) if attachment_info else ""
-
-    # Resolve delivery mode: mode parameter takes precedence over send boolean
-    if mode is not None:
-        if mode not in ("send", "draft", "open"):
-            return f"Error: Invalid mode '{mode}'. Use: send, draft, open"
-        effective_mode = mode
-    else:
-        effective_mode = "send" if send else "draft"
-
-    blocked = _send_blocked(effective_mode)
-    if blocked:
-        return blocked
-
-    if effective_mode == "open":
-        cap_err = _check_open_compose_window_cap()
-        if cap_err:
-            return cap_err
 
     mode_plan = _reply_mode_plan(effective_mode)
 

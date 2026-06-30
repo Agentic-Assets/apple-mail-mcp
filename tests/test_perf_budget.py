@@ -9,6 +9,7 @@ BASELINE_PATH = FIXTURE_DIR / "id_first_baseline.json"
 CURRENT_PATH = FIXTURE_DIR / "id_first_current.json"
 REQUIRED_CASES = {
     "search_emails.discovery_bounded",
+    "get_needs_response.discovery_bounded",
     "get_email_thread.message_id_header_first",
     "get_email_by_id.exact",
     "full_inbox_export.metadata_only",

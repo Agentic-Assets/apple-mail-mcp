@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apple_mail_mcp import server as _server
+from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import compose as compose_tools
 
 
@@ -194,6 +195,41 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
                     any(f'set message signature of {message_var} to signature "TU"' in script for script in captured),
                     captured,
                 )
+
+    def test_default_signature_applies_to_reply_via_mail_signature_property(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return ""
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|detected"
+            return "ok"
+
+        with (
+            patch.object(compose_tools.server, "DEFAULT_MAIL_SIGNATURE", "TU", create=True),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        script = _main_reply_script(captured)
+        _assert_ordered(
+            self,
+            script,
+            'set message signature of replyMessage to signature "TU"',
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "save replyMessage",
+        )
+        verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
+        self.assertIn("set signatureWasRequested to true", verifier_script)
+        self.assertIn("Signature Verification Status: detected", result)
 
 
 class ComposeToolTests(unittest.TestCase):
@@ -982,6 +1018,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["draft_id"], "84053")
         self.assertEqual(payload["verified_draft_id"], "84053")
         self.assertEqual(payload["verification_status"], "found")
+        self.assertTrue(payload["exact_id_verified"])
         self.assertTrue(payload["body_present"])
         self.assertEqual(payload["attachment_status"], "not_requested")
         self.assertEqual(payload["signature_status"], "not_requested")
@@ -1112,9 +1149,32 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["draft_id"], "84053")
         self.assertEqual(payload["verified_draft_id"], "84054")
         self.assertEqual(payload["verification_status"], "found")
+        self.assertFalse(payload["exact_id_verified"])
         self.assertEqual(payload["attachment_status"], "verified")
         self.assertEqual(payload["signature_status"], "missing")
         self.assertFalse(payload["sent"])
+
+    def test_reply_draft_success_text_warns_when_fallback_verified_different_draft(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84054|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        self.assertIn("Draft ID: 84053", result)
+        self.assertIn("Verified Draft ID: 84054", result)
+        self.assertIn("verified by bounded Drafts fallback", result)
 
     def test_reply_all_with_attachment_preserves_single_body_and_verifies_exact_draft(self):
         captured = []
@@ -1327,8 +1387,95 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         payload = json.loads(result)
         self.assertEqual(payload["code"], "REPLY_DRAFT_BODY_MISSING")
         self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["draft_id"], "84053")
         self.assertEqual(payload["remediation"]["expected_body_needle"], sentinel)
         self.assertIn("No email was sent", payload["message"])
+
+    def test_reply_draft_verifier_timeout_preserves_saved_draft_id(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                raise AppleScriptTimeout("simulated verifier timeout")
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_DRAFT_VERIFICATION_TIMEOUT")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["draft_id"], "84053")
+        self.assertEqual(payload["remediation"]["verification_status"], "verification_timeout")
+        self.assertIn("No email was sent", payload["message"])
+
+    def test_reply_draft_verifier_error_preserves_saved_draft_id(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                raise RuntimeError("simulated verifier failure")
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_DRAFT_VERIFICATION_ERROR")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["draft_id"], "84053")
+        self.assertEqual(payload["remediation"]["verification_status"], "applescript_error")
+        self.assertIn("No email was sent", payload["message"])
+
+    def test_reply_to_email_rejects_json_mode_send_before_main_script(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", False),
+            patch.object(compose_tools._server, "DRAFT_SAFE", False),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                mode="send",
+                output_format="json",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("output_format='json' is only supported", result)
+
+    def test_reply_to_email_rejects_json_send_alias_before_main_script(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", False),
+            patch.object(compose_tools._server, "DRAFT_SAFE", False),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                send=True,
+                output_format="json",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("output_format='json' is only supported", result)
 
     def test_reply_draft_verifier_rejects_body_after_quoted_original(self):
         def fake_run(script, timeout=120):

@@ -19,6 +19,7 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     inject_preferences,
     run_applescript,
+    sanitize_pipe_delimited_field,
     validate_account_name,
 )
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
@@ -741,6 +742,8 @@ def _build_needs_response_inbox_script(
                             if isFlagged then set flagText to "true"
                             set questionText to "false"
                             if hasQuestion then set questionText to "true"
+                            {sanitize_pipe_delimited_field("messageSubject")}
+                            {sanitize_pipe_delimited_field("messageSender")}
 
                             set end of outputLines to "MSG|||" & mailAppMessageId & "|||" & inboxInternetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText
                             set emittedCount to emittedCount + 1

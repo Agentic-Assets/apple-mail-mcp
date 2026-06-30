@@ -425,6 +425,26 @@ class HeavyScanGuardTests(unittest.TestCase):
         self.assertNotIn("every message of targetMailbox whose", captured["script"])
         self.assertNotIn("set mailboxMessages to messages of targetMailbox", captured["script"])
 
+    def test_needs_response_emits_numeric_and_internet_message_ids_safely(self):
+        script = smart_inbox_tools._build_needs_response_inbox_script(
+            escaped_account="Work",
+            escaped_mailbox="INBOX",
+            days_back=7,
+            inbox_cap=25,
+            max_results=10,
+            scan_body=False,
+        )
+
+        self.assertIn("set mailAppMessageId to id of aMessage as string", script)
+        self.assertIn("set rawMessageId to message id of aMessage", script)
+        self.assertIn(
+            '"MSG|||" & mailAppMessageId & "|||" & inboxInternetMessageId',
+            script,
+        )
+        self.assertIn('set AppleScript\'s text item delimiters to "|||"', script)
+        self.assertIn("set messageSubject to _amm_parts as string", script)
+        self.assertIn("set messageSender to _amm_parts as string", script)
+
     def test_awaiting_reply_uses_bounded_slices_not_unbounded_whose(self):
         captured: dict[str, list[str]] = {"scripts": []}
 
