@@ -226,6 +226,7 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Reply body",
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         script = _main_reply_script(captured)
@@ -1026,6 +1027,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="",
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         script = _main_reply_script(captured)
@@ -1387,6 +1389,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 attachments=str(attachment),
                 include_signature=False,
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         self.assertIn("Reply saved as draft!", result)
@@ -1536,6 +1539,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_body="Reply body",
                 include_signature=True,
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
@@ -1915,6 +1919,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_body="Reply body",
                 send=False,
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         script = _main_reply_script(captured)
@@ -2008,6 +2013,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_body="Reply body",
                 signature_name="TU",
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         script = _main_reply_script(captured)
@@ -2042,6 +2048,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_body="Unique body sentinel 84053",
                 include_signature=False,
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         script = _main_reply_script(captured)
@@ -2082,6 +2089,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_body=f"{body_sentinel}\n\nReply body",
                 include_signature=False,
                 native_format=False,
+                allow_windowless_fallback=True,
             )
 
         self.assertIn("Draft ID: 81121", result)
@@ -2148,7 +2156,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
     def test_native_reply_guard_abort_returns_focus_failed_error(self):
         # When the native path cannot bring the reply window into focus it returns a
         # GUARD_ABORT sentinel without saving; reply_to_email maps that to a structured
-        # REPLY_WINDOW_FOCUS_FAILED error that points callers at native_format=False.
+        # REPLY_WINDOW_FOCUS_FAILED error that tells callers to retry native and NOT
+        # switch off native formatting.
         def fake_run(script, timeout=120):
             if "reply foundMessage" in script:
                 return "GUARD_ABORT: could not focus reply window (mailFront=Inbox seFront=Inbox)"
@@ -2167,8 +2176,27 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         payload = json.loads(result)
         self.assertTrue(payload["error"])
         self.assertEqual(payload["code"], "REPLY_WINDOW_FOCUS_FAILED")
-        self.assertIn("native_format=False", payload["remediation"]["alternative"])
+        self.assertIn("Do not switch off native formatting", payload["remediation"]["alternative"])
+        self.assertNotIn("native_format=False", payload["remediation"]["alternative"])
         self.assertIn("GUARD_ABORT", payload["remediation"]["detail"])
+
+    def test_windowless_fallback_disabled_without_ack(self):
+        # native_format=False is gated: without allow_windowless_fallback=True the tool
+        # returns WINDOWLESS_FALLBACK_DISABLED before any AppleScript runs, so agents
+        # cannot drift into the windowless plain-text fallback path.
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                native_format=False,
+            )
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertTrue(payload["error"])
+        self.assertEqual(payload["code"], "WINDOWLESS_FALLBACK_DISABLED")
+        self.assertIn("preferred", payload["remediation"])
+        self.assertIn("headless_only", payload["remediation"])
 
     def test_native_reply_verifier_rejoins_soft_wrapped_lines(self):
         # Mail soft-wraps long typed lines, and `content as string` renders the wraps

@@ -28,7 +28,7 @@ reply_to_email(message_id=message_id, reply_body="...", mode="draft")
 
 - Never pass `subject_keyword` to `reply_to_email` or `forward_email` (`TARGET_SELECTOR_DEPRECATED`).
 - Never use `compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")` for thread replies.
-- On `REPLY_WINDOW_FOCUS_FAILED`: retry with Mail visible, or `native_format=False` for headless/CI.
+- On `REPLY_WINDOW_FOCUS_FAILED`: no draft was saved. Retry with Mail visible and not being clicked. Do not switch to `native_format=False`; it is gated (`WINDOWLESS_FALLBACK_DISABLED`) and reserved for deliberate headless/CI via `allow_windowless_fallback=True`, which agents must never set. If focus still cannot be acquired, stop and report the blocker.
 
 ## JSON key reminder
 

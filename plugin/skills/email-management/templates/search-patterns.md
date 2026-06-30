@@ -197,7 +197,8 @@ reply_to_email(
     mode="draft",
 )
 # Default native_format=True (rich quote + logo signature); load email-drafting for
-# Accessibility / REPLY_WINDOW_FOCUS_FAILED recovery. Use native_format=False headless only.
+# Accessibility / REPLY_WINDOW_FOCUS_FAILED recovery: retry with Mail visible. Do not
+# use native_format=False (gated: WINDOWLESS_FALLBACK_DISABLED).
 ```
 
 Do not reply or forward by subject. If no id is known, run `search_emails` or `list_inbox_emails` first.

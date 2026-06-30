@@ -1803,7 +1803,8 @@ def _build_reply_native_window_applescript(
     tolerates an empty System Events title (an AX quirk for compose windows); a
     different non-empty SE title aborts without typing so a partial/wrong-thread
     draft is never saved. Requires Accessibility permission for the host process;
-    callers that cannot grant it should use ``native_format=False``.
+    callers that cannot grant it must stop and report the blocker; the
+    ``native_format=False`` path is gated behind ``allow_windowless_fallback``.
     """
     extra_output_lines = _reply_extra_output_lines(
         safe_cc=safe_cc,
@@ -2196,9 +2197,14 @@ def reply_to_email(
     signature_name: str | None = None,
     output_format: str = "text",
     native_format: bool = True,
+    allow_windowless_fallback: bool = False,
 ) -> str:
     """
-    Reply to an email by exact ``message_id``.
+    Reply to an email by exact ``message_id`` using Mail's native reply window.
+    Native drafting (``native_format=True``, the default) is the only supported
+    path; the windowless ``native_format=False`` fallback is gated and returns
+    ``WINDOWLESS_FALLBACK_DISABLED`` unless ``allow_windowless_fallback=True`` is
+    passed. Agents must never use the fallback.
 
     ``subject_keyword`` is a deprecated selector retained for v3.x schema
     compatibility. Use ``search_emails(...)`` or ``list_inbox_emails(...)`` to
@@ -2235,13 +2241,45 @@ def reply_to_email(
             keystroke above the quote. This needs the Mail window to take focus and
             Accessibility permission for the host process. When False, compose the
             reply through the object model with no window (headless/bulk-safe, no
-            Accessibility needed); the quote and signature are flattened to plain text.
+            Accessibility needed); the quote and signature are flattened to plain
+            text. ``native_format=False`` is gated: it returns
+            ``WINDOWLESS_FALLBACK_DISABLED`` unless ``allow_windowless_fallback=True``
+            is also passed, so agents cannot drift into the fallback path.
+        allow_windowless_fallback: Explicit ack required to use the windowless
+            ``native_format=False`` path. Defaults to False; agents must never set
+            it. Exists for deliberate headless/bulk/CI reply runs only.
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
     """
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
+
+    if not native_format and not allow_windowless_fallback:
+        return serialize_tool_error(
+            ToolError(
+                code="WINDOWLESS_FALLBACK_DISABLED",
+                message=(
+                    "The windowless reply path (native_format=False) is disabled by "
+                    "default; native reply drafting (native_format=True) is the only "
+                    "supported path for normal use because it preserves Mail's rich "
+                    "quote bar and logo signature."
+                ),
+                remediation={
+                    "preferred": (
+                        "Retry with native_format=True (the default) and Mail visible so "
+                        "the reply window can take focus. On REPLY_WINDOW_FOCUS_FAILED no "
+                        "draft was saved: retry with Mail visible and not being clicked."
+                    ),
+                    "headless_only": (
+                        "The windowless path is reserved for deliberate headless/bulk/CI "
+                        "runs with no GUI focus. If that is actually your situation, pass "
+                        "allow_windowless_fallback=True with native_format=False. Agents "
+                        "must never set this flag on their own."
+                    ),
+                },
+            )
+        )
 
     if not message_id and not subject_keyword:
         return _MESSAGE_ID_REQUIRED_ERROR
@@ -2441,8 +2479,9 @@ def reply_to_email(
                             "into the reply window and need it to hold focus for a moment."
                         ),
                         "alternative": (
-                            "Pass native_format=False to compose the reply with no window "
-                            "(headless-safe; no Accessibility focus needed; plain-text quote)."
+                            "Do not switch off native formatting. No draft was saved, so retry "
+                            "with native_format=True (the default) once Mail can take focus. If "
+                            "focus still cannot be acquired, stop and report the blocker."
                         ),
                         "detail": result,
                     },

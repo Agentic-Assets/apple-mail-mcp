@@ -1,7 +1,7 @@
 {
   "threshold": 600,
   "modules": {
-    "plugin/apple_mail_mcp/tools/compose.py": 3623,
+    "plugin/apple_mail_mcp/tools/compose.py": 3662,
     "plugin/apple_mail_mcp/tools/search.py": 2399,
     "plugin/apple_mail_mcp/tools/inbox.py": 2094,
     "plugin/apple_mail_mcp/tools/analytics.py": 2036,
