@@ -1833,6 +1833,31 @@ class SearchGuardrailTests(unittest.TestCase):
         self.assertNotIn("warnings", payload)
         self.assertIn('messageSender contains "@example.com"', captured["script"])
 
+    def test_internet_message_id_builds_exact_header_condition(self):
+        captured = {}
+
+        def fake_run(script, timeout=180):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            raw = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    internet_message_id="reply@example.com",
+                    sender="news@example.com",
+                    recent_days=7,
+                    output_format="json",
+                )
+            )
+
+        payload = json.loads(raw)
+        self.assertNotIn("warnings", payload)
+        script = captured["script"]
+        self.assertIn("set internetMessageId to message id of aMessage", script)
+        self.assertIn('internetMessageId is "<reply@example.com>"', script)
+        self.assertIn('internetMessageId is "reply@example.com"', script)
+
 
 class GetEmailThreadMessageIdTests(unittest.TestCase):
     """Phase 2: get_email_thread(message_id=...) derives subject from anchor."""

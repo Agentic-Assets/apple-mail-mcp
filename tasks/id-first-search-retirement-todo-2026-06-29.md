@@ -50,11 +50,17 @@ Completed in the thread-discovery follow-up pass:
 - Updated thread guidance and packaged ID-first examples to prefer explicit mailbox lists, JSON output, and no-preview handle collection.
 - Added mocked tests for JSON contract shape, header fields, renamed-thread/header matching, common-subject fallback separation, explicit mailbox anchor lookup, and preview suppression.
 
+Completed in the exact Message-ID discovery pass:
+
+- Added `search_emails(internet_message_id=...)` as an exact bounded discovery filter. Angle brackets are optional.
+- Added CLI `apple-mail search --internet-message-id`.
+- Updated ID-first guidance to prefer exact Internet Message-ID discovery when a prior tool or note already exposed the header.
+- Added focused mocked tests for generated AppleScript conditions, warning behavior, and CLI forwarding.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
 - Forward draft id capture and verification.
-- Internet Message-ID lookup support as a search input.
 - Metadata index feasibility and integration.
 - Batch exact-ID APIs.
 
@@ -203,7 +209,7 @@ Recommended subagents:
 Todos:
 
 - [x] Add `sender_exact` and `sender_domain` to `search_emails`.
-- [ ] Add `internet_message_id` lookup support where headers are available.
+- [x] Add `internet_message_id` lookup support where headers are available.
 - [ ] Decide future of fuzzy `sender`.
 - [x] Add `get_email_thread` JSON output with message ids and headers.
 - [x] Make `get_email_thread(message_id=...)` header-first: exact anchor headers, cached headers where available, explicit mailbox set, subject fallback last.

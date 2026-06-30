@@ -138,7 +138,7 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(captured["body_text"], "invoice terms")
         self.assertTrue(captured["allow_body_scan"])
 
-    def test_search_sender_exact_and_domain_forward_to_tool(self):
+    def test_search_exact_sender_domain_and_message_id_forward_to_tool(self):
         captured = {}
 
         def fake_search(**kwargs):
@@ -158,6 +158,8 @@ class AppleMailCliTests(unittest.TestCase):
                     "person@example.com",
                     "--sender-domain",
                     "example.com",
+                    "--internet-message-id",
+                    "<reply@example.com>",
                     "--json",
                 ]
             )
@@ -165,6 +167,7 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(captured["sender_exact"], "person@example.com")
         self.assertEqual(captured["sender_domain"], "example.com")
+        self.assertEqual(captured["internet_message_id"], "<reply@example.com>")
 
     def test_drafts_list_forwards_hide_empty(self):
         captured = {}

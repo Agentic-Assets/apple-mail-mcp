@@ -97,6 +97,22 @@ from_domain = search_emails(
 
 Use fuzzy `sender="..."` only when the exact address or domain is unknown, and keep it bounded with account, mailbox, date window, and limit.
 
+## Exact Message-ID Discovery
+
+If another tool, a saved note, or a prior thread result gives you an Internet Message-ID, use it as an exact discovery filter. Angle brackets are optional.
+
+```python
+by_header = search_emails(
+    account="Work",
+    mailboxes=["INBOX", "Sent", "Archive"],
+    internet_message_id="<reply@example.com>",
+    output_format="json",
+    limit=5,
+)
+```
+
+Use the returned numeric `message_id` for follow-up actions.
+
 ## Explicit Mailbox Sets
 
 Prefer a short explicit mailbox list over the whole-account search path.

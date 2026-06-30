@@ -343,6 +343,7 @@ def _build_search_script(
     body_text: str | None,
     sender_exact: str | None = None,
     sender_domain: str | None = None,
+    internet_message_id: str | None = None,
     recent_days: float = 0.0,
     timeout: int | None = None,
     date_from_explicit: bool = False,
@@ -376,6 +377,14 @@ def _build_search_script(
     escaped_sender_domain = (
         escape_applescript(sender_domain.strip().lstrip("@")) if sender_domain and sender_domain.strip() else None
     )
+    normalized_internet_message_id = ""
+    if internet_message_id and internet_message_id.strip():
+        normalized_internet_message_id = internet_message_id.strip()
+        if not normalized_internet_message_id.startswith("<"):
+            normalized_internet_message_id = "<" + normalized_internet_message_id
+        if not normalized_internet_message_id.endswith(">"):
+            normalized_internet_message_id = normalized_internet_message_id + ">"
+    escaped_internet_message_id = escape_applescript(normalized_internet_message_id)
     use_body_search = body_text is not None
 
     collect_limit = limit + 1  # +1 for has_more probe; offset is decremented separately
@@ -396,6 +405,7 @@ def _build_search_script(
             and not sender
             and not sender_exact
             and not sender_domain
+            and not internet_message_id
             and body_text is None
             and has_attachments is None
             and read_status == "all"
@@ -514,6 +524,10 @@ def _build_search_script(
         )
     if escaped_sender_domain:
         per_msg_conditions.append(f'messageSender contains "@{escaped_sender_domain}"')
+    if escaped_internet_message_id:
+        per_msg_conditions.append(
+            f'(internetMessageId is "{escaped_internet_message_id}" or internetMessageId is "{escaped_internet_message_id.strip("<>")}")'
+        )
     if read_status == "read":
         per_msg_conditions.append("messageRead is true")
     elif read_status == "unread":
@@ -534,6 +548,7 @@ def _build_search_script(
         and not sender
         and not sender_exact
         and not sender_domain
+        and not internet_message_id
         and has_attachments is None
         and read_status == "all"
         and not use_body_search
@@ -581,6 +596,10 @@ def _build_search_script(
                                         {early_date_break}
                                         set messageSubject to subject of aMessage
                                         set messageSender to sender of aMessage
+                                        set internetMessageId to ""
+                                        try
+                                            set internetMessageId to message id of aMessage
+                                        end try
                                         set messageRead to read status of aMessage
                                         {content_read_block}
                                         if {combined_condition} then
@@ -812,6 +831,7 @@ def _search_one_account(
     sender: str | None,
     sender_exact: str | None,
     sender_domain: str | None,
+    internet_message_id: str | None,
     has_attachments: bool | None,
     read_status: str,
     date_from: str | None,
@@ -845,6 +865,7 @@ def _search_one_account(
         sender=sender,
         sender_exact=sender_exact,
         sender_domain=sender_domain,
+        internet_message_id=internet_message_id,
         has_attachments=has_attachments,
         read_status=read_status,
         date_from=date_from,
@@ -873,6 +894,7 @@ async def _search_mail_records(
     sender: str | None = None,
     sender_exact: str | None = None,
     sender_domain: str | None = None,
+    internet_message_id: str | None = None,
     has_attachments: bool | None = None,
     read_status: str = "all",
     date_from: str | None = None,
@@ -919,6 +941,7 @@ async def _search_mail_records(
                 sender,
                 sender_exact,
                 sender_domain,
+                internet_message_id,
                 has_attachments,
                 read_status,
                 date_from,
@@ -960,6 +983,7 @@ async def _search_mail_records(
                 sender,
                 sender_exact,
                 sender_domain,
+                internet_message_id,
                 has_attachments,
                 read_status,
                 date_from,
@@ -1027,6 +1051,7 @@ def _search_mail_records_sync(**kwargs: Any) -> list[dict[str, Any]]:
                 sender=kwargs.get("sender"),
                 sender_exact=kwargs.get("sender_exact"),
                 sender_domain=kwargs.get("sender_domain"),
+                internet_message_id=kwargs.get("internet_message_id"),
                 has_attachments=kwargs.get("has_attachments"),
                 read_status=kwargs.get("read_status", "all"),
                 date_from=kwargs.get("date_from"),
@@ -1066,6 +1091,7 @@ async def search_emails(
     sender: str | None = None,
     sender_exact: str | None = None,
     sender_domain: str | None = None,
+    internet_message_id: str | None = None,
     has_attachments: bool | None = None,
     read_status: str = "all",
     date_from: str | None = None,
@@ -1090,7 +1116,8 @@ async def search_emails(
     Unified search tool with JSON output, pagination, and real date filtering.
 
     Consolidates subject search, sender search, exact sender/domain discovery,
-    body content search, and cross-account search into a single tool.
+    body content search, exact Internet Message-ID lookup, and cross-account
+    search into a single tool.
 
     Smart defaults:
         - When `date_from` is None and `recent_days > 0`, an effective window
@@ -1127,6 +1154,8 @@ async def search_emails(
         sender: Optional fuzzy sender email or name to filter by
         sender_exact: Optional exact sender address discovery filter
         sender_domain: Optional exact sender domain discovery filter, with or without "@"
+        internet_message_id: Optional exact Internet Message-ID discovery filter.
+            Angle brackets are optional.
         has_attachments: Optional filter for emails with attachments (True/False/None)
         read_status: Filter by read status: "all", "read", "unread" (default: "all")
         date_from: Optional start date filter (format: "YYYY-MM-DD")
@@ -1182,6 +1211,7 @@ async def search_emails(
         and not sender_domain
         and not subject_keyword
         and not subject_keywords
+        and not internet_message_id
         and date_from is None
         and not body_text
         and has_attachments is None
@@ -1257,6 +1287,7 @@ async def search_emails(
             sender=sender,
             sender_exact=sender_exact,
             sender_domain=sender_domain,
+            internet_message_id=internet_message_id,
             has_attachments=has_attachments,
             read_status=read_status,
             date_from=date_from,

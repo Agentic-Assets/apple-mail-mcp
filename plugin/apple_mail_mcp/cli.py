@@ -743,6 +743,7 @@ def _build_parser() -> argparse.ArgumentParser:
     search.add_argument("--sender", help="Sender substring")
     search.add_argument("--sender-exact", help="Exact sender address discovery filter")
     search.add_argument("--sender-domain", help="Exact sender domain discovery filter")
+    search.add_argument("--internet-message-id", help="Exact Internet Message-ID discovery filter")
     search.add_argument("--body", help="Body text search, slower; requires --allow-body-scan")
     search.add_argument(
         "--allow-body-scan",
@@ -1066,6 +1067,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
         sender=args.sender,
         sender_exact=args.sender_exact,
         sender_domain=args.sender_domain,
+        internet_message_id=args.internet_message_id,
         body_text=args.body,
         allow_body_scan=args.allow_body_scan,
         date_from=args.date_from,
