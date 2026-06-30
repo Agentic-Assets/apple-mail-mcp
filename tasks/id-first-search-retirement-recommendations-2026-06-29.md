@@ -308,12 +308,12 @@ The dashboard is a required dependency before runtime removal. Current quick act
 
 ### Phase 4a: Index Feasibility Spike
 
-- [ ] Define cache privacy rules: outside repo/package artifacts, opt-in only, TTL-scoped, gitignored, refreshable, and deletable.
-- [ ] Define index provenance, completeness, freshness TTL, resume/watermark behavior, and mailbox-count coverage.
+- [x] Define cache privacy rules: outside repo/package artifacts, opt-in only, TTL-scoped, gitignored, refreshable, and deletable.
+- [x] Define index provenance, completeness, freshness TTL, resume/watermark behavior, and mailbox-count coverage.
 - [ ] Extend safe metadata-only exporters only after measuring header and attachment-count costs.
-- [ ] Split cached rows into `coverage_tier=bulk_metadata` and `coverage_tier=exact_hydrated`.
-- [ ] Add tests proving partial cache rows cannot answer recipient/header/thread/attachment queries unless hydrated.
-- [ ] Keep direct Envelope Index as a parallel spike for metadata-only queries after permission and schema-drift checks.
+- [x] Split cached rows into `coverage_tier=bulk_metadata` and `coverage_tier=exact_hydrated`.
+- [x] Add tests proving partial cache rows cannot answer recipient/header/thread/attachment queries unless hydrated.
+- [x] Keep direct Envelope Index as a parallel spike for metadata-only queries after permission and schema-drift checks.
 
 ### Phase 4b: Metadata Index Integration
 

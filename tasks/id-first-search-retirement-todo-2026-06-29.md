@@ -90,10 +90,16 @@ Completed in the forward draft verification pass:
 - Reused exact Drafts-scoped `verify_draft(draft_id=...)` to verify saved forward drafts without subject/body search.
 - Added mocked tests for forward verification metadata and warning surfacing.
 
+Completed in the metadata-index feasibility contract pass:
+
+- Added a non-integrated `metadata_index_contract` module for cache root policy, opt-in runtime-read gating, TTL freshness, exact keys, coverage tiers, and hydrated capability checks.
+- Added unit tests proving `bulk_metadata` rows cannot answer recipient, header, thread, attachment, or body queries.
+- Saved `tasks/metadata-index-feasibility-spike-2026-06-30.md` with Mail dictionary evidence, privacy rules, integration boundary, and measurement next steps.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
-- Metadata index feasibility and integration.
+- Metadata index measurement and integration.
 
 ## Required Skills
 
@@ -267,20 +273,20 @@ Recommended subagents:
 
 Todos:
 
-- [ ] Define cache storage outside repo and package artifacts.
-- [ ] Make cache opt-in, TTL-scoped, gitignored, refreshable, and deletable.
-- [ ] Define provenance, completeness, freshness, resume/watermark, and mailbox-count coverage.
-- [ ] Split rows into `bulk_metadata` and `exact_hydrated`.
-- [ ] Prove partial rows cannot answer recipient, header, thread, attachment, or body queries unless hydrated.
+- [x] Define cache storage outside repo and package artifacts.
+- [x] Define cache as opt-in, TTL-scoped, outside repo/package artifacts, refreshable, and deletable.
+- [x] Define provenance, completeness, freshness, resume/watermark, and mailbox-count coverage.
+- [x] Split rows into `bulk_metadata` and `exact_hydrated`.
+- [x] Prove partial rows cannot answer recipient, header, thread, attachment, or body queries unless hydrated.
 - [ ] Measure header and attachment-count costs before extending exporters.
 - [ ] Keep direct Envelope Index as a parallel research spike only until permission and schema-drift risks are known.
 
 Verification:
 
-- [ ] Design note or spike report.
+- [x] Design note or spike report.
 - [ ] Perf baseline and p50/p95 comparison where runnable.
-- [ ] Privacy and packaging review.
-- [ ] No live private content in reports.
+- [x] Privacy and packaging review.
+- [x] No live private content in reports.
 
 ## Phase 4b: Metadata Index Integration
 
