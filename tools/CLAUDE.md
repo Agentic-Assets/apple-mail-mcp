@@ -56,6 +56,25 @@ python3 tools/check_wrapper_surface.py --wrapper /path/to/apple-mail
 
 Run after regenerating the mcporter bundle or adding read tools agents rely on.
 
+## measure_metadata_hydration.py
+
+| Script | Role |
+|--------|------|
+| `measure_metadata_hydration.py` | Read-only exact-id timing helper for Phase 4a metadata-index feasibility |
+
+Measures header-read and attachment-count hydration costs for exact Mail message ids. It is not an MCP tool and must not be run casually: it requires `--confirm-read-only-live-mail`, sends nothing, creates no drafts, and prints only aggregate timings/counts. It does not print message contents, headers, senders, subjects, recipient addresses, attachment names, or raw message ids.
+
+```bash
+python3 tools/measure_metadata_hydration.py \
+  --account "$DEFAULT_MAIL_ACCOUNT" \
+  --mailbox INBOX \
+  --message-ids "12345,67890" \
+  --repeats 3 \
+  --confirm-read-only-live-mail
+```
+
+Use only with known dummy or approved exact ids. The output is suitable for deciding whether Phase 4b metadata-index hydration is worth implementing, but it is not a runtime cache and does not mutate Mail.
+
 ## dev-check.sh
 
 Tiered local gate (no live Mail except `live` tier). Requires root `.venv/`.

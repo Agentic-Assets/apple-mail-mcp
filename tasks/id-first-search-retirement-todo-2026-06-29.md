@@ -102,6 +102,12 @@ Completed in the offline perf-budget fixture pass:
 - Added baseline/current offline fixtures under `tests/fixtures/perf_budget/`.
 - Kept fixtures explicitly marked `live_mail=false`; they are CI budget wiring, not private Mail measurements.
 
+Completed in the metadata hydration measurement-helper pass:
+
+- Added `tools/measure_metadata_hydration.py` as an exact-id-only, read-only helper for header and attachment-count timing.
+- Required `--confirm-read-only-live-mail` before any Mail read.
+- Added mocked tests proving the helper does not run without confirmation and does not print private content, raw headers, raw message ids, subjects, senders, body text, or attachment names.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.

@@ -70,9 +70,16 @@ An offline CI fixture gate now exists for ID-first hot paths:
 
 These fixtures are synthetic and marked `live_mail=false`. They prove the p50/p95 budget format and regression assertions, not live Mail performance.
 
+A privacy-safe measurement helper now exists:
+
+- `tools/measure_metadata_hydration.py`
+- `tests/test_measure_metadata_hydration.py`
+
+The helper requires `--confirm-read-only-live-mail`, exact numeric ids, and emits only timing and aggregate count fields. It does not print raw ids or Mail content.
+
 ## Next Actions
 
 1. Review the contract and decide whether this cache policy is acceptable.
-2. Add a privacy-safe read-only measurement script before extending exporters.
+2. Run `tools/measure_metadata_hydration.py` with approved dummy or selected exact ids before extending exporters.
 3. Only after review, implement Phase 4b integration behind opt-in runtime flags.
 4. Keep cache misses bounded: fall back only to bounded AppleScript paths or explicit `full_inbox_export`.
