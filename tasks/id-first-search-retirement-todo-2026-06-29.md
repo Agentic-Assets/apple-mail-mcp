@@ -106,7 +106,7 @@ Recommended subagents:
 
 Todos:
 
-- [ ] Update `docs/CLAUDE-conventions.md` to say action tools must target exact ids.
+- [x] Update `docs/CLAUDE-conventions.md` to say action tools must target exact ids.
 - [ ] Rewrite `plugin/skills/email-management/templates/search-patterns.md` as ID-first discovery guidance.
 - [ ] Remove fuzzy mutation examples from packaged skills, starting with `move_email`, `update_email_status`, and `manage_trash`.
 - [ ] Update reply, forward, Drafts, thread, attachment, and style-profile skills so subject fallback requires explicit degraded-path approval.
@@ -120,11 +120,11 @@ Todos:
 
 Verification:
 
-- [ ] Focused docs/static tests.
-- [ ] `tests/test_cli.py`.
-- [ ] Dashboard template/static tests or focused UI tests.
-- [ ] `git diff --check`.
-- [ ] Sensitive-data scan over changed docs, skills, UI, and tests.
+- [x] Focused docs/static tests.
+- [x] `tests/test_cli.py`.
+- [x] Dashboard template/static tests or focused UI tests.
+- [x] `git diff --check`.
+- [x] Sensitive-data scan over changed docs, skills, UI, and tests.
 
 ## Phase 2a: Schema-Compatible Runtime Deprecation
 
@@ -154,11 +154,11 @@ Todos:
 
 Verification:
 
-- [ ] Focused compose, manage, analytics, and schema tests.
-- [ ] `tests/test_read_only_registry.py` or equivalent schema inspection.
-- [ ] `tests/test_phase_2_scan_hardening.py` updates.
-- [ ] `ruff check`, `ruff format --check`, and type checks where touched.
-- [ ] `git diff --check`.
+- [x] Focused compose, manage, analytics, and schema tests.
+- [x] `tests/test_read_only_registry.py` or equivalent schema inspection.
+- [x] `tests/test_phase_2_scan_hardening.py` updates.
+- [x] `ruff check`, `ruff format --check`, and type checks where touched.
+- [x] `git diff --check`.
 
 ## Phase 2b: v4 Schema Removal
 
@@ -202,7 +202,7 @@ Todos:
 
 Verification:
 
-- [ ] Search and thread focused tests.
+- [x] Search and thread focused tests.
 - [ ] Schema tests for new params.
 - [ ] No-unbounded-scan tests.
 - [ ] Large-mailbox fixture or mocked perf checks where available.
