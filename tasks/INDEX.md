@@ -32,7 +32,7 @@
 
 | File | Purpose |
 |------|---------|
-| [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) | Historical sequencing plan; verify against current 3.2.1 state before using |
+| [`phase-plan-3.1.7.md`](phase-plan-3.1.7.md) | Historical sequencing plan; verify against current source and `pyproject.toml` before using |
 | [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) | Historical live baseline and production account context |
 | [`id-first-refactor-spec.md`](id-first-refactor-spec.md) | Future destructive-action/id-first refactor design |
 | [`mcp-mailbox-timeout-audit-2026-05-22.md`](mcp-mailbox-timeout-audit-2026-05-22.md) | Timeout audit reference |

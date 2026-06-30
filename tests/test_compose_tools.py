@@ -1063,9 +1063,42 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("Signature Verification Status: missing", result)
         self.assertIn("requested Mail signature was not detected", result)
         verifier_script = next(script for script in captured if "set expectedAttachmentCount to" in script)
+        self.assertIn('using terms from application "Mail"', verifier_script)
         self.assertIn("set expectedAttachmentCount to 1", verifier_script)
+        self.assertIn('set expectedAttachmentNames to {"support.pdf"}', verifier_script)
         self.assertIn("set signatureWasRequested to true", verifier_script)
+        self.assertIn('set expectedSignatureName to "TU"', verifier_script)
+        self.assertIn("if (name of sig as string) is expectedSignatureName then", verifier_script)
+        self.assertIn("set expectedSigText to content of sig as string", verifier_script)
+        self.assertIn("expectedAttachmentName", verifier_script)
         self.assertIn("file size of anAttachment", verifier_script)
+
+    def test_reply_draft_attachment_verification_checks_requested_filenames(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|missing|not_requested|1|wrong.pdf::2048;;"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+                expected_attachment_count=1,
+                expected_attachment_names=["support.pdf"],
+                signature_requested=False,
+            )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "missing")
+        script = captured[0]
+        self.assertIn('set expectedAttachmentNames to {"support.pdf"}', script)
+        self.assertIn("if (expectedAttachmentName as string) is not in draftAttachmentNames then return \"missing\"", script)
 
     def test_reply_draft_attachment_warning_includes_applied_count(self):
         def fake_run(script, timeout=120):
@@ -1379,6 +1412,68 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
         self.assertIn("set signatureWasRequested to true", verifier_script)
+
+    def test_reply_signature_verification_targets_resolved_signature_name(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return ""
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|detected"
+            return "ok"
+
+        with (
+            patch.object(compose_tools.server, "DEFAULT_MAIL_SIGNATURE", "TU", create=True),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                include_signature=True,
+            )
+
+        self.assertIn("Signature Verification Status: detected", result)
+        verifier_script = next(script for script in captured if "set expectedSignatureName" in script)
+        self.assertIn('set expectedSignatureName to "TU"', verifier_script)
+        self.assertIn("if (name of sig as string) is expectedSignatureName then", verifier_script)
+        self.assertIn("set expectedSigText to content of sig as string", verifier_script)
+
+    def test_reply_attachment_validation_error_removes_body_temp_file(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        temp_path = Path(temp_dir.name) / "mail_reply_body.txt"
+
+        class FakeTempFile:
+            name = str(temp_path)
+
+            def __enter__(self):
+                self.handle = temp_path.open("w", encoding="utf-8")
+                return self.handle
+
+            def __exit__(self, exc_type, exc, tb):
+                self.handle.close()
+
+        with (
+            patch("apple_mail_mcp.tools.compose.tempfile.NamedTemporaryFile", return_value=FakeTempFile()),
+            patch(
+                "apple_mail_mcp.tools.compose._validate_attachment_paths",
+                return_value=([], "Error: Attachment file does not exist: missing.pdf"),
+            ),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                attachments="missing.pdf",
+            )
+
+        self.assertIn("Attachment file does not exist", result)
+        self.assertFalse(temp_path.exists())
 
     def test_reply_draft_success_reports_structured_artifact_error_when_body_missing(self):
         sentinel = "AA-REPLY-BODY-SENTINEL-84053"

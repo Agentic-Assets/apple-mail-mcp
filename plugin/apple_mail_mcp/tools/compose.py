@@ -518,7 +518,9 @@ def _verify_saved_reply_draft(
     draft_id: str | None = None,
     quoted_needle: str | None = None,
     expected_attachment_count: int | None = None,
+    expected_attachment_names: list[str] | None = None,
     signature_requested: bool | None = None,
+    expected_signature_name: str | None = None,
     timeout: int | None = None,
 ) -> _ReplyDraftVerification:
     """Confirm a native reply draft appears in a bounded newest Drafts window."""
@@ -527,10 +529,15 @@ def _verify_saved_reply_draft(
     safe_body_needle = escape_applescript(_first_non_empty_line(reply_body))
     safe_draft_id = escape_applescript(draft_id or "")
     safe_quoted_needle = escape_applescript(_first_non_empty_line(quoted_needle or ""))
+    expected_attachment_names = expected_attachment_names or []
+    expected_attachment_names_script = (
+        "{" + ", ".join(f'"{escape_applescript(name)}"' for name in expected_attachment_names if name) + "}"
+    )
     expected_attachment_count_value = -1 if expected_attachment_count is None else max(0, expected_attachment_count)
     signature_requested_flag = (
         "missing value" if signature_requested is None else ("true" if signature_requested else "false")
     )
+    safe_expected_signature_name = escape_applescript(expected_signature_name or "")
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
     sanitize_script = sanitize_field_handler(include_attachment_row_delimiter=True)
     text_offset_script = text_offset_handler()
@@ -549,13 +556,24 @@ def _verify_saved_reply_draft(
         return "after_quote"
     end replyBodyIsBeforeQuote
 
-    on attachmentStatus(draftMessage, expectedAttachmentCount)
+    using terms from application "Mail"
+
+    on attachmentStatus(draftMessage, expectedAttachmentCount, expectedAttachmentNames)
         if expectedAttachmentCount < 0 then return "not_requested"
         try
             set draftAttachments to mail attachments of draftMessage
             set actualAttachmentCount to count of draftAttachments
-            if actualAttachmentCount >= expectedAttachmentCount then return "verified"
-            return "missing"
+            if actualAttachmentCount < expectedAttachmentCount then return "missing"
+            if (count of expectedAttachmentNames) is 0 then return "verified"
+
+            set draftAttachmentNames to {{}}
+            repeat with anAttachment in draftAttachments
+                set end of draftAttachmentNames to my sanitize_field(name of anAttachment)
+            end repeat
+            repeat with expectedAttachmentName in expectedAttachmentNames
+                if (expectedAttachmentName as string) is not in draftAttachmentNames then return "missing"
+            end repeat
+            return "verified"
         on error
             return "unsupported"
         end try
@@ -584,7 +602,7 @@ def _verify_saved_reply_draft(
         return attachmentRowsText
     end attachmentRows
 
-    on signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
+    on signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested, expectedSignatureName)
         if signatureWasRequested is missing value then return "not_requested"
         if signatureWasRequested is false then return "not_requested"
         set newBodyText to draftContent
@@ -593,6 +611,16 @@ def _verify_saved_reply_draft(
             if quoteOffset > 1 then set newBodyText to text 1 thru (quoteOffset - 1) of draftContent
         end if
         try
+            if expectedSignatureName is not "" then
+                repeat with sig in signatures
+                    if (name of sig as string) is expectedSignatureName then
+                        set expectedSigText to content of sig as string
+                        if expectedSigText is not "" and newBodyText contains expectedSigText then return "detected"
+                        return "missing"
+                    end if
+                end repeat
+                return "missing"
+            end if
             repeat with sig in signatures
                 set sigText to content of sig as string
                 if sigText is not "" and newBodyText contains sigText then return "detected"
@@ -601,13 +629,13 @@ def _verify_saved_reply_draft(
         return "missing"
     end signatureStatus
 
-    on verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, signatureWasRequested)
+    on verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
         set draftId to id of draftMessage as string
         set draftContent to content of draftMessage as string
-        set draftAttachmentStatus to my attachmentStatus(draftMessage, expectedAttachmentCount)
+        set draftAttachmentStatus to my attachmentStatus(draftMessage, expectedAttachmentCount, expectedAttachmentNames)
         set draftAttachmentCount to my attachmentCount(draftMessage)
         set draftAttachmentRows to my attachmentRows(draftMessage)
-        set draftSignatureStatus to my signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
+        set draftSignatureStatus to my signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested, expectedSignatureName)
         if replyBodyNeedle is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         set bodyStatus to my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
         if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
@@ -615,13 +643,17 @@ def _verify_saved_reply_draft(
         return "BODY_MISSING|" & draftId
     end verifyReplyDraft
 
+    end using terms from
+
     tell application "Mail"
         set targetAccount to account "{safe_account}"
         set targetDraftIdText to "{safe_draft_id}"
         set replyBodyNeedle to "{safe_body_needle}"
         set quotedNeedle to "{safe_quoted_needle}"
         set expectedAttachmentCount to {expected_attachment_count_value}
+        set expectedAttachmentNames to {expected_attachment_names_script}
         set signatureWasRequested to {signature_requested_flag}
+        set expectedSignatureName to "{safe_expected_signature_name}"
         set replyDraftVerified to false
         set bodyMissingDraftId to ""
         set bodyAfterQuoteDraftId to ""
@@ -636,7 +668,7 @@ def _verify_saved_reply_draft(
                         set targetDrafts to every message of draftsMailbox whose id is targetDraftId
                         if (count of targetDrafts) > 0 then
                             set exactDraft to item 1 of targetDrafts
-                            set exactResult to my verifyReplyDraft(exactDraft, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, signatureWasRequested)
+                            set exactResult to my verifyReplyDraft(exactDraft, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
                             return exactResult
                         end if
                     end try
@@ -652,7 +684,7 @@ def _verify_saved_reply_draft(
                             set draftMatched to false
                             set draftSubject to subject of draftMessage as string
                             if "{safe_reply_subject}" is "" or draftSubject is "{safe_reply_subject}" then
-                                set draftResult to my verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, signatureWasRequested)
+                                set draftResult to my verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
                                 if draftResult starts with "FOUND|" then
                                     set draftMatched to true
                                     set foundDraftId to draftResult
@@ -1989,6 +2021,9 @@ def reply_to_email(
     if attachments:
         validated_paths, error = _validate_attachment_paths(attachments)
         if error:
+            body_path = Path(body_temp_path)
+            if body_path.exists():
+                body_path.unlink()
             return error
         for path in validated_paths:
             safe_path = escape_applescript(path)
@@ -2050,7 +2085,9 @@ def reply_to_email(
                 draft_id=draft_id,
                 quoted_needle=quoted_needle,
                 expected_attachment_count=len(validated_paths) if validated_paths else None,
+                expected_attachment_names=[Path(path).name for path in validated_paths],
                 signature_requested=include_signature,
+                expected_signature_name=resolved_signature_name,
                 timeout=timeout,
             )
             if not verification.ok:

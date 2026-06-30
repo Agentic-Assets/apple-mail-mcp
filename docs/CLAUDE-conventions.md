@@ -207,11 +207,11 @@ The guard lives in `tools/validate_manifests.py::_check_marketplace_contract`; r
 
 ## Plugin-dev agents
 
-This repo **is** a Claude Code plugin. For plugin shell, MCP wiring, skills, agents, commands, hooks, or manifests, defer to `plugin-dev:*` agents — they override memory about plugin authoring:
+This repo **is** a Claude Code plugin. For plugin shell, MCP wiring, skills, agents, commands, hooks, or manifests, defer to `plugin-dev:*` agents when the host exposes them; they override memory about plugin authoring. If those experts are unavailable, say so in the handoff and run the local validation gates listed below:
 
 | Agent / skill | When |
 |---------------|------|
-| **`plugin-dev:plugin-validator`** | After any change to `plugin.json`, `marketplace.json`, `.mcp.json`, command/skill/agent frontmatter, or directory layout. Blocking before merge. |
+| **`plugin-dev:plugin-validator`** | After any change to `plugin.json`, `marketplace.json`, `.mcp.json`, command/skill/agent frontmatter, or directory layout. Blocking before merge when available; otherwise run `bash tools/dev-check.sh release`. |
 | **`plugin-dev:skill-reviewer`** | After creating or editing any skill under `plugin/skills/`. Focus on `description` / frontmatter — that drives triggering. |
 | **`plugin-dev:agent-creator`** | Adding a new agent. Don't hand-author frontmatter from memory. |
 | **`plugin-dev:*` skills** | Invoke the matching skill *before* designing (`mcp-integration`, `skill-development`, `command-development`, etc.). |
@@ -230,7 +230,7 @@ Every skill under `plugin/skills/` follows the same shape so siblings trigger cr
 - **`SKILL.md`**: 1,500–2,000 words. Detail → `references/`, code → `examples/`, scripts → `scripts/`. Link in "Additional Resources".
 - **Top of body**: (1) purpose, (2) when-to-use / when-NOT-to-use, (3) performance defaults, (4) sibling decision tree, (5) red-flag table for destructive ops.
 - **No persona openers** ("You are an expert…").
-- **Verify** with `plugin-dev:skill-reviewer` before merge. Template: `plugin/skills/email-management/SKILL.md`.
+- **Verify** with `plugin-dev:skill-reviewer` before merge when available. If unavailable, run manifest/release validation and note the missing expert pass. Template: `plugin/skills/email-management/SKILL.md`.
 
 ### Skills only — no new slash commands
 
@@ -250,7 +250,7 @@ Entry points ship as skills only. Do not restore `plugin/commands/`; the old `/e
 
 **Routing cheat sheet:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). **Narrow skills** may stay shorter than the umbrella template if they include triggers, sibling matrix, performance notes, and destructive red lines. **Umbrella template:** `plugin/skills/email-management/SKILL.md` (also has `references/`, `examples/`, `templates/`).
 
-After adding or editing any skill: run **`plugin-dev:skill-reviewer`**. After manifest, package, artifact, or skill-count marketing copy changes: **`plugin-dev:plugin-validator`** + `bash tools/dev-check.sh release`.
+After adding or editing any skill: run **`plugin-dev:skill-reviewer`** when available. After manifest, package, artifact, or skill-count marketing copy changes: run **`plugin-dev:plugin-validator`** when available plus `bash tools/dev-check.sh release`.
 
 ---
 
