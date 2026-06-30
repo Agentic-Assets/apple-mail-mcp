@@ -99,3 +99,30 @@ def test_build_verify_draft_payload_reports_unexpected_signature_and_quote():
     assert payload["attachments"]["status"] == "not_requested"
     assert payload["checks"]["to_matches_expected"] is None
     assert payload["warnings"] == ["signature_unexpected", "quoted_original_unexpected"]
+
+
+def test_build_verify_draft_payload_requires_multiset_attachment_counts():
+    payload = _build_verify_draft_payload(
+        numeric_id="84055",
+        subject="Subject",
+        to_recips="to@example.com",
+        cc_recips="",
+        bcc_recips="",
+        body_preview="Body",
+        in_reply_to="",
+        references="",
+        quoted_text="false",
+        signature_text="false",
+        attachment_rows="support.pdf::2048;;other.pdf::1024;;",
+        expected_to_values=[],
+        expected_cc_values=[],
+        expected_subject=None,
+        expected_body_contains=None,
+        expected_attachment_names=["support.pdf", "support.pdf"],
+        expected_signature=None,
+        require_quoted_original=None,
+    )
+
+    assert payload["attachments"]["status"] == "missing"
+    assert payload["attachments"]["missing"] == ["support.pdf"]
+    assert "expected_attachments_missing" in payload["warnings"]

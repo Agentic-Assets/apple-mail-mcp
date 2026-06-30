@@ -352,7 +352,7 @@ get_email_thread(
     message_id="<message_id from search>"
 )
 
-# 3. Create a reply draft (plain-text "Re:", correctly addressed) for later
+# 3. Create a reply draft (native quote + signature; pass native_format=False for a plain-text headless draft) for later
 reply_to_email(
     account="Work",
     message_id="<message_id from search>",

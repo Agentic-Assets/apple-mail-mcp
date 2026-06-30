@@ -1170,7 +1170,62 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(verification.attachment_status, "missing")
         script = captured[0]
         self.assertIn('set expectedAttachmentNames to {"support.pdf"}', script)
-        self.assertIn("if (expectedAttachmentName as string) is not in draftAttachmentNames then return \"missing\"", script)
+        self.assertIn("(name of anAttachment as string)", script)
+        self.assertIn("set item matchIndex of draftAttachmentNames to missing value", script)
+
+    def test_reply_draft_attachment_verification_uses_multiset_matching(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|missing|not_requested|2|support.pdf::2048;;other.pdf::1024;;"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+                expected_attachment_count=2,
+                expected_attachment_names=["support.pdf", "support.pdf"],
+                signature_requested=False,
+            )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "missing")
+        script = captured[0]
+        self.assertIn('set expectedAttachmentNames to {"support.pdf", "support.pdf"}', script)
+        self.assertIn("set item matchIndex of draftAttachmentNames to missing value", script)
+
+    def test_reply_draft_attachment_verification_compares_raw_attachment_names(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|verified|not_requested|1|foo;;;bar.pdf::2048;;"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+                expected_attachment_count=1,
+                expected_attachment_names=["foo;;;bar.pdf"],
+                signature_requested=False,
+            )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "verified")
+        script = captured[0]
+        self.assertIn('set expectedAttachmentNames to {"foo;;;bar.pdf"}', script)
+        self.assertIn("(name of anAttachment as string)", script)
 
     def test_reply_draft_attachment_warning_includes_applied_count(self):
         def fake_run(script, timeout=120):

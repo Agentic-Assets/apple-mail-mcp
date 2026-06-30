@@ -96,7 +96,7 @@ Tiered local gate (no live Mail except `live` tier). Requires root `.venv/`.
 
 | Tier | Runs |
 |------|------|
-| `default` | `validate_manifests.sh` + `pytest`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
+| `default` | `validate_manifests.sh` + `pytest` + `run_test_count_check`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
 | `lint` | Fatal package quality gate: `ruff check plugin/apple_mail_mcp/`, `ruff format --check plugin/apple_mail_mcp/`, and `mypy --strict plugin/apple_mail_mcp/` |
 | `surface` | default + wrapper check always |
 | `manifest` | manifests only |
@@ -109,6 +109,14 @@ bash tools/dev-check.sh
 bash tools/dev-check.sh surface
 bash tools/dev-check.sh release   # always before commit/PR
 ```
+
+### Collected-test count (single source of truth)
+
+`tools/expected_test_count.txt` holds the one canonical collected-test count. Docs no
+longer hardcode the number; `run_test_count_check` (in `default` and `release`)
+recomputes the real count with `PYTEST_ADDOPTS='' pytest --collect-only tests` and fails
+on drift, printing the new number to drop into that one file. The tool count (31) is
+already derived/enforced separately by `validate_manifests`.
 
 ## pre-commit hook
 

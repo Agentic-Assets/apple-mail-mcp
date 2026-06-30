@@ -28,12 +28,17 @@ signature, with a windowless fallback preserved for headless and bulk use.
   `BODY_MISSING`. The native default also skips signature substring matching (Mail's
   own logo signature cannot be reliably substring-matched) and never pins the
   account alias on the native window (pinning had dropped the embedded logo).
+- **Attachment verification matches names as a multiset.** Reply-draft verification
+  and `verify_draft` / `verify_drafts` now require each expected attachment name to be
+  present with its full multiplicity (duplicate filenames are consumed one for one)
+  and compare raw Mail attachment names, so a draft missing one of two identically
+  named files is reported as `missing` rather than passing.
 
 ### Notes
 
 - The native path needs the host process to hold macOS Accessibility permission
   (System Events keystroke); `native_format=False` avoids it.
-- 963 collected tests; tool count unchanged (31).
+- 966 collected tests; tool count unchanged (31).
 
 ## 3.6.1 — 2026-06-07
 

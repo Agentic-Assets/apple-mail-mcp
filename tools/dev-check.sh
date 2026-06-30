@@ -44,6 +44,31 @@ run_wrapper() {
   "$PY" tools/check_wrapper_surface.py
 }
 
+# Single source of truth for the collected-test count: tools/expected_test_count.txt.
+# Docs no longer hardcode the number; this gate recomputes it and fails on drift,
+# telling you the one line to update. Mirrors the documented recount command.
+run_test_count_check() {
+  local count_file="${ROOT}/tools/expected_test_count.txt"
+  if [[ ! -f "$count_file" ]]; then
+    echo "error: missing ${count_file} (single source of truth for collected test count)" >&2
+    exit 1
+  fi
+  local expected actual
+  expected="$(tr -d '[:space:]' < "$count_file")"
+  actual="$(PYTEST_ADDOPTS='' "$PYTEST" --collect-only tests 2>/dev/null \
+    | grep -oE '[0-9]+ tests collected' | grep -oE '[0-9]+' | head -1)"
+  if [[ -z "$actual" ]]; then
+    echo "error: could not determine collected test count from pytest --collect-only" >&2
+    exit 1
+  fi
+  if [[ "$expected" != "$actual" ]]; then
+    echo "test-count drift: tools/expected_test_count.txt says ${expected}, actual collected ${actual}" >&2
+    echo "  -> update tools/expected_test_count.txt to ${actual}" >&2
+    exit 1
+  fi
+  echo "test count: OK (${actual} collected, matches tools/expected_test_count.txt)"
+}
+
 run_lint() {
   if [[ ! -x "$RUFF" ]]; then
     echo "error: ruff not found in .venv — run: .venv/bin/pip install -e '.[dev]'" >&2
@@ -73,6 +98,7 @@ staged_touches_tool_surface() {
 run_default() {
   run_manifests
   run_pytest
+  run_test_count_check
 }
 
 maybe_run_wrapper_for_staged_surface() {
@@ -113,6 +139,7 @@ case "$TIER" in
     run_lint
     bash tools/build-artifacts.sh
     run_pytest
+    run_test_count_check
     run_wrapper
     ;;
   *)

@@ -1,5 +1,6 @@
 """Pure helpers for Apple Mail Drafts verification payloads."""
 
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +69,6 @@ def _build_verify_draft_payload(
 ) -> dict[str, Any]:
     """Build the public verify_draft JSON payload and expectation warnings."""
     attachments_found = _normalize_attachment_rows(attachment_rows)
-    found_attachment_names = {item["filename"] for item in attachments_found}
     warnings: list[str] = []
 
     body_contains_expected = None
@@ -90,7 +90,14 @@ def _build_verify_draft_payload(
     if cc_matches is False:
         warnings.append("cc_mismatch")
 
-    missing_attachments = [name for name in expected_attachment_names if name not in found_attachment_names]
+    missing_attachments: list[str] = []
+    if expected_attachment_names:
+        expected_counts = Counter(expected_attachment_names)
+        found_counts = Counter(item["filename"] for item in attachments_found)
+        for name, expected_count in expected_counts.items():
+            shortfall = expected_count - found_counts.get(name, 0)
+            if shortfall > 0:
+                missing_attachments.extend([name] * shortfall)
     attachment_status = "not_requested"
     if expected_attachment_names:
         attachment_status = "verified" if not missing_attachments else "missing"

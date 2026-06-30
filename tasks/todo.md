@@ -15,10 +15,30 @@ for full Done / To-test detail. Findings + reusable probes:
 **Done this pass (2026-06-30):** Test suite re-aligned to the native default (8
 flatten-path tests pinned to `native_format=False`, 4 default-path tests rewritten to
 the native keystroke contract, 3 native regression tests added: signature-verify skip,
-`GUARD_ABORT` to `REPLY_WINDOW_FOCUS_FAILED`, verifier `stripLineBreaks`). 963 tests
+`GUARD_ABORT` to `REPLY_WINDOW_FOCUS_FAILED`, verifier `stripLineBreaks`). 966 tests
 pass. code-simplifier pass (no changes needed). Docs/manifests updated for
 `native_format` + Accessibility. Version bumped to 3.8.0 across all six version files;
 all three artifacts rebuilt and validated (`dev-check.sh release` green).
+Post-ship `plugin-dev:plugin-validator` (PASS, no drift) + `plugin-dev:skill-reviewer`
+pass run; the reviewer caught that the bundled `email-drafting` skill still described
+replies in the old object-model/plain-text framing, so it was synced to the native
+default (mechanism, Accessibility/focus, `REPLY_WINDOW_FOCUS_FAILED` recovery,
+signature behavior) and artifacts rebuilt again. Then reviewed a sibling agent's
+attachment-verification changes (multiset duplicate-name matching in `verify_draft`
+and reply verification): kept the correct Counter/`suppress(OSError)` work, fixed a
+runtime bug where the reply verifier used `delete item N of <list>` (a Mail command
+that throws on a list, degrading every matched attachment to `"unsupported"`) by
+switching to `set item N ... to missing value` (dictionary- and live-verified). Also
+centralized the collected-test count to `tools/expected_test_count.txt` (single source
+of truth) and added a `dev-check.sh` gate that fails on drift, so the number no longer
+lives hardcoded across CLAUDE.md/AGENTS.md/README/tests+tasks CLAUDE.md.
+
+**Deferred follow-up (brand-voice, not a blocker):** `plugin-validator` flagged
+pre-existing em dashes in ~10 shipped descriptions (top-level + 8 tool descriptions in
+`apple-mail-mcpb/manifest.json`, plus the `plugin/.claude-plugin/plugin.json` and
+`.claude-plugin/marketplace.json` descriptions). These violate the no-em-dash rule but
+predate this workstream; sweep them (and align the Codex `plugin.json` copy) in a
+separate brand-voice pass, then rebuild artifacts.
 
 **Next action (live, needs Cayman):** the remaining TO-TEST items that cannot be mocked.
 Send a saved native draft to self and confirm the logo survives the actual SEND; live

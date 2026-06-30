@@ -39,7 +39,7 @@ Never use standalone draft creators (`compose_email`, `create_rich_email_draft`,
 
 ## Preconditions
 
-1. Know the **`account`** (defaults follow `DEFAULT_MAIL_ACCOUNT`) and signature intent. Compose/reply/forward default to **`include_signature=True`**, which applies **`DEFAULT_MAIL_SIGNATURE`** when that env var is set; when unset, the tool does not force a named signature and Mail may still apply the account's normal default signature. Pass `include_signature=False` to suppress plugin-applied signatures, or `signature_name` to override the default for one call. For replies, disabling signatures cannot skip `reply_body` insertion.
+1. Know the **`account`** (defaults follow `DEFAULT_MAIL_ACCOUNT`) and signature intent. Compose/reply/forward default to **`include_signature=True`**, which applies **`DEFAULT_MAIL_SIGNATURE`** when that env var is set; when unset, the tool does not force a named signature and Mail may still apply the account's normal default signature. Pass `include_signature=False` to suppress plugin-applied signatures, or `signature_name` to override the default for one call. For replies, disabling signatures cannot skip `reply_body` insertion. On native replies (`native_format=True`) Mail supplies its own default reply signature with the logo preserved; `signature_name` and `include_signature=False` still override it, whereas the windowless `native_format=False` path yields a flattened text signature only.
 2. Confirm the `mcp__apple-mail__*` tools are actually registered before any drafting call. If they are absent, fix MCP registration or use the documented MCP-only absolute-path fallback; do not draft with generic AppleScript, Mail UI scripting, shell `osascript`, or a standalone compose fallback.
 3. For replies/forwards, use the Mail **`message_id`** returned by `search_emails`, `list_inbox_emails`, `get_email_by_id`, or thread tools whenever available. Do not switch to `subject_keyword` just because the subject is visible; subject lookup is a degraded path only after the user accepts that ids are unavailable.
 4. Reply drafting requires `reply_to_email(message_id=...)`. If no `message_id` is known, run `search_emails` or `list_inbox_emails` first; `subject_keyword` on `reply_to_email` returns `TARGET_SELECTOR_DEPRECATED`.
@@ -60,12 +60,14 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 
 `mode="open"` saves first then leaves the compose window open, so closing it should not trigger Mail's Save/Don't Save prompt.
 
+**Native reply focus:** the default native path (`native_format=True`) types `reply_body` into Mail's reply window, so Mail must be able to take focus and the host process needs Accessibility permission. If `reply_to_email` returns `REPLY_WINDOW_FOCUS_FAILED`, no draft was saved and nothing was sent: either retry with Mail visible and not being clicked, or retry with `native_format=False` (windowless object-model path, plain-text quote, no logo signature, no Accessibility needed). Prefer `native_format=False` up front for headless, bulk, or CI reply runs with no GUI focus available.
+
 ## Tool Selection Pattern
 
 | Situation | Tool | Notes |
 |-----------|------|-------|
 | New outbound mail | `compose_email` | Standalone only; default `mode="draft"`; use `mode="open"` only for explicit saved-open review; `mode="send"` blocked under `--draft-safe` |
-| Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list; `subject_keyword` is a degraded path only after confirming ids are unavailable; verification requires `reply_body` above the quoted original |
+| Structured reply context | `reply_to_email` | Default quiet draft (`send=False` / `mode="draft"`); pass `message_id=...` from search/list; `subject_keyword` is a degraded path only after confirming ids are unavailable. Defaults to `native_format=True` (rich quote bar + logo signature, typed body, needs Mail focus + Accessibility); use `native_format=False` for headless/bulk/CI or after a `REPLY_WINDOW_FOCUS_FAILED`. Verification requires `reply_body` above the quoted original |
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is a degraded path only after confirming ids are unavailable |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params. Use plain compose tools when a named signature is required |
 | Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, accepts `limit=...`, and accepts `subject_contains="..."` (case-insensitive "find the draft I just made"). `action="find"` locates reply drafts by bounded In-Reply-To / References header scan. For `send`, `open`, or `delete`, prefer exact `draft_id` from the list output over `draft_subject` |
@@ -110,11 +112,17 @@ the returned exact `draft_id` for `manage_drafts(action="open"|"delete"|"send")`
 `reply_body` must appear above the quoted original; mere presence below the
 quote is not enough.
 
-**Reply threading note:** `reply_to_email` uses Mail's native `reply` command,
-constructs and assigns the new plain-text `reply_body` above the quoted-original
-block, then saves. Verification checks the exact Drafts artifact id first when
-Mail exposes one, falls back to bounded newest-Drafts only when needed, and fails
-with a structured artifact id if the body is missing or appears after the quote.
+**Reply threading note:** `reply_to_email` defaults to `native_format=True`: it
+opens Mail's native reply window so the saved draft keeps Mail's colored quote bar
+and the account's default reply signature (logo included), and types `reply_body`
+above the quoted original via a System Events keystroke. This path needs the Mail
+reply window to take focus and Accessibility permission for the host process; if
+focus cannot be acquired it returns `REPLY_WINDOW_FOCUS_FAILED` without saving.
+`native_format=False` is a windowless fallback (object model, plain-text quote, no
+logo signature, no Accessibility needed) for headless, bulk, or CI use. Both paths
+check the exact Drafts artifact id first when Mail exposes one, fall back to bounded
+newest-Drafts only when needed, and fail with a structured artifact id if the body
+is missing or appears after the quote.
 For machine-readable reply draft metadata, call `reply_to_email(..., output_format="json")` only with `mode="draft"` or `mode="open"`. The JSON payload includes `mode`, `sent`, `subject`, `draft_id`, `verified_draft_id`, `exact_id_verified`, `verification_status`, `body_present`, `attachment_status`, `attachment_count`, `attachments_applied`, `signature_status`, and `mailbox`. `exact_id_verified=true` means the verifier matched Mail's returned `draft_id`; `false` means bounded fallback verified a Drafts artifact, so treat `draft_id` and `verified_draft_id` as distinct handles until manually checked. If verification times out or errors after Mail returned a Draft ID, the error preserves the known `draft_id` / Drafts artifact id for exact cleanup. `output_format="json"` with effective `mode="send"` is rejected before Mail mutation; send mode is not draft-verifiable.
 `body_html` on `reply_to_email` is accepted for compatibility but ignored; use
 `create_rich_email_draft` / `compose_email` only for rich HTML on a confirmed

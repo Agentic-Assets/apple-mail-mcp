@@ -6,6 +6,7 @@ import re
 import subprocess
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from email.message import EmailMessage
 from html import escape as html_escape
@@ -624,10 +625,18 @@ def _verify_saved_reply_draft(
 
             set draftAttachmentNames to {{}}
             repeat with anAttachment in draftAttachments
-                set end of draftAttachmentNames to my sanitize_field(name of anAttachment)
+                set end of draftAttachmentNames to (name of anAttachment as string)
             end repeat
             repeat with expectedAttachmentName in expectedAttachmentNames
-                if (expectedAttachmentName as string) is not in draftAttachmentNames then return "missing"
+                set matchIndex to 0
+                repeat with nameIndex from 1 to count of draftAttachmentNames
+                    if item nameIndex of draftAttachmentNames is (expectedAttachmentName as string) then
+                        set matchIndex to nameIndex
+                        exit repeat
+                    end if
+                end repeat
+                if matchIndex is 0 then return "missing"
+                set item matchIndex of draftAttachmentNames to missing value
             end repeat
             return "verified"
         on error
@@ -2321,9 +2330,8 @@ def reply_to_email(
     if attachments:
         validated_paths, error = _validate_attachment_paths(attachments)
         if error:
-            body_path = Path(body_temp_path)
-            if body_path.exists():
-                body_path.unlink()
+            with suppress(OSError):
+                Path(body_temp_path).unlink(missing_ok=True)
             return error
         for path in validated_paths:
             safe_path = escape_applescript(path)
@@ -2488,9 +2496,8 @@ def reply_to_email(
         return f"Error: Reply failed: {err}"
     finally:
         # Belt-and-suspenders cleanup in case AppleScript didn't run
-        body_path = Path(body_temp_path)
-        if body_path.exists():
-            body_path.unlink()
+        with suppress(OSError):
+            Path(body_temp_path).unlink(missing_ok=True)
 
 
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
