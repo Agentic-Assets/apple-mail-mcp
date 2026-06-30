@@ -84,10 +84,15 @@ Completed in the exact-id export pass:
 - Updated README, MCPB manifest text, packaged skills, and task docs for the new exact-id export path.
 - Added mocked tests for default-scope exact-id export, 120-id chunking, invalid-only rejection, and existing single `message_id` behavior.
 
+Completed in the forward draft verification pass:
+
+- Added saved forward `Draft ID` capture for `forward_email(mode="draft")` and `forward_email(mode="open")`.
+- Reused exact Drafts-scoped `verify_draft(draft_id=...)` to verify saved forward drafts without subject/body search.
+- Added mocked tests for forward verification metadata and warning surfacing.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
-- Forward draft id capture and verification.
 - Metadata index feasibility and integration.
 
 ## Required Skills
@@ -185,7 +190,7 @@ Todos:
 - [x] Add structured `TARGET_SELECTOR_DEPRECATED` errors before AppleScript runs.
 - [x] `reply_to_email`: deprecate `subject_keyword` without `message_id`.
 - [x] `forward_email`: deprecate `subject_keyword` without `message_id`.
-- [ ] Add forward saved-draft id capture and verification work item.
+- [x] Add forward saved-draft id capture and verification work item.
 - [x] `manage_drafts`: deprecate `draft_subject` for `send`, `open`, and `delete`.
 - [ ] `move_email`: keep `message_ids` normal path, decide fate of `allow_filter_scan=True`. Runtime migration done; product decision remains open.
 - [ ] `update_email_status`: same migration shape as `move_email`. Runtime migration done; product decision remains open.
@@ -314,6 +319,7 @@ Candidate APIs:
 - [x] `verify_drafts(draft_ids=[...])`
 - [x] `list_email_attachments(message_ids=[...])`
 - [x] `export_emails(message_ids=[...])`
+- [x] `forward_email` saved forward `Draft ID` capture and exact Drafts verification
 
 ## Phase 6: Final Verification And Release Readiness
 

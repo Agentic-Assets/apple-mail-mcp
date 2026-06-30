@@ -394,6 +394,61 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
     return "\n".join(lines) + "\n"
 
 
+def _format_forward_verification_lines(
+    raw_verification: str,
+    fallback_draft_id: str,
+) -> str:
+    """Return stable success metadata lines for a verified forward draft."""
+    try:
+        payload = json.loads(raw_verification)
+    except json.JSONDecodeError:
+        return "Verification Status: error\nWarning: saved forward draft verification returned invalid JSON\n"
+
+    warnings = payload.get("warnings") or []
+    found = payload.get("found") is True
+    if found and warnings:
+        status = "found_with_warnings"
+    elif found:
+        status = "found"
+    else:
+        status = "not_found"
+    verified_id = str(payload.get("draft_id") or fallback_draft_id)
+    lines = [f"Verification Status: {status}"]
+    if verified_id:
+        lines.append(f"Verified Draft ID: {verified_id}")
+    if payload.get("error"):
+        lines.append(f"Verification Error: {payload['error']}")
+    if warnings:
+        lines.append("Verification Warnings: " + ", ".join(str(item) for item in warnings))
+    return "\n".join(lines) + "\n"
+
+
+def _verify_saved_forward_draft(
+    account: str,
+    *,
+    draft_id: str | None,
+    to: str,
+    subject: str | None,
+    lead_message: str | None,
+    expected_signature: bool | None,
+    timeout: int | None = None,
+) -> str:
+    """Verify a saved forward draft by exact Drafts id when Mail exposes it."""
+    if not draft_id:
+        return "Verification Status: unavailable\nWarning: Mail did not expose a saved forward Draft ID\n"
+
+    raw_verification = verify_draft(
+        account=account,
+        draft_id=draft_id,
+        expected_to=to,
+        expected_subject=subject,
+        expected_body_contains=_first_non_empty_line(lead_message or "") or None,
+        expected_signature=expected_signature,
+        timeout=timeout,
+    )
+    return _format_forward_verification_lines(raw_verification, draft_id)
+
+
 def _verify_saved_reply_draft(
     account: str,
     reply_subject: str,
@@ -2304,6 +2359,19 @@ def forward_email(
         post_forward_action = "save forwardMessage"
         success_text = "Forward saved as draft."
 
+    draft_id_capture_script = ""
+    draft_id_output_script = ""
+    if mode in {"draft", "open"}:
+        draft_id_capture_script = """
+        set forwardDraftId to ""
+        try
+            set forwardDraftId to id of forwardMessage as string
+        end try
+        """
+        draft_id_output_script = """
+        if forwardDraftId is not "" then set outputText to outputText & "Draft ID: " & forwardDraftId & return
+        """
+
     script = f'''
 tell application "Mail"
     set outputText to "{header_text}" & return & return
@@ -2368,12 +2436,15 @@ tell application "Mail"
 
         {post_forward_action}
 
+        {draft_id_capture_script}
+
         -- Clean up temp file
         {fwd_cleanup_script}
 
         set outputText to outputText & "{success_text}" & return
         set outputText to outputText & "To: {safe_to}" & return
         set outputText to outputText & "Subject: " & fwdSubject & return
+        {draft_id_output_script}
     '''
 
     if cc:
@@ -2398,9 +2469,21 @@ tell application "Mail"
     """
 
     try:
-        if timeout is None:
-            return run_applescript(script)
-        return run_applescript(script, timeout=timeout)
+        result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
+        if mode in ("draft", "open") and success_text in result:
+            draft_id = _extract_output_field(result, "Draft ID")
+            forward_subject = _extract_output_field(result, "Subject")
+            expected_signature = False if not include_signature else (resolved_signature_name is not None)
+            result += _verify_saved_forward_draft(
+                account,
+                draft_id=draft_id,
+                to=to,
+                subject=forward_subject,
+                lead_message=message,
+                expected_signature=expected_signature,
+                timeout=timeout,
+            )
+        return result
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out while forwarding email for account "

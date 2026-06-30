@@ -58,6 +58,19 @@ def _saved_reply_draft_output(
     return "\n".join(lines) + "\n"
 
 
+def _saved_forward_draft_output(*, to="recipient@example.com", subject="Fwd: Test", draft_id=None):
+    lines = [
+        "SAVING FORWARD AS DRAFT",
+        "",
+        "Forward saved as draft.",
+        f"To: {to}",
+        f"Subject: {subject}",
+    ]
+    if draft_id is not None:
+        lines.append(f"Draft ID: {draft_id}")
+    return "\n".join(lines) + "\n"
+
+
 class DefaultMailSignatureSupportTests(unittest.TestCase):
     def test_server_exposes_default_mail_signature_env_setting(self):
         self.assertTrue(hasattr(_server, "DEFAULT_MAIL_SIGNATURE"))
@@ -1550,6 +1563,71 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(len(forward_scripts), 1)
         self.assertIn("save forwardMessage", forward_scripts[0])
         self.assertIn("review", result)
+
+    def test_forward_draft_success_outputs_draft_id_and_verification(self):
+        captured = []
+        verify_calls = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return _saved_forward_draft_output(draft_id="84055")
+
+        def fake_verify(**kwargs):
+            verify_calls.append(kwargs)
+            return json.dumps({"draft_id": kwargs["draft_id"], "found": True, "warnings": []})
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+        ):
+            result = compose_tools.forward_email(
+                account="Work",
+                message_id="12345",
+                to="recipient@example.com",
+                message="Please review\nMore context",
+                include_signature=False,
+            )
+
+        self.assertIn("Draft ID: 84055", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 84055", result)
+        self.assertEqual(len(verify_calls), 1)
+        self.assertEqual(
+            verify_calls[0],
+            {
+                "account": "Work",
+                "draft_id": "84055",
+                "expected_to": "recipient@example.com",
+                "expected_subject": "Fwd: Test",
+                "expected_body_contains": "Please review",
+                "expected_signature": False,
+                "timeout": None,
+            },
+        )
+        script = captured[0]
+        self.assertIn("set forwardDraftId to id of forwardMessage as string", script)
+        self.assertIn('"Draft ID: " & forwardDraftId', script)
+
+    def test_forward_draft_reports_verification_warnings(self):
+        def fake_run(script, timeout=120):
+            return _saved_forward_draft_output(draft_id="84055")
+
+        def fake_verify(**kwargs):
+            return json.dumps({"draft_id": kwargs["draft_id"], "found": True, "warnings": ["signature_unexpected"]})
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+        ):
+            result = compose_tools.forward_email(
+                account="Work",
+                message_id="12345",
+                to="recipient@example.com",
+                include_signature=False,
+            )
+
+        self.assertIn("Verification Status: found_with_warnings", result)
+        self.assertIn("Verification Warnings: signature_unexpected", result)
 
     def test_default_emits_single_alias_fallback_for_forward_message(self):
         captured = []

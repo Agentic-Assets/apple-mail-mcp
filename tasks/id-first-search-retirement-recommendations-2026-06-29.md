@@ -22,7 +22,7 @@ The local Mail scripting dictionary supports stable handles for the workflows in
 - `message.message id` is the Internet Message-ID header string.
 - `message` contains `header` elements, so `In-Reply-To` and `References` can be parsed per bounded candidate or via a cache for thread linkage. Mail does not expose a cheap thread graph index.
 - `reply <message>` and `forward <message>` return `outgoing message`.
-- `outgoing message.id` is a read-only integer. Reply drafts are currently exact-id verified when Mail exposes the saved Drafts id. Forward drafts are dictionary-feasible, but current `forward_email` needs native-forward or post-save id capture and verification work before making the same claim.
+- `outgoing message.id` is a read-only integer. Reply drafts and forward drafts are exact-id verified when Mail exposes the saved Drafts id.
 - `outgoing message.message signature` accepts `signature` or `missing value`.
 - `message` contains `mail attachment`; attachments expose `name`, `file size`, `downloaded`, and `id`.
 - Saved/source `message.content` is read-only. `outgoing message.content` is writable.
@@ -277,7 +277,7 @@ The dashboard is a required dependency before runtime removal. Current quick act
 - [x] Keep legacy selector params in v3.x schemas, but return structured `TARGET_SELECTOR_DEPRECATED` errors before AppleScript runs.
 - [x] `reply_to_email`: return deprecation error for `subject_keyword` without `message_id`.
 - [x] `forward_email`: return deprecation error for `subject_keyword` without `message_id`.
-- [ ] Separately capture and verify forward draft ids.
+- [x] Separately capture and verify forward draft ids. (implemented on `codex/id-first-search-retirement-implementation`)
 - [x] `manage_drafts`: return deprecation error for `draft_subject` on `send`, `open`, and `delete`.
 - [ ] `move_email`: keep `message_ids` as the normal path; decide whether `allow_filter_scan=True` becomes a deprecation error or moves to a separate bulk tool.
 - [ ] `update_email_status`: same migration shape as `move_email`.
@@ -342,7 +342,7 @@ The dashboard is a required dependency before runtime removal. Current quick act
 2. **CLI ID-first cleanup:** `--message-ids` for dry-run commands, `--allow-body-scan` for search.
 3. **Dashboard ID-first cleanup:** add ids to dashboard feed and migrate quick actions.
 4. **Schema-compatible deprecation:** structured errors for legacy selectors while v3.x schemas stay stable.
-5. **Reply and forward exact-id contract:** deprecate `subject_keyword`; add forward saved-draft id verification.
+5. **Reply and forward exact-id contract:** deprecate `subject_keyword`; capture and verify saved reply/forward draft ids.
 6. **Draft lifecycle exact-id contract:** deprecate `draft_subject` from send/open/delete.
 7. **Mutation exact-id contract:** deprecate or quarantine `allow_filter_scan` paths from move/status/trash into explicit bulk tools.
 8. **Attachment exact-id contract:** surface attachment ids and require exact attachment selectors.
