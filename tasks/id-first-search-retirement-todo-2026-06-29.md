@@ -38,6 +38,7 @@ Completed in the CLI/dashboard follow-up pass:
 - Rewrote `search-patterns.md` as ID-first discovery guidance and added a static guard against copyable whole-account mailbox examples.
 - Rewrote `common-workflows.md` and adjacent packaged examples so action examples use reviewed ids, whole-account mailbox snippets are not copyable, and exact sender/domain discovery is preferred.
 - Updated reply, forward, Drafts, thread, attachment, and style-profile guidance so subject fallback is explicitly a degraded path after ids are unavailable.
+- Added JSON attachment listing metadata (`message_id`, `attachment_index`, filename, size) and exact `save_email_attachment(..., attachment_index=N)` support with duplicate-name ambiguity errors.
 
 Still open:
 
@@ -148,8 +149,8 @@ Todos:
 - [ ] `move_email`: keep `message_ids` normal path, decide fate of `allow_filter_scan=True`. Runtime migration done; product decision remains open.
 - [ ] `update_email_status`: same migration shape as `move_email`. Runtime migration done; product decision remains open.
 - [ ] `manage_trash`: same migration shape as `move_email`, keep `empty_trash` separate. Runtime migration done; product decision remains open.
-- [ ] `list_email_attachments`: deprecate `subject_keyword`, add JSON attachment metadata.
-- [ ] `save_email_attachment`: deprecate `subject_keyword`, add exact attachment selector design.
+- [x] `list_email_attachments`: deprecate `subject_keyword`, add JSON attachment metadata.
+- [x] `save_email_attachment`: deprecate `subject_keyword`, add exact attachment selector design.
 - [x] `export_emails(scope="single_email")`: deprecate `subject_keyword`.
 - [x] Tests must prove no AppleScript call occurs for deprecated target selectors.
 - [x] Read-only and draft-safe precedence tests for `manage_drafts(action="send", draft_subject=...)`.

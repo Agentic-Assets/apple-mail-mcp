@@ -37,7 +37,7 @@ Widen timeframe only after checking performance.
 Prefer ids from step 1:
 
 ```
-list_email_attachments(message_ids=[12345, 12346], max_results=10)
+list_email_attachments(message_ids=[12345, 12346], max_results=10, output_format="json")
 ```
 
 If ids are unknown, run bounded discovery first, then call by reviewed ids:
@@ -48,22 +48,21 @@ list_email_attachments(message_ids=[12345], max_results=10)
 
 See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight.
 
-`list_email_attachments` and `save_email_attachment` require exact `message_ids`; use bounded `search_emails(..., has_attachments=True)` first when ids are unknown.
+`list_email_attachments` and `save_email_attachment` require exact `message_ids`; use bounded `search_emails(..., has_attachments=True)` first when ids are unknown. JSON attachment listing returns each row's `message_id`, `attachment_index`, filename, and size. Treat `message_id + attachment_index` as the exact selector for saving.
 
-If duplicates exist, escalate with `search_emails` + **`get_email_by_id`** targeting specific numeric ids prior to save.
+If duplicate or similar filenames exist, choose the row from `list_email_attachments(..., output_format="json")` and save with `attachment_index`.
 
 ### 3. Persist With Validation
 
 ```
-save_email_attachment(message_ids=["12345"], attachment_name="Quarterly.pdf",
-                      save_path="/Users/<user>/Documents/Finance/Quarterly.pdf",
-                      message_ids=["12345"])
+save_email_attachment(message_ids=["12345"], attachment_index=2,
+                      save_path="/Users/<user>/Documents/Finance/Quarterly.pdf")
 ```
 
 Rules:
 
 - Path must reside under **`$HOME`** per server validation.
-- When multiple attachments match partial names, disambiguate with additional filters or sequential saves per `message_ids`.
+- Prefer `attachment_index` from JSON listing. `attachment_name` is compatible but ambiguous duplicate matches return a structured error.
 
 ### 4. Integrity Pass
 

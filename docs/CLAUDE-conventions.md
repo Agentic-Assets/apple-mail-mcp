@@ -149,6 +149,8 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 **Draft lifecycle targeting:** `manage_drafts(action="list")` returns each draft's id. For `send`, `open`, or `delete`, pass `draft_id`; `draft_subject` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`.
 
+**Attachment targeting:** pass `message_ids` to `list_email_attachments`; `subject_keyword` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`. Use `output_format="json"` to get per-row `message_id`, `attachment_index`, filename, and size. Prefer `save_email_attachment(message_ids=[one_id], attachment_index=N, ...)` for exact saves. `attachment_name` remains compatible, but duplicate filename matches return `AMBIGUOUS_ATTACHMENT_SELECTOR` and instruct callers to retry with `attachment_index`.
+
 **Agent guidance:** skills under `plugin/skills/email-drafting/` and `plugin/skills/apple-mail-operator/` document the quiet-default vs saved-open review split. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
 
 ---

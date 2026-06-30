@@ -1,5 +1,6 @@
 """Phase 2 scan-path hardening: compose caps, timeouts."""
 
+import json
 import sys
 import unittest
 from types import SimpleNamespace
@@ -1038,6 +1039,119 @@ class AnalyticsMessageIdPathTests(unittest.TestCase):
         self.assertIn("id is 777", captured["script"])
         self.assertNotIn("subject contains", captured["script"])
         self.assertIn("ATTACHMENTS FOR", result)
+
+    def test_list_email_attachments_subject_lookup_returns_deprecation_error(self):
+        with patch("apple_mail_mcp.tools.analytics.run_applescript") as mock_run:
+            result = analytics_tools.list_email_attachments(
+                account="Work",
+                subject_keyword="Invoice",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "message_ids")
+
+    def test_list_email_attachments_json_returns_exact_attachment_selectors(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "\n".join(
+                [
+                    "777|||Invoice|||sender@example.com|||2026-06-29|||1|||report.pdf|||2048",
+                    "777|||Invoice|||sender@example.com|||2026-06-29|||2|||data.csv|||",
+                ]
+            )
+
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            result = analytics_tools.list_email_attachments(
+                account="Work",
+                message_ids=["777"],
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["returned"], 2)
+        self.assertEqual(payload["selector"], "message_ids")
+        self.assertEqual(payload["items"][0]["message_id"], "777")
+        self.assertEqual(payload["items"][0]["attachment_index"], 1)
+        self.assertEqual(payload["items"][0]["filename"], "report.pdf")
+        self.assertEqual(payload["items"][0]["size_bytes"], 2048)
+        self.assertIsNone(payload["items"][1]["size_bytes"])
+        self.assertIn("id of aMessage as string", captured["script"])
+        self.assertIn("attachmentIndex from 1 to attachmentCount", captured["script"])
+
+    def test_list_email_attachments_rejects_invalid_output_format(self):
+        result = analytics_tools.list_email_attachments(
+            account="Work",
+            message_ids=["777"],
+            output_format="xml",
+        )
+
+        self.assertIn("Invalid output_format", result)
+
+    def test_save_email_attachment_with_attachment_index_uses_exact_index(self):
+        captured: list[str] = []
+        home = __import__("os").path.expanduser("~")
+        save_path = f"{home}/Downloads/test-file.bin"
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "file size of anAttachment" in script:
+                return "1|||-1"
+            return "saved by index"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            result = manage_tools.save_email_attachment(
+                account="Work",
+                message_ids=["777"],
+                attachment_index=2,
+                save_path=save_path,
+            )
+
+        self.assertEqual(result, "saved by index")
+        self.assertIn("attachmentLoopIndex is 2", captured[-1])
+        self.assertIn("id is 777", captured[-1])
+        self.assertNotIn("subject contains", captured[-1])
+
+    def test_save_email_attachment_index_requires_single_message_id(self):
+        home = __import__("os").path.expanduser("~")
+        save_path = f"{home}/Downloads/test-file.bin"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript") as mock_run:
+            result = manage_tools.save_email_attachment(
+                account="Work",
+                message_ids=["777", "778"],
+                attachment_index=1,
+                save_path=save_path,
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "AMBIGUOUS_ATTACHMENT_SELECTOR")
+        self.assertEqual(payload["remediation"]["exact_selector"], "message_ids + attachment_index")
+
+    def test_save_email_attachment_duplicate_name_requires_attachment_index(self):
+        home = __import__("os").path.expanduser("~")
+        save_path = f"{home}/Downloads/test-file.bin"
+
+        def fake_run(script, timeout=120):
+            if "file size of anAttachment" in script:
+                return "2|||1024"
+            return "saved"
+
+        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+            result = manage_tools.save_email_attachment(
+                account="Work",
+                message_ids=["777"],
+                attachment_name="report",
+                save_path=save_path,
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "AMBIGUOUS_ATTACHMENT_SELECTOR")
+        self.assertEqual(payload["remediation"]["matches"], 2)
 
     def test_export_emails_single_email_message_id_skips_subject_search(self):
         captured = {}

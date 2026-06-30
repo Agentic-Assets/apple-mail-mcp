@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from apple_mail_mcp import server as _server
+from apple_mail_mcp.applescript_snippets import sanitize_field_handler
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,38 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.tools.search import _search_mail_records_sync as _search_mail_records
 
 
+def _parse_attachment_listing_rows(text: str) -> list[dict[str, Any]]:
+    """Parse JSON-mode attachment rows emitted by AppleScript."""
+    items: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("|||")
+        if len(parts) != 7:
+            continue
+        message_id, subject, sender, received_date, attachment_index, filename, size_text = parts
+        try:
+            index_value = int(attachment_index)
+        except ValueError:
+            continue
+        try:
+            size_bytes: int | None = int(size_text)
+        except ValueError:
+            size_bytes = None
+        items.append(
+            {
+                "message_id": message_id,
+                "subject": subject,
+                "sender": sender,
+                "received_date": received_date,
+                "attachment_index": index_value,
+                "filename": filename,
+                "size_bytes": size_bytes,
+            }
+        )
+    return items
+
+
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def list_email_attachments(
@@ -38,14 +71,16 @@ def list_email_attachments(
     message_ids: list[str] | None = None,
     max_results: int = 50,
     timeout: int | None = None,
+    output_format: str = "text",
 ) -> str:
     """
-    List attachments for emails matching a subject keyword or exact message ids.
+    List attachments for exact message ids.
 
-    Scans the most-recent inbox messages (capped at ``max_results`` via
-    ``messages 1 thru max_results``) and returns attachments for the messages
-    whose subject contains ``subject_keyword``. When ``message_ids`` is set,
-    looks up exact messages by id and ignores ``subject_keyword``.
+    ``subject_keyword`` is a deprecated selector retained for v3.x schema
+    compatibility. Use ``search_emails(..., has_attachments=True)`` to discover
+    candidate ids, then pass ``message_ids``. JSON mode returns attachment
+    metadata with ``message_id`` and per-message ``attachment_index`` so
+    ``save_email_attachment`` can select deterministically.
 
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal"). Falls back
@@ -57,10 +92,14 @@ def list_email_attachments(
             (default: 50). The AppleScript only enumerates this many messages.
         timeout: Optional AppleScript timeout in seconds. Defaults to the
             ``run_applescript`` baseline (120s).
+        output_format: ``"text"`` (default) or ``"json"``.
 
     Returns:
-        List of attachments with their names and sizes
+        List of attachments with names, sizes, and exact selectors
     """
+
+    if output_format not in {"text", "json"}:
+        return "Error: Invalid output_format. Use: text, json"
 
     if account is None:
         account = _server.DEFAULT_MAIL_ACCOUNT
@@ -86,6 +125,7 @@ def list_email_attachments(
     # Escape for AppleScript
     escaped_keyword = escape_applescript(subject_keyword)
     escaped_account = escape_applescript(account)
+    sanitize_script = sanitize_field_handler()
 
     header_label = subject_keyword
     use_id_lookup = False
@@ -157,7 +197,54 @@ def list_email_attachments(
     )
     subject_match_close = "" if use_id_lookup else "                    end if"
 
-    script = f'''
+    if output_format == "json":
+        script = f'''
+    {sanitize_script}
+    tell application "Mail"
+        set outputText to ""
+
+        try
+            set targetAccount to account "{escaped_account}"
+            {inbox_mailbox_script("inboxMailbox", "targetAccount")}
+            {message_lookup_script}
+
+            repeat with aMessage in inboxMessages
+                if resultCount >= {max_results} then exit repeat
+
+                try
+                    set messageId to id of aMessage as string
+                    set messageSubject to subject of aMessage
+                    set messageSender to sender of aMessage
+                    set messageDate to date received of aMessage
+{subject_match_block}
+                        set msgAttachments to mail attachments of aMessage
+                        set attachmentCount to count of msgAttachments
+
+                        repeat with attachmentIndex from 1 to attachmentCount
+                            set anAttachment to item attachmentIndex of msgAttachments
+                            set attachmentName to name of anAttachment
+                            set attachmentSizeText to ""
+                            try
+                                set attachmentSizeText to (file size of anAttachment as integer) as string
+                            end try
+
+                            set outputText to outputText & messageId & "|||" & my sanitize_field(messageSubject) & "|||" & my sanitize_field(messageSender) & "|||" & my sanitize_field(messageDate) & "|||" & (attachmentIndex as string) & "|||" & my sanitize_field(attachmentName) & "|||" & attachmentSizeText & return
+                        end repeat
+
+                        set resultCount to resultCount + 1
+{subject_match_close}
+                end try
+            end repeat
+
+        on error errMsg
+            return "Error: " & errMsg
+        end try
+
+        return outputText
+    end tell
+    '''
+    else:
+        script = f'''
     tell application "Mail"
         set outputText to "ATTACHMENTS FOR: {escaped_header}" & return & return
         set resultCount to 0
@@ -223,6 +310,19 @@ def list_email_attachments(
         result = run_applescript(script, timeout=timeout if timeout is not None else 120)
     except AppleScriptTimeout:
         return f"Error: AppleScript timed out while listing attachments for '{account}'"
+    if output_format == "json":
+        if result.startswith("Error:"):
+            return result
+        items = _parse_attachment_listing_rows(result)
+        return json.dumps(
+            {
+                "items": items,
+                "returned": len(items),
+                "message_ids": normalize_message_ids(message_ids or []),
+                "selector": "message_ids",
+            },
+            indent=2,
+        )
     return result
 
 
