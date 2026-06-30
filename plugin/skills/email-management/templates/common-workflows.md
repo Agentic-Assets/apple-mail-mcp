@@ -61,9 +61,11 @@ search_emails(
 # Option 2: Get full thread
 get_email_thread(
     account="Work",
-    subject_keyword="Project Alpha",
-    mailbox="INBOX",
-    max_messages=20
+    message_id="<message_id-from-search>",
+    mailboxes=["INBOX", "Sent", "Archive"],
+    max_messages=20,
+    output_format="json",
+    include_preview=False
 )
 
 # Option 3: Advanced search
@@ -579,7 +581,10 @@ search_emails(
 # 2. Review the thread by message_id
 get_email_thread(
     account="Work",
-    message_id="<message_id-from-search>"
+    message_id="<message_id-from-search>",
+    mailboxes=["INBOX", "Sent"],
+    output_format="json",
+    include_preview=False
 )
 
 # 3. Create a reply draft with original thread context

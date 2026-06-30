@@ -1,7 +1,7 @@
 """JSON schema contract tests for search MCP tools.
 
 Tools covered:
-- get_email_thread — text return shape + error codes
+- get_email_thread — text return shape, JSON return shape + error codes
 - search_emails (output_format="json") — success + error shapes
 
 The JSON Schema assertions here serve as the living wire contract.
@@ -13,7 +13,6 @@ import unittest
 from unittest.mock import patch
 
 import jsonschema
-
 from apple_mail_mcp.tools import search as search_tools
 
 
@@ -27,17 +26,29 @@ def _run(coro):
 
 # search_emails returns pipe-delimited records:
 # mail_app_id|||internet_message_id|||subject|||sender|||mailbox|||account|||is_read|||received_date[|||content_preview]
-SEARCH_PAYLOAD = "\n".join([
-    "301|||<thread1@example.com>|||Re: Project Update|||alice@example.com|||INBOX|||Work|||false|||2026-05-20T10:00:00",
-    "302|||<thread1@example.com>|||Project Update|||bob@example.com|||INBOX|||Work|||true|||2026-05-19T09:00:00",
-    "303|||<thread2@example.com>|||Kick-off meeting|||carol@example.com|||Archive|||Work|||true|||2026-05-18T08:00:00",
-])
+SEARCH_PAYLOAD = "\n".join(
+    [
+        "301|||<thread1@example.com>|||Re: Project Update|||alice@example.com|||INBOX|||Work|||false|||2026-05-20T10:00:00",
+        "302|||<thread1@example.com>|||Project Update|||bob@example.com|||INBOX|||Work|||true|||2026-05-19T09:00:00",
+        "303|||<thread2@example.com>|||Kick-off meeting|||carol@example.com|||Archive|||Work|||true|||2026-05-18T08:00:00",
+    ]
+)
 
 # get_email_thread uses the same parser under the hood.
-THREAD_PAYLOAD = "\n".join([
-    "401|||<thread3@example.com>|||Re: Budget Review|||alice@example.com|||INBOX|||Work|||false|||2026-05-22T14:00:00",
-    "402|||<thread3@example.com>|||Budget Review|||finance@example.com|||INBOX|||Work|||true|||2026-05-21T10:00:00",
-])
+THREAD_PAYLOAD = "\n".join(
+    [
+        "401|||<thread3@example.com>|||Re: Budget Review|||alice@example.com|||INBOX|||Work|||false|||2026-05-22T14:00:00",
+        "402|||<thread3@example.com>|||Budget Review|||finance@example.com|||INBOX|||Work|||true|||2026-05-21T10:00:00",
+    ]
+)
+
+THREAD_JSON_PAYLOAD = "\n".join(
+    [
+        "THREAD_STRATEGY|||subject",
+        "401|||<reply@example.com>|||Re: Budget Review|||alice@example.com|||INBOX|||Work|||false|||2026-05-22T14:00:00||||||||||||<root@example.com>|||<root@example.com>|||",
+        "402|||<root@example.com>|||Renamed Budget Decision|||finance@example.com|||Sent|||Work|||true|||2026-05-21T10:00:00|||||||||||||||",
+    ]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +111,70 @@ SEARCH_EMAILS_ACCOUNT_NOT_FOUND_SCHEMA = {
     "additionalProperties": True,
 }
 
+GET_EMAIL_THREAD_JSON_SCHEMA = {
+    "type": "object",
+    "required": [
+        "items",
+        "returned",
+        "account",
+        "mailbox",
+        "mailboxes",
+        "subject_keyword",
+        "strategy",
+        "selection_strategy",
+        "subject_fallback_used",
+        "include_preview",
+        "recent_days_applied",
+        "max_messages",
+    ],
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "message_id",
+                    "internet_message_id",
+                    "subject",
+                    "sender",
+                    "mailbox",
+                    "account",
+                    "is_read",
+                    "received_date",
+                ],
+                "properties": {
+                    "message_id": {"type": "string"},
+                    "internet_message_id": {"type": "string"},
+                    "subject": {"type": "string"},
+                    "sender": {"type": "string"},
+                    "mailbox": {"type": "string"},
+                    "account": {"type": "string"},
+                    "is_read": {"type": "boolean"},
+                    "received_date": {"type": "string"},
+                    "in_reply_to": {"type": "string"},
+                    "references": {"type": "string"},
+                    "content_preview": {"type": "string"},
+                    "mail_link": {"type": "string"},
+                },
+            },
+        },
+        "returned": {"type": "integer", "minimum": 0},
+        "account": {"type": "string"},
+        "mailbox": {"type": "string"},
+        "mailboxes": {"type": "array", "items": {"type": "string"}},
+        "subject_keyword": {"type": "string"},
+        "strategy": {"type": "string", "enum": ["subject", "header_first"]},
+        "selection_strategy": {"type": "string", "enum": ["subject", "header", "subject_fallback"]},
+        "subject_fallback_used": {"type": "boolean"},
+        "include_preview": {"type": "boolean"},
+        "recent_days_applied": {"type": "number"},
+        "max_messages": {"type": "integer", "minimum": 1},
+        "anchor": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "additionalProperties": True,
+}
+
 
 # ---------------------------------------------------------------------------
 # search_emails contract tests
@@ -136,8 +211,14 @@ class SearchEmailsContractTests(unittest.TestCase):
         raw = self._run_search()
         parsed = json.loads(raw)
         required = {
-            "message_id", "internet_message_id", "subject",
-            "sender", "mailbox", "account", "is_read", "received_date",
+            "message_id",
+            "internet_message_id",
+            "subject",
+            "sender",
+            "mailbox",
+            "account",
+            "is_read",
+            "received_date",
         }
         for item in parsed.get("items", []):
             missing = required - item.keys()
@@ -190,7 +271,7 @@ class SearchEmailsContractTests(unittest.TestCase):
 
 
 class GetEmailThreadContractTests(unittest.TestCase):
-    """Contract tests for get_email_thread (text-mode only tool)."""
+    """Contract tests for get_email_thread."""
 
     def test_account_not_found_returns_error_string(self):
         """Unknown account must return an 'Error:' string."""
@@ -241,6 +322,31 @@ class GetEmailThreadContractTests(unittest.TestCase):
         self.assertIsInstance(result, str)
         # Must contain the subject keywords from the payload
         self.assertIn("Budget Review", result)
+
+    def test_json_success_shape_matches_schema(self):
+        """JSON output exposes stable ids, headers, strategy, and preview state."""
+        with patch(
+            "apple_mail_mcp.tools.search.run_applescript",
+            return_value=THREAD_JSON_PAYLOAD,
+        ):
+            result = search_tools.get_email_thread(
+                account="Work",
+                subject_keyword="Budget Review",
+                max_messages=10,
+                recent_days=7,
+                include_preview=False,
+                output_format="json",
+            )
+
+        parsed = json.loads(result)
+        jsonschema.validate(instance=parsed, schema=GET_EMAIL_THREAD_JSON_SCHEMA)
+        self.assertEqual(parsed["returned"], len(parsed["items"]))
+        self.assertEqual(parsed["strategy"], "subject")
+        self.assertEqual(parsed["selection_strategy"], "subject")
+        self.assertFalse(parsed["subject_fallback_used"])
+        self.assertFalse(parsed["include_preview"])
+        self.assertEqual(parsed["items"][0]["in_reply_to"], "<root@example.com>")
+        self.assertEqual(parsed["items"][0]["references"], "<root@example.com>")
 
     def test_unbounded_scan_json_contains_remediation(self):
         """UNBOUNDED_SCAN_REQUIRED JSON must include remediation and fallback_tool."""

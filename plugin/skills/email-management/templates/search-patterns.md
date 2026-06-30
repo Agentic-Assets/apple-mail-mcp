@@ -157,7 +157,7 @@ ids = [item["message_id"] for item in candidates["items"]]
 list_email_attachments(message_ids=ids, max_results=20)
 ```
 
-`save_email_attachment` should be called after the candidate message ids are known. Prefer exact attachment names. Ambiguous duplicate names remain a design item until exact attachment ids are surfaced.
+`save_email_attachment` should be called after the candidate message ids are known. Prefer `attachment_index` from `list_email_attachments(output_format="json")`; exact attachment names remain compatible, but duplicate filename matches require retrying with the exact index.
 
 ## Threads And Replies
 
@@ -167,8 +167,10 @@ When a search or list result contains a `message_id`, use that id for the thread
 thread = get_email_thread(
     account="Work",
     message_id="12345",
-    mailbox="INBOX",
+    mailboxes=["INBOX", "Sent"],
     max_messages=20,
+    output_format="json",
+    include_preview=False,
 )
 
 reply_to_email(

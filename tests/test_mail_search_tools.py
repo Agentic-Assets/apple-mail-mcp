@@ -37,6 +37,39 @@ def _record_line(
     )
 
 
+def _thread_record_line(
+    message_id,
+    subject,
+    internet_message_id="<thread@example.com>",
+    sender="sender@example.com",
+    mailbox="INBOX",
+    account="Work",
+    is_read=False,
+    received_date="2026-03-07T10:00:00",
+    content_preview="",
+    in_reply_to="",
+    references="",
+):
+    return "|||".join(
+        [
+            str(message_id),
+            internet_message_id,
+            subject,
+            sender,
+            mailbox,
+            account,
+            "true" if is_read else "false",
+            received_date,
+            content_preview,
+            "",
+            "",
+            in_reply_to,
+            references,
+            "",
+        ]
+    )
+
+
 def _run(coro):
     """Convenience: drive an async tool to completion from a sync test."""
     return asyncio.run(coro)
@@ -1035,6 +1068,178 @@ class GetEmailThreadTests(unittest.TestCase):
             max_messages=0,
         )
         self.assertIn("max_messages must be > 0", result)
+
+    def test_get_email_thread_rejects_invalid_output_format(self):
+        result = search_tools.get_email_thread(
+            account="Work",
+            subject_keyword="Invoice",
+            output_format="xml",
+        )
+        self.assertIn("Invalid output_format", result)
+
+    def test_get_email_thread_json_returns_ids_headers_and_anchor(self):
+        anchor_line = _thread_record_line(
+            12345,
+            "Re: Budget Review",
+            internet_message_id="<reply@example.com>",
+            sender="alice@example.com",
+            in_reply_to="<root@example.com>",
+            references="<root@example.com> <prior@example.com>",
+        )
+        thread_rows = "\n".join(
+            [
+                _thread_record_line(
+                    12345,
+                    "Re: Budget Review",
+                    internet_message_id="<reply@example.com>",
+                    sender="alice@example.com",
+                    in_reply_to="<root@example.com>",
+                    references="<root@example.com> <prior@example.com>",
+                ),
+                _thread_record_line(
+                    12000,
+                    "Renamed: Budget decision",
+                    internet_message_id="<root@example.com>",
+                    sender="finance@example.com",
+                    references="<prior@example.com>",
+                ),
+            ]
+        )
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "whose id is 12345" in script:
+                return anchor_line
+            return "THREAD_STRATEGY|||header\n" + thread_rows
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_thread(
+                account="Work",
+                message_id="12345",
+                mailboxes=["INBOX", "Sent"],
+                max_messages=10,
+                recent_days=7,
+                include_preview=False,
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["strategy"], "header_first")
+        self.assertEqual(payload["selection_strategy"], "header")
+        self.assertFalse(payload["subject_fallback_used"])
+        self.assertFalse(payload["include_preview"])
+        self.assertEqual(payload["mailboxes"], ["INBOX", "Sent"])
+        self.assertEqual(payload["anchor"]["message_id"], "12345")
+        self.assertEqual(payload["anchor"]["in_reply_to"], "<root@example.com>")
+        self.assertEqual(payload["returned"], 2)
+        self.assertEqual(payload["items"][0]["message_id"], "12345")
+        self.assertEqual(payload["items"][0]["references"], "<root@example.com> <prior@example.com>")
+        self.assertNotIn("content_preview", payload["items"][0])
+
+        thread_script = captured[1]
+        self.assertIn(
+            'set threadHeaderTokens to {"prior@example.com", "reply@example.com", "root@example.com"}', thread_script
+        )
+        self.assertIn('mailbox "Sent" of targetAccount', thread_script)
+        self.assertNotIn("set msgContent to content of aMessage", thread_script)
+
+    def test_get_email_thread_header_first_uses_subject_fallback_only_when_no_header_matches(self):
+        anchor_line = _thread_record_line(
+            12345,
+            "Re: Quarterly Update",
+            internet_message_id="<reply@example.com>",
+            in_reply_to="<root@example.com>",
+            references="<root@example.com>",
+        )
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "whose id is 12345" in script:
+                return anchor_line
+            return "THREAD_STRATEGY|||subject_fallback\n"
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_thread(
+                account="Work",
+                message_id="12345",
+                max_messages=10,
+                recent_days=7,
+                output_format="json",
+            )
+
+        thread_script = captured[1]
+        self.assertIn("set headerThreadMessages to {}", thread_script)
+        self.assertIn("set subjectFallbackMessages to {}", thread_script)
+        self.assertIn("set end of headerThreadMessages to aMessage", thread_script)
+        self.assertIn("set end of subjectFallbackMessages to aMessage", thread_script)
+        self.assertIn("if true and (count of headerThreadMessages) > 0 then", thread_script)
+        self.assertIn("set threadMessages to headerThreadMessages", thread_script)
+        self.assertIn("set threadMessages to subjectFallbackMessages", thread_script)
+
+        payload = json.loads(result)
+        self.assertEqual(payload["selection_strategy"], "subject_fallback")
+        self.assertTrue(payload["subject_fallback_used"])
+
+    def test_get_email_thread_message_id_without_headers_reports_subject_strategy(self):
+        anchor_line = _thread_record_line(
+            12345,
+            "Re: Budget Review",
+            internet_message_id="",
+        )
+
+        def fake_run(script, timeout=120):
+            if "whose id is 12345" in script:
+                return anchor_line
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_thread(
+                account="Work",
+                message_id="12345",
+                max_messages=10,
+                recent_days=7,
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["strategy"], "subject")
+        self.assertIn("warnings", payload)
+        self.assertIn("subject fallback", payload["warnings"][0])
+
+    def test_get_email_thread_message_id_tries_explicit_mailboxes_for_anchor(self):
+        anchor_line = _thread_record_line(
+            12345,
+            "Re: Budget Review",
+            mailbox="Sent",
+            internet_message_id="<reply@example.com>",
+            in_reply_to="<root@example.com>",
+        )
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if 'set targetMailbox to mailbox "INBOX"' in script:
+                return ""
+            if 'set targetMailbox to mailbox "Sent"' in script:
+                return anchor_line
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_thread(
+                account="Work",
+                message_id="12345",
+                mailboxes=["INBOX", "Sent"],
+                max_messages=10,
+                recent_days=7,
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["anchor"]["mailbox"], "Sent")
+        self.assertEqual(len(captured), 3)
+        self.assertIn('mailbox "Sent" of targetAccount', captured[2])
 
 
 class MailboxAllCapTests(unittest.TestCase):

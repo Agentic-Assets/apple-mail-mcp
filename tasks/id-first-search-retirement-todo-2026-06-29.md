@@ -41,11 +41,20 @@ Completed in the CLI/dashboard follow-up pass:
 - Added JSON attachment listing metadata (`message_id`, `attachment_index`, filename, size) and exact `save_email_attachment(..., attachment_index=N)` support with duplicate-name ambiguity errors.
 - Added search warnings for sender-only, body, content-preview, and whole-account mailbox discovery paths.
 
+Completed in the thread-discovery follow-up pass:
+
+- Added `get_email_thread(output_format="json")` with stable `message_id`, Internet Message-ID, In-Reply-To, References, account, mailbox, strategy, anchor, and preview metadata.
+- Added `get_email_thread(mailboxes=[...])` for explicit folder sets and made message-id anchor lookup try those folders before scanning.
+- Made `get_email_thread(message_id=...)` use Message-ID, In-Reply-To, and References headers first, with subject fallback only when the header graph is unavailable or empty.
+- Added `include_preview=False` support so thread discovery can collect exact handles without reading message bodies.
+- Updated thread guidance and packaged ID-first examples to prefer explicit mailbox lists, JSON output, and no-preview handle collection.
+- Added mocked tests for JSON contract shape, header fields, renamed-thread/header matching, common-subject fallback separation, explicit mailbox anchor lookup, and preview suppression.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
 - Forward draft id capture and verification.
-- Thread header graph work.
+- Internet Message-ID lookup support as a search input.
 - Metadata index feasibility and integration.
 - Batch exact-ID APIs.
 
@@ -196,19 +205,19 @@ Todos:
 - [x] Add `sender_exact` and `sender_domain` to `search_emails`.
 - [ ] Add `internet_message_id` lookup support where headers are available.
 - [ ] Decide future of fuzzy `sender`.
-- [ ] Add `get_email_thread` JSON output with message ids and headers.
-- [ ] Make `get_email_thread(message_id=...)` header-first: exact anchor headers, cached headers where available, explicit mailbox set, subject fallback last.
-- [ ] Add `include_preview=False` default or option for `get_email_thread`.
-- [ ] Add examples for explicit `mailboxes=[...]`.
+- [x] Add `get_email_thread` JSON output with message ids and headers.
+- [x] Make `get_email_thread(message_id=...)` header-first: exact anchor headers, cached headers where available, explicit mailbox set, subject fallback last.
+- [x] Add `include_preview=False` default or option for `get_email_thread`.
+- [x] Add examples for explicit `mailboxes=[...]`.
 - [x] Add warnings for sender-only, body, content-preview, and All-mailbox searches.
-- [ ] Test renamed threads and common-subject overmatch.
+- [x] Test renamed threads and common-subject overmatch.
 
 Verification:
 
 - [x] Search and thread focused tests.
-- [ ] Schema tests for new params.
-- [ ] No-unbounded-scan tests.
-- [ ] Large-mailbox fixture or mocked perf checks where available.
+- [x] Schema tests for new params.
+- [x] No-unbounded-scan tests.
+- [x] Large-mailbox fixture or mocked perf checks where available.
 
 ## Phase 4a: Index Feasibility Spike
 

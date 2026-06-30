@@ -1,10 +1,10 @@
 # Thread Management
 
-Apple Mail does not expose true conversation threads to AppleScript. The MCP server reconstructs threads by stripping `Re:`, `Fwd:`, and locale-specific prefixes from subjects and grouping the result.
+Apple Mail does not expose true conversation threads to AppleScript. The MCP server reconstructs threads from a known `message_id` by reading dictionary-backed Message-ID, In-Reply-To, and References headers first, then using subject grouping only as a degraded fallback when headers are unavailable.
 
 ## Tool
 
-`get_email_thread(message_id="...", account="...")` returns the reconstructed conversation around a known Mail message id. Use `subject_keyword` only as a degraded path after confirming no id is available and bounding the search window.
+`get_email_thread(message_id="...", account="...", output_format="json")` returns the reconstructed conversation around a known Mail message id with message ids, Internet Message-ID, In-Reply-To, References, mailbox, account metadata, and fallback status. Check `selection_strategy` and `subject_fallback_used` before treating a reconstructed thread as header-confirmed. Use `subject_keyword` only as a degraded path after confirming no id is available and bounding the search window.
 
 ## When To Use
 
@@ -17,8 +17,14 @@ Apple Mail does not expose true conversation threads to AppleScript. The MCP ser
 ### Read a conversation in order
 
 ```text
-results = search_emails(subject_keyword="Q2 planning", limit=5)
-get_email_thread(message_id=results["emails"][0]["message_id"])
+results = search_emails(subject_keyword="Q2 planning", mailboxes=["INBOX", "Sent"], limit=5, output_format="json")
+get_email_thread(
+    account="Work",
+    message_id=results["items"][0]["message_id"],
+    mailboxes=["INBOX", "Sent"],
+    output_format="json",
+    include_preview=False,
+)
 ```
 
 The result is already chronological. Read top to bottom for context.
@@ -35,10 +41,9 @@ The last entry returned by `get_email_thread()` is the most recent. Prefer reply
 
 ## Cross-Account Threads
 
-`get_email_thread()` honors the same account and mailbox scoping as `search_emails()`. For a thread that spans personal and work accounts, use explicit accounts and mailbox lists first. Whole-account thread scans are slower; use them only when single-account scope is known to be incomplete.
+`get_email_thread()` honors the same account and mailbox scoping as `search_emails()`. For a thread that spans folders, pass explicit `mailboxes=["INBOX", "Sent", "Archive"]` before considering any whole-account fallback. For a thread that spans personal and work accounts, call the tool once per reviewed account and mailbox list. Whole-account thread scans are slower; use them only when single-account scope is known to be incomplete.
 
 ## Limitations
 
-- Subject-prefix stripping is approximate; threads with subject edits ("Q2 planning → revised") will split.
-- The MCP server cannot expose the underlying `Message-ID` or `In-Reply-To` headers, so deeply nested forwards may appear as separate threads.
-- Use `include_content=True` sparingly on `get_email_thread` — full content for every message in a long thread is expensive.
+- Header matching depends on Mail exposing useful Message-ID, In-Reply-To, or References values. When those are missing, subject-prefix stripping remains approximate and common subjects can overmatch.
+- Use `include_preview=False` for ID collection or archive planning. Turn previews on only when the user needs content context.
