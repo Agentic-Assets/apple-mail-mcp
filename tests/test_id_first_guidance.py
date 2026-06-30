@@ -14,6 +14,7 @@ ACTION_SELECTOR_RE = re.compile(
     r"manage_drafts|list_email_attachments|save_email_attachment|export_emails"
     r")\([^`\n]*(subject_keyword|subject_keywords|sender=|draft_subject)"
 )
+MAILBOX_ALL_RE = re.compile(r"\bmailbox\s*=\s*['\"]All['\"]")
 
 NEGATIVE_GUIDANCE_MARKERS = (
     "Do not",
@@ -41,6 +42,17 @@ class IdFirstGuidanceTests(unittest.TestCase):
                 if any(marker in line for marker in NEGATIVE_GUIDANCE_MARKERS):
                     continue
                 violations.append(f"{rel}:{line_no}: {line.strip()}")
+
+        self.assertEqual(violations, [])
+
+    def test_search_patterns_do_not_teach_default_mailbox_all(self):
+        path = ROOT / "plugin" / "skills" / "email-management" / "templates" / "search-patterns.md"
+
+        violations = [
+            f"{path.relative_to(ROOT)}:{line_no}: {line.strip()}"
+            for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+            if MAILBOX_ALL_RE.search(line)
+        ]
 
         self.assertEqual(violations, [])
 
