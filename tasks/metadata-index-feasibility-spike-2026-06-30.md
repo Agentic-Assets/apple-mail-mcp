@@ -62,6 +62,14 @@ Actual header and attachment-count cost measurement needs a privacy-safe live re
 
 No live Mail reads were performed for this spike.
 
+An offline CI fixture gate now exists for ID-first hot paths:
+
+- `tests/test_perf_budget.py`
+- `tests/fixtures/perf_budget/id_first_baseline.json`
+- `tests/fixtures/perf_budget/id_first_current.json`
+
+These fixtures are synthetic and marked `live_mail=false`. They prove the p50/p95 budget format and regression assertions, not live Mail performance.
+
 ## Next Actions
 
 1. Review the contract and decide whether this cache policy is acceptable.

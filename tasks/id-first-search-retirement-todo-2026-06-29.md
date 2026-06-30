@@ -96,6 +96,12 @@ Completed in the metadata-index feasibility contract pass:
 - Added unit tests proving `bulk_metadata` rows cannot answer recipient, header, thread, attachment, or body queries.
 - Saved `tasks/metadata-index-feasibility-spike-2026-06-30.md` with Mail dictionary evidence, privacy rules, integration boundary, and measurement next steps.
 
+Completed in the offline perf-budget fixture pass:
+
+- Added `tests/test_perf_budget.py` with p50/p95 budget assertions for ID-first hot paths and batch APIs.
+- Added baseline/current offline fixtures under `tests/fixtures/perf_budget/`.
+- Kept fixtures explicitly marked `live_mail=false`; they are CI budget wiring, not private Mail measurements.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
@@ -284,7 +290,7 @@ Todos:
 Verification:
 
 - [x] Design note or spike report.
-- [ ] Perf baseline and p50/p95 comparison where runnable.
+- [x] Offline perf baseline and p50/p95 comparison fixture where runnable.
 - [x] Privacy and packaging review.
 - [x] No live private content in reports.
 
@@ -305,7 +311,7 @@ Verification:
 
 - [ ] Cache hit, cache miss, stale fallback, and invalidation tests.
 - [ ] Cache miss must fall back only through bounded AppleScript paths or explicit `full_inbox_export`.
-- [ ] Perf budget tests.
+- [x] Perf budget tests.
 - [ ] Packaging and sensitive-data scans.
 
 ## Phase 5: Batch Exact-ID APIs

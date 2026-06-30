@@ -334,7 +334,7 @@ The dashboard is a required dependency before runtime removal. Current quick act
 - [x] Treat no-unbounded-scan gates as design constraints for cache misses: fallback only through bounded AppleScript paths or explicit `full_inbox_export`.
 - [ ] Add metadata-index tests for cache hit, cache miss, stale fallback, and post-write invalidation.
 - [x] Add batch-id tests for 50, 51, and 120 ids.
-- [ ] Add performance budget tests and before/after p50/p95 fixtures for `search_emails`, `get_email_thread`, `get_email_by_id`, `full_inbox_export`, and new batch APIs.
+- [x] Add performance budget tests and before/after p50/p95 fixtures for `search_emails`, `get_email_thread`, `get_email_by_id`, `full_inbox_export`, and new batch APIs. (offline fixture gate; live measurement still separate)
 
 ## Suggested Issue Breakdown
 
