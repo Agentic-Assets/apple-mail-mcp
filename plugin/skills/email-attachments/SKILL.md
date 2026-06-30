@@ -1,6 +1,6 @@
 ---
 name: email-attachments
-description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses list_email_attachments (message_ids preferred; subject keyword as fallback), save_email_attachment, search_emails (has_attachments filters), get_email_by_id for confirmation, optionally export_emails for bundles. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
+description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses bounded search_emails (has_attachments filters) to collect message_ids first, then list_email_attachments, save_email_attachment, get_email_by_id for confirmation, and optionally export_emails for bundles. Subject lookup is a degraded discovery path only when exact ids are unavailable. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
 ---
 
 # Email Attachments
@@ -27,6 +27,8 @@ Otherwise:
 search_emails(subject_keyword="...", has_attachments=true, recent_days=7, limit=20)
 ```
 
+Use the subject search above only as a degraded discovery path after confirming no exact id is available. Review the results and collect `message_id` before listing or saving attachments.
+
 For genuine full-inbox attachment audits (rare), escalate to `full_inbox_export` instead of unbounded `recent_days`.
 Widen timeframe only after checking performance.
 
@@ -38,7 +40,7 @@ Prefer ids from step 1:
 list_email_attachments(message_ids=[12345, 12346], max_results=10)
 ```
 
-Fallback when ids are unknown (bounded subject scan):
+If ids are unknown, run bounded discovery first, then call by reviewed ids:
 
 ```
 list_email_attachments(message_ids=[12345], max_results=10)

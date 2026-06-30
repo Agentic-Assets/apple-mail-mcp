@@ -40,7 +40,7 @@ Before deleting a large mailbox, export it: `export_emails(scope="entire_mailbox
 ### Purge old read newsletters
 
 ```text
-search_emails(sender="newsletter@example.com", read_status="read", recent_days=30)
+search_emails(sender_exact="newsletter@example.com", read_status="read", recent_days=30)
 # collect message_ids from results
 manage_trash(action="move_to_trash", message_ids=[...], dry_run=True)
 manage_trash(action="move_to_trash", message_ids=[...], dry_run=False)

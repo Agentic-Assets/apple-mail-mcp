@@ -20,7 +20,7 @@ Focus on recurring automated domains versus human counterparts. See [`large-inbo
 ### 2. Drill Candidates
 
 ```
-search_emails(sender="...", recent_days=30, limit=20, include_content=false)
+search_emails(sender_exact="...", recent_days=30, limit=20, include_content=false)
 get_statistics(scope="sender_stats", sender="...")
 ```
 

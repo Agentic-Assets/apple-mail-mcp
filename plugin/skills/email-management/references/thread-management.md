@@ -4,7 +4,7 @@ Apple Mail does not expose true conversation threads to AppleScript. The MCP ser
 
 ## Tool
 
-`get_email_thread(message_id="...", account="...")` returns the reconstructed conversation around a known Mail message id. Use `subject_keyword` only as a fallback when no id is available.
+`get_email_thread(message_id="...", account="...")` returns the reconstructed conversation around a known Mail message id. Use `subject_keyword` only as a degraded path after confirming no id is available and bounding the search window.
 
 ## When To Use
 

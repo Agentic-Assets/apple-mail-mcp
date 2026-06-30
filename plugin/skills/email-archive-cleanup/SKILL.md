@@ -21,7 +21,7 @@ See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonic
 
 On a 24k inbox, filter-based mutations re-pay the scan cost for every batch and often time out. Always:
 
-1. **List or search (bounded)** — `search_emails(sender="...", subject_keyword="...", recent_days=30, limit=50)` or `list_inbox_emails(...)`; inspect sample subjects.
+1. **List or search (bounded)** — `search_emails(sender_exact="...", subject_keyword="...", recent_days=30, limit=50)`, `search_emails(sender_domain="...", recent_days=30, limit=50)`, or `list_inbox_emails(...)`; inspect sample subjects.
 2. **Collect `message_id`s** — extract ids from the JSON/text result.
 3. **Simulate** — `move_email(dry_run=True, message_ids=[ids], to_mailbox="...", max_moves=50)` (or `manage_trash(dry_run=True, message_ids=[ids], ...)`).
 4. **Execute** — `move_email(dry_run=False, message_ids=[ids], ...)` after the operator confirms counts.
