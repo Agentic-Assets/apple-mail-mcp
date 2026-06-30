@@ -118,10 +118,7 @@ def _list_outgoing_message_ids(timeout: int | None = None) -> list[str]:
     end tell
     """
     try:
-        if timeout is None:
-            raw = run_applescript(script).strip()
-        else:
-            raw = run_applescript(script, timeout=timeout).strip()
+        raw = (run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)).strip()
     except Exception:  # noqa: BLE001 — snapshot probe must fail-open
         return []
     return [line.strip() for line in raw.splitlines() if line.strip()]
@@ -590,11 +587,26 @@ def _verify_saved_reply_draft(
 
     {text_offset_script}
 
+    on stripLineBreaks(theText)
+        -- Mail's compose window soft-wraps long lines, and `content as string`
+        -- renders those wraps as line breaks (sometimes mid-word), which would
+        -- defeat a contiguous-substring match for a typed reply body. Removing
+        -- CR/LF rejoins the text so the body needle is found regardless of wrap.
+        set previousDelimiters to AppleScript's text item delimiters
+        set AppleScript's text item delimiters to {{return, linefeed}}
+        set lineParts to text items of theText
+        set AppleScript's text item delimiters to ""
+        set joinedText to lineParts as string
+        set AppleScript's text item delimiters to previousDelimiters
+        return joinedText
+    end stripLineBreaks
+
     on replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
-        set bodyOffset to my textOffset(draftContent, replyBodyNeedle)
+        set flatContent to my stripLineBreaks(draftContent)
+        set bodyOffset to my textOffset(flatContent, my stripLineBreaks(replyBodyNeedle))
         if bodyOffset is 0 then return "missing"
         if quotedNeedle is "" then return "found"
-        set quoteOffset to my textOffset(draftContent, quotedNeedle)
+        set quoteOffset to my textOffset(flatContent, my stripLineBreaks(quotedNeedle))
         if quoteOffset is 0 then return "found"
         if bodyOffset < quoteOffset then return "found"
         return "after_quote"
@@ -1602,7 +1614,7 @@ def _reply_extra_output_lines(
     return "\n        ".join(lines)
 
 
-def _build_native_reply_applescript(
+def _build_reply_objectmodel_applescript(
     *,
     header_text: str,
     success_text: str,
@@ -1626,7 +1638,15 @@ def _build_native_reply_applescript(
     has_bcc: bool,
     has_attachments: bool,
 ) -> str:
-    """Build the Mail dictionary-backed native reply script."""
+    """Build the object-model reply script used when ``native_format=False``.
+
+    This path assigns the reply ``content`` directly (reply_body + a plain-text
+    quoted original) without opening a window. It is the headless/bulk-safe path:
+    no GUI focus, no Accessibility permission. The trade-off is that Mail's native
+    rich quote bar and logo signature are flattened to plain text. The windowed
+    ``native_format=True`` path (``_build_reply_native_window_applescript``)
+    preserves the native look; this is the quiet fallback.
+    """
     extra_output_lines = _reply_extra_output_lines(
         safe_cc=safe_cc,
         safe_bcc=safe_bcc,
@@ -1710,6 +1730,206 @@ tell application "Mail"
     end try
     end tell
     '''
+
+
+def _native_reply_post_action(mode: str) -> str:
+    """Return the post-keystroke Mail action for the windowed native reply path.
+
+    draft: save, then close the reply window quietly (one draft remains; the
+    auto-created shell is reused by ``save``, so no dedupe is needed). open: save
+    and leave the window up for review. send: send (the window closes itself).
+    """
+    if mode == "send":
+        return "send replyMessage\n        delay 0.5"
+    if mode == "open":
+        return "save replyMessage\n        delay 0.8\n        activate"
+    return (
+        "save replyMessage\n"
+        "        delay 1.0\n"
+        "        try\n"
+        "            close (every window whose name is replySubject) saving no\n"
+        "        end try"
+    )
+
+
+def _build_reply_native_window_applescript(
+    *,
+    header_text: str,
+    success_text: str,
+    safe_account: str,
+    lookup_script: str,
+    not_found_message: str,
+    body_temp_path: str,
+    reply_options: str,
+    sender_script: str,
+    signature_script: str,
+    cc_script: str,
+    bcc_script: str,
+    attachment_script: str,
+    mode: str,
+    cleanup_script: str,
+    safe_cc: str,
+    safe_bcc: str,
+    safe_attachment_info: str,
+    has_cc: bool,
+    has_bcc: bool,
+    has_attachments: bool,
+) -> str:
+    """Build the windowed native reply script used when ``native_format=True``.
+
+    Mail's ``reply ... with opening window`` renders its own rich quoted thread
+    (the colored quote bar) and inserts the account's default reply signature
+    (with logo). Those exist only in the rendered compose window, never in the
+    dictionary ``content``, so this path NEVER reassigns ``content`` (doing so
+    flattens them — the prior bug). Instead the reply body is inserted with a
+    TYPED System Events keystroke (never the clipboard, which clobbered the
+    pasteboard and leaked bodies into the wrong thread).
+
+    UI scripting is isolated to the focus guard + keystroke and is unavoidable
+    here: the native rich format cannot be expressed through the Mail dictionary.
+    The guard treats Mail's dictionary front-window name as authoritative and
+    tolerates an empty System Events title (an AX quirk for compose windows); a
+    different non-empty SE title aborts without typing so a partial/wrong-thread
+    draft is never saved. Requires Accessibility permission for the host process;
+    callers that cannot grant it should use ``native_format=False``.
+    """
+    extra_output_lines = _reply_extra_output_lines(
+        safe_cc=safe_cc,
+        safe_bcc=safe_bcc,
+        safe_attachment_info=safe_attachment_info,
+        has_cc=has_cc,
+        has_bcc=has_bcc,
+        has_attachments=has_attachments,
+    )
+    post_action = _native_reply_post_action(mode)
+    return f'''
+set bodyTempPath to "{body_temp_path}"
+set replySubject to ""
+set replyMessage to missing value
+set quotedNeedle to ""
+set didType to false
+set guardMail to "(unset)"
+set guardSE to "(unset)"
+
+try
+    tell application "Mail"
+        set targetAccount to account "{safe_account}"
+        {inbox_mailbox_script("inboxMailbox", "targetAccount")}
+        {lookup_script}
+
+        if foundMessage is missing value then
+            {cleanup_script}
+            return "{not_found_message}"
+        end if
+
+        set sourceSubject to subject of foundMessage as string
+        if sourceSubject starts with "Re:" or sourceSubject starts with "RE:" or sourceSubject starts with "re:" then
+            set replySubject to sourceSubject
+        else
+            set replySubject to "Re: " & sourceSubject
+        end if
+        set replyBodyText to do shell script "cat " & quoted form of bodyTempPath
+
+        -- Native Mail reply: Mail builds its own rich quoted thread and inserts the
+        -- account's default reply signature into the opened window. Content is never
+        -- reassigned below, so that native formatting is preserved.
+        set replyMessage to reply foundMessage {reply_options}
+        delay 1.2
+        activate
+        delay 0.4
+
+        -- Best-effort identity tweaks on the already-good native window.
+        try
+            {sender_script}
+        end try
+        try
+            {signature_script}
+        end try
+        {cc_script}
+        {bcc_script}
+        {attachment_script}
+    end tell
+
+    -- Insert the reply body with a TYPED keystroke. Guard: Mail's dictionary front
+    -- window must be the reply; an empty System Events title is tolerated (AX quirk);
+    -- a different non-empty SE title aborts. Retry to ride out transient focus.
+    if replyBodyText is not "" then
+        repeat with guardAttempt from 1 to 4
+            set guardMail to "(unset)"
+            set guardSE to "(unset)"
+            tell application "Mail"
+                activate
+            end tell
+            delay 0.3
+            tell application "System Events"
+                tell process "Mail"
+                    set frontmost to true
+                    delay 0.3
+                    try
+                        perform action "AXRaise" of (first window whose name is replySubject)
+                    end try
+                    delay 0.3
+                    try
+                        set guardSE to name of front window
+                    end try
+                end tell
+            end tell
+            tell application "Mail"
+                try
+                    set guardMail to name of front window
+                end try
+            end tell
+            if (guardMail is replySubject) and (guardSE is replySubject or guardSE is "" or guardSE is "(unset)") then
+                tell application "System Events"
+                    tell process "Mail"
+                        keystroke replyBodyText
+                    end tell
+                end tell
+                set didType to true
+                exit repeat
+            end if
+            delay 0.5
+        end repeat
+
+        if didType is false then
+            tell application "Mail"
+                try
+                    close (every window whose name is replySubject) saving no
+                end try
+                {cleanup_script}
+            end tell
+            return "GUARD_ABORT: could not focus reply window (mailFront=" & guardMail & " seFront=" & guardSE & ")"
+        end if
+        set quotedNeedle to "wrote:"
+    end if
+
+    delay 0.4
+    tell application "Mail"
+        {post_action}
+
+        set outputText to "{header_text}" & return & return
+        set outputText to outputText & "{success_text}" & return
+        set outputText to outputText & "To: native reply recipients" & return
+        set outputText to outputText & "Subject: " & replySubject & return
+        if quotedNeedle is not "" then set outputText to outputText & "Quote Needle: " & quotedNeedle & return
+        {extra_output_lines}
+
+        {cleanup_script}
+
+        return outputText
+    end tell
+on error errMsg
+    try
+        tell application "Mail"
+            close (every window whose name is replySubject) saving no
+        end tell
+    end try
+    try
+        {cleanup_script}
+    end try
+    return "Error: " & errMsg & return & "Please check that the account name is correct and the email exists."
+end try
+'''
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -1963,6 +2183,7 @@ def reply_to_email(
     include_signature: bool = True,
     signature_name: str | None = None,
     output_format: str = "text",
+    native_format: bool = True,
 ) -> str:
     """
     Reply to an email by message_id (preferred) or subject keyword.
@@ -1988,6 +2209,13 @@ def reply_to_email(
         output_format: "text" (default) preserves the existing success output.
             "json" returns machine-readable draft/open success metadata after
             saved-draft verification succeeds.
+        native_format: When True (default), compose the reply in Mail's native reply
+            window so the draft keeps Mail's colored quote bar and the account's
+            default reply signature (with logo), inserting reply_body with a typed
+            keystroke above the quote. This needs the Mail window to take focus and
+            Accessibility permission for the host process. When False, compose the
+            reply through the object model with no window (headless/bulk-safe, no
+            Accessibility needed); the quote and signature are flattened to plain text.
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
@@ -2116,40 +2344,107 @@ def reply_to_email(
 
     cleanup_script = f'do shell script "rm -f " & quoted form of "{body_temp_path}"'
 
-    sender_script = _compose_sender_script("replyMessage", "targetAccount", sender_override)
     signature_script = _reply_signature_script(resolved_signature_name, include_signature=include_signature)
-    reply_options, reply_settle_delay = _reply_command_options(effective_mode, reply_to_all)
 
-    script = _build_native_reply_applescript(
-        header_text=mode_plan.header_text,
-        success_text=mode_plan.success_text,
-        safe_account=safe_account,
-        lookup_script=lookup_script,
-        not_found_message=not_found_message,
-        body_temp_path=body_temp_path,
-        reply_options=reply_options,
-        reply_settle_delay=reply_settle_delay,
-        sender_script=sender_script,
-        signature_script=signature_script,
-        cc_script=cc_script,
-        bcc_script=bcc_script,
-        attachment_script=attachment_script,
-        post_action=mode_plan.post_action,
-        cleanup_script=cleanup_script,
-        safe_cc=safe_cc,
-        safe_bcc=safe_bcc,
-        safe_attachment_info=safe_attachment_info,
-        has_cc=bool(cc),
-        has_bcc=bool(bcc),
-        has_attachments=bool(attachments),
-    )
+    if native_format:
+        # Native reply: let Mail own the reply identity and its default signature
+        # (with logo). Only set the sender when the caller explicitly overrode it;
+        # never pin the account's single alias here — changing the From on the open
+        # reply window makes Mail re-insert a text-only signature and drop the
+        # embedded logo image (the saved draft loses the logo).
+        native_sender_script = (
+            f'set sender of replyMessage to "{escape_applescript(sender_override)}"' if sender_override else ""
+        )
+        # Always open the reply window so Mail renders its native rich quote +
+        # signature; the body is typed in. Reuse the "open" option string only for
+        # the "with opening window [and reply to all]" wording, independent of mode.
+        native_reply_options, _ = _reply_command_options("open", reply_to_all)
+        script = _build_reply_native_window_applescript(
+            header_text=mode_plan.header_text,
+            success_text=mode_plan.success_text,
+            safe_account=safe_account,
+            lookup_script=lookup_script,
+            not_found_message=not_found_message,
+            body_temp_path=body_temp_path,
+            reply_options=native_reply_options,
+            sender_script=native_sender_script,
+            signature_script=signature_script,
+            cc_script=cc_script,
+            bcc_script=bcc_script,
+            attachment_script=attachment_script,
+            mode=effective_mode,
+            cleanup_script=cleanup_script,
+            safe_cc=safe_cc,
+            safe_bcc=safe_bcc,
+            safe_attachment_info=safe_attachment_info,
+            has_cc=bool(cc),
+            has_bcc=bool(bcc),
+            has_attachments=bool(attachments),
+        )
+    else:
+        # Object-model path (no window): pin the single alias so the headless draft
+        # still sends from the account's own address, since there is no native reply
+        # window to inherit the identity from.
+        objectmodel_sender_script = _compose_sender_script("replyMessage", "targetAccount", sender_override)
+        reply_options, reply_settle_delay = _reply_command_options(effective_mode, reply_to_all)
+        script = _build_reply_objectmodel_applescript(
+            header_text=mode_plan.header_text,
+            success_text=mode_plan.success_text,
+            safe_account=safe_account,
+            lookup_script=lookup_script,
+            not_found_message=not_found_message,
+            body_temp_path=body_temp_path,
+            reply_options=reply_options,
+            reply_settle_delay=reply_settle_delay,
+            sender_script=objectmodel_sender_script,
+            signature_script=signature_script,
+            cc_script=cc_script,
+            bcc_script=bcc_script,
+            attachment_script=attachment_script,
+            post_action=mode_plan.post_action,
+            cleanup_script=cleanup_script,
+            safe_cc=safe_cc,
+            safe_bcc=safe_bcc,
+            safe_attachment_info=safe_attachment_info,
+            has_cc=bool(cc),
+            has_bcc=bool(bcc),
+            has_attachments=bool(attachments),
+        )
 
     try:
         result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
+        if result.startswith("GUARD_ABORT"):
+            return serialize_tool_error(
+                ToolError(
+                    code="REPLY_WINDOW_FOCUS_FAILED",
+                    message=(
+                        "Native reply could not bring the reply window into focus to type the "
+                        "body, so no draft was saved and no email was sent."
+                    ),
+                    remediation={
+                        "preferred": (
+                            "Retry with Mail visible and not being clicked; native replies type "
+                            "into the reply window and need it to hold focus for a moment."
+                        ),
+                        "alternative": (
+                            "Pass native_format=False to compose the reply with no window "
+                            "(headless-safe; no Accessibility focus needed; plain-text quote)."
+                        ),
+                        "detail": result,
+                    },
+                )
+            )
         if effective_mode in ("draft", "open") and mode_plan.success_text in result:
             reply_subject = _extract_output_field(result, "Subject")
             draft_id = _extract_output_field(result, "Draft ID")
             quoted_needle = _extract_output_field(result, "Quote Needle")
+            # The native window inherits Mail's own default reply signature (with logo),
+            # whose rich text we never set and cannot reliably substring-match. Only
+            # assert a signature when one was explicitly requested by name; otherwise
+            # skip the check so the native default signature is not flagged "missing".
+            signature_requested_for_verify: bool | None = include_signature
+            if native_format and include_signature and not resolved_signature_name:
+                signature_requested_for_verify = None
             verification = _verify_saved_reply_draft(
                 account,
                 reply_subject or "",
@@ -2158,7 +2453,7 @@ def reply_to_email(
                 quoted_needle=quoted_needle,
                 expected_attachment_count=len(validated_paths) if validated_paths else None,
                 expected_attachment_names=[Path(path).name for path in validated_paths],
-                signature_requested=include_signature,
+                signature_requested=signature_requested_for_verify,
                 expected_signature_name=resolved_signature_name,
                 timeout=timeout,
             )

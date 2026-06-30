@@ -3,6 +3,38 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
+## 3.8.0 - 2026-06-30
+
+Native-format reply drafts. `reply_to_email` now defaults to Mail's native reply
+window so saved drafts keep the colored quote bar and the account's default logo
+signature, with a windowless fallback preserved for headless and bulk use.
+
+### Added
+
+- **`native_format` parameter on `reply_to_email`** (default `True`). The native
+  path opens Mail's `reply ... with opening window`, which renders Mail's own rich
+  quoted thread and default reply signature, then types `reply_body` above the quote
+  with a System Events keystroke (never the clipboard). Set `native_format=False`
+  for the windowless object-model path (plain-text quote, no signature logo, no
+  Accessibility permission required) for headless, bulk, or CI use.
+- **`REPLY_WINDOW_FOCUS_FAILED` structured error.** When the native path cannot
+  bring the reply window into focus, it aborts without saving and returns a
+  structured error that points callers at `native_format=False`.
+
+### Changed
+
+- **Reply verification is line-break-insensitive.** The saved-draft verifier now
+  strips CR/LF before matching, so a soft-wrapped first line no longer trips a false
+  `BODY_MISSING`. The native default also skips signature substring matching (Mail's
+  own logo signature cannot be reliably substring-matched) and never pins the
+  account alias on the native window (pinning had dropped the embedded logo).
+
+### Notes
+
+- The native path needs the host process to hold macOS Accessibility permission
+  (System Events keystroke); `native_format=False` avoids it.
+- 963 collected tests; tool count unchanged (31).
+
 ## 3.6.1 — 2026-06-07
 
 Codex plugin install-smoke regression recovery and test-count verification.

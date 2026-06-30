@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **958 collected tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **963 collected tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -324,7 +324,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
-| `reply_to_email` | Native Mail reply or reply-all draft; constructs and assigns `reply_body` above a quoted-original block, then verifies exact Drafts id first with bounded fallback; returns verification status, verified draft id, attachment status, and signature status for draft/open modes |
+| `reply_to_email` | Native Mail reply or reply-all draft. Default `native_format=True` composes in Mail's reply window (keeps the rich quote bar + logo signature) and types `reply_body` above the quote — needs window focus + Accessibility permission, else returns `REPLY_WINDOW_FOCUS_FAILED`; `native_format=False` is the windowless object-model fallback (plain-text quote). Verifies exact Drafts id first with bounded fallback; returns verification status, verified draft id, attachment status, and signature status for draft/open modes |
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, open, and delete drafts; list returns Drafts ids, and send/open/delete prefer exact `draft_id` over subject matching; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `verify_draft` | Verify one exact Drafts message id; returns JSON snapshot for recipients, body sentinel, attachments, signature state, quoted-original status, and thread headers |

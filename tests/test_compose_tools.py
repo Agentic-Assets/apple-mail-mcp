@@ -225,6 +225,7 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
                 account="Work",
                 message_id="12345",
                 reply_body="Reply body",
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -974,25 +975,31 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         script = _main_reply_script(captured)
+        # Native default: Mail's own reply window owns the rich quote + signature,
+        # and the reply body is TYPED in (never reassigned via `set content`, which
+        # flattens the native formatting, and never the clipboard).
         _assert_ordered(
             self,
             script,
-            "set sourceContent to content of foundMessage as string",
             "set replyBodyText to do shell script",
-            "set replyMessage to reply foundMessage",
-            'set quotedOriginalNeedle to "On " & sourceDate & ", " & sourceSender & " wrote:"',
-            "set quotedOriginalText to quotedOriginalNeedle & return & sourceContent",
-            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
-            "set content of replyMessage to (composedReplyContent as rich text)",
+            "set replyMessage to reply foundMessage with opening window",
+            'perform action "AXRaise" of (first window whose name is replySubject)',
+            "keystroke replyBodyText",
+            'set quotedNeedle to "wrote:"',
             "save replyMessage",
         )
+        # Body is typed, so content is never reassigned and no plain-text quote is built.
+        self.assertNotIn("set content of replyMessage", script)
+        self.assertNotIn("set composedReplyContent", script)
+        self.assertNotIn("set quotedOriginalText", script)
+        # Empty System Events title is tolerated (AX quirk for compose windows);
+        # a different non-empty title aborts before typing.
+        self.assertIn('guardSE is replySubject or guardSE is "" or guardSE is "(unset)"', script)
+        # Native default never pins the account alias (that drops the logo signature).
+        self.assertNotIn("set sender of replyMessage", script)
         self.assertNotIn("make new outgoing message", script)
-        self.assertNotIn("content:fullBody", script)
-        self.assertNotIn("set quotedBody", script)
-        self.assertNotIn("quoted original truncated", script)
-        self.assertNotIn("set existingReplyContent to content of replyMessage", script)
         self.assertNotIn("NSPasteboard", script)
-        self.assertNotIn("System Events", script)
+        self.assertNotIn("set the clipboard", script)
         self.assertNotIn('keystroke "v"', script)
 
     def test_reply_to_email_accepts_output_format_parameter(self):
@@ -1018,6 +1025,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 account="Work",
                 message_id="12345",
                 reply_body="",
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -1323,6 +1331,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_to_all=True,
                 attachments=str(attachment),
                 include_signature=False,
+                native_format=False,
             )
 
         self.assertIn("Reply saved as draft!", result)
@@ -1374,24 +1383,23 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn("SAVING REPLY AS DRAFT", script)
-        # Native Mail reply: Mail constructs the quoted prior conversation and
-        # the tool inserts the requested body into the native composer.
-        self.assertIn("set replyMessage to reply foundMessage", script)
-        self.assertNotIn("set replyMessage to reply foundMessage with opening window", script)
+        # Native default: Mail opens its own reply window (rich quote + signature)
+        # and the body is typed in; draft mode saves quietly and closes the window.
+        self.assertIn("set replyMessage to reply foundMessage with opening window", script)
         self.assertGreaterEqual(script.count("save replyMessage"), 1)
+        self.assertIn("close (every window whose name is replySubject) saving no", script)
         self.assertNotIn("close (window of replyMessage)", script)
         self.assertNotIn("close front window", script)
         self.assertIn("set sourceSubject to subject of foundMessage as string", script)
         self.assertNotIn("set replySubject to subject of replyMessage as string", script)
         self.assertIn('set outputText to outputText & "Subject: " & replySubject', script)
-        self.assertIn("set quotedOriginalText to", script)
-        self.assertIn(
-            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
-            script,
-        )
+        # Typed body: no plain-text quote assembly, no content reassignment.
+        self.assertIn("keystroke replyBodyText", script)
+        self.assertNotIn("set quotedOriginalText to", script)
+        self.assertNotIn("set composedReplyContent", script)
+        self.assertNotIn("set content of replyMessage", script)
         self.assertNotIn("content of replyMessage as string", script)
         self.assertNotIn("NSPasteboard", script)
-        self.assertNotIn("System Events", script)
         self.assertNotIn('keystroke "v"', script)
         self.assertNotIn("send replyMessage", script)
 
@@ -1472,6 +1480,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Reply body",
                 include_signature=True,
+                native_format=False,
             )
 
         verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
@@ -1850,6 +1859,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Reply body",
                 send=False,
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -1878,10 +1888,12 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         script = _main_reply_script(captured)
+        # Native reply-all opens the window with Mail's own reply-to-all recipients.
         self.assertIn(
-            "reply foundMessage with reply to all",
+            "reply foundMessage with opening window and reply to all",
             script,
         )
+        self.assertIn("keystroke replyBodyText", script)
         self.assertNotIn("to recipients of foundMessage", script)
         self.assertNotIn("cc recipients of foundMessage", script)
         self.assertNotIn(
@@ -1910,8 +1922,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         script = _main_reply_script(captured)
-        self.assertIn("set replyMessage to reply foundMessage", script)
-        self.assertNotIn("set replyMessage to reply foundMessage with opening window", script)
+        # Native plain reply (no reply-to-all): window opens without "reply to all".
+        self.assertIn("set replyMessage to reply foundMessage with opening window", script)
+        self.assertIn("keystroke replyBodyText", script)
         self.assertNotIn("reply to all", script)
         self.assertNotIn("cc recipients of foundMessage", script)
         self.assertNotIn(
@@ -1939,6 +1952,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Reply body",
                 signature_name="TU",
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -1972,6 +1986,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Unique body sentinel 84053",
                 include_signature=False,
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -2011,6 +2026,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body=f"{body_sentinel}\n\nReply body",
                 include_signature=False,
+                native_format=False,
             )
 
         self.assertIn("Draft ID: 81121", result)
@@ -2041,6 +2057,88 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
         self.assertIn("set signatureWasRequested to false", verifier_script)
         self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
+
+    def test_native_default_skips_signature_verification(self):
+        # Native default inherits Mail's own logo signature, whose rich text we never
+        # set and cannot substring-match. The verifier must be told the signature was
+        # NOT requested (missing value) so the native default is not flagged "missing".
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                include_signature=True,
+            )
+
+        verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
+        self.assertIn("set signatureWasRequested to missing value", verifier_script)
+        # The native main script still applies Mail's own default signature property,
+        # but verification of it is deliberately skipped.
+        main_script = _main_reply_script(captured)
+        self.assertIn("set replyMessage to reply foundMessage with opening window", main_script)
+
+    def test_native_reply_guard_abort_returns_focus_failed_error(self):
+        # When the native path cannot bring the reply window into focus it returns a
+        # GUARD_ABORT sentinel without saving; reply_to_email maps that to a structured
+        # REPLY_WINDOW_FOCUS_FAILED error that points callers at native_format=False.
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return "GUARD_ABORT: could not focus reply window (mailFront=Inbox seFront=Inbox)"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["error"])
+        self.assertEqual(payload["code"], "REPLY_WINDOW_FOCUS_FAILED")
+        self.assertIn("native_format=False", payload["remediation"]["alternative"])
+        self.assertIn("GUARD_ABORT", payload["remediation"]["detail"])
+
+    def test_native_reply_verifier_rejoins_soft_wrapped_lines(self):
+        # Mail soft-wraps long typed lines, and `content as string` renders the wraps
+        # as line breaks (sometimes mid-word). The verifier strips CR/LF before the
+        # contiguous-substring match so a wrapped body needle is still found.
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|not_requested|not_requested"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+            )
+
+        verifier_script = captured[0]
+        self.assertIn("on stripLineBreaks(theText)", verifier_script)
+        self.assertIn("set bodyOffset to my textOffset(flatContent, my stripLineBreaks(replyBodyNeedle))", verifier_script)
 
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):
         captured = []

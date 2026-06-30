@@ -73,7 +73,7 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 | Tool | Default | Notes |
 |------|---------|-------|
 | `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True` |
-| `reply_to_email` | `mode="draft"` (via `send=False`) | Native Mail reply composer; verifies exact Drafts id first with bounded fallback, exposes `exact_id_verified` in JSON, and preserves known `draft_id` on verifier timeout/error |
+| `reply_to_email` | `mode="draft"` (via `send=False`), `native_format=True` | Default native path opens Mail's reply window (rich quote bar + logo signature) and types `reply_body` above the quote — needs window focus + **Accessibility permission** or returns `REPLY_WINDOW_FOCUS_FAILED`. `native_format=False` is the windowless object-model fallback (plain-text quote, no Accessibility). Both verify exact Drafts id first with bounded fallback, expose `exact_id_verified` in JSON, and preserve known `draft_id` on verifier timeout/error |
 | `verify_draft` | read-only | Exact Drafts id snapshot for recipients, body, attachments, signatures, quoted original, and thread headers |
 | `verify_drafts` | read-only | Batch exact Drafts id snapshots with per-draft JSON payloads |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
