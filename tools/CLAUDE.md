@@ -12,7 +12,7 @@ Dev-infra guardrails — not MCP tools (`plugin/apple_mail_mcp/tools/` is the se
 Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].name`):
 
 1. **Version sync** — Claude/Codex `plugin.json`, Claude marketplace `plugins[0].version`, `server.json` (×2), `apple-mail-mcpb/manifest.json`
-2. **Tool count claims** — descriptions must match `rg "^@mcp\.tool" … | wc -l` (**29**)
+2. **Tool count claims**: descriptions must match `rg "^@mcp\.tool" ... | wc -l` (**31**)
 3. **MCPB name parity** — `@mcp.tool` names ↔ `apple-mail-mcpb/manifest.json` `tools[]`
 4. **Install contracts** — Claude plugin `mcpServers`, Codex `.mcp.json`, marketplace `source`/skills, MCPB `server` config, `server.json` package metadata, and PyPI package deps/packages must point at the shipped runtime
 5. **Payload syntax** — `plugin/start_mcp.sh` and shipped Python files must parse before release
@@ -55,6 +55,40 @@ python3 tools/check_wrapper_surface.py --wrapper /path/to/apple-mail
 ```
 
 Run after regenerating the mcporter bundle or adding read tools agents rely on.
+
+## measure_metadata_hydration.py
+
+| Script | Role |
+|--------|------|
+| `measure_metadata_hydration.py` | Read-only exact-id timing helper for Phase 4a metadata-index feasibility |
+
+Measures header-read and attachment-count hydration costs for exact Mail message ids. It is not an MCP tool and must not be run casually: it requires `--confirm-read-only-live-mail`, sends nothing, creates no drafts, and prints only aggregate timings/counts. It does not print message contents, headers, senders, subjects, recipient addresses, attachment names, or raw message ids.
+
+```bash
+python3 tools/measure_metadata_hydration.py \
+  --account "$DEFAULT_MAIL_ACCOUNT" \
+  --mailbox INBOX \
+  --message-ids "12345,67890" \
+  --repeats 3 \
+  --confirm-read-only-live-mail
+```
+
+Use only with known dummy or approved exact ids. The output is suitable for deciding whether Phase 4b metadata-index hydration is worth implementing, but it is not a runtime cache and does not mutate Mail.
+
+## inspect_envelope_index_schema.py
+
+| Script | Role |
+|--------|------|
+| `inspect_envelope_index_schema.py` | Schema-only Envelope Index research helper for Phase 4a risk assessment |
+
+Inspects only SQLite schema metadata from Mail's local Envelope Index: table names, column names/types, index names/columns, and a schema fingerprint. It is not an MCP tool, does not read message rows, redacts the file path, and requires `--confirm-read-only-live-mail-index`.
+
+```bash
+python3 tools/inspect_envelope_index_schema.py \
+  --confirm-read-only-live-mail-index
+```
+
+Use this only to assess permission and schema-drift risk before any future direct-index backend work. Do not use it as a runtime query path or include its output in package artifacts.
 
 ## dev-check.sh
 

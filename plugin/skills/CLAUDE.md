@@ -2,7 +2,7 @@
 
 Skills are the **primary entry point** for email workflows in Claude Code. They teach the model when and how to call MCP tools — they do not implement tool logic.
 
-New or edited skills: delegate drafting to subagents; run **`plugin-dev:plugin-validator`** and **`plugin-dev:skill-reviewer`** before merge. See root [`CLAUDE.md`](../../CLAUDE.md) § Agent orchestration.
+New or edited skills: delegate drafting to subagents when available and permitted; run **`plugin-dev:plugin-validator`** and **`plugin-dev:skill-reviewer`** before merge when available. If not, document the gap and run local validation. See root [`CLAUDE.md`](../../CLAUDE.md), Agent orchestration section.
 
 ## Skills-only policy
 
@@ -56,7 +56,7 @@ Follow the shipped `email-management/SKILL.md` as the canonical template for umb
 
 ## Before merging skill changes
 
-Run **`plugin-dev:skill-reviewer`** on the description and body. Description quality determines whether the skill triggers at all.
+Run **`plugin-dev:skill-reviewer`** on the description and body when available. Description quality determines whether the skill triggers at all.
 
 ## Related folders
 

@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **29 tools**, **822 tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **932 collected tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -45,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (29 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
+One install — MCP server (31 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -126,7 +126,7 @@ python3 -m venv .venv
   --arg ./start_mcp.sh \
   --arg=--draft-safe \
   --cwd "$PWD/plugin" \
-  --expect-count 29 \
+  --expect-count 31 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -158,7 +158,7 @@ replace the path below if the details output shows a different install path:
   --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
   --arg=--draft-safe \
   --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1" \
-  --expect-count 29 \
+  --expect-count 31 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -295,7 +295,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 
 </details>
 
-## Tools (29)
+## Tools (31)
 
 ### Reading & Search
 | Tool | Description |
@@ -307,6 +307,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `list_account_addresses` | List sender aliases configured for a Mail account |
 | `search_emails` | Unified search — subject, sender, body, dates, attachments. Defaults to last 48h and the default account |
 | `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results |
+| `get_email_by_ids` | Fetch multiple exact emails by reviewed Apple Mail message ids, chunked internally |
 | `get_email_thread` | Conversation thread view across Inbox + Sent; prefer `message_id` from search/list results |
 
 ### Organization
@@ -327,6 +328,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, open, and delete drafts; list returns Drafts ids, and send/open/delete prefer exact `draft_id` over subject matching; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `verify_draft` | Verify one exact Drafts message id; returns JSON snapshot for recipients, body sentinel, attachments, signature state, quoted-original status, and thread headers |
+| `verify_drafts` | Verify multiple exact Drafts message ids and merge the per-draft JSON snapshots |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
@@ -346,7 +348,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 75 messages, longer windows 20 × 250 |
-| `export_emails` | Export single emails by `message_id` or subject, or full mailboxes to TXT/HTML (default cap 1000) |
+| `export_emails` | Export exact `message_ids`, single emails by `message_id`, or full mailboxes to TXT/HTML (default cap 1000) |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Audited full-inbox walk; only tool that scans every message. Slow (minutes on 24K mailboxes). Named in `UNBOUNDED_SCAN_REQUIRED` remediation as the legitimate fallback. |
 
@@ -384,7 +386,7 @@ Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows a
 
 In draft-safe mode:
 
-- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies assign `reply_body` above the quoted original, verify exact Drafts id first when Mail exposes it, return verification metadata, then use bounded newest-Drafts fallback only if needed
+- `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies assign `reply_body` above the quoted original, and saved replies/forwards verify exact Drafts id first when Mail exposes it before returning verification metadata
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it. For replies, disabling signatures cannot skip `reply_body` insertion
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
 - reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
@@ -490,8 +492,8 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 ```
 Show me an overview of my inbox
 Search for emails about "project update" in my Gmail
-Reply to the email about "Domain name" with "Thanks for the update!"
-Move emails with "invoice" in the subject to my Archive folder
+Find the recent "Domain name" message, show me its message_id, then draft a reply by id
+Search for recent invoice messages, show me the candidate ids, then move the reviewed message_ids to Archive
 Show me email statistics for the last 30 days
 Draft replies to unread messages with mode=open for review, or create a rich HTML weekly-update draft
 ```
@@ -607,7 +609,7 @@ apple-mail-mcp/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
-│   ├── apple_mail_mcp/        # Python MCP server package (29 tools)
+│   ├── apple_mail_mcp/        # Python MCP server package (31 tools)
 │   ├── apple_mail_mcp.py      # Entry point
 │   ├── start_mcp.sh           # Startup wrapper (auto-creates venv)
 │   └── requirements.txt

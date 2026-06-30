@@ -119,8 +119,9 @@ Goal: keep folder structure healthy and archive aging messages.
 3. Analyze patterns: `get_statistics(scope="account_overview")` plus `get_top_senders()`. For per-folder volume, prefer `list_mailboxes(include_counts=True)`; when calling `get_statistics(scope="mailbox_breakdown")`, pass explicit `mailbox=` — omitting it scopes to the default Inbox in code. Full guidance lives in `references/analytics.md`.
 4. Adjust folders: collaborate with **`mailbox-taxonomy`** for naming; create net-new folders with `create_mailbox` after explicit confirmation (rename/delete heavy work still occurs in Mail UI when needed).
 5. Bulk-organize by sender or date (ID-first — see **`email-archive-cleanup`**):
-   - `search_emails(sender="...", recent_days=30)` → collect `message_id`s → `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` → execute.
-   - Filter-only `move_email(sender=...)` requires `allow_filter_scan=True` (slow; rarely use).
+   - Prefer `search_emails(sender_exact="person@example.com", recent_days=30)` or `search_emails(sender_domain="example.com", recent_days=30)` when the exact sender/domain is known; use fuzzy `sender="..."` only for discovery when the address is uncertain.
+   - `search_emails(sender_exact="...", recent_days=30)` → collect `message_id`s → `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` → execute.
+   - Action tools do not target by `sender=`; collect ids with `search_emails(sender_exact="...", ...)` or `search_emails(sender_domain="...", ...)`, then call `move_email(message_ids=[...])`.
 6. Archive read mail older than 30 days into `Archive/<year>`.
 
 Detailed safe bulk operations are documented in `references/bulk-cleanup.md`.
@@ -156,16 +157,16 @@ Mindset:
 | Full dashboard | `inbox_dashboard()` | Heavier, richer view |
 | Find a specific email | `search_emails(subject_keyword="...")` | Defaults to last 48 hours |
 | Read one message by id | `get_email_by_id(message_id="...")` | After search/list returns an id |
-| Search by sender | `search_emails(sender="...")` | Same defaults apply |
+| Search by sender | `search_emails(sender_exact="person@example.com")` or `search_emails(sender_domain="example.com")` | Use fuzzy `sender="..."` only when the address is uncertain |
 | Search email bodies | `search_emails(body_text="...", allow_body_scan=True)` | Slower; requires explicit opt-in |
 | Cross-account search | `search_emails(account=None, all_accounts=True)` | Costly on Exchange; use sparingly |
 | Recent inbox listing | `list_inbox_emails(max_emails=50, read_status="unread", include_content=False)` | Default cap is 50; `read_status="unread"` is the cheapest pass on a large inbox. Legacy `include_read=False` still works but deprecated. |
-| View a conversation | `get_email_thread(message_id="...")` or `subject_keyword=` when no id | Prefer id from list/search |
+| View a conversation | `get_email_thread(message_id="...")` | Use subject lookup only as a degraded path after confirming no id is available |
 | Move messages | `move_email(message_ids=[...], max_moves=N)` | ID-first; filter scans need `allow_filter_scan=True` |
 | Flag / mark read | `update_email_status(action="...", message_ids=[...])` | ID-first; default cap 10 |
 | Move to trash / delete | `manage_trash(action="...", message_ids=[...])` | See `references/bulk-cleanup.md` |
 | Analytics | `get_statistics()` and `get_top_senders()` | See `references/analytics.md` |
-| Export for backup | `export_emails(scope="...", mailbox="...")` | Run before any large delete |
+| Export for backup | `export_emails(message_ids=[...])` or `export_emails(scope="...", mailbox="...")` | Prefer reviewed ids for batches; run before any large delete |
 | Sync stale account | `synchronize_account(account="...", confirm_sync=True)` | Only after the user explicitly accepts that Mail may fetch a large backlog |
 
 ## Common Scenarios
@@ -182,7 +183,7 @@ Mindset:
 ### "I can't find an important email"
 
 1. Start with `search_emails(subject_keyword="...")` on the default account and default 48-hour window.
-2. Widen the time window: add `recent_days=30`. If the tool returns `code: UNBOUNDED_SCAN_REQUIRED`, follow the `remediation.fallback_tool` field — usually a wider `recent_days` covers it; only escalate to `full_inbox_export` after confirming with the user.
+2. Widen the time window: add `recent_days=30`. If the tool returns `code: UNBOUNDED_SCAN_REQUIRED`, follow the `remediation.fallback_tool` field. Usually a wider `recent_days` covers it; only escalate to `full_inbox_export` after confirming with the user.
 3. Widen the scope: add `all_accounts=True` to search every configured account.
 4. Search the body: `search_emails(body_text="...", allow_body_scan=True, recent_days=30)` before asking to run a full scan.
 5. Filter by attachment if relevant: `search_emails(has_attachments=True, ...)`.
@@ -206,7 +207,7 @@ Mindset:
 ### "Too many emails from one sender"
 
 1. Confirm volume: `get_statistics(scope="sender_stats", sender="...")`.
-2. Find the messages: `search_emails(sender="...", recent_days=30)`. If the user wants every message from this sender across all time, call `full_inbox_export` (slow) rather than ratcheting `recent_days` indefinitely.
+2. Find the messages: `search_emails(sender_exact="...", recent_days=30)` or `search_emails(sender_domain="...", recent_days=30)`. If the user wants every message from this sender across all time, call `full_inbox_export` (slow) rather than ratcheting `recent_days` indefinitely.
 3. If unwanted, run the cleanup sequence from `references/bulk-cleanup.md`.
 4. If wanted but noisy, create a dedicated folder and bulk-move with `message_ids` from step 2 (`email-archive-cleanup` workflow).
 5. If the sender is a newsletter, surface it via `get_top_senders()` and unsubscribe in Apple Mail.

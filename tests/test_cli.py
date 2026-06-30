@@ -111,6 +111,64 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIsNone(captured["mailboxes"])
 
+    def test_search_body_requires_explicit_allow_body_scan(self):
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured.update(kwargs)
+            return '{"items":[]}'
+
+        with (
+            patch("apple_mail_mcp.tools.search.search_emails", side_effect=fake_search),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "search",
+                    "--account",
+                    "Work",
+                    "--body",
+                    "invoice terms",
+                    "--allow-body-scan",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["body_text"], "invoice terms")
+        self.assertTrue(captured["allow_body_scan"])
+
+    def test_search_exact_sender_domain_and_message_id_forward_to_tool(self):
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured.update(kwargs)
+            return '{"items":[]}'
+
+        with (
+            patch("apple_mail_mcp.tools.search.search_emails", side_effect=fake_search),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "search",
+                    "--account",
+                    "Work",
+                    "--sender-exact",
+                    "person@example.com",
+                    "--sender-domain",
+                    "example.com",
+                    "--internet-message-id",
+                    "<reply@example.com>",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["sender_exact"], "person@example.com")
+        self.assertEqual(captured["sender_domain"], "example.com")
+        self.assertEqual(captured["internet_message_id"], "<reply@example.com>")
+
     def test_drafts_list_forwards_hide_empty(self):
         captured = {}
 
@@ -671,6 +729,60 @@ class AppleMailCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertTrue(captured["dry_run"])
+
+    def test_move_dry_run_prefers_message_ids(self):
+        captured = {}
+
+        def fake_move(**kwargs):
+            captured.update(kwargs)
+            return "preview"
+
+        with (
+            patch("apple_mail_mcp.tools.manage.move_email", side_effect=fake_move),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "move-dry-run",
+                    "--account",
+                    "Work",
+                    "--to",
+                    "Archive",
+                    "--message-ids",
+                    "101, 202",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["message_ids"], ["101", "202"])
+        self.assertIsNone(captured["subject_keyword"])
+        self.assertFalse(captured["allow_filter_scan"])
+
+    def test_trash_dry_run_prefers_message_ids(self):
+        captured = {}
+
+        def fake_trash(**kwargs):
+            captured.update(kwargs)
+            return "preview"
+
+        with (
+            patch("apple_mail_mcp.tools.manage.manage_trash", side_effect=fake_trash),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "trash-dry-run",
+                    "--account",
+                    "Work",
+                    "--message-ids",
+                    "303,404",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["message_ids"], ["303", "404"])
+        self.assertIsNone(captured["subject_keyword"])
+        self.assertFalse(captured["allow_filter_scan"])
 
     def test_smoke_test_checks_invalid_account_and_draft_safe(self):
         with (

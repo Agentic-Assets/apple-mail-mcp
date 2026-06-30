@@ -194,11 +194,15 @@ class PerfBatteryTests(unittest.TestCase):
 
         with (
             patch.object(cli, "_resolve_test_account", return_value=("Work", None)),
-            patch.object(cli, "build_perf_cases", return_value=[
-                cli.PerfCase("metadata", "metadata", 2000, lambda: None),
-                cli.PerfCase("no_hit_search", "no_hit_search", 3000, lambda: None),
-                cli.PerfCase("inbox", "inbox", 5000, lambda: None),
-            ]),
+            patch.object(
+                cli,
+                "build_perf_cases",
+                return_value=[
+                    cli.PerfCase("metadata", "metadata", 2000, lambda: None),
+                    cli.PerfCase("no_hit_search", "no_hit_search", 3000, lambda: None),
+                    cli.PerfCase("inbox", "inbox", 5000, lambda: None),
+                ],
+            ),
             patch.object(cli, "_evaluate_perf_case", side_effect=fake_evaluate),
         ):
             payload = cli.run_perf_battery("Work", quick=True)
@@ -212,9 +216,13 @@ class PerfBatteryTests(unittest.TestCase):
     def test_run_perf_battery_fails_when_any_case_fails(self):
         with (
             patch.object(cli, "_resolve_test_account", return_value=("Work", None)),
-            patch.object(cli, "build_perf_cases", return_value=[
-                cli.PerfCase("metadata", "metadata", 2000, lambda: None),
-            ]),
+            patch.object(
+                cli,
+                "build_perf_cases",
+                return_value=[
+                    cli.PerfCase("metadata", "metadata", 2000, lambda: None),
+                ],
+            ),
             patch.object(
                 cli,
                 "_evaluate_perf_case",

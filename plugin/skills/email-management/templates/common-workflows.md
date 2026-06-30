@@ -15,14 +15,14 @@ search_emails(subject_keyword="urgent", read_status="unread")
 search_emails(subject_keyword="ASAP", read_status="unread")
 
 # 3. Check VIP senders
-search_emails(sender="boss@company.com", read_status="unread")
-search_emails(sender="key-client@example.com", read_status="unread")
+search_emails(sender_exact="boss@company.com", read_status="unread")
+search_emails(sender_exact="key-client@example.com", read_status="unread")
 
 # 4. Flag action items
-update_email_status(action="flag", subject_keyword="action required", max_updates=5)
+update_email_status(action="flag", message_ids=[...], max_updates=5)
 
 # 5. Quick cleanup
-manage_trash(action="move_to_trash", sender="newsletter@", mailbox="INBOX", max_deletes=10)
+manage_trash(action="move_to_trash", message_ids=[...], mailbox="INBOX", max_deletes=10)
 ```
 
 ### End of Day Cleanup (5 minutes)
@@ -35,13 +35,13 @@ get_mailbox_unread_counts(summary_only=True)
 list_inbox_emails(max_emails=20, include_content=False)
 
 # 3. Mark read non-essential
-update_email_status(action="mark_read", sender="automated@", mailbox="INBOX", max_updates=10)
+update_email_status(action="mark_read", message_ids=[...], mailbox="INBOX", max_updates=10)
 
 # 4. Archive processed emails
 move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=20)
 
 # 5. Review flagged items for tomorrow
-search_emails(mailbox="All")  # Check flags
+search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Check flags
 ```
 
 ## Search & Find Workflows
@@ -61,17 +61,19 @@ search_emails(
 # Option 2: Get full thread
 get_email_thread(
     account="Work",
-    subject_keyword="Project Alpha",
-    mailbox="All",
-    max_messages=20
+    message_id="<message_id-from-search>",
+    mailboxes=["INBOX", "Sent", "Archive"],
+    max_messages=20,
+    output_format="json",
+    include_preview=False
 )
 
 # Option 3: Advanced search
 search_emails(
     account="Work",
-    mailbox="All",
+    mailboxes=["INBOX", "Sent", "Archive"],
     subject_keyword="Project Alpha",
-    sender="client@example.com",
+    sender_exact="client@example.com",
     include_content=True,
     max_results=10
 )
@@ -83,8 +85,8 @@ search_emails(
 # All emails from sender
 search_emails(
     account="Work",
-    sender="colleague@company.com",
-    mailbox="All",
+    sender_exact="colleague@company.com",
+    mailboxes=["INBOX", "Sent", "Archive"],
     recent_days=30,
     max_results=50
 )
@@ -92,7 +94,7 @@ search_emails(
 # Unread emails from sender
 search_emails(
     account="Work",
-    sender="colleague@company.com",
+    sender_exact="colleague@company.com",
     read_status="unread",
     mailbox="INBOX"
 )
@@ -100,9 +102,9 @@ search_emails(
 # Emails with attachments from sender
 search_emails(
     account="Work",
-    sender="colleague@company.com",
+    sender_exact="colleague@company.com",
     has_attachments=True,
-    mailbox="All",
+    mailboxes=["INBOX", "Archive"],
     recent_days=30,
     max_results=20
 )
@@ -116,7 +118,7 @@ search_emails(
     account="Work",
     date_from="2025-01-01",
     date_to="2025-01-31",
-    mailbox="All",
+    mailboxes=["INBOX", "Sent", "Archive"],
     max_results=100
 )
 
@@ -125,7 +127,7 @@ search_emails(
     account="Work",
     subject_keyword="invoice",
     date_from="2025-01-15",
-    mailbox="All",
+    mailboxes=["INBOX", "Archive"],
     max_results=20
 )
 ```
@@ -142,26 +144,27 @@ search_emails(
 )
 
 # Specific sender with attachments
-search_emails(
+attachment_matches = search_emails(
     account="Work",
-    sender="supplier@example.com",
+    sender_exact="supplier@example.com",
     has_attachments=True,
-    mailbox="All",
+    mailboxes=["INBOX", "Archive"],
     recent_days=30,
-    max_results=20
+    max_results=20,
+    output_format="json",
 )
 
-# Then list attachments
+# Review matches, then list attachments by message id
+message_ids = [item["message_id"] for item in attachment_matches["items"]]
 list_email_attachments(
     account="Work",
-    subject_keyword="Invoice",
-    max_results=1
+    message_ids=message_ids[:5],
 )
 
 # Save specific attachment
 save_email_attachment(
     account="Work",
-    subject_keyword="Invoice",
+    message_id=message_ids[0],
     attachment_name="invoice.pdf",
     save_path="~/Desktop/invoice.pdf"
 )
@@ -173,35 +176,41 @@ save_email_attachment(
 
 ```
 # 1. File project emails
-search_emails(
+project_matches = search_emails(
     account="Work",
     subject_keyword="Project Alpha",
     mailbox="INBOX",
-    read_status="all"
+    read_status="all",
+    max_results=10,
+    output_format="json",
 )
 
+project_ids = [item["message_id"] for item in project_matches["items"]]
 move_email(
     account="Work",
-    subject_keyword="Project Alpha",
+    message_ids=project_ids,
     to_mailbox="Projects/Alpha",
     from_mailbox="INBOX",
-    max_moves=10
+    max_moves=len(project_ids),
 )
 
 # 2. File client emails
-search_emails(
+client_matches = search_emails(
     account="Work",
-    sender="client@example.com",
+    sender_exact="client@example.com",
     mailbox="INBOX",
-    recent_days=30
+    recent_days=30,
+    max_results=10,
+    output_format="json",
 )
 
+client_ids = [item["message_id"] for item in client_matches["items"]]
 move_email(
     account="Work",
-    sender="client@example.com",  # Need to use subject_keyword with search result
+    message_ids=client_ids,
     to_mailbox="Clients/ClientName",
     from_mailbox="INBOX",
-    max_moves=10
+    max_moves=len(client_ids),
 )
 
 # 3. Preview older read leftovers before archiving
@@ -229,23 +238,25 @@ get_statistics(
     days_back=30
 )
 
-# 3. Batch move by pattern
+# 3. Batch move by reviewed ids
 # Example: Move all emails from a client
-search_emails(
+client_matches = search_emails(
     account="Work",
-    sender="bigclient@example.com",
-    mailbox="All",
+    sender_exact="bigclient@example.com",
+    mailboxes=["INBOX", "Archive"],
     recent_days=30,
-    max_results=50
+    max_results=50,
+    output_format="json",
 )
 
 # Then move them (repeat with batches if >10)
+client_ids = [item["message_id"] for item in client_matches["items"]]
 move_email(
     account="Work",
-    subject_keyword="[pattern from search]",
+    message_ids=client_ids[:10],
     to_mailbox="Clients/BigClient",
     from_mailbox="INBOX",
-    max_moves=10
+    max_moves=min(len(client_ids), 10),
 )
 ```
 
@@ -265,23 +276,23 @@ search_emails(
 # 2. Review what you found
 # (Check if any need to be kept in current folders)
 
-# 3. Export if important
+# 3. Export if important, using a reviewed message id
 export_emails(
     account="Work",
     scope="single_email",
-    subject_keyword="Important Old Email",
+    message_id="<reviewed-message-id>",
     mailbox="INBOX",
     save_directory="~/Documents/Email-Archives",
     format="txt"
 )
 
-# 4. Move to archive
+# 4. Move reviewed ids to archive
 move_email(
     account="Work",
-    subject_keyword="[pattern]",
+    message_ids=["<reviewed-message-id-1>", "<reviewed-message-id-2>"],
     to_mailbox="Archive/2024",
     from_mailbox="INBOX",
-    max_moves=20
+    max_moves=2,
 )
 ```
 
@@ -366,7 +377,7 @@ update_email_status(
 get_email_thread(
     account="Work",
     message_id="<message_id from search/list>",
-    mailbox="All",
+    mailbox="INBOX",
     max_messages=20
 )
 
@@ -383,18 +394,20 @@ reply_to_email(
 
 ```
 # 1. Find the email
-search_emails(
+matches = search_emails(
     account="Work",
     subject_keyword="Customer Issue",
     include_content=True,
     max_results=1,
-    max_content_length=500
+    max_content_length=500,
+    output_format="json",
 )
+message_id = matches["items"][0]["message_id"]
 
 # 2. Forward to colleague
 forward_email(
     account="Work",
-    subject_keyword="Customer Issue",
+    message_id=message_id,
     to="colleague@company.com",
     message="Hi [Name],\n\nCan you please help with this customer issue? It seems related to your area.\n\nThanks!",
     mailbox="INBOX"
@@ -404,17 +417,17 @@ forward_email(
 update_email_status(
     account="Work",
     action="mark_read",
-    subject_keyword="Customer Issue",
+    message_ids=[message_id],
     mailbox="INBOX",
-    max_updates=1
+    max_updates=1,
 )
 
 move_email(
     account="Work",
-    subject_keyword="Customer Issue",
+    message_ids=[message_id],
     to_mailbox="Waiting For",
     from_mailbox="INBOX",
-    max_moves=1
+    max_moves=1,
 )
 ```
 
@@ -434,7 +447,7 @@ get_statistics(
 # 2. Search for their emails
 search_emails(
     account="Personal",
-    sender="newsletter@unwanted.com",
+    sender_exact="newsletter@unwanted.com",
     mailbox="INBOX",
     recent_days=30,
     max_results=50
@@ -444,7 +457,7 @@ search_emails(
 manage_trash(
     account="Personal",
     action="move_to_trash",
-    sender="newsletter@unwanted.com",
+    sender_exact="newsletter@unwanted.com",
     mailbox="INBOX",
     max_deletes=20
 )
@@ -452,7 +465,7 @@ manage_trash(
 # 4. Verify trash
 search_emails(
     account="Personal",
-    sender="newsletter@unwanted.com",
+    sender_exact="newsletter@unwanted.com",
     mailbox="Trash",
     recent_days=30
 )
@@ -461,7 +474,7 @@ search_emails(
 manage_trash(
     account="Personal",
     action="delete_permanent",
-    sender="newsletter@unwanted.com",
+    sender_exact="newsletter@unwanted.com",
     max_deletes=20
 )
 ```
@@ -488,13 +501,13 @@ export_emails(
     format="txt"
 )
 
-# 3. Move to archive or delete
+# 3. Move reviewed ids to archive or delete
 move_email(
     account="Work",
-    subject_keyword="[pattern]",
+    message_ids=["<reviewed-message-id-1>", "<reviewed-message-id-2>"],
     to_mailbox="Archive/2024",
     from_mailbox="INBOX",
-    max_moves=20
+    max_moves=2,
 )
 ```
 
@@ -561,14 +574,17 @@ manage_drafts(
 search_emails(
     account="Work",
     subject_keyword="Complex Topic",
-    mailbox="All",
+    mailboxes=["INBOX", "Sent"],
     limit=5
 )
 
 # 2. Review the thread by message_id
 get_email_thread(
     account="Work",
-    message_id="<message_id-from-search>"
+    message_id="<message_id-from-search>",
+    mailboxes=["INBOX", "Sent"],
+    output_format="json",
+    include_preview=False
 )
 
 # 3. Create a reply draft with original thread context
@@ -601,7 +617,7 @@ get_statistics(
 get_statistics(
     account="Work",
     scope="sender_stats",
-    sender="frequent-sender@example.com",
+    sender_exact="frequent-sender@example.com",
     days_back=30
 )
 
@@ -627,7 +643,7 @@ get_mailbox_unread_counts(summary_only=True)
 get_statistics(
     account="Work",
     scope="sender_stats",
-    sender="automated-reports@company.com",
+    sender_exact="automated-reports@company.com",
     days_back=90
 )
 
@@ -637,20 +653,22 @@ get_statistics(
 #    Option C: Unsubscribe
 
 # 3. Organize existing emails
-search_emails(
+report_matches = search_emails(
     account="Work",
-    sender="automated-reports@company.com",
-    mailbox="All",
+    sender_exact="automated-reports@company.com",
+    mailboxes=["INBOX", "Archive"],
     recent_days=30,
-    max_results=50
+    max_results=50,
+    output_format="json",
 )
 
+report_ids = [item["message_id"] for item in report_matches["items"]]
 move_email(
     account="Work",
-    subject_keyword="[pattern]",
+    message_ids=report_ids[:20],
     to_mailbox="Automated Reports",
     from_mailbox="INBOX",
-    max_moves=20
+    max_moves=min(len(report_ids), 20),
 )
 ```
 
@@ -660,21 +678,23 @@ move_email(
 
 ```
 # 1. Search for pattern
-search_emails(
+review_matches = search_emails(
     account="Work",
     subject_keyword="Q4 Review",
-    mailbox="All",
+    mailboxes=["INBOX", "Archive"],
     recent_days=30,
-    max_results=20
+    max_results=20,
+    output_format="json",
 )
 
 # 2. Batch flag
+review_ids = [item["message_id"] for item in review_matches["items"]]
 update_email_status(
     account="Work",
     action="flag",
-    subject_keyword="Q4 Review",
-    mailbox="All",
-    max_updates=10
+    message_ids=review_ids[:10],
+    mailbox="INBOX",
+    max_updates=min(len(review_ids), 10),
 )
 ```
 
@@ -684,7 +704,7 @@ update_email_status(
 # 1. Identify emails to mark read
 search_emails(
     account="Work",
-    sender="automated-notifications@",
+    sender_domain="notifications.example.com",
     read_status="unread",
     mailbox="INBOX",
     max_results=20
@@ -694,7 +714,7 @@ search_emails(
 update_email_status(
     account="Work",
     action="mark_read",
-    sender="automated-notifications@",
+    sender_domain="notifications.example.com",
     mailbox="INBOX",
     max_updates=20
 )
@@ -706,7 +726,7 @@ update_email_status(
 # 1. Find all emails from sender
 search_emails(
     account="Work",
-    sender="project-team@company.com",
+    sender_exact="project-team@company.com",
     mailbox="INBOX",
     recent_days=30,
     max_results=50
@@ -715,7 +735,7 @@ search_emails(
 # 2. Move in batches (max_moves=10 is safe)
 move_email(
     account="Work",
-    sender="project-team@company.com",
+    sender_exact="project-team@company.com",
     to_mailbox="Projects/Team Project",
     from_mailbox="INBOX",
     max_moves=10,
@@ -756,23 +776,25 @@ export_emails(
 
 ```
 # 1. Find the email
-search_emails(
+contract_matches = search_emails(
     account="Work",
     subject_keyword="Contract Agreement",
     include_content=True,
     max_results=1,
-    max_content_length=0  # Full content
+    max_content_length=0,  # Full content
+    output_format="json",
 )
+message_id = contract_matches["items"][0]["message_id"]
 
 # 2. Export with attachments
 list_email_attachments(
     account="Work",
-    subject_keyword="Contract Agreement"
+    message_ids=[message_id],
 )
 
 save_email_attachment(
     account="Work",
-    subject_keyword="Contract Agreement",
+    message_id=message_id,
     attachment_name="contract.pdf",
     save_path="~/Documents/Contracts/contract.pdf"
 )
@@ -781,7 +803,7 @@ save_email_attachment(
 export_emails(
     account="Work",
     scope="single_email",
-    subject_keyword="Contract Agreement",
+    message_id=message_id,
     save_directory="~/Documents/Contracts",
     format="html"
 )
@@ -803,7 +825,7 @@ search_emails(subject_keyword="action required", read_status="unread")
 # (Use inbox zero workflow)
 
 # 4. Review weekly tasks
-search_emails(mailbox="All")  # Check flags
+search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Check flags
 
 # 5. Set up for the week
 manage_drafts(action="list")
@@ -817,7 +839,7 @@ manage_drafts(action="list")
 # Send or delete drafts by exact draft_id from the list output
 
 # 2. Clean up flagged items
-search_emails(mailbox="All")  # Review flags
+search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Review flags
 update_email_status(action="unflag", ...)  # Clear completed
 
 # 3. Archive week's emails
@@ -845,7 +867,7 @@ get_statistics(scope="account_overview", days_back=7)
 # Daily essentials
 get_inbox_overview()
 list_inbox_emails(max_emails=20)
-search_emails(subject_keyword="...", mailbox="All")
+search_emails(subject_keyword="...", mailboxes=["INBOX", "Archive"])
 get_email_thread(message_id="<message_id from search>")
 reply_to_email(message_id="<message_id from search>", reply_body="...")
 move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=10)

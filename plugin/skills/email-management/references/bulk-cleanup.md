@@ -4,7 +4,7 @@ Bulk operations remove or relocate many messages at once. Apple Mail offers no u
 
 ## ID-first rule (v3.7.0)
 
-Mutations default to **`message_ids=[...]`** from a prior bounded `search_emails` or `list_inbox_emails` call. Filter-based `move_email` / `update_email_status` / `manage_trash` without ids returns **`FILTER_SCAN_DISABLED`** unless **`allow_filter_scan=True`** (slow; approved bulk campaigns only).
+Mutations default to **`message_ids=[...]`** from a prior bounded `search_emails` or `list_inbox_emails` call. Filter-based `move_email` / `update_email_status` / `manage_trash` without ids returns **`TARGET_SELECTOR_DEPRECATED`** for subject or sender target selectors; date-only or explicit bulk scans still require **`allow_filter_scan=True`**.
 
 See **`email-archive-cleanup`** for the canonical campaign shape.
 
@@ -40,7 +40,7 @@ Before deleting a large mailbox, export it: `export_emails(scope="entire_mailbox
 ### Purge old read newsletters
 
 ```text
-search_emails(sender="newsletter@example.com", read_status="read", recent_days=30)
+search_emails(sender_exact="newsletter@example.com", read_status="read", recent_days=30)
 # collect message_ids from results
 manage_trash(action="move_to_trash", message_ids=[...], dry_run=True)
 manage_trash(action="move_to_trash", message_ids=[...], dry_run=False)

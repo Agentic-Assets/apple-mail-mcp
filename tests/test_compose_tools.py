@@ -58,6 +58,19 @@ def _saved_reply_draft_output(
     return "\n".join(lines) + "\n"
 
 
+def _saved_forward_draft_output(*, to="recipient@example.com", subject="Fwd: Test", draft_id=None):
+    lines = [
+        "SAVING FORWARD AS DRAFT",
+        "",
+        "Forward saved as draft.",
+        f"To: {to}",
+        f"Subject: {subject}",
+    ]
+    if draft_id is not None:
+        lines.append(f"Draft ID: {draft_id}")
+    return "\n".join(lines) + "\n"
+
+
 class DefaultMailSignatureSupportTests(unittest.TestCase):
     def test_server_exposes_default_mail_signature_env_setting(self):
         self.assertTrue(hasattr(_server, "DEFAULT_MAIL_SIGNATURE"))
@@ -147,12 +160,12 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
             (
                 compose_tools.reply_to_email,
                 "replyMessage",
-                {"subject_keyword": "test", "reply_body": "Thanks"},
+                {"message_id": "12345", "reply_body": "Thanks"},
             ),
             (
                 compose_tools.forward_email,
                 "forwardMessage",
-                {"subject_keyword": "test", "to": "recipient@example.com"},
+                {"message_id": "12345", "to": "recipient@example.com"},
             ),
         ]:
             with self.subTest(tool=tool.__name__):
@@ -856,7 +869,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -903,7 +916,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="",
             )
 
@@ -928,7 +941,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -957,7 +970,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 output_format="json",
             )
@@ -1000,7 +1013,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             mock_validate.return_value = ([str(attachment)], None)
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 attachments=str(attachment),
                 include_signature=True,
@@ -1038,7 +1051,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             mock_validate.return_value = ([str(attachment)], None)
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 attachments=str(attachment),
                 include_signature=False,
@@ -1087,7 +1100,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             mock_validate.return_value = ([str(attachment)], None)
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 attachments=str(attachment),
                 include_signature=True,
@@ -1132,7 +1145,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             mock_validate.return_value = ([str(attachment)], None)
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body=f"{body_sentinel}\n\nReply body",
                 reply_to_all=True,
                 attachments=str(attachment),
@@ -1182,7 +1195,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -1226,7 +1239,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -1283,7 +1296,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 include_signature=True,
             )
@@ -1307,7 +1320,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body=f"{sentinel}\n\nReply body",
             )
 
@@ -1356,7 +1369,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Unique body sentinel",
             )
 
@@ -1379,7 +1392,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
             )
 
@@ -1402,7 +1415,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 mode="open",
             )
@@ -1444,7 +1457,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 mode="open",
             )
@@ -1483,7 +1496,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 mode="open",
                 output_format="json",
@@ -1512,7 +1525,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 send=False,
             )
@@ -1537,7 +1550,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 reply_to_all=True,
             )
@@ -1569,7 +1582,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 reply_to_all=False,
             )
@@ -1601,7 +1614,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 signature_name="TU",
             )
@@ -1634,7 +1647,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Unique body sentinel 84053",
                 include_signature=False,
             )
@@ -1673,7 +1686,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body=f"{body_sentinel}\n\nReply body",
                 include_signature=False,
             )
@@ -1724,7 +1737,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 signature_name="Missing",
             )
@@ -1750,7 +1763,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 from_address="secondary@example.org",
                 send=False,
@@ -1774,7 +1787,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 reply_body="Reply body",
                 from_address="unknown@example.com",
                 send=False,
@@ -1798,7 +1811,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
             )
 
@@ -1833,7 +1846,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 mode="open",
             )
@@ -1843,6 +1856,71 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(len(forward_scripts), 1)
         self.assertIn("save forwardMessage", forward_scripts[0])
         self.assertIn("review", result)
+
+    def test_forward_draft_success_outputs_draft_id_and_verification(self):
+        captured = []
+        verify_calls = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return _saved_forward_draft_output(draft_id="84055")
+
+        def fake_verify(**kwargs):
+            verify_calls.append(kwargs)
+            return json.dumps({"draft_id": kwargs["draft_id"], "found": True, "warnings": []})
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+        ):
+            result = compose_tools.forward_email(
+                account="Work",
+                message_id="12345",
+                to="recipient@example.com",
+                message="Please review\nMore context",
+                include_signature=False,
+            )
+
+        self.assertIn("Draft ID: 84055", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 84055", result)
+        self.assertEqual(len(verify_calls), 1)
+        self.assertEqual(
+            verify_calls[0],
+            {
+                "account": "Work",
+                "draft_id": "84055",
+                "expected_to": "recipient@example.com",
+                "expected_subject": "Fwd: Test",
+                "expected_body_contains": "Please review",
+                "expected_signature": False,
+                "timeout": None,
+            },
+        )
+        script = captured[0]
+        self.assertIn("set forwardDraftId to id of forwardMessage as string", script)
+        self.assertIn('"Draft ID: " & forwardDraftId', script)
+
+    def test_forward_draft_reports_verification_warnings(self):
+        def fake_run(script, timeout=120):
+            return _saved_forward_draft_output(draft_id="84055")
+
+        def fake_verify(**kwargs):
+            return json.dumps({"draft_id": kwargs["draft_id"], "found": True, "warnings": ["signature_unexpected"]})
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+        ):
+            result = compose_tools.forward_email(
+                account="Work",
+                message_id="12345",
+                to="recipient@example.com",
+                include_signature=False,
+            )
+
+        self.assertIn("Verification Status: found_with_warnings", result)
+        self.assertIn("Verification Warnings: signature_unexpected", result)
 
     def test_default_emits_single_alias_fallback_for_forward_message(self):
         captured = []
@@ -1857,7 +1935,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
             )
 
@@ -1882,7 +1960,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 from_address="secondary@example.org",
             )
@@ -1908,7 +1986,7 @@ class ForwardEmailSenderOverrideTests(unittest.TestCase):
         ):
             result = compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 from_address="unknown@example.com",
             )
@@ -2066,6 +2144,40 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
         self.assertIn('set outputText to outputText & "Draft ID: " & draftId', script)
         self.assertNotIn('contains "Duplicate Subject"', script)
 
+    def test_send_draft_subject_returns_deprecation_before_read_only_send_guard(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", True),
+            patch.object(compose_tools._server, "DRAFT_SAFE", False),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="send",
+                draft_subject="Duplicate Subject",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "draft_id")
+
+    def test_send_draft_subject_returns_deprecation_before_draft_safe_send_guard(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", False),
+            patch.object(compose_tools._server, "DRAFT_SAFE", True),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="send",
+                draft_subject="Duplicate Subject",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(payload["remediation"]["exact_selector"], "draft_id")
+
     def test_open_and_delete_drafts_can_target_exact_draft_id(self):
         for action, expected_action in [("open", "open foundDraft"), ("delete", "delete foundDraft")]:
             with self.subTest(action=action):
@@ -2216,6 +2328,70 @@ class ManageDraftsListTests(unittest.TestCase):
         self.assertFalse(payload["checks"]["to_matches_expected"])
         self.assertIn("to_mismatch", payload["warnings"])
 
+    def test_verify_drafts_preserves_order_and_reports_missing_invalid_ids(self):
+        calls: list[dict[str, object]] = []
+
+        def fake_verify(**kwargs):
+            calls.append(kwargs)
+            draft_id = kwargs["draft_id"]
+            found = draft_id != "303"
+            return json.dumps(
+                {
+                    "draft_id": draft_id,
+                    "found": found,
+                    "warnings": [] if found else ["draft_not_found"],
+                    "checks": {"body_contains_expected": kwargs["expected_body_contains"] == "hello"},
+                }
+            )
+
+        with patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify):
+            result = compose_tools.verify_drafts(
+                account="Work",
+                draft_ids=["101", "bad", "202", "101", "303"],
+                expected_body_contains="hello",
+                expected_signature=True,
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["draft_ids"], ["101", "202", "303"])
+        self.assertEqual(payload["invalid_ids"], ["bad"])
+        self.assertEqual(payload["missing_ids"], ["303"])
+        self.assertEqual(payload["found"], 2)
+        self.assertEqual(payload["chunk_size"], 50)
+        self.assertEqual([item["draft_id"] for item in payload["items"]], ["101", "202", "303"])
+        self.assertEqual([call["draft_id"] for call in calls], ["101", "202", "303"])
+        self.assertTrue(all(call["expected_body_contains"] == "hello" for call in calls))
+        self.assertTrue(all(call["expected_signature"] is True for call in calls))
+
+    def test_verify_drafts_rejects_non_numeric_draft_ids_without_calling_verifier(self):
+        with patch("apple_mail_mcp.tools.compose.verify_draft") as mock_verify:
+            result = compose_tools.verify_drafts(account="Work", draft_ids=["abc", ""])
+
+        mock_verify.assert_not_called()
+        self.assertIn("'draft_ids' must contain one or more numeric", result)
+
+    def test_verify_drafts_handles_120_ids(self):
+        calls: list[str] = []
+
+        def fake_verify(**kwargs):
+            draft_id = kwargs["draft_id"]
+            calls.append(draft_id)
+            return json.dumps({"draft_id": draft_id, "found": False, "warnings": ["draft_not_found"]})
+
+        ids = [str(i) for i in range(1, 121)]
+        with patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify):
+            result = compose_tools.verify_drafts(account="Work", draft_ids=ids)
+
+        payload = json.loads(result)
+        self.assertEqual(payload["draft_ids"], ids)
+        self.assertEqual(payload["found"], 0)
+        self.assertEqual(payload["missing_ids"], ids)
+        self.assertEqual(payload["chunk_size"], 50)
+        self.assertEqual(len(calls), 120)
+        self.assertEqual(calls[0], "1")
+        self.assertEqual(calls[50], "51")
+        self.assertEqual(calls[100], "101")
+
     def test_list_uses_newest_first_slice(self):
         captured = []
 
@@ -2365,7 +2541,7 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         ):
             compose_tools.reply_to_email(
                 account="Work",
-                subject_keyword="Invoice",
+                message_id="888",
                 reply_body="Thanks",
                 timeout=240,
             )
@@ -2468,7 +2644,7 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         ):
             compose_tools.forward_email(
                 account="Work",
-                subject_keyword="test",
+                message_id="12345",
                 to="recipient@example.com",
                 message="Please review",
             )

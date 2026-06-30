@@ -20,9 +20,11 @@ from apple_mail_mcp.applescript_snippets import (
     text_offset_handler,
     thread_headers_block,
 )
-from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.bounded_scan import (
+    MAX_WHOSE_IDS,
     build_bounded_message_scan,
+    iter_id_chunks,
 )
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
@@ -433,6 +435,61 @@ def _reply_success_payload(
         "signature_status": verification.signature_status,
         "mailbox": "Drafts",
     }
+
+
+def _format_forward_verification_lines(
+    raw_verification: str,
+    fallback_draft_id: str,
+) -> str:
+    """Return stable success metadata lines for a verified forward draft."""
+    try:
+        payload = json.loads(raw_verification)
+    except json.JSONDecodeError:
+        return "Verification Status: error\nWarning: saved forward draft verification returned invalid JSON\n"
+
+    warnings = payload.get("warnings") or []
+    found = payload.get("found") is True
+    if found and warnings:
+        status = "found_with_warnings"
+    elif found:
+        status = "found"
+    else:
+        status = "not_found"
+    verified_id = str(payload.get("draft_id") or fallback_draft_id)
+    lines = [f"Verification Status: {status}"]
+    if verified_id:
+        lines.append(f"Verified Draft ID: {verified_id}")
+    if payload.get("error"):
+        lines.append(f"Verification Error: {payload['error']}")
+    if warnings:
+        lines.append("Verification Warnings: " + ", ".join(str(item) for item in warnings))
+    return "\n".join(lines) + "\n"
+
+
+def _verify_saved_forward_draft(
+    account: str,
+    *,
+    draft_id: str | None,
+    to: str,
+    subject: str | None,
+    lead_message: str | None,
+    expected_signature: bool | None,
+    timeout: int | None = None,
+) -> str:
+    """Verify a saved forward draft by exact Drafts id when Mail exposes it."""
+    if not draft_id:
+        return "Verification Status: unavailable\nWarning: Mail did not expose a saved forward Draft ID\n"
+
+    raw_verification = verify_draft(
+        account=account,
+        draft_id=draft_id,
+        expected_to=to,
+        expected_subject=subject,
+        expected_body_contains=_first_non_empty_line(lead_message or "") or None,
+        expected_signature=expected_signature,
+        timeout=timeout,
+    )
+    return _format_forward_verification_lines(raw_verification, draft_id)
 
 
 def _verify_saved_reply_draft(
@@ -1682,6 +1739,79 @@ def verify_draft(
     return json.dumps(payload)
 
 
+@mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@inject_preferences
+def verify_drafts(
+    account: str | None = None,
+    draft_ids: list[str] | None = None,
+    expected_to: str | None = None,
+    expected_cc: str | None = None,
+    expected_subject: str | None = None,
+    expected_body_contains: str | None = None,
+    expected_attachments: str | list[str] | None = None,
+    expected_signature: bool | None = None,
+    require_quoted_original: bool | None = None,
+    timeout: int | None = None,
+) -> str:
+    """
+    Verify multiple saved Apple Mail Drafts messages by exact draft ids.
+
+    This batches calls to the exact Drafts verifier without using subject or
+    keyword lookup. The per-draft payload is the same JSON object returned by
+    ``verify_draft``.
+    """
+    account, account_error = _resolve_account(account, timeout=timeout)
+    if account_error:
+        return account_error
+    assert account is not None
+
+    raw_ids = [str(value).strip() for value in (draft_ids or []) if str(value).strip()]
+    normalized_ids = normalize_message_ids(raw_ids)
+    invalid_ids = [value for value in raw_ids if not value.isdigit()]
+    if not normalized_ids:
+        return "Error: 'draft_ids' must contain one or more numeric Mail Drafts message ids"
+
+    items: list[dict[str, Any]] = []
+    for chunk in iter_id_chunks(normalized_ids):
+        for draft_id in chunk:
+            raw_result = verify_draft(
+                account=account,
+                draft_id=draft_id,
+                expected_to=expected_to,
+                expected_cc=expected_cc,
+                expected_subject=expected_subject,
+                expected_body_contains=expected_body_contains,
+                expected_attachments=expected_attachments,
+                expected_signature=expected_signature,
+                require_quoted_original=require_quoted_original,
+                timeout=timeout,
+            )
+            try:
+                payload = json.loads(raw_result)
+            except json.JSONDecodeError:
+                payload = {"draft_id": draft_id, "found": False, "error": raw_result}
+            items.append(payload)
+
+    missing_ids = [
+        str(item.get("draft_id", ""))
+        for item in items
+        if item.get("found") is False and "draft_not_found" in (item.get("warnings") or [])
+    ]
+
+    return json.dumps(
+        {
+            "draft_ids": normalized_ids,
+            "items": items,
+            "returned": len(items),
+            "found": sum(1 for item in items if item.get("found") is True),
+            "missing_ids": missing_ids,
+            "invalid_ids": invalid_ids,
+            "account": account,
+            "chunk_size": MAX_WHOSE_IDS,
+        }
+    )
+
+
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
 @inject_preferences
 def reply_to_email(
@@ -1734,12 +1864,21 @@ def reply_to_email(
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
 
+    if not message_id and not subject_keyword:
+        return "Error: 'subject_keyword' or 'message_id' is required"
+    if not message_id and subject_keyword:
+        return target_selector_deprecated_error(
+            "reply_to_email",
+            ("subject_keyword",),
+            preferred="Call search_emails(...) or list_inbox_emails(...) first, then pass message_id.",
+            discovery="search_emails(subject_keyword=..., recent_days=..., limit=...)",
+            exact_selector="message_id",
+        )
+
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
         return account_error
     assert account is not None  # _resolve_account guarantees non-None when error is None
-    if not message_id and not subject_keyword:
-        return "Error: 'subject_keyword' or 'message_id' is required"
 
     lookup_script, lookup_error = _build_found_message_lookup(
         "inboxMailbox",
@@ -2189,14 +2328,23 @@ def forward_email(
         Confirmation message with details of forwarded email
     """
 
-    account, account_error = _resolve_account(account, timeout=timeout)
-    if account_error:
-        return account_error
-    assert account is not None  # _resolve_account guarantees non-None when error is None
     if not message_id and not subject_keyword:
         return "Error: 'subject_keyword' or 'message_id' is required"
     if not to:
         return "Error: 'to' is required"
+    if not message_id and subject_keyword:
+        return target_selector_deprecated_error(
+            "forward_email",
+            ("subject_keyword",),
+            preferred="Call search_emails(...) or list_inbox_emails(...) first, then pass message_id.",
+            discovery="search_emails(subject_keyword=..., recent_days=..., limit=...)",
+            exact_selector="message_id",
+        )
+
+    account, account_error = _resolve_account(account, timeout=timeout)
+    if account_error:
+        return account_error
+    assert account is not None  # _resolve_account guarantees non-None when error is None
 
     lookup_script, lookup_error = _build_found_message_lookup(
         "targetMailbox",
@@ -2297,6 +2445,19 @@ def forward_email(
         post_forward_action = "save forwardMessage"
         success_text = "Forward saved as draft."
 
+    draft_id_capture_script = ""
+    draft_id_output_script = ""
+    if mode in {"draft", "open"}:
+        draft_id_capture_script = """
+        set forwardDraftId to ""
+        try
+            set forwardDraftId to id of forwardMessage as string
+        end try
+        """
+        draft_id_output_script = """
+        if forwardDraftId is not "" then set outputText to outputText & "Draft ID: " & forwardDraftId & return
+        """
+
     script = f'''
 tell application "Mail"
     set outputText to "{header_text}" & return & return
@@ -2361,12 +2522,15 @@ tell application "Mail"
 
         {post_forward_action}
 
+        {draft_id_capture_script}
+
         -- Clean up temp file
         {fwd_cleanup_script}
 
         set outputText to outputText & "{success_text}" & return
         set outputText to outputText & "To: {safe_to}" & return
         set outputText to outputText & "Subject: " & fwdSubject & return
+        {draft_id_output_script}
     '''
 
     if cc:
@@ -2391,9 +2555,21 @@ tell application "Mail"
     """
 
     try:
-        if timeout is None:
-            return run_applescript(script)
-        return run_applescript(script, timeout=timeout)
+        result = run_applescript(script) if timeout is None else run_applescript(script, timeout=timeout)
+        if mode in ("draft", "open") and success_text in result:
+            draft_id = _extract_output_field(result, "Draft ID")
+            forward_subject = _extract_output_field(result, "Subject")
+            expected_signature = False if not include_signature else (resolved_signature_name is not None)
+            result += _verify_saved_forward_draft(
+                account,
+                draft_id=draft_id,
+                to=to,
+                subject=forward_subject,
+                lead_message=message,
+                expected_signature=expected_signature,
+                timeout=timeout,
+            )
+        return result
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out while forwarding email for account "
@@ -2641,6 +2817,15 @@ def manage_drafts(
         its message id, To recipients, and a short body snippet so the list is
         directly triageable; verify full threading with `get_email_by_id`.
     """
+
+    if action in {"send", "open", "delete"} and not draft_id and draft_subject:
+        return target_selector_deprecated_error(
+            "manage_drafts",
+            ("draft_subject",),
+            preferred="Call manage_drafts(action='list') or manage_drafts(action='find') first, then pass draft_id.",
+            discovery="manage_drafts(action='list', subject_contains=...) or manage_drafts(action='find', in_reply_to=...)",
+            exact_selector="draft_id",
+        )
 
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
