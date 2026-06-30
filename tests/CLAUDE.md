@@ -21,7 +21,7 @@ Autouse fixture `_pass_through_known_test_accounts` patches `validate_account_na
 - **Pure helpers** — `test_bulk_helpers.py`: `escape_applescript`, filters, mailbox refs (no subprocess mock).
 - **Registry / CLI** — `test_read_only_registry.py`, `test_cli.py`, `test_cli_perf.py` (perf thresholds, `--include-analysis`, profiles; no live Mail).
 - **Wrapper surface** — `test_wrapper_surface.py`: mocks `check_wrapper_surface.py` help parsing (no generated wrapper required).
-- **Infra** — `test_orphan_watcher.py` (injectable seams); `test_validate_manifests.py`.
+- **Infra** — `test_orphan_watcher.py` (injectable seams); `test_validate_manifests.py`; `test_module_line_budget.py` (600 LOC budget warn + baseline regression).
 
 ## Test files
 
@@ -36,7 +36,7 @@ Autouse fixture `_pass_through_known_test_accounts` patches `validate_account_na
 - **Registry/CLI**: `test_read_only_registry`, `test_cli`, `test_cli_perf`
 - **Contracts & hardening**: `test_bounded_scan_contract`, `test_contracts_*.py` (inbox, search, smart_inbox), `test_tier*_hardening_*.py`
 - **Phase fixes**: `test_phase_a_fixes`, `test_phase_2_scan_hardening`, `test_phase_*_regression`
-- **Infrastructure**: `test_orphan_watcher`, `test_validate_manifests`, `test_wrapper_surface`, `test_bulk_helpers`
+- **Infrastructure**: `test_orphan_watcher`, `test_validate_manifests`, `test_module_line_budget`, `test_wrapper_surface`, `test_bulk_helpers`
 - **Scale/regression**: `test_scalability_24k`, `test_gmail_unread_crash_regression`
 - **Property-based (under `tests/property/`)**: `test_escape_applescript_properties`, `test_validate_account_name_properties`
 
