@@ -1,6 +1,6 @@
 # Email Management Skill (plugin bundle)
 
-Part of the **Apple Mail Claude Code plugin** skill suite. This directory is the **umbrella** skill for sustained Inbox Zero habits and cross-cutting workflows. Narrower siblings handle specialized intents — see [`../CLAUDE.md`](../CLAUDE.md) for the full routing map.
+Part of the **Apple Mail Claude Code plugin** skill suite. This directory is the **umbrella** skill for sustained Inbox Zero habits and cross-cutting workflows. Narrower siblings handle specialized intents — see `plugin/skills/CLAUDE.md` in the repo for the full routing map (maintainer doc; not bundled in the plugin skill folder).
 
 ## What this skill is
 
@@ -43,7 +43,7 @@ for d in apple-mail-operator inbox-triage email-management mailbox-taxonomy \
 done
 ```
 
-Claude Desktop `.mcpb` bundles mirror `skills/` inside the archive — see [`../../../apple-mail-mcpb/CLAUDE.md`](../../../apple-mail-mcpb/CLAUDE.md).
+Claude Desktop `.mcpb` bundles mirror `skills/` inside the archive — see `apple-mail-mcpb/CLAUDE.md` in the repo (maintainer doc).
 
 ## When to use this skill vs siblings
 
@@ -58,7 +58,7 @@ Claude Desktop `.mcpb` bundles mirror `skills/` inside the archive — see [`../
 | Draft or reply | `email-drafting` (+ `email-style-profile` for voice) |
 | Save attachments | `email-attachments` |
 
-Details live in each skill’s `SKILL.md` frontmatter (`description` triggers) and in [`../CLAUDE.md`](../CLAUDE.md).
+Details live in each skill’s `SKILL.md` frontmatter (`description` triggers) and in `plugin/skills/CLAUDE.md` (repo maintainer routing index).
 
 ## Learning path
 
@@ -75,7 +75,7 @@ Details live in each skill’s `SKILL.md` frontmatter (`description` triggers) a
 
 ## Authoring / contributing
 
-Follow [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Skill authoring. Run **`plugin-dev:skill-reviewer`** before merge. Do not add new slash commands — new workflows → new `plugin/skills/<name>/SKILL.md`.
+Follow `docs/CLAUDE-conventions.md` § Skill authoring (repo root). Run **`plugin-dev:skill-reviewer`** before merge. Do not add new slash commands — new workflows → new `plugin/skills/<name>/SKILL.md`.
 
 ## License
 

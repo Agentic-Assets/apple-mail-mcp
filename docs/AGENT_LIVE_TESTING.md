@@ -294,12 +294,15 @@ Output is redacted by default: counts and char lengths only; account names, subj
 
 ## Unit tests vs live Mail
 
-CI runs mocked pytest + manifest validation only:
+CI runs mocked pytest + manifest validation + **module line budget** (600 LOC warn, baseline regression fail):
 
 ```bash
 bash tools/validate_manifests.sh
-.venv/bin/pytest tests/ -q
+python3 tools/check_module_line_budget.py
+.venv/bin/pytest tests/ -q -rw
 ```
+
+Detail: [`CLAUDE-conventions.md`](CLAUDE-conventions.md) § Module line budget.
 
 Optional local hook (manifest drift + pytest; wrapper check when staged MCP tool files change):
 

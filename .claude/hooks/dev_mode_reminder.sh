@@ -28,7 +28,11 @@ A change here lands in all three. Treat tool source as a public API.
   itself is broken at runtime.
 - **Before commits that touch `plugin/`, manifests, `pyproject.toml`,
   or release artifacts:** `bash tools/dev-check.sh release` — rebuilds
-  both distributables, runs validator + 416 tests + mcpb smoke.
+  both distributables, runs validator + pytest + module line budget + mcpb smoke.
+- **Module line budget:** `dev-check.sh`, CI, and `validate_manifests.py`
+  warn on modules over 600 LOC and fail on baseline regression
+  (`tests/fixtures/module_line_budget/baseline.json`). See
+  `docs/CLAUDE-conventions.md` § Module line budget.
 - **Run `code-simplifier:code-simplifier` agent at end of session** —
   REQUIRED before commit on any non-trivial change. Collapses duplication,
   drops dead branches, tightens names; behavior must be preserved.
@@ -38,6 +42,10 @@ A change here lands in all three. Treat tool source as a public API.
 - **To wrap up a change:** invoke the `finalize-apple-mail-mcp` skill —
   it orchestrates plugin-validator, code-simplifier, doc sync, artifact
   rebuild, and commit/push.
+- **`tasks/` layout (mandatory):** read `tasks/todo.md` then `tasks/CLAUDE.md`
+  § Agent requirements. New planning artifacts go under `tasks/active/`,
+  `tasks/reference/`, or `tasks/archive/` only — never loose `*.md` at
+  `tasks/` root. CI enforces via `tools/validate_tasks_layout.py`.
 
 ### Quick-pick by change type
 

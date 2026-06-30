@@ -106,7 +106,7 @@ Parallel OK within a phase for **different modules** (e.g. `list_mailboxes` vs `
 
 - [ ] **`inbox_dashboard`** — `output_format='json'` returns dict (not JSON string).
 - [ ] **Smart inbox four** — `get_needs_response`, `get_awaiting_reply`, `get_top_senders`, `get_actionable_emails` JSON modes return dicts with stable keys + `errors[]`.
-- [x] **`list_inbox_emails` JSON** — always `{emails, errors}` *(breaking — documented in `CHANGELOG.md` and `tasks/robustness-backlog-2026-05-22.md`)*.
+- [x] **`list_inbox_emails` JSON** — always `{emails, errors}` *(breaking — documented in `CHANGELOG.md` and `tasks/reference/robustness-backlog-2026-05-22.md`)*.
 - [ ] **Wrapper examples** — add copy-paste `--raw` examples for tools whose generated help exposes only raw JSON, especially `get-inbox-overview`.
 - [ ] **Wrapper parity tests/docs** — note that manifest validation can pass while a stale generated wrapper is missing a command; keep wrapper command-surface smoke separate from manifest validation.
 
@@ -131,7 +131,7 @@ Parallel OK within a phase for **different modules** (e.g. `list_mailboxes` vs `
 
 ## Orchestrator checklist
 
-1. Live baseline before/after: `tasks/live-test-baseline-2026-05-21.md`
+1. Live baseline before/after: `tasks/reference/live-test-baseline-2026-05-21.md`
 2. `pytest tests/ -q` after every tool change
 3. `apple-mail --help` command-surface check before closing Phase 1
 4. `perf-test --include-analysis --allow-heavy-mail-scan --account cayman@agenticassets.ai --json` before closing Phase 2

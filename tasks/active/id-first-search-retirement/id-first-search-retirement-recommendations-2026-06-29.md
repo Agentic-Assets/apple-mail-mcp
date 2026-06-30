@@ -367,8 +367,8 @@ This sequence avoids breaking workflows before the documented replacement path i
 
 - Local Mail dictionary inspected at `/System/Applications/Mail.app/Contents/Resources/Mail.sdef`.
 - Existing repo references reviewed:
-  - `tasks/id-first-refactor-spec.md`
-  - `tasks/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`
+  - `tasks/reference/id-first-refactor-spec.md`
+  - `tasks/archive/2026-05/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`
   - `docs/CLAUDE-conventions.md`
   - `plugin/apple_mail_mcp/tools/search.py`
   - `plugin/apple_mail_mcp/tools/compose.py`

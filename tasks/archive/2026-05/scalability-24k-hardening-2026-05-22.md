@@ -1,5 +1,7 @@
 # Scalability Hardening — 24K-Mailbox Robustness Plan
 
+> **Stale (pre-3.7):** Examples that pass `sender=` or `subject_keyword=` to action tools are obsolete; those selectors return `TARGET_SELECTOR_DEPRECATED`. See [`docs/CLAUDE-conventions.md`](../../docs/CLAUDE-conventions.md) and [`../active/agent-guidance-audit/agent-guidance-audit-2026-06-30.md`](../active/agent-guidance-audit/agent-guidance-audit-2026-06-30.md).
+
 **Date:** 2026-05-22
 **Branch:** `feat/apple-mail-plugin-robustness`
 **Target version:** 3.1.9
@@ -198,7 +200,7 @@ One commit with all robustness changes; push to existing branch.
 
 These were identified by research agents but are bigger-than-one-PR and not blocking the 24K bar:
 
-- **Session-level caches** (mailbox-handle cache, sent-mailbox replied-ids cache, message-ID result cache) — would unlock another ~3x speedup on bulk operations but require careful invalidation. Park in `tasks/robustness-backlog-2026-05-22.md` as **v3.2.0 candidate**.
+- **Session-level caches** (mailbox-handle cache, sent-mailbox replied-ids cache, message-ID result cache) — would unlock another ~3x speedup on bulk operations but require careful invalidation. Park in `tasks/reference/robustness-backlog-2026-05-22.md` as **v3.2.0 candidate**.
 - **Per-account adaptive timeouts** in `core.run_applescript` (e.g. learn slow accounts, raise default for Exchange). Park as v3.2.0.
 - **New tools** the user proposed (`get_email_by_sender_summary`, `mark_thread_done`) — sensible but additions not robustness. Park as v3.2.0 backlog.
 - **`save_email_attachment` ID-resolve redundancy** (manage.py:390-406) — LOW severity, functional. Park.

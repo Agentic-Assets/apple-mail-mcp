@@ -3,7 +3,7 @@
 This module defines the *dormant* interface that wave-2 tool migrations will
 route through. Phase A (whose-elimination) introduces only the types and a
 runtime capability check; existing tools still call ``core.run_applescript``
-directly. See ``tasks/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md``
+directly. See ``tasks/archive/2026-05/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md``
 "Architecture: the seam".
 """
 

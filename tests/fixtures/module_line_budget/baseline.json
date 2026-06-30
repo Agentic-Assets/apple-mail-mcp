@@ -1,0 +1,14 @@
+{
+  "threshold": 600,
+  "modules": {
+    "plugin/apple_mail_mcp/tools/compose.py": 3623,
+    "plugin/apple_mail_mcp/tools/search.py": 2399,
+    "plugin/apple_mail_mcp/tools/inbox.py": 2094,
+    "plugin/apple_mail_mcp/tools/analytics.py": 2036,
+    "plugin/apple_mail_mcp/tools/manage.py": 1775,
+    "plugin/apple_mail_mcp/cli.py": 1578,
+    "plugin/apple_mail_mcp/tools/smart_inbox.py": 1282,
+    "tools/validate_manifests.py": 1128,
+    "plugin/apple_mail_mcp/core.py": 754
+  }
+}

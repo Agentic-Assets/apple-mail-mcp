@@ -4,7 +4,7 @@ Apple Mail does not expose true conversation threads to AppleScript. The MCP ser
 
 ## Tool
 
-`get_email_thread(message_id="...", account="...", output_format="json")` returns the reconstructed conversation around a known Mail message id with message ids, Internet Message-ID, In-Reply-To, References, mailbox, account metadata, and fallback status. Check `selection_strategy` and `subject_fallback_used` before treating a reconstructed thread as header-confirmed. Use `subject_keyword` only as a degraded path after confirming no id is available and bounding the search window.
+`get_email_thread(message_id="...", account="...", output_format="json")` returns the reconstructed conversation around a known Mail message id with message ids, Internet Message-ID, In-Reply-To, References, mailbox, account metadata, and fallback status. Check `selection_strategy` and `subject_fallback_used` before treating a reconstructed thread as header-confirmed. **Discovery-only:** if no `message_id` yet, pass `subject_keyword` to `search_emails` (or use `list_inbox_emails` for a bounded recent skim), then pass the returned `message_id` to `get_email_thread`.
 
 ## When To Use
 
@@ -37,7 +37,7 @@ The result is already chronological. Read top to bottom for context.
 
 ### Find the latest message in a long thread
 
-The last entry returned by `get_email_thread()` is the most recent. Prefer replying with `reply_to_email(message_id=...)` when search or list tools already returned the Mail id; pass `message_id`; if no id is known, run search or list first. For bulk human review, use `mode="open"` so each saved draft stays visible in Mail. See **`email-drafting`** for compose tool selection.
+The last entry returned by `get_email_thread()` is the most recent. Prefer replying with `reply_to_email(message_id=...)` when search or list tools already returned the Mail id; pass `message_id`; if no id is known, run search or list first. Default `native_format=True` on replies (see **`email-drafting`** for Accessibility and `REPLY_WINDOW_FOCUS_FAILED`). For bulk human review, use `mode="open"` so each saved draft stays visible in Mail.
 
 ## Cross-Account Threads
 

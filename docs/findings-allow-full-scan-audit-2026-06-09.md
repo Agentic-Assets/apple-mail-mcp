@@ -1,5 +1,10 @@
 # Audit: `allow_full_scan` and scan escape hatches
 
+> Historical point-in-time audit from 2026-06-09. Use this file for incident
+> context only. For current tool counts, install surfaces, and validation
+> commands, use the root `CLAUDE.md`, `README.md`,
+> `docs/CLAUDE-conventions.md`, and `tools/CLAUDE.md`.
+
 **Date:** 2026-06-09  
 **Repo version audited:** `3.7.1` (`pyproject.toml`)  
 **Trigger:** Cursor agent called `search_emails` with `allow_full_scan=true` alongside `date_from=2026-03-01`, `recent_days=0`, `mailbox=All`, `all_accounts=true`, `sender=Emily.Irvine@taylorandfrancis.com`, `limit=50`.  
@@ -103,7 +108,7 @@ Enforcement:
 
 ### Historical tools that **used to** expose `allow_full_scan` (pre-v3.2.0)
 
-Planning map in `tasks/whose-elimination-2026-05-22/05-codebase-whose-map.md` (historical; behavior since changed):
+Planning map in `tasks/archive/2026-05/whose-elimination-2026-05-22/05-codebase-whose-map.md` (historical; behavior since changed):
 
 | Tool | Module | Old gate |
 |------|--------|----------|
@@ -136,7 +141,7 @@ Tools that **still list `allow_full_scan` in the JSON schema** (stale):
 
 Other tools in the same folder (**27 tools total**) do **not** expose `allow_full_scan` in JSON, including `get_statistics` and `get_top_senders` (their stale descriptions mention `days_back=0 = all time` without the boolean).
 
-**Missing vs current repo:** Cursor cache has **27** tools; current repo ships **28** (`full_inbox_export` is not in the stale Cursor tool set).
+**Missing vs the audit checkout:** Cursor cache had **27** tools; the repo checkout audited that day shipped **28** (`full_inbox_export` was not in the stale Cursor tool set).
 
 ### Cursor plugin runtime cache
 
@@ -232,7 +237,7 @@ This is the **only** tool designed for whole-mailbox walks. No boolean opt-in on
 
 ---
 
-## Full tool inventory (28 tools) — scan sensitivity
+## Full tool inventory in the audit checkout (28 tools): scan sensitivity
 
 | Tool | `allow_full_scan` (current) | Other scan gates | Full-mailbox risk |
 |------|----------------------------|------------------|-------------------|
@@ -272,8 +277,8 @@ This is the **only** tool designed for whole-mailbox walks. No boolean opt-in on
 | Location | Status |
 |----------|--------|
 | `plugin/**` (current) | Clean |
-| `tasks/whose-elimination-2026-05-22/*` | Historical planning (explicitly marked historical) |
-| `tasks/scalability-24k-hardening-2026-05-22.md` | Historical planning |
+| `tasks/archive/2026-05/whose-elimination-2026-05-22/*` | Historical planning (explicitly marked historical) |
+| `tasks/archive/2026-05/scalability-24k-hardening-2026-05-22.md` | Historical planning |
 | Cursor cache v3.1.7 skills + `tools/CLAUDE.md` | **Stale — still teaches `allow_full_scan`** |
 | Cursor MCP JSON descriptors | **Stale — still exposes parameter** |
 

@@ -11,8 +11,12 @@ GIT_STATUS="$(git status -s 2>/dev/null | head -20)"
 LOG="$(git log --oneline -5 2>/dev/null)"
 CHANGELOG_HEAD="$(sed -n '1,25p' CHANGELOG.md 2>/dev/null)"
 TODO_HEAD=""
+TASKS_LAYOUT=""
 if [ -f tasks/todo.md ]; then
     TODO_HEAD="$(head -25 tasks/todo.md 2>/dev/null)"
+fi
+if [ -f tasks/CLAUDE.md ]; then
+    TASKS_LAYOUT="$(awk '/^## Agent requirements \(mandatory\)/,/^## Layout$/' tasks/CLAUDE.md 2>/dev/null | head -35)"
 fi
 
 CONTEXT="## apple-mail-mcp project state (auto-injected)
@@ -31,6 +35,13 @@ if [ -n "$TODO_HEAD" ]; then
 
 ### tasks/todo.md head
 $TODO_HEAD"
+fi
+
+if [ -n "$TASKS_LAYOUT" ]; then
+    CONTEXT="$CONTEXT
+
+### tasks/ agent requirements (mandatory)
+$TASKS_LAYOUT"
 fi
 
 python3 - "$CONTEXT" <<'PY'

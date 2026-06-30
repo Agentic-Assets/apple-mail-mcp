@@ -38,6 +38,14 @@ def _main_reply_script(scripts):
     return reply_scripts[0]
 
 
+def _save_draft_script(scripts):
+    """Return the save-as-draft script, skipping the sender/snapshot probes."""
+    save_scripts = [script for script in scripts if "save targetMessage" in script]
+    if len(save_scripts) != 1:
+        raise AssertionError(f"expected one save-draft script, got {len(save_scripts)}")
+    return save_scripts[0]
+
+
 def _saved_reply_draft_output(
     *,
     to="Sender <sender@example.com>",
@@ -217,6 +225,7 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
                 account="Work",
                 message_id="12345",
                 reply_body="Reply body",
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -307,20 +316,25 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Opened in Mail: yes", result)
             self.assertIn("Saved in Drafts: yes", result)
             mock_run.assert_called_once_with(["open", "-a", "Mail", str(output_path)], check=True)
-            self.assertNotIn("every outgoing message whose subject is", scripts[1])
-            # Save the opened .eml compose object through Mail's dictionary,
-            # then close the matching compose window without a second persist.
+            save_script = _save_draft_script(scripts)
+            self.assertNotIn("every outgoing message whose subject is", save_script)
+            # Save the newly-opened .eml compose object (the outgoing message
+            # whose id was not present before the open), then close that exact
+            # compose window without a second persist or a blind item-1 grab.
+            self.assertNotIn("item 1 of outgoing messages", save_script)
             _assert_ordered(
                 self,
-                scripts[1],
-                "set targetMessage to item 1 of outgoing messages",
+                save_script,
+                "set priorIds to {",
+                "repeat with candidateMessage in outgoing messages",
+                "if priorIds does not contain candidateId then",
                 "save targetMessage",
                 "close (window of targetMessage) saving no",
             )
-            self.assertNotIn("System Events", scripts[1])
-            self.assertNotIn('keystroke "s" using command down', scripts[1])
-            self.assertNotIn("close window 1 saving no", scripts[1])
-            self.assertNotIn("close window 1 saving yes", scripts[1])
+            self.assertNotIn("System Events", save_script)
+            self.assertNotIn('keystroke "s" using command down', save_script)
+            self.assertNotIn("close window 1 saving no", save_script)
+            self.assertNotIn("close window 1 saving yes", save_script)
 
     def test_create_rich_email_draft_default_saves_and_closes_mail_window(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -352,20 +366,24 @@ class ComposeToolTests(unittest.TestCase):
             mock_run.assert_called_once_with(["open", "-a", "Mail", str(output_path)], check=True)
             self.assertIn("Saved in Drafts: yes", result)
             self.assertIn("Left open for review: no", result)
-            self.assertNotIn("every outgoing message whose subject is", scripts[1])
-            # Save the opened .eml compose object through Mail's dictionary,
-            # then close the matching compose window without a second persist.
+            save_script = _save_draft_script(scripts)
+            self.assertNotIn("every outgoing message whose subject is", save_script)
+            # Save the newly-opened .eml compose object (id-diff against the
+            # pre-open snapshot), then close that exact compose window.
+            self.assertNotIn("item 1 of outgoing messages", save_script)
             _assert_ordered(
                 self,
-                scripts[1],
-                "set targetMessage to item 1 of outgoing messages",
+                save_script,
+                "set priorIds to {",
+                "repeat with candidateMessage in outgoing messages",
+                "if priorIds does not contain candidateId then",
                 "save targetMessage",
                 "close (window of targetMessage) saving no",
             )
-            self.assertNotIn("System Events", scripts[1])
-            self.assertNotIn('keystroke "s" using command down', scripts[1])
-            self.assertNotIn("close window 1 saving no", scripts[1])
-            self.assertNotIn("close window 1 saving yes", scripts[1])
+            self.assertNotIn("System Events", save_script)
+            self.assertNotIn('keystroke "s" using command down', save_script)
+            self.assertNotIn("close window 1 saving no", save_script)
+            self.assertNotIn("close window 1 saving yes", save_script)
 
     def test_create_rich_email_draft_allows_partial_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -422,7 +440,9 @@ class ComposeToolTests(unittest.TestCase):
     def test_create_rich_email_draft_can_save_to_drafts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "saved.eml"
-            run_results = ["sender@example.com", "saved"]
+            # Three AppleScript calls: sender resolution, pre-open outgoing-id
+            # snapshot, then the save-as-draft script.
+            run_results = ["sender@example.com", "", "saved"]
 
             def fake_run_applescript(script, timeout=120):
                 return run_results.pop(0)
@@ -445,8 +465,8 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Saved in Drafts: yes", result)
 
 
-class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
-    def test_saves_front_compose_window_without_subject_lookup(self):
+class SaveNewComposeWindowAsDraftTests(unittest.TestCase):
+    def test_saves_new_compose_window_without_subject_lookup(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -457,16 +477,20 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            result = compose_tools._save_front_compose_window_as_draft(close_after_save=True)
+            result = compose_tools._save_new_compose_window_as_draft(close_after_save=True)
 
         self.assertTrue(result)
         self.assertEqual(len(captured), 1)
         self.assertNotIn("every outgoing message whose subject is", captured[0])
-        # Save through Mail's outgoing-message object model, not System Events.
+        # Save through Mail's outgoing-message object model via id-diff, not a
+        # blind item-1 grab and not System Events.
+        self.assertNotIn("item 1 of outgoing messages", captured[0])
         _assert_ordered(
             self,
             captured[0],
-            "set targetMessage to item 1 of outgoing messages",
+            "set priorIds to {",
+            "repeat with candidateMessage in outgoing messages",
+            "if priorIds does not contain candidateId then",
             "save targetMessage",
             "close (window of targetMessage) saving no",
         )
@@ -475,7 +499,7 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
         self.assertNotIn("close window 1 saving no", captured[0])
         self.assertNotIn("close window 1 saving yes", captured[0])
 
-    def test_can_leave_front_compose_window_open_for_review(self):
+    def test_can_leave_new_compose_window_open_for_review(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -486,7 +510,7 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            result = compose_tools._save_front_compose_window_as_draft(close_after_save=False)
+            result = compose_tools._save_new_compose_window_as_draft(close_after_save=False)
 
         self.assertTrue(result)
         self.assertIn("save targetMessage", captured[0])
@@ -494,6 +518,47 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
         self.assertNotIn('keystroke "s" using command down', captured[0])
         self.assertNotIn("close (window of targetMessage) saving no", captured[0])
         self.assertNotIn("close window 1 saving yes", captured[0])
+
+    def test_prior_outgoing_ids_are_excluded_from_save_target(self):
+        """A pre-existing compose window (id in the snapshot) is never saved."""
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "saved"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools._save_new_compose_window_as_draft(
+                prior_outgoing_ids={"41", "57"},
+                close_after_save=False,
+            )
+
+        self.assertTrue(result)
+        # Both pre-open ids land in the priorIds literal so the diff skips them.
+        self.assertIn('"41"', captured[0])
+        self.assertIn('"57"', captured[0])
+        self.assertIn("if priorIds does not contain candidateId then", captured[0])
+
+    def test_no_new_outgoing_window_returns_false(self):
+        """When only pre-existing windows exist, the save reports failure."""
+
+        def fake_run(script, timeout=120):
+            return "not-found"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools._save_new_compose_window_as_draft(
+                prior_outgoing_ids={"7"},
+                retries=2,
+                delay_seconds=0,
+            )
+
+        self.assertFalse(result)
 
 
 class StripCdataTests(unittest.TestCase):
@@ -910,25 +975,31 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         script = _main_reply_script(captured)
+        # Native default: Mail's own reply window owns the rich quote + signature,
+        # and the reply body is TYPED in (never reassigned via `set content`, which
+        # flattens the native formatting, and never the clipboard).
         _assert_ordered(
             self,
             script,
-            "set sourceContent to content of foundMessage as string",
             "set replyBodyText to do shell script",
-            "set replyMessage to reply foundMessage",
-            'set quotedOriginalNeedle to "On " & sourceDate & ", " & sourceSender & " wrote:"',
-            "set quotedOriginalText to quotedOriginalNeedle & return & sourceContent",
-            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
-            "set content of replyMessage to (composedReplyContent as rich text)",
+            "set replyMessage to reply foundMessage with opening window",
+            'perform action "AXRaise" of (first window whose name is replySubject)',
+            "keystroke replyBodyText",
+            'set quotedNeedle to "wrote:"',
             "save replyMessage",
         )
+        # Body is typed, so content is never reassigned and no plain-text quote is built.
+        self.assertNotIn("set content of replyMessage", script)
+        self.assertNotIn("set composedReplyContent", script)
+        self.assertNotIn("set quotedOriginalText", script)
+        # Empty System Events title is tolerated (AX quirk for compose windows);
+        # a different non-empty title aborts before typing.
+        self.assertIn('guardSE is replySubject or guardSE is "" or guardSE is "(unset)"', script)
+        # Native default never pins the account alias (that drops the logo signature).
+        self.assertNotIn("set sender of replyMessage", script)
         self.assertNotIn("make new outgoing message", script)
-        self.assertNotIn("content:fullBody", script)
-        self.assertNotIn("set quotedBody", script)
-        self.assertNotIn("quoted original truncated", script)
-        self.assertNotIn("set existingReplyContent to content of replyMessage", script)
         self.assertNotIn("NSPasteboard", script)
-        self.assertNotIn("System Events", script)
+        self.assertNotIn("set the clipboard", script)
         self.assertNotIn('keystroke "v"', script)
 
     def test_reply_to_email_accepts_output_format_parameter(self):
@@ -954,6 +1025,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 account="Work",
                 message_id="12345",
                 reply_body="",
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -1063,9 +1135,97 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("Signature Verification Status: missing", result)
         self.assertIn("requested Mail signature was not detected", result)
         verifier_script = next(script for script in captured if "set expectedAttachmentCount to" in script)
+        self.assertIn('using terms from application "Mail"', verifier_script)
         self.assertIn("set expectedAttachmentCount to 1", verifier_script)
+        self.assertIn('set expectedAttachmentNames to {"support.pdf"}', verifier_script)
         self.assertIn("set signatureWasRequested to true", verifier_script)
+        self.assertIn('set expectedSignatureName to "TU"', verifier_script)
+        self.assertIn("if (name of sig as string) is expectedSignatureName then", verifier_script)
+        self.assertIn("set expectedSigText to content of sig as string", verifier_script)
+        self.assertIn("expectedAttachmentName", verifier_script)
         self.assertIn("file size of anAttachment", verifier_script)
+
+    def test_reply_draft_attachment_verification_checks_requested_filenames(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|missing|not_requested|1|wrong.pdf::2048;;"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+                expected_attachment_count=1,
+                expected_attachment_names=["support.pdf"],
+                signature_requested=False,
+            )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "missing")
+        script = captured[0]
+        self.assertIn('set expectedAttachmentNames to {"support.pdf"}', script)
+        self.assertIn("(name of anAttachment as string)", script)
+        self.assertIn("set item matchIndex of draftAttachmentNames to missing value", script)
+
+    def test_reply_draft_attachment_verification_uses_multiset_matching(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|missing|not_requested|2|support.pdf::2048;;other.pdf::1024;;"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+                expected_attachment_count=2,
+                expected_attachment_names=["support.pdf", "support.pdf"],
+                signature_requested=False,
+            )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "missing")
+        script = captured[0]
+        self.assertIn('set expectedAttachmentNames to {"support.pdf", "support.pdf"}', script)
+        self.assertIn("set item matchIndex of draftAttachmentNames to missing value", script)
+
+    def test_reply_draft_attachment_verification_compares_raw_attachment_names(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|verified|not_requested|1|foo;;;bar.pdf::2048;;"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+                expected_attachment_count=1,
+                expected_attachment_names=["foo;;;bar.pdf"],
+                signature_requested=False,
+            )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "verified")
+        script = captured[0]
+        self.assertIn('set expectedAttachmentNames to {"foo;;;bar.pdf"}', script)
+        self.assertIn("(name of anAttachment as string)", script)
 
     def test_reply_draft_attachment_warning_includes_applied_count(self):
         def fake_run(script, timeout=120):
@@ -1226,6 +1386,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_to_all=True,
                 attachments=str(attachment),
                 include_signature=False,
+                native_format=False,
             )
 
         self.assertIn("Reply saved as draft!", result)
@@ -1277,24 +1438,23 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn("SAVING REPLY AS DRAFT", script)
-        # Native Mail reply: Mail constructs the quoted prior conversation and
-        # the tool inserts the requested body into the native composer.
-        self.assertIn("set replyMessage to reply foundMessage", script)
-        self.assertNotIn("set replyMessage to reply foundMessage with opening window", script)
+        # Native default: Mail opens its own reply window (rich quote + signature)
+        # and the body is typed in; draft mode saves quietly and closes the window.
+        self.assertIn("set replyMessage to reply foundMessage with opening window", script)
         self.assertGreaterEqual(script.count("save replyMessage"), 1)
+        self.assertIn("close (every window whose name is replySubject) saving no", script)
         self.assertNotIn("close (window of replyMessage)", script)
         self.assertNotIn("close front window", script)
         self.assertIn("set sourceSubject to subject of foundMessage as string", script)
         self.assertNotIn("set replySubject to subject of replyMessage as string", script)
         self.assertIn('set outputText to outputText & "Subject: " & replySubject', script)
-        self.assertIn("set quotedOriginalText to", script)
-        self.assertIn(
-            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
-            script,
-        )
+        # Typed body: no plain-text quote assembly, no content reassignment.
+        self.assertIn("keystroke replyBodyText", script)
+        self.assertNotIn("set quotedOriginalText to", script)
+        self.assertNotIn("set composedReplyContent", script)
+        self.assertNotIn("set content of replyMessage", script)
         self.assertNotIn("content of replyMessage as string", script)
         self.assertNotIn("NSPasteboard", script)
-        self.assertNotIn("System Events", script)
         self.assertNotIn('keystroke "v"', script)
         self.assertNotIn("send replyMessage", script)
 
@@ -1375,10 +1535,73 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Reply body",
                 include_signature=True,
+                native_format=False,
             )
 
         verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
         self.assertIn("set signatureWasRequested to true", verifier_script)
+
+    def test_reply_signature_verification_targets_resolved_signature_name(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return ""
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|detected"
+            return "ok"
+
+        with (
+            patch.object(compose_tools.server, "DEFAULT_MAIL_SIGNATURE", "TU", create=True),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                include_signature=True,
+            )
+
+        self.assertIn("Signature Verification Status: detected", result)
+        verifier_script = next(script for script in captured if "set expectedSignatureName" in script)
+        self.assertIn('set expectedSignatureName to "TU"', verifier_script)
+        self.assertIn("if (name of sig as string) is expectedSignatureName then", verifier_script)
+        self.assertIn("set expectedSigText to content of sig as string", verifier_script)
+
+    def test_reply_attachment_validation_error_removes_body_temp_file(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        temp_path = Path(temp_dir.name) / "mail_reply_body.txt"
+
+        class FakeTempFile:
+            name = str(temp_path)
+
+            def __enter__(self):
+                self.handle = temp_path.open("w", encoding="utf-8")
+                return self.handle
+
+            def __exit__(self, exc_type, exc, tb):
+                self.handle.close()
+
+        with (
+            patch("apple_mail_mcp.tools.compose.tempfile.NamedTemporaryFile", return_value=FakeTempFile()),
+            patch(
+                "apple_mail_mcp.tools.compose._validate_attachment_paths",
+                return_value=([], "Error: Attachment file does not exist: missing.pdf"),
+            ),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                attachments="missing.pdf",
+            )
+
+        self.assertIn("Attachment file does not exist", result)
+        self.assertFalse(temp_path.exists())
 
     def test_reply_draft_success_reports_structured_artifact_error_when_body_missing(self):
         sentinel = "AA-REPLY-BODY-SENTINEL-84053"
@@ -1691,6 +1914,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Reply body",
                 send=False,
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -1719,10 +1943,12 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         script = _main_reply_script(captured)
+        # Native reply-all opens the window with Mail's own reply-to-all recipients.
         self.assertIn(
-            "reply foundMessage with reply to all",
+            "reply foundMessage with opening window and reply to all",
             script,
         )
+        self.assertIn("keystroke replyBodyText", script)
         self.assertNotIn("to recipients of foundMessage", script)
         self.assertNotIn("cc recipients of foundMessage", script)
         self.assertNotIn(
@@ -1751,8 +1977,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         script = _main_reply_script(captured)
-        self.assertIn("set replyMessage to reply foundMessage", script)
-        self.assertNotIn("set replyMessage to reply foundMessage with opening window", script)
+        # Native plain reply (no reply-to-all): window opens without "reply to all".
+        self.assertIn("set replyMessage to reply foundMessage with opening window", script)
+        self.assertIn("keystroke replyBodyText", script)
         self.assertNotIn("reply to all", script)
         self.assertNotIn("cc recipients of foundMessage", script)
         self.assertNotIn(
@@ -1780,6 +2007,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Reply body",
                 signature_name="TU",
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -1813,6 +2041,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body="Unique body sentinel 84053",
                 include_signature=False,
+                native_format=False,
             )
 
         script = _main_reply_script(captured)
@@ -1852,6 +2081,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 message_id="12345",
                 reply_body=f"{body_sentinel}\n\nReply body",
                 include_signature=False,
+                native_format=False,
             )
 
         self.assertIn("Draft ID: 81121", result)
@@ -1882,6 +2112,88 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
         self.assertIn("set signatureWasRequested to false", verifier_script)
         self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
+
+    def test_native_default_skips_signature_verification(self):
+        # Native default inherits Mail's own logo signature, whose rich text we never
+        # set and cannot substring-match. The verifier must be told the signature was
+        # NOT requested (missing value) so the native default is not flagged "missing".
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                include_signature=True,
+            )
+
+        verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
+        self.assertIn("set signatureWasRequested to missing value", verifier_script)
+        # The native main script still applies Mail's own default signature property,
+        # but verification of it is deliberately skipped.
+        main_script = _main_reply_script(captured)
+        self.assertIn("set replyMessage to reply foundMessage with opening window", main_script)
+
+    def test_native_reply_guard_abort_returns_focus_failed_error(self):
+        # When the native path cannot bring the reply window into focus it returns a
+        # GUARD_ABORT sentinel without saving; reply_to_email maps that to a structured
+        # REPLY_WINDOW_FOCUS_FAILED error that points callers at native_format=False.
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return "GUARD_ABORT: could not focus reply window (mailFront=Inbox seFront=Inbox)"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["error"])
+        self.assertEqual(payload["code"], "REPLY_WINDOW_FOCUS_FAILED")
+        self.assertIn("native_format=False", payload["remediation"]["alternative"])
+        self.assertIn("GUARD_ABORT", payload["remediation"]["detail"])
+
+    def test_native_reply_verifier_rejoins_soft_wrapped_lines(self):
+        # Mail soft-wraps long typed lines, and `content as string` renders the wraps
+        # as line breaks (sometimes mid-word). The verifier strips CR/LF before the
+        # contiguous-substring match so a wrapped body needle is still found.
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|not_requested|not_requested"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+            )
+
+        verifier_script = captured[0]
+        self.assertIn("on stripLineBreaks(theText)", verifier_script)
+        self.assertIn("set bodyOffset to my textOffset(flatContent, my stripLineBreaks(replyBodyNeedle))", verifier_script)
 
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):
         captured = []

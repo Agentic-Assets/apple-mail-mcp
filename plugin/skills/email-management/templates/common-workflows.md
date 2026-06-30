@@ -2,27 +2,45 @@
 
 This document provides ready-to-use workflow templates for common email management tasks. Copy and adapt these patterns to your specific needs.
 
+**Action-tool contract:** Mutation examples follow `search-patterns.md`. Use `sender_exact`, `sender_domain`, and `subject_keyword` on **`search_emails`** only. Use `list_inbox_emails` for bounded recent listing (`exclude_replied=True` when feeding reply candidates). Pass returned `message_id` / `message_ids` to `reply_to_email`, `move_email`, `manage_trash`, and related action tools. For daily triage, prefer the **`inbox-triage`** skill over keyword-only sweeps below.
+
 ## Quick Triage Workflows
 
 ### Morning Inbox Check (10 minutes)
 
+Prefer the **`inbox-triage`** skill for the full daily loop. Minimal pattern:
+
 ```
-# 1. Get overview
-get_inbox_overview()
+# 1. Needs-response queue (read-first triage)
+get_needs_response(account="Work", check_already_replied=True, include_already_replied=False, max_results=20)
 
-# 2. Check urgent items
-search_emails(subject_keyword="urgent", read_status="unread")
-search_emails(subject_keyword="ASAP", read_status="unread")
+# 2. VIP unread (discovery on search_emails only)
+vip_matches = search_emails(
+    account="Work",
+    sender_exact="boss@company.com",
+    read_status="unread",
+    max_results=10,
+    output_format="json",
+)
+# Repeat for other VIPs; collect message_ids from items[]
 
-# 3. Check VIP senders
-search_emails(sender_exact="boss@company.com", read_status="unread")
-search_emails(sender_exact="key-client@example.com", read_status="unread")
+# 3. Flag action items (ids from step 1 or 2)
+update_email_status(
+    account="Work",
+    action="flag",
+    message_ids=["<message_id-from-needs-response>"],
+    mailbox="INBOX",
+    max_updates=5,
+)
 
-# 4. Flag action items
-update_email_status(action="flag", message_ids=[...], max_updates=5)
-
-# 5. Quick cleanup
-manage_trash(action="move_to_trash", message_ids=[...], mailbox="INBOX", max_deletes=10)
+# 4. Quick cleanup (ids from reviewed search/list)
+manage_trash(
+    account="Work",
+    action="move_to_trash",
+    message_ids=["<reviewed-message-id>"],
+    mailbox="INBOX",
+    max_deletes=10,
+)
 ```
 
 ### End of Day Cleanup (5 minutes)
@@ -37,8 +55,21 @@ list_inbox_emails(max_emails=20, include_content=False)
 # 3. Mark read non-essential
 update_email_status(action="mark_read", message_ids=[...], mailbox="INBOX", max_updates=10)
 
-# 4. Archive processed emails
-move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=20)
+# 4. Archive processed emails (collect ids first)
+processed = list_inbox_emails(
+    account="Work",
+    max_emails=20,
+    include_content=False,
+    output_format="json",
+)
+processed_ids = [item["message_id"] for item in processed["items"]]
+move_email(
+    account="Work",
+    message_ids=processed_ids,
+    to_mailbox="Archive",
+    from_mailbox="INBOX",
+    max_moves=len(processed_ids),
+)
 
 # 5. Review flagged items for tomorrow
 search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Check flags
@@ -161,11 +192,11 @@ list_email_attachments(
     message_ids=message_ids[:5],
 )
 
-# Save specific attachment
+# Save specific attachment (use attachment_index from list output)
 save_email_attachment(
     account="Work",
-    message_id=message_ids[0],
-    attachment_name="invoice.pdf",
+    message_ids=[message_ids[0]],
+    attachment_index=0,
     save_path="~/Desktop/invoice.pdf"
 )
 ```
@@ -213,13 +244,14 @@ move_email(
     max_moves=len(client_ids),
 )
 
-# 3. Preview older read leftovers before archiving
+# 3. Preview older read leftovers (human-approved date scan; prefer message_ids when possible)
 move_email(
     account="Work",
     to_mailbox="Archive",
     from_mailbox="INBOX",
     older_than_days=30,
     only_read=True,
+    allow_filter_scan=True,
     max_moves=20,
     dry_run=True
 )
@@ -316,7 +348,7 @@ get_email_thread(
     message_id="<message_id from search>"
 )
 
-# 3. Reply immediately by exact id so Mail includes the original thread
+# 3. Reply immediately by exact id (default native_format=True; load email-drafting for focus/Accessibility)
 reply_to_email(
     account="Work",
     message_id="<message_id from search>",
@@ -352,7 +384,8 @@ get_email_thread(
     message_id="<message_id from search>"
 )
 
-# 3. Create a reply draft (plain-text "Re:", correctly addressed) for later
+# 3. Create a reply draft (default native_format=True: rich quote + logo signature; needs Mail focus + Accessibility)
+#    Pass native_format=False only for headless/CI. On REPLY_WINDOW_FOCUS_FAILED, retry with visible Mail or native_format=False.
 reply_to_email(
     account="Work",
     message_id="<message_id from search>",
@@ -388,6 +421,7 @@ reply_to_email(
     reply_body="Based on the discussion, I agree with the proposal. Let's move forward.",
     reply_to_all=True
 )
+# Default native_format=True; load email-drafting for Accessibility / REPLY_WINDOW_FOCUS_FAILED
 ```
 
 ### Forward with Context
@@ -444,25 +478,28 @@ get_statistics(
 )
 # Look for frequent senders you don't read
 
-# 2. Search for their emails
-search_emails(
+# 2. Search for their emails (discovery only)
+newsletter_matches = search_emails(
     account="Personal",
     sender_exact="newsletter@unwanted.com",
     mailbox="INBOX",
     recent_days=30,
-    max_results=50
+    max_results=50,
+    output_format="json",
 )
+newsletter_ids = [item["message_id"] for item in newsletter_matches["items"]]
 
-# 3. Bulk delete (move to trash first - reversible)
+# 3. Preview trash (dry_run=True default; reversible)
 manage_trash(
     account="Personal",
     action="move_to_trash",
-    sender_exact="newsletter@unwanted.com",
+    message_ids=newsletter_ids,
     mailbox="INBOX",
-    max_deletes=20
+    max_deletes=20,
+    dry_run=True
 )
 
-# 4. Verify trash
+# 4. Verify trash (discovery)
 search_emails(
     account="Personal",
     sender_exact="newsletter@unwanted.com",
@@ -470,12 +507,14 @@ search_emails(
     recent_days=30
 )
 
-# 5. Permanently delete if confirmed (optional)
+# 5. Execute trash after user confirms, then optionally delete permanent
 manage_trash(
     account="Personal",
-    action="delete_permanent",
-    sender_exact="newsletter@unwanted.com",
-    max_deletes=20
+    action="move_to_trash",
+    message_ids=newsletter_ids,
+    mailbox="INBOX",
+    max_deletes=20,
+    dry_run=False
 )
 ```
 
@@ -592,9 +631,10 @@ reply_to_email(
     account="Work",
     message_id="<message_id-from-search>",
     cc="team@company.com",
-    body="[Draft - Need to expand]\n\n1. Summary of situation\n2. Analysis\n3. Recommendation\n\n[Notes to self: Check data, consult with team]",
+    reply_body="[Draft - Need to expand]\n\n1. Summary of situation\n2. Analysis\n3. Recommendation\n\n[Notes to self: Check data, consult with team]",
     mode="draft"
 )
+# Default native_format=True; load email-drafting for Accessibility / REPLY_WINDOW_FOCUS_FAILED
 
 # 4. Schedule time to complete
 # (Set calendar reminder to finish draft)
@@ -617,7 +657,7 @@ get_statistics(
 get_statistics(
     account="Work",
     scope="sender_stats",
-    sender_exact="frequent-sender@example.com",
+    sender="frequent-sender@example.com",
     days_back=30
 )
 
@@ -643,7 +683,7 @@ get_mailbox_unread_counts(summary_only=True)
 get_statistics(
     account="Work",
     scope="sender_stats",
-    sender_exact="automated-reports@company.com",
+    sender="automated-reports@company.com",
     days_back=90
 )
 
@@ -701,49 +741,60 @@ update_email_status(
 ### Mark Multiple Emails as Read
 
 ```
-# 1. Identify emails to mark read
-search_emails(
+# 1. Identify emails to mark read (discovery)
+notification_matches = search_emails(
     account="Work",
     sender_domain="notifications.example.com",
     read_status="unread",
     mailbox="INBOX",
-    max_results=20
+    max_results=20,
+    output_format="json",
 )
+notification_ids = [item["message_id"] for item in notification_matches["items"]]
 
-# 2. Batch mark as read
+# 2. Batch mark as read by exact ids
 update_email_status(
     account="Work",
     action="mark_read",
-    sender_domain="notifications.example.com",
+    message_ids=notification_ids,
     mailbox="INBOX",
-    max_updates=20
+    max_updates=len(notification_ids),
 )
 ```
 
 ### Bulk Move by Sender
 
 ```
-# 1. Find all emails from sender
-search_emails(
+# 1. Find all emails from sender (discovery)
+team_matches = search_emails(
     account="Work",
     sender_exact="project-team@company.com",
     mailbox="INBOX",
     recent_days=30,
-    max_results=50
+    max_results=50,
+    output_format="json",
 )
+team_ids = [item["message_id"] for item in team_matches["items"]]
 
-# 2. Move in batches (max_moves=10 is safe)
+# 2. Preview move in batches (max_moves=10 is safe)
 move_email(
     account="Work",
-    sender_exact="project-team@company.com",
+    message_ids=team_ids[:10],
     to_mailbox="Projects/Team Project",
     from_mailbox="INBOX",
-    max_moves=10,
+    max_moves=min(len(team_ids), 10),
     dry_run=True
 )
 
-# 3. Repeat if more than 10 emails
-# (Run the move_email command again)
+# 3. Execute after user confirms; repeat with next batch if more than 10
+move_email(
+    account="Work",
+    message_ids=team_ids[:10],
+    to_mailbox="Projects/Team Project",
+    from_mailbox="INBOX",
+    max_moves=min(len(team_ids), 10),
+    dry_run=False
+)
 ```
 
 ## Backup and Export Workflows
@@ -794,8 +845,8 @@ list_email_attachments(
 
 save_email_attachment(
     account="Work",
-    message_id=message_id,
-    attachment_name="contract.pdf",
+    message_ids=[message_id],
+    attachment_index=0,
     save_path="~/Documents/Contracts/contract.pdf"
 )
 
@@ -840,10 +891,23 @@ manage_drafts(action="list")
 
 # 2. Clean up flagged items
 search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Review flags
-update_email_status(action="unflag", ...)  # Clear completed
+update_email_status(
+    account="Work",
+    action="unflag",
+    message_ids=["<reviewed-message-id>"],
+    mailbox="INBOX",
+    max_updates=10,
+)
 
-# 3. Archive week's emails
-move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=50)
+# 3. Archive week's emails (collect ids from list/search first)
+week_ids = ["<message_id-1>", "<message_id-2>"]  # from list_inbox_emails or search_emails
+move_email(
+    account="Work",
+    message_ids=week_ids,
+    to_mailbox="Archive",
+    from_mailbox="INBOX",
+    max_moves=len(week_ids),
+)
 
 # 4. Review statistics
 get_statistics(scope="account_overview", days_back=7)
@@ -864,22 +928,22 @@ get_statistics(scope="account_overview", days_back=7)
 ## Quick Reference: Most Common Commands
 
 ```
-# Daily essentials
-get_inbox_overview()
-list_inbox_emails(max_emails=20)
-search_emails(subject_keyword="...", mailboxes=["INBOX", "Archive"])
+# Daily essentials (discovery → ids → action)
+get_needs_response(account="Work", check_already_replied=True, include_already_replied=False)
+list_inbox_emails(max_emails=20, output_format="json")
+search_emails(sender_exact="...", mailboxes=["INBOX"], max_results=20, output_format="json")
 get_email_thread(message_id="<message_id from search>")
-reply_to_email(message_id="<message_id from search>", reply_body="...")
-move_email(to_mailbox="Archive", from_mailbox="INBOX", max_moves=10)
+reply_to_email(message_id="<message_id from search>", reply_body="...")  # load email-drafting for native reply
+move_email(message_ids=["<id>"], to_mailbox="Archive", from_mailbox="INBOX", max_moves=1)
 
 # Weekly maintenance
 list_mailboxes(include_counts=True)
 manage_drafts(action="list")
 get_statistics(scope="account_overview", days_back=7)
-update_email_status(action="flag" or "mark_read", ...)
+update_email_status(action="flag", message_ids=["<id>"], mailbox="INBOX", max_updates=1)
 
 # Cleanup operations
-manage_trash(action="move_to_trash", ...)
+manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10)
 export_emails(scope="entire_mailbox", mailbox="...", ...)
 ```
 

@@ -88,7 +88,7 @@ list_mailboxes(include_counts=True)
 
 # Move to Archive after processing (ID-first)
 preview = search_emails(mailbox="INBOX", subject_keyword="...", recent_days=7, limit=10)
-ids = [e["message_id"] for e in preview["emails"]]
+ids = [e["message_id"] for e in preview["items"]]
 move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=10)
 move_email(message_ids=ids, to_mailbox="Archive", max_moves=10)
 
@@ -131,7 +131,7 @@ create_mailbox(name="Projects/Project Alpha")
 
 # 3. Move project emails (ID-first)
 preview = search_emails(subject_keyword="Project Alpha", mailbox="INBOX", recent_days=90, limit=20)
-ids = [e["message_id"] for e in preview["emails"]]
+ids = [e["message_id"] for e in preview["items"]]
 move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/Project Alpha", max_moves=20)
 move_email(message_ids=ids, to_mailbox="Projects/Project Alpha", max_moves=20)
 
@@ -172,7 +172,7 @@ get_statistics(scope="account_overview")
 
 # 3. Batch move by sender (ID-first)
 preview = search_emails(sender_exact="contact@clienta.com", mailbox="INBOX", recent_days=90, limit=50)
-ids = [e["message_id"] for e in preview["emails"]]
+ids = [e["message_id"] for e in preview["items"]]
 move_email(dry_run=True, message_ids=ids, to_mailbox="Clients/Client A", max_moves=50)
 move_email(message_ids=ids, to_mailbox="Clients/Client A", max_moves=50)
 
@@ -284,7 +284,7 @@ list_mailboxes(include_counts=True)
 ```
 # 1. Identify emails to move (bounded search)
 preview = search_emails(subject_keyword="Project Alpha", mailbox="INBOX", recent_days=90, limit=20)
-ids = [e["message_id"] for e in preview["emails"]]
+ids = [e["message_id"] for e in preview["items"]]
 
 # 2. Simulate, then move in batches
 move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/Project Alpha", max_moves=20)
@@ -300,7 +300,7 @@ list_mailboxes(include_counts=True)
 ```
 # Find all emails from a sender
 preview = search_emails(sender_exact="client@example.com", mailbox="INBOX", recent_days=90, limit=50)
-ids = [e["message_id"] for e in preview["emails"]]
+ids = [e["message_id"] for e in preview["items"]]
 
 # Simulate, then move
 move_email(dry_run=True, message_ids=ids, to_mailbox="Clients/Client Name", max_moves=20)
@@ -322,9 +322,9 @@ move_email(message_ids=ids, to_mailbox="Clients/Client Name", max_moves=20)
 
 # 3. Quick moves (ID-first: search → message_ids → move_email)
 alpha = search_emails(subject_keyword="Alpha", mailbox="INBOX", recent_days=7, limit=5)
-move_email(message_ids=[e["message_id"] for e in alpha["emails"]], to_mailbox="Projects/Alpha", max_moves=5)
+move_email(message_ids=[e["message_id"] for e in alpha["items"]], to_mailbox="Projects/Alpha", max_moves=5)
 client = search_emails(subject_keyword="ClientA", mailbox="INBOX", recent_days=7, limit=5)
-move_email(message_ids=[e["message_id"] for e in client["emails"]], to_mailbox="Clients/ClientA", max_moves=5)
+move_email(message_ids=[e["message_id"] for e in client["items"]], to_mailbox="Clients/ClientA", max_moves=5)
 
 # 4. Batch archive remaining
 remaining = list_inbox_emails(max_emails=20, include_content=False, output_format="json")
@@ -498,7 +498,7 @@ Projects/
 # Note the "/" separator for nested paths; collect ids first
 preview = search_emails(subject_keyword="Alpha", mailbox="INBOX", recent_days=30, limit=10)
 move_email(
-    message_ids=[e["message_id"] for e in preview["emails"]],
+    message_ids=[e["message_id"] for e in preview["items"]],
     to_mailbox="Projects/ClientA/Project Alpha",
     max_moves=10
 )
@@ -543,7 +543,7 @@ move_email(message_ids=[e["message_id"] for e in preview["emails"]], to_mailbox=
 
 # When project completes, bulk archive (ID-first)
 preview = search_emails(mailbox="Temp/ProjectName", limit=100)
-ids = [e["message_id"] for e in preview["emails"]]
+ids = [e["message_id"] for e in preview["items"]]
 move_email(dry_run=True, message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)
 move_email(message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)
 
@@ -609,7 +609,7 @@ Archive/
 4. **Backfill key projects** only:
    ```
    preview = search_emails(subject_keyword="ProjectName", mailbox="INBOX", recent_days=90, limit=50)
-   ids = [e["message_id"] for e in preview["emails"]]
+   ids = [e["message_id"] for e in preview["items"]]
    move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/ProjectName", max_moves=50)
    move_email(message_ids=ids, to_mailbox="Projects/ProjectName", max_moves=50)
    ```

@@ -9,17 +9,11 @@ Fast, read-first email check for Apple Mail — what arrived, what needs a reply
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight checklist. Triage is read-only, so the bounded defaults below are usually enough — do not reach for `full_inbox_export` inside the daily loop.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. Triage is read-only, so the bounded defaults below are usually enough — do not reach for `full_inbox_export` inside the daily loop.
 
-## Already-replied safeguard
+## Before drafting
 
-Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. Discovery tools can help, but the final pre-draft thread check is still required:
-
-- `get_needs_response(check_already_replied=True)` filters or annotates already-replied emails by matching each candidate `internet_message_id` against Sent `In-Reply-To` / `References` headers. Keep `include_already_replied=False` unless the user explicitly asks to see already-handled messages.
-- `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
-- As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
-
-Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` with `check_already_replied=True` on `get_needs_response`, or `exclude_replied=False` elsewhere.
+This skill is read-first. When the user wants a reply, hand off to **`email-drafting`** after you have a `message_id`. See [`pre-draft-verification.md`](references/pre-draft-verification.md).
 
 ## When To Use
 
@@ -60,10 +54,10 @@ Note unread totals and recent subjects. Do not open every message yet.
 ### 2. Needs your reply (1–3 min)
 
 ```
-get_needs_response(days_back=2, max_results=20, output_format="json")
+get_needs_response(days_back=2, max_results=20, check_already_replied=True, include_already_replied=False, output_format="json")
 ```
 
-In JSON rows, `message_id` is the numeric Apple Mail id for follow-up tool calls (`get_email_by_id`, `get_email_thread`, `reply_to_email`, `move_email`). `internet_message_id` is the RFC Message-ID header used for replied-header correlation only; do not pass it to tools that expect a numeric Mail id. When duplicate-reply protection matters, pass `check_already_replied=True`; with that enabled, Sent-header matching compares each candidate's `internet_message_id` against `In-Reply-To` / `References`.
+In JSON rows, `message_id` is the numeric Apple Mail id for follow-up tool calls (`get_email_by_id`, `get_email_thread`, `reply_to_email`, `move_email`). `internet_message_id` is the RFC Message-ID header used for replied-header correlation only; do not pass it to tools that expect a numeric Mail id. `include_already_replied=False` (default) filters already-replied rows when `check_already_replied=True`; enable Sent-header matching only when duplicate-reply protection matters (slower on large Exchange inboxes).
 
 Subject-only detection is the default (fast). Use `scan_body=True` only when the user asks to hunt question marks in bodies.
 
@@ -96,6 +90,8 @@ get_email_by_id(message_id="12345", include_content=true, output_format="json")
 ```
 
 Repo CLI equivalent: `apple-mail show --id 12345 --json`.
+
+**To draft:** load **`email-drafting`** (not this skill). Pass the `message_id` from triage into `reply_to_email(message_id=..., reply_body=..., mode="draft")`; default `native_format=True` needs Mail focus + Accessibility (see `email-drafting` for `REPLY_WINDOW_FOCUS_FAILED` recovery).
 
 ## Output format for the user
 

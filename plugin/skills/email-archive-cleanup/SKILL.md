@@ -9,7 +9,7 @@ High-leverage transformations with **explicit human checkpoints**. Optimize for 
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight checklist.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist.
 
 ### When to reach for `full_inbox_export`
 
@@ -54,7 +54,7 @@ Always quote expected totals after dry runs.
 Mandatory first pass after collecting ids from step 2:
 
 ```
-ids = [e["message_id"] for e in preview["emails"]]
+ids = [e["message_id"] for e in preview["items"]]  # search_emails JSON uses "items"; list_inbox_emails uses "emails"
 move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=50)
 ```
 

@@ -2,6 +2,35 @@
 
 Dev-infra guardrails — not MCP tools (`plugin/apple_mail_mcp/tools/` is the server).
 
+## sync_skill_references
+
+| Script | Role |
+|--------|------|
+| `sync_skill_references.py` | Copy canonical `plugin/skills/references/*.md` into each packaged skill's `references/` folder |
+
+Packaged Claude/Codex skills only expose files inside each `plugin/skills/<name>/` directory. Shared refs are edited once under `plugin/skills/references/`, then synced:
+
+```bash
+python3 tools/sync_skill_references.py          # write copies
+python3 tools/sync_skill_references.py --check  # CI / dev-check parity gate
+```
+
+Enforced by `tests/test_packaged_skill_paths.py` (link escape + byte parity).
+
+## validate_tasks_layout
+
+| Script | Role |
+|--------|------|
+| `validate_tasks_layout.py` | Enforces `tasks/` bucket layout (`active/`, `reference/`, `archive/`); covered by `tests/test_tasks_layout.py` |
+
+Agents must read `tasks/CLAUDE.md` § Agent requirements before creating or moving planning artifacts. The gate fails when loose markdown or workstream folders appear at `tasks/` root, required buckets are missing, navigation files drop layout markers, or `todo.md` links to stale flat paths.
+
+```bash
+python3 tools/validate_tasks_layout.py
+```
+
+Runs in `bash tools/dev-check.sh` (default and release tiers).
+
 ## validate_manifests
 
 | Script | Role |
@@ -23,6 +52,7 @@ Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].n
 10. **Marketplace ↔ plugin.json component conflict** — fails if both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while marketplace `strict` is not `true`. Mirrors the Claude Code "conflicting manifests" install error. See [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json" for the rule and escape hatch.
 11. **Codex plugin surface** — `.agents/plugins/marketplace.json` must point at `./plugin`; `plugin/.codex-plugin/plugin.json` must expose `skills: "./skills"` and `mcpServers: "./.mcp.json"`; `plugin/.mcp.json` must launch `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."`.
 12. **Stale distribution artifacts** — fails if repo root contains `apple-mail-mcp-v*.mcpb` files other than the current `pyproject.toml` version; run `tools/build-artifacts.sh` to prune and rebuild.
+13. **Module line budget** — warns on modules over **600 LOC** in `plugin/apple_mail_mcp/` and `tools/`; **fails** on baseline regression (`tests/fixtures/module_line_budget/baseline.json`). Covered by `tests/test_module_line_budget.py` and `check_module_line_budget.py`.
 
 ```bash
 bash tools/validate_manifests.sh
@@ -38,6 +68,25 @@ bash tools/validate-codex-plugin.sh
 That smoke installs the plugin into a temporary `CODEX_HOME`, reads `codex mcp get apple-mail --json`, launches the registered stdio server, and fails unless MCP `list_tools` includes `reply_to_email`, `compose_email`, `manage_drafts`, `list_accounts`, and `get_inbox_overview`.
 
 Skips Claude marketplace `metadata.version` (1.0.0) and Codex marketplace release versioning because `.agents/plugins/marketplace.json` is install routing metadata — see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).
+
+## validate_tasks_layout.py
+
+| Script | Role |
+|--------|------|
+| `validate_tasks_layout.py` | Enforces `tasks/` bucket layout (`active/`, `reference/`, `archive/`); covered by `tests/test_tasks_layout.py` |
+
+Agents must read `tasks/CLAUDE.md` § Agent requirements before creating or moving planning artifacts. The gate fails when:
+
+1. Loose `*.md` or workstream folders appear at `tasks/` root (only `CLAUDE.md`, `INDEX.md`, `todo.md` allowed).
+2. `active/`, `reference/`, or `archive/` is missing.
+3. `tasks/CLAUDE.md` or `tasks/INDEX.md` drops required layout markers.
+4. `tasks/todo.md` links to stale flat paths like `tasks/foo-2026-06-30.md`.
+
+```bash
+python3 tools/validate_tasks_layout.py
+```
+
+Runs in `bash tools/dev-check.sh` (default and release tiers).
 
 ## check_wrapper_surface.py
 
@@ -55,6 +104,21 @@ python3 tools/check_wrapper_surface.py --wrapper /path/to/apple-mail
 ```
 
 Run after regenerating the mcporter bundle or adding read tools agents rely on.
+
+## check_module_line_budget.py
+
+| Script | Role |
+|--------|------|
+| `check_module_line_budget.py` | 600 LOC budget scanner for `plugin/apple_mail_mcp/` and `tools/`; covered by `tests/test_module_line_budget.py` |
+
+Warn-only CLI (exit 0) listing oversized modules; **regression** enforced in pytest and `validate_manifests.py` via `tests/fixtures/module_line_budget/baseline.json`.
+
+```bash
+python3 tools/check_module_line_budget.py
+python3 tools/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json
+```
+
+Runs automatically in `dev-check.sh` (default/release), `validate_manifests.sh` (regression), CI (dedicated step + pytest `-rw`), and pre-commit.
 
 ## measure_metadata_hydration.py
 
@@ -96,7 +160,7 @@ Tiered local gate (no live Mail except `live` tier). Requires root `.venv/`.
 
 | Tier | Runs |
 |------|------|
-| `default` | `validate_manifests.sh` + `pytest`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
+| `default` | `validate_manifests.sh` + `validate_tasks_layout.py` + module line budget report + `pytest` + `run_test_count_check`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
 | `lint` | Fatal package quality gate: `ruff check plugin/apple_mail_mcp/`, `ruff format --check plugin/apple_mail_mcp/`, and `mypy --strict plugin/apple_mail_mcp/` |
 | `surface` | default + wrapper check always |
 | `manifest` | manifests only |
@@ -109,6 +173,14 @@ bash tools/dev-check.sh
 bash tools/dev-check.sh surface
 bash tools/dev-check.sh release   # always before commit/PR
 ```
+
+### Collected-test count (single source of truth)
+
+`tools/expected_test_count.txt` holds the one canonical collected-test count. Docs no
+longer hardcode the number; `run_test_count_check` (in `default` and `release`)
+recomputes the real count with `PYTEST_ADDOPTS='' pytest --collect-only tests` and fails
+on drift, printing the new number to drop into that one file. The tool count (31) is
+already derived/enforced separately by `validate_manifests`.
 
 ## pre-commit hook
 
@@ -126,7 +198,7 @@ bash tools/pre-commit-validate.sh
 
 ## CI
 
-`.github/workflows/ci.yml` (Ubuntu, Python 3.10): `validate_manifests.sh` then `pytest tests/ -q`. Same gate as pre-commit; live Mail is manual ([`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)).
+`.github/workflows/ci.yml` (Ubuntu, Python 3.10): `validate_manifests.sh`, module line budget report, then `pytest tests/ -q -rw`. Same gate as pre-commit; live Mail is manual ([`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)).
 
 Run after tool add/remove, version bump, mcpb `tools[]` edit, or plugin skill marketing copy in manifests. Supplement with **`plugin-dev:plugin-validator`** when available; add **`plugin-dev:skill-reviewer`** when editing `plugin/skills/*/SKILL.md`.
 

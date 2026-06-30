@@ -1,5 +1,7 @@
 # Apple Mail MCP — Live Field Report (2026-06-04)
 
+> **Historical:** Anti-patterns in this report (e.g. `search_emails` on Drafts for verify/find) are superseded by `verify_draft`, `manage_drafts(action="list")`, and ID-first guidance in [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md).
+
 **Author:** Claude (agent), driving the plugin from a real session
 **Context:** Real QA task — review the 10 reply drafts created today on the *TU - Cayman* Exchange account, confirm each was a genuine threaded reply to its original, and confirm appropriateness. Doing that exercised compose/reply, draft listing, search (INBOX + `All`), and `get_email_by_id` against a large Exchange mailbox. This report records what broke or got in the way, with code references, plus recommended fixes/additions/refinements.
 

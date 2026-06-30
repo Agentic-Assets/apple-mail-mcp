@@ -16,13 +16,13 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 ## Who reads what
 
-**Implementing or changing MCP tools** → start with root [`CLAUDE.md`](../CLAUDE.md) (architecture), then [`CLAUDE-conventions.md`](CLAUDE-conventions.md) (anti-patterns). Run mocked tests per [`tests/CLAUDE.md`](../tests/CLAUDE.md).
+**Implementing or changing MCP tools** → start with root [`CLAUDE.md`](../CLAUDE.md) (architecture), then [`CLAUDE-conventions.md`](CLAUDE-conventions.md) (anti-patterns, **module line budget**). Run mocked tests per [`tests/CLAUDE.md`](../tests/CLAUDE.md).
 
 **Verifying against real Mail.app** → [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md): setup, permissions, `quick-check` / `perf-test` batteries, safe probes, MCP env vars (`DEFAULT_MAIL_ACCOUNT`, `DEFAULT_MAIL_SIGNATURE`, `USER_EMAIL_PREFERENCES`).
 
 **Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Codex routing lives in [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json), and [`../plugin/.mcp.json`](../plugin/.mcp.json). Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
 
-**Planning / backlog** → [`tasks/CLAUDE.md`](../tasks/CLAUDE.md) and [`tasks/todo.md`](../tasks/todo.md).
+**Planning / backlog** → [`tasks/CLAUDE.md`](../tasks/CLAUDE.md) (read § Agent requirements) and [`tasks/todo.md`](../tasks/todo.md).
 
 ## Plugin workflow skills (Claude Code and Codex)
 
@@ -55,10 +55,10 @@ Workflow entry points are skills-only. Do not add or restore legacy slash comman
 
 ## CI vs live
 
-CI never touches Mail.app. Manifest validation + pytest only ([`tools/CLAUDE.md`](../tools/CLAUDE.md)). Live testing is manual on macOS after local changes.
+CI never touches Mail.app. Manifest validation, **module line budget** report, and pytest ([`tools/CLAUDE.md`](../tools/CLAUDE.md)). Live testing is manual on macOS after local changes.
 
 ## Related
 
 - User-facing install: root [`README.md`](../README.md)
 - Cross-session backlog: [`tasks/todo.md`](../tasks/todo.md)
-- Active robustness goal: [`tasks/apple-mail-plugin-robustness-goal-2026-05-22.md`](../tasks/apple-mail-plugin-robustness-goal-2026-05-22.md) · historical phase sequencing: [`tasks/phase-plan-3.1.7.md`](../tasks/phase-plan-3.1.7.md) · live baseline: [`tasks/live-test-baseline-2026-05-21.md`](../tasks/live-test-baseline-2026-05-21.md)
+- Active robustness goal: [`tasks/reference/apple-mail-plugin-robustness-goal-2026-05-22.md`](../tasks/reference/apple-mail-plugin-robustness-goal-2026-05-22.md) · historical phase sequencing: [`tasks/reference/phase-plan-3.1.7.md`](../tasks/reference/phase-plan-3.1.7.md) · live baseline: [`tasks/reference/live-test-baseline-2026-05-21.md`](../tasks/reference/live-test-baseline-2026-05-21.md)

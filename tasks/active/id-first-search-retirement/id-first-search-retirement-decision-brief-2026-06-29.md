@@ -6,10 +6,10 @@ This brief turns the remaining unchecked product decisions from the ID-first sea
 
 Related files:
 
-- `tasks/id-first-search-retirement-recommendations-2026-06-29.md`
-- `tasks/id-first-search-retirement-todo-2026-06-29.md`
-- `tasks/id-first-search-retirement-completion-audit-2026-06-29.md`
-- `tasks/metadata-index-feasibility-spike-2026-06-30.md`
+- `id-first-search-retirement-recommendations-2026-06-29.md`
+- `id-first-search-retirement-todo-2026-06-29.md`
+- `id-first-search-retirement-completion-audit-2026-06-29.md`
+- `metadata-index-feasibility-spike-2026-06-30.md`
 
 ## Current Branch State
 

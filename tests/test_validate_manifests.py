@@ -29,6 +29,13 @@ class ValidateManifestsTests(unittest.TestCase):
             msg=result.stdout + result.stderr,
         )
         self.assertIn("validate_manifests: OK", result.stdout)
+        self.assertIn("module_budget_warn=", result.stdout)
+
+    def test_module_line_budget_passes_on_current_repo(self):
+        errors: list[str] = []
+        warn_count = validate_manifests._check_module_line_budget(errors)
+        self.assertEqual(errors, [])
+        self.assertGreater(warn_count, 0)
 
     def test_active_doc_tool_count_claims_pass_on_current_repo(self):
         errors = []

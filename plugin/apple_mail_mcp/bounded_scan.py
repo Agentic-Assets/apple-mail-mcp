@@ -1,7 +1,7 @@
 """Bounded scan helpers — the only sanctioned producers of ScanWindow tokens.
 
 Phase A of the ``whose``-elimination refactor. See
-``tasks/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`` and
+``tasks/archive/2026-05/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`` and
 ``05-codebase-whose-map.md`` § 7 for the helper signatures and the
 bounded-slice-then-loop-filter pattern these helpers encode.
 

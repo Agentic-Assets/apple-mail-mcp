@@ -4,8 +4,8 @@
 
 This audit covers the `codex/id-first-search-retirement-implementation` branch and the plan files:
 
-- `tasks/id-first-search-retirement-recommendations-2026-06-29.md`
-- `tasks/id-first-search-retirement-todo-2026-06-29.md`
+- `id-first-search-retirement-recommendations-2026-06-29.md`
+- `id-first-search-retirement-todo-2026-06-29.md`
 - `tasks/metadata-index-feasibility-spike-2026-06-30.md`
 
 The branch advances the ID-first contract for action tools, discovery tools, batch exact-id APIs, metadata-index feasibility, and local verification helpers. It does not remove v3.x compatibility parameters, enable a runtime metadata index, inspect live Mail, create drafts, or send email.

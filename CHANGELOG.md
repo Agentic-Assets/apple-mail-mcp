@@ -3,6 +3,60 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
+## 3.8.0 - 2026-06-30
+
+Native-format reply drafts. `reply_to_email` now defaults to Mail's native reply
+window so saved drafts keep the colored quote bar and the account's default logo
+signature, with a windowless fallback preserved for headless and bulk use.
+
+### Added
+
+- **`native_format` parameter on `reply_to_email`** (default `True`). The native
+  path opens Mail's `reply ... with opening window`, which renders Mail's own rich
+  quoted thread and default reply signature, then types `reply_body` above the quote
+  with a System Events keystroke (never the clipboard). Set `native_format=False`
+  for the windowless object-model path (plain-text quote, no signature logo, no
+  Accessibility permission required) for headless, bulk, or CI use.
+- **`REPLY_WINDOW_FOCUS_FAILED` structured error.** When the native path cannot
+  bring the reply window into focus, it aborts without saving and returns a
+  structured error that points callers at `native_format=False`.
+- **Module line budget gate.** `tools/check_module_line_budget.py` and
+  `tests/test_module_line_budget.py` warn on modules over **600 LOC** in
+  `plugin/apple_mail_mcp/` and `tools/`, and fail CI on baseline regression
+  (`tests/fixtures/module_line_budget/baseline.json`). Runs in `dev-check.sh`,
+  `validate_manifests.py`, pre-commit, and GitHub CI. Documented in
+  `docs/CLAUDE-conventions.md` § Module line budget.
+
+### Changed
+
+- **Reply verification is line-break-insensitive.** The saved-draft verifier now
+  strips CR/LF before matching, so a soft-wrapped first line no longer trips a false
+  `BODY_MISSING`. The native default also skips signature substring matching (Mail's
+  own logo signature cannot be reliably substring-matched) and never pins the
+  account alias on the native window (pinning had dropped the embedded logo).
+- **Attachment verification matches names as a multiset.** Reply-draft verification
+  and `verify_draft` / `verify_drafts` now require each expected attachment name to be
+  present with its full multiplicity (duplicate filenames are consumed one for one)
+  and compare raw Mail attachment names, so a draft missing one of two identically
+  named files is reported as `missing` rather than passing.
+- **Agent guidance ID-first alignment.** Skills, `common-workflows.md`, README tool
+  table, `apple-mail-mcpb/manifest.json`, and compose/manage/analytics docstrings now
+  tell the same story: `message_id` / `message_ids` required on action tools;
+  `subject_keyword`, `sender`, and `draft_subject` are schema-compat only
+  (`TARGET_SELECTOR_DEPRECATED`). New canonical references:
+  `plugin/skills/references/agent-id-first-workflow.md` and
+  `pre-draft-verification.md` (per-skill copies via `tools/sync_skill_references.py`,
+  enforced by `tests/test_packaged_skill_paths.py`). Extended
+  `tests/test_id_first_guidance.py` for README, manifest, and template traps. Stale
+  banners on historical task docs (`scalability-24k-hardening`, `id-first-refactor-spec`,
+  `LIVE_FIELD_REPORT`).
+
+### Notes
+
+- The native path needs the host process to hold macOS Accessibility permission
+  (System Events keystroke); `native_format=False` avoids it.
+- 981 collected tests; tool count unchanged (31).
+
 ## 3.6.1 — 2026-06-07
 
 Codex plugin install-smoke regression recovery and test-count verification.
@@ -392,7 +446,7 @@ the smart-inbox surface, and one targeted breaking change to
     transparently through `_print_result`.
 
   See `plugin/apple_mail_mcp/tools/inbox.py` and
-  `tasks/robustness-backlog-2026-05-22.md` (Phase 3) for context.
+  `tasks/reference/robustness-backlog-2026-05-22.md` (Phase 3) for context.
 
 ### Performance
 
@@ -441,5 +495,5 @@ the smart-inbox surface, and one targeted breaking change to
   `get-statistics` (three scopes), smart-inbox triage, `inbox-dashboard`
   JSON mode, and `full-inbox-export`.
 
-See `tasks/robustness-backlog-2026-05-22.md` Phase 2 + Phase 3 for the
+See `tasks/reference/robustness-backlog-2026-05-22.md` Phase 2 + Phase 3 for the
 backlog this batch closes.

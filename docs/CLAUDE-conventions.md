@@ -139,21 +139,21 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 | Mode | Behavior | When agents should use it |
 |------|----------|---------------------------|
-| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. Native replies use Mail's dictionary-backed `reply` command, assign `reply_body` above the quoted original without clipboard/UI scripting, and verify exact Drafts id first with bounded fallback. Reply JSON exposes `exact_id_verified`; `false` means bounded fallback verified a different or non-exact Drafts artifact. | Bulk drafting, background agent work, default under `--draft-safe` |
+| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. By default `reply_to_email` runs the native path (`native_format=True`): Mail's `reply ... with opening window` renders its own colored quote bar and default logo signature, and `reply_body` is typed in above the quote with a System Events keystroke (never the clipboard), then the window is saved and closed. `native_format=False` is the headless/bulk fallback: object-model `reply`, assign `reply_body` above a plain-text quoted original, no window or Accessibility. Both verify exact Drafts id first with bounded fallback. Reply JSON exposes `exact_id_verified`; `false` means bounded fallback verified a different or non-exact Drafts artifact. | Bulk drafting, background agent work, default under `--draft-safe` |
 | `open` | Save first, then leave the compose window open for human review | User wants each draft to pop up in Mail (e.g. review 10 replies in sequence) |
 | `send` | Send immediately. `reply_to_email(output_format="json", mode="send")` is rejected before mutation; send replies use the normal text/send path only. | Explicit user authorization only; blocked when `DRAFT_SAFE` or `READ_ONLY` |
 
-**Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id`. `subject_keyword` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`; run discovery first. `reply_to_email` uses Mail's native reply command, constructs and assigns `reply_body` above the quoted-original block, and saved replies/forwards verify exact Drafts id first when Mail exposes one. `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
+**Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id`. `subject_keyword` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`; run discovery first. `reply_to_email` defaults to the native reply window (`native_format=True`) so drafts keep Mail's rich quote bar and logo signature; this needs the Mail window to take focus and **Accessibility permission for the host process** (System Events keystroke). If the window cannot be focused the tool returns `REPLY_WINDOW_FOCUS_FAILED` without saving — callers that cannot grant Accessibility (headless, bulk, CI) should pass `native_format=False` for the windowless object-model path (plain-text quote, no signature logo). Saved replies/forwards verify exact Drafts id first when Mail exposes one. `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
 
 **Thread discovery:** pass `message_id` and explicit `mailboxes=[...]` to `get_email_thread` whenever a prior list/search result exposed the id. The message-id path reads Mail's dictionary-backed Message-ID, In-Reply-To, and References headers first, then uses subject fallback only when headers are unavailable or no header-linked messages are found. Use `output_format="json"` to collect exact message ids and header metadata, and `include_preview=False` when the workflow only needs handles. Check `selection_strategy` and `subject_fallback_used` before treating a reconstructed thread as header-confirmed.
 
-**Rich `.eml` drafts:** `create_rich_email_draft` saves the opened Mail compose object after opening the file (no subject-based outgoing-message lookup and no `System Events` save keystroke). Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
+**Rich `.eml` drafts:** `create_rich_email_draft` saves the opened Mail compose object after opening the file (no subject-based outgoing-message lookup and no `System Events` save keystroke). It snapshots the open `outgoing messages` ids **before** the `open`, then saves and closes only the window whose id is new (the one this call created), so a pre-existing compose window is never saved or closed by mistake and "Saved in Drafts: yes" cannot be reported against the wrong window. Use `review_in_mail=True` for saved-open review; blank subjects stay `.eml`-only until a nonblank subject exists.
 
 **Draft lifecycle targeting:** `manage_drafts(action="list")` returns each draft's id. For `send`, `open`, or `delete`, pass `draft_id`; `draft_subject` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`.
 
 **Attachment targeting:** pass `message_ids` to `list_email_attachments`; `subject_keyword` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`. Use `output_format="json"` to get per-row `message_id`, `attachment_index`, filename, and size. Prefer `save_email_attachment(message_ids=[one_id], attachment_index=N, ...)` for exact saves. `attachment_name` remains compatible, but duplicate filename matches return `AMBIGUOUS_ATTACHMENT_SELECTOR` and instruct callers to retry with `attachment_index`.
 
-**Agent guidance:** skills under `plugin/skills/email-drafting/` and `plugin/skills/apple-mail-operator/` document the quiet-default vs saved-open review split. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
+**Agent guidance:** `plugin/skills/email-drafting/` documents the quiet-default vs saved-open review split, native reply (`native_format=True`), Accessibility requirements, and `REPLY_WINDOW_FOCUS_FAILED` recovery. `apple-mail-operator` covers bootstrap and navigation and hands off reply drafting to `email-drafting`. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
 
 ---
 
@@ -207,11 +207,11 @@ The guard lives in `tools/validate_manifests.py::_check_marketplace_contract`; r
 
 ## Plugin-dev agents
 
-This repo **is** a Claude Code plugin. For plugin shell, MCP wiring, skills, agents, commands, hooks, or manifests, defer to `plugin-dev:*` agents — they override memory about plugin authoring:
+This repo **is** a Claude Code plugin. For plugin shell, MCP wiring, skills, agents, commands, hooks, or manifests, defer to `plugin-dev:*` agents when the host exposes them; they override memory about plugin authoring. If those experts are unavailable, say so in the handoff and run the local validation gates listed below:
 
 | Agent / skill | When |
 |---------------|------|
-| **`plugin-dev:plugin-validator`** | After any change to `plugin.json`, `marketplace.json`, `.mcp.json`, command/skill/agent frontmatter, or directory layout. Blocking before merge. |
+| **`plugin-dev:plugin-validator`** | After any change to `plugin.json`, `marketplace.json`, `.mcp.json`, command/skill/agent frontmatter, or directory layout. Blocking before merge when available; otherwise run `bash tools/dev-check.sh release`. |
 | **`plugin-dev:skill-reviewer`** | After creating or editing any skill under `plugin/skills/`. Focus on `description` / frontmatter — that drives triggering. |
 | **`plugin-dev:agent-creator`** | Adding a new agent. Don't hand-author frontmatter from memory. |
 | **`plugin-dev:*` skills** | Invoke the matching skill *before* designing (`mcp-integration`, `skill-development`, `command-development`, etc.). |
@@ -228,9 +228,10 @@ Every skill under `plugin/skills/` follows the same shape so siblings trigger cr
 - **`description`**: third-person, scenario-rich, ends with "Do NOT use for X (see \<sibling\>)". Include 4–6 quoted trigger phrases and name 3–5 central MCP tools.
 - **Body**: imperative/infinitive ("Start with `get_inbox_overview()`"). Addresses the executing model, not a human reader.
 - **`SKILL.md`**: 1,500–2,000 words. Detail → `references/`, code → `examples/`, scripts → `scripts/`. Link in "Additional Resources".
+- **Packaged skill paths:** Agents only see files inside each `plugin/skills/<name>/` directory. Do not link to `../references/` or other paths outside the skill folder. Canonical shared refs live in `plugin/skills/references/`; run `python3 tools/sync_skill_references.py` after edits to refresh per-skill `references/` copies. `tests/test_packaged_skill_paths.py` enforces both rules.
 - **Top of body**: (1) purpose, (2) when-to-use / when-NOT-to-use, (3) performance defaults, (4) sibling decision tree, (5) red-flag table for destructive ops.
 - **No persona openers** ("You are an expert…").
-- **Verify** with `plugin-dev:skill-reviewer` before merge. Template: `plugin/skills/email-management/SKILL.md`.
+- **Verify** with `plugin-dev:skill-reviewer` before merge when available. If unavailable, run manifest/release validation and note the missing expert pass. Template: `plugin/skills/email-management/SKILL.md`.
 
 ### Skills only — no new slash commands
 
@@ -250,7 +251,40 @@ Entry points ship as skills only. Do not restore `plugin/commands/`; the old `/e
 
 **Routing cheat sheet:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). **Narrow skills** may stay shorter than the umbrella template if they include triggers, sibling matrix, performance notes, and destructive red lines. **Umbrella template:** `plugin/skills/email-management/SKILL.md` (also has `references/`, `examples/`, `templates/`).
 
-After adding or editing any skill: run **`plugin-dev:skill-reviewer`**. After manifest, package, artifact, or skill-count marketing copy changes: **`plugin-dev:plugin-validator`** + `bash tools/dev-check.sh release`.
+After adding or editing any skill: run **`plugin-dev:skill-reviewer`** when available. After manifest, package, artifact, or skill-count marketing copy changes: run **`plugin-dev:plugin-validator`** when available plus `bash tools/dev-check.sh release`.
+
+---
+
+## Module line budget (600 LOC)
+
+Keep production modules focused and splittable. The repo enforces a **600 physical-line** soft target on `plugin/apple_mail_mcp/` and `tools/` (aligned with agent guidance and the `python-project-structure` skill's 300–500 line split heuristic).
+
+### Automated gates
+
+| Layer | Behavior |
+|-------|----------|
+| **`tools/check_module_line_budget.py`** | Warn-only CLI; lists modules over budget |
+| **`tests/test_module_line_budget.py`** | Pytest warning on oversize modules; **hard fail** on baseline regression |
+| **`validate_manifests.py`** | Same regression check during manifest validation; prints WARN lines |
+| **`dev-check.sh`** | Prints budget report before pytest (default, release, live, surface, all) |
+| **GitHub CI** | Dedicated step + pytest `-rw` (warnings visible in log) |
+| **Pre-commit** | Via `dev-check.sh default` |
+
+### Baseline fixture
+
+Known oversized modules are snapshotted in [`tests/fixtures/module_line_budget/baseline.json`](../tests/fixtures/module_line_budget/baseline.json). CI **fails** when a tracked file grows past its baseline count. Refresh only after an intentional split or measured shrink:
+
+```bash
+python3 tools/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json
+```
+
+Do not refresh the baseline merely to silence growth from new features; split helpers into focused modules first (`plugin/apple_mail_mcp/tools/CLAUDE.md` module map). Run **`code-simplifier:code-simplifier`** after splits.
+
+### Current debt (tool modules)
+
+All six MCP tool modules exceed 600 LOC today (`compose.py` largest). The gate prevents further sprawl until decomposition work lands (see [`tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`](../tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md)).
+
+Detail: [`tools/CLAUDE.md`](../tools/CLAUDE.md) § `check_module_line_budget.py` · [`tests/CLAUDE.md`](../tests/CLAUDE.md) § Module line budget.
 
 ---
 

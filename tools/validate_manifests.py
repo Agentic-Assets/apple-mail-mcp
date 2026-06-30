@@ -58,9 +58,52 @@ TOOL_COUNT_CLAIM_PATTERNS = (
 )
 
 
+MODULE_LINE_BUDGET_BASELINE = (
+    ROOT / "tests" / "fixtures" / "module_line_budget" / "baseline.json"
+)
+
+
 def _fail(msg: str) -> None:
     print(f"validate_manifests: {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def _check_module_line_budget(errors: list[str]) -> int:
+    """Warn on oversized modules; fail on baseline regression. Returns warn count."""
+    if not MODULE_LINE_BUDGET_BASELINE.is_file():
+        errors.append(
+            "module line budget baseline missing: "
+            f"{MODULE_LINE_BUDGET_BASELINE.relative_to(ROOT)}"
+        )
+        return 0
+
+    tools_dir = ROOT / "tools"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+
+    from check_module_line_budget import (  # noqa: PLC0415
+        MODULE_LINE_BUDGET,
+        REFRESH_BASELINE_CMD,
+        check_regression,
+        load_baseline,
+        scan_oversized_modules,
+    )
+
+    baseline = load_baseline(MODULE_LINE_BUDGET_BASELINE)
+    for msg in check_regression(baseline):
+        errors.append(f"module line budget: {msg} (refresh: {REFRESH_BASELINE_CMD})")
+
+    oversized = scan_oversized_modules(MODULE_LINE_BUDGET)
+    if oversized:
+        print(
+            f"validate_manifests: module line budget warning: "
+            f"{len(oversized)} module(s) exceed {MODULE_LINE_BUDGET} LOC",
+            file=sys.stderr,
+        )
+        for rel, count in oversized:
+            print(f"  WARN: {rel}: {count} lines", file=sys.stderr)
+
+    return len(oversized)
 
 
 def _read_project_version() -> str:
@@ -1066,13 +1109,19 @@ def main() -> None:
         require_artifacts=_env_truthy("APPLE_MAIL_REQUIRE_DIST_ARTIFACTS"),
     )
 
+    module_budget_warn_count = _check_module_line_budget(errors)
+
     if errors:
         print("validate_manifests: FAILED", file=sys.stderr)
         for err in errors:
             print(f"  ERROR: {err}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"validate_manifests: OK (version={expected_version}, tools={actual_count})")
+    print(
+        "validate_manifests: OK "
+        f"(version={expected_version}, tools={actual_count}, "
+        f"module_budget_warn={module_budget_warn_count})"
+    )
 
 
 if __name__ == "__main__":

@@ -1,11 +1,11 @@
 """Static enforcement tests for the bounded-scan contract.
 
 These tests guard the Phase A whose-elimination invariants documented in
-``tasks/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`` and the
+``tasks/archive/2026-05/whose-elimination-2026-05-22/00-FINAL-SYNTHESIS.md`` and the
 post-Phase-A Gmail-whose-on-list fix (commit f96b44c, 2026-05-27).
 
 Key rules they enforce (per
-``tasks/whose-elimination-2026-05-22/05-codebase-whose-map.md`` § 1):
+``tasks/archive/2026-05/whose-elimination-2026-05-22/05-codebase-whose-map.md`` § 1):
 
 * ``every message of <mailbox> whose <predicate>`` is only allowed when
   the predicate is ``id is <numeric>`` or ``read status is <bool>`` — both

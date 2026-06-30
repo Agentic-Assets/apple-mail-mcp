@@ -25,7 +25,7 @@ Possible shapes:
 
 ## This answers an existing open question
 
-`tasks/id-first-refactor-spec.md` Open Question #1 asks whether Mail.app exposes a
+`tasks/reference/id-first-refactor-spec.md` Open Question #1 asks whether Mail.app exposes a
 Message-ID header accessor in AppleScript. **It does, and the plugin already uses
 it**: `get_email_by_id` parses `in_reply_to` and `references` from the raw
 `all headers` of a message and returns them (and `has_quoted_original`). So the

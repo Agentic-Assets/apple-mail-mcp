@@ -2,9 +2,15 @@
 
 Date: 2026-06-30
 Branch: `fix/reply-draft-verification-consolidated`
-Head: `7770fa3229f2bb5ae78848fc994a30208997e1e9`
+Original reviewed head: `7770fa3229f2bb5ae78848fc994a30208997e1e9`
 Base reviewed: `origin/main` at `1482949`
 PR: https://github.com/Agentic-Assets/apple-mail-mcp/pull/38
+
+Status note: this review artifact is retained as historical context for PR #38.
+The implementation has since addressed several items below, including verifier
+timeout/error preservation of the known `draft_id`, fallback exactness metadata,
+JSON send-mode rejection, and concrete default-signature tests. Treat the current
+source and tests as authoritative.
 
 ## Scope
 
@@ -132,15 +138,10 @@ tracked artifact drift afterward.
 
 ### Current Merge Blocker
 
-The fresh reviewers promoted one item from "before-merge todo" to blocker for
-this PR's robustness bar:
-
-- If the main reply save returns a `Draft ID`, then verifier timeout or
-  AppleScript error can still collapse into a generic verification failure
-  without carrying that known `draft_id` forward.
-
-This conflicts with the exact-artifact cleanup goal of the reply draft work.
-Fix this before merge.
+Historical note: the verifier-timeout blocker recorded in this section has been
+resolved in the current branch. The remaining known correctness issues are tracked
+by the current tests and review follow-up around attachment filename verification
+and requested-signature verification.
 
 ## Before-Merge Todos
 
@@ -148,6 +149,8 @@ These are the review items most worth handling before merge if the goal is the
 most robust reply draft system.
 
 ### 1. Preserve Known Draft ID On Verifier Timeout Or Error
+
+Status: resolved in the current branch.
 
 Current risk: `reply_to_email` may extract `Draft ID`, then
 `_verify_saved_reply_draft` can time out or hit an AppleScript error and return a
@@ -304,17 +307,11 @@ Improve resilience by:
 
 ## Merge Recommendation
 
-PR #38 should not merge yet if the merge bar is the most robust reply draft
-system. Handle these before merge:
-
-1. verifier timeout/error preserving `draft_id`,
-2. fallback exactness status,
-3. concrete default-signature tests,
-4. `output_format="json"` with `mode="send"` contract,
-5. full JSON contract docs,
-6. `get_needs_response` 8-field row test and numeric id docs,
-7. controlled live dummy proof with `DEFAULT_MAIL_SIGNATURE` configured, unless
-   Cayman explicitly accepts mocked-only residual risk.
+PR #38 should not merge yet if the merge bar requires live Mail proof. Several
+mocked-code blockers in this historical list have now been addressed. The
+remaining high-value proof item is a controlled live dummy reply draft with
+`DEFAULT_MAIL_SIGNATURE` configured, unless Cayman explicitly accepts mocked-only
+residual risk.
 
 After those are complete, PR #38 should be a strong merge candidate.
 

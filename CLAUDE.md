@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, **932 collected tests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. Recount tests with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
 ## Distribution channels (four install surfaces from one source tree)
 
@@ -39,6 +39,8 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 **Run `code-simplifier:code-simplifier` regularly** — after any non-trivial change to tools, backend, helpers, or tests. Especially after refactors that touched many sites (e.g. capability-token / structured-error / bounded-scan work). Behavior must be preserved; the simplifier collapses duplication, drops dead branches, and tightens names. Trigger it as part of every "ready to ship" pass alongside `plugin-validator` and `skill-reviewer`, and any time a file grows past ~600 LOC or a helper sprouts >3 near-copies.
 
+**Module line budget (automated):** CI, pre-commit, `dev-check.sh`, and `validate_manifests.py` warn on modules over **600 LOC** in `plugin/apple_mail_mcp/` and `tools/`, and **fail** if a tracked file grows past its baseline (`tests/fixtures/module_line_budget/baseline.json`). Detail: [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) § Module line budget · [`tools/CLAUDE.md`](tools/CLAUDE.md) § `check_module_line_budget.py`.
+
 ## When working in…
 
 | Area | Read |
@@ -51,7 +53,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 | Manifest validation, pre-commit | [`tools/CLAUDE.md`](tools/CLAUDE.md) |
 | Live CLI testing, agent workflows | [`docs/CLAUDE.md`](docs/CLAUDE.md) |
 | Deep tool/skill/plugin rules | [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) |
-| Phase plans & backlog | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) · [`tasks/todo.md`](tasks/todo.md) |
+| Phase plans & backlog | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) · [`tasks/todo.md`](tasks/todo.md) — **read `tasks/CLAUDE.md` § Agent requirements before adding or moving task files** |
 | MCPB bundle build | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) |
 | Claude Code marketplace manifest | [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) |
 | Codex Desktop/CLI plugin surface | [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) · [`plugin/.codex-plugin/plugin.json`](plugin/.codex-plugin/plugin.json) · [`plugin/.mcp.json`](plugin/.mcp.json) |
@@ -64,7 +66,9 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/pytest tests/                    # 932 collected tests on current branch
+.venv/bin/pytest tests/                    # full suite (count tracked in tools/expected_test_count.txt)
+python3 tools/check_module_line_budget.py  # 600 LOC warn report (also runs in dev-check + CI)
+bash tools/dev-check.sh                    # manifests + module budget + pytest + test-count gate
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```
