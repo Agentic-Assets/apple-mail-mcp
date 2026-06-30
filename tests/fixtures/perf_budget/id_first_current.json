@@ -1,0 +1,82 @@
+{
+  "suite": "id_first_hot_paths",
+  "profile": "offline_fixture",
+  "captured_at": "2026-06-30T00:00:00Z",
+  "source": "mocked_unit_fixture",
+  "live_mail": false,
+  "notes": "Synthetic fixture for CI budget wiring only. Does not contain private Mail data or live timings.",
+  "cases": [
+    {
+      "name": "search_emails.discovery_bounded",
+      "tool": "search_emails",
+      "category": "discovery",
+      "p50_ms": 410.0,
+      "p95_ms": 1240.0,
+      "p50_budget_ms": 500.0,
+      "p95_budget_ms": 1500.0
+    },
+    {
+      "name": "get_email_thread.message_id_header_first",
+      "tool": "get_email_thread",
+      "category": "thread",
+      "p50_ms": 355.0,
+      "p95_ms": 1050.0,
+      "p50_budget_ms": 500.0,
+      "p95_budget_ms": 1500.0
+    },
+    {
+      "name": "get_email_by_id.exact",
+      "tool": "get_email_by_id",
+      "category": "exact_read",
+      "p50_ms": 295.0,
+      "p95_ms": 880.0,
+      "p50_budget_ms": 500.0,
+      "p95_budget_ms": 1500.0
+    },
+    {
+      "name": "full_inbox_export.metadata_only",
+      "tool": "full_inbox_export",
+      "category": "explicit_export",
+      "p50_ms": 2480.0,
+      "p95_ms": 4700.0,
+      "p50_budget_ms": 3000.0,
+      "p95_budget_ms": 6000.0
+    },
+    {
+      "name": "get_email_by_ids.120",
+      "tool": "get_email_by_ids",
+      "category": "batch_exact",
+      "p50_ms": 450.0,
+      "p95_ms": 1250.0,
+      "p50_budget_ms": 600.0,
+      "p95_budget_ms": 1800.0
+    },
+    {
+      "name": "verify_drafts.120",
+      "tool": "verify_drafts",
+      "category": "batch_exact",
+      "p50_ms": 470.0,
+      "p95_ms": 1400.0,
+      "p50_budget_ms": 700.0,
+      "p95_budget_ms": 2000.0
+    },
+    {
+      "name": "list_email_attachments.message_ids_120",
+      "tool": "list_email_attachments",
+      "category": "batch_exact",
+      "p50_ms": 500.0,
+      "p95_ms": 1460.0,
+      "p50_budget_ms": 800.0,
+      "p95_budget_ms": 2200.0
+    },
+    {
+      "name": "export_emails.message_ids_120",
+      "tool": "export_emails",
+      "category": "batch_exact",
+      "p50_ms": 620.0,
+      "p95_ms": 1650.0,
+      "p50_budget_ms": 900.0,
+      "p95_budget_ms": 2500.0
+    }
+  ]
+}

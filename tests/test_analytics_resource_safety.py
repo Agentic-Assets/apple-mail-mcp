@@ -144,15 +144,11 @@ class SingleEmailExportCloseTest(unittest.TestCase):
         # For the single-email path we need search_emails to return a record.
         with (
             patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture),
-            patch(
-                "apple_mail_mcp.tools.analytics._search_mail_records",
-                return_value=[{"subject": "Test", "message_id": "42"}],
-            ),
         ):
             analytics_tools.export_emails(
                 account="Work",
                 scope="single_email",
-                subject_keyword="Test",
+                message_id="42",
                 save_directory=DESKTOP_PATH,
                 mailbox="INBOX",
                 format="txt",
@@ -173,14 +169,10 @@ class ListEmailAttachmentsDictionaryTests(unittest.TestCase):
 
         with (
             patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture),
-            patch(
-                "apple_mail_mcp.tools.analytics._search_mail_records",
-                return_value=[{"subject": "Test", "message_id": "42"}],
-            ),
         ):
             analytics_tools.list_email_attachments(
                 account="Work",
-                subject_keyword="Test",
+                message_ids=["42"],
             )
 
         self.assertIn("file size of anAttachment", capture.last_script)
@@ -192,9 +184,7 @@ class ExportEmailsDefaultsAndWarningTests(unittest.TestCase):
 
     def _export(self, **kwargs):
         """Drive export_emails and return (result_text, captured_script)."""
-        capture = _ScriptCapture(
-            return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!"
-        )
+        capture = _ScriptCapture(return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!")
         defaults = dict(
             account="Work",
             scope="entire_mailbox",

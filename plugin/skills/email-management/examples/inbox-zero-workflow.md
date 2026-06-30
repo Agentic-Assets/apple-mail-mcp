@@ -15,7 +15,7 @@ For every email in your inbox, choose ONE action:
 
 ### 1. Delete (or Trash)
 **When**: Email has no value, spam, unwanted newsletters
-**Tool**: collect `message_id` from `list_inbox_emails` or `search_emails`, then `manage_trash(action="move_to_trash", message_ids=[...])`. Do not pass `subject_keyword=` or `sender=` to `manage_trash` (returns `FILTER_SCAN_DISABLED` without `allow_filter_scan=True`).
+**Tool**: collect `message_id` from `list_inbox_emails` or `search_emails`, then `manage_trash(action="move_to_trash", message_ids=[...])`. Do not pass `subject_keyword=` or `sender=` to `manage_trash` (returns `TARGET_SELECTOR_DEPRECATED`).
 **Examples**:
 - Spam and promotional emails you'll never read
 - Automated notifications you don't need
@@ -26,7 +26,7 @@ For every email in your inbox, choose ONE action:
 
 ### 2. Delegate (or Forward)
 **When**: Someone else should handle this email
-**Tool**: `forward_email(to="colleague@example.com", subject_keyword="...", message="Can you handle this? Thanks!")`
+**Tool**: collect `message_id` with search or list, then `forward_email(to="colleague@example.com", message_id="12345", message="Can you handle this? Thanks!")`
 **Examples**:
 - Questions someone else can answer better
 - Tasks that belong to another team member
@@ -73,7 +73,7 @@ For every email in your inbox, choose ONE action:
 
 **For downloads**:
 ```
-list_email_attachments(subject_keyword="...")
+list_email_attachments(message_ids=[12345])
 save_email_attachment(attachment_name="...", save_path="...")
 ```
 
@@ -108,7 +108,7 @@ For each email, apply the 5 D's:
 
 **Step 4: Review Flagged Items**
 ```
-search_emails(mailbox="All", read_status="all")  # Look for flags
+search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Look for flags
 ```
 - Check items you flagged earlier
 - Take action if ready
@@ -165,7 +165,7 @@ Inbox (empty)
 **Solution**:
 1. Unsubscribe from newsletters: `get_statistics(scope="account_overview")` to see top senders
 2. Set up filters in Mail app for auto-filing
-3. Process in batches: `search_emails(sender="newsletter.com", recent_days=30, limit=50)` → collect `message_id`s → `manage_trash(action="move_to_trash", message_ids=[...])`
+3. Process in batches: `search_emails(sender_domain="newsletter.example.com", recent_days=30, limit=50)` → collect `message_id`s → `manage_trash(action="move_to_trash", message_ids=[...])`
 4. Delegate more: Forward emails that others can handle
 
 ### "I'm afraid to delete emails"
@@ -247,7 +247,7 @@ Track these to measure success:
 
 1. **Batch by Sender**: Group emails from the same person and process together
    ```
-   search_emails(sender="person@example.com", read_status="unread")
+   search_emails(sender_exact="person@example.com", read_status="unread")
    ```
 
 2. **Time-Box Processing**: Set a timer for 25 minutes (Pomodoro technique)
@@ -279,7 +279,7 @@ Track these to measure success:
 | Archive | `move_email(message_ids=[...], to_mailbox="Archive")` |
 | Flag for later | `update_email_status(action="flag", message_ids=[...])` |
 | List drafts | `manage_drafts(action="list")` |
-| Search all | `search_emails(mailbox="All", ...)` |
+| Search selected folders | `search_emails(mailboxes=["INBOX", "Archive"], ...)` |
 
 ---
 

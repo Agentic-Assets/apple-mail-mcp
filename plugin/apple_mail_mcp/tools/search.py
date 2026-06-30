@@ -10,7 +10,7 @@ from urllib.parse import quote
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.applescript_snippets import recipient_addresses_block, sanitize_field_handler, thread_headers_block
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
+from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list, compute_scan_upper_bound, iter_id_chunks
 from apple_mail_mcp.constants import SCAN_BOUNDS, THREAD_PREFIXES
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
@@ -197,6 +197,13 @@ SENDER_ONLY_SEARCH_HINT = (
     "sender-only search can be slow on large mailboxes; add subject_keyword, "
     "date_from, has_attachments, or body_text (with allow_body_scan=True) to narrow the scan"
 )
+CONTENT_PREVIEW_SEARCH_HINT = (
+    "include_content=True adds body previews to results and can be slower or expose more message text; "
+    "leave it false for discovery, then fetch exact messages by id"
+)
+BODY_TEXT_SEARCH_HINT = (
+    "body_text scans message bodies and can be slow or broad; keep account, date, subject, and limit filters tight"
+)
 
 
 def _body_scan_disabled_error() -> str:
@@ -230,6 +237,8 @@ def _build_search_response(
     mailbox_count_capped: bool = False,
     mailboxes_truncated: bool = False,
     sender_only_hint: bool = False,
+    include_content_hint: bool = False,
+    body_text_hint: bool = False,
 ) -> str:
     """Return either JSON or text for search results."""
     sorted_records = _sort_search_records(records, sort)
@@ -269,6 +278,10 @@ def _build_search_response(
             )
         if sender_only_hint:
             payload.setdefault("warnings", []).append(SENDER_ONLY_SEARCH_HINT)
+        if include_content_hint:
+            payload.setdefault("warnings", []).append(CONTENT_PREVIEW_SEARCH_HINT)
+        if body_text_hint:
+            payload.setdefault("warnings", []).append(BODY_TEXT_SEARCH_HINT)
         if errors:
             payload["errors"] = errors
         if error_details:
@@ -297,6 +310,10 @@ def _build_search_response(
         text_result = mb_warning + text_result
     if sender_only_hint:
         text_result = f"WARNING: {SENDER_ONLY_SEARCH_HINT}\n" + text_result
+    if include_content_hint:
+        text_result = f"WARNING: {CONTENT_PREVIEW_SEARCH_HINT}\n" + text_result
+    if body_text_hint:
+        text_result = f"WARNING: {BODY_TEXT_SEARCH_HINT}\n" + text_result
     return text_result
 
 
@@ -324,6 +341,9 @@ def _build_search_script(
     offset: int,
     limit: int,
     body_text: str | None,
+    sender_exact: str | None = None,
+    sender_domain: str | None = None,
+    internet_message_id: str | None = None,
     recent_days: float = 0.0,
     timeout: int | None = None,
     date_from_explicit: bool = False,
@@ -353,6 +373,18 @@ def _build_search_script(
         cap fires to help callers understand why results may be incomplete.
     """
     escaped_sender = escape_applescript(sender) if sender else None
+    escaped_sender_exact = escape_applescript(sender_exact.strip()) if sender_exact and sender_exact.strip() else None
+    escaped_sender_domain = (
+        escape_applescript(sender_domain.strip().lstrip("@")) if sender_domain and sender_domain.strip() else None
+    )
+    normalized_internet_message_id = ""
+    if internet_message_id and internet_message_id.strip():
+        normalized_internet_message_id = internet_message_id.strip()
+        if not normalized_internet_message_id.startswith("<"):
+            normalized_internet_message_id = "<" + normalized_internet_message_id
+        if not normalized_internet_message_id.endswith(">"):
+            normalized_internet_message_id = normalized_internet_message_id + ">"
+    escaped_internet_message_id = escape_applescript(normalized_internet_message_id)
     use_body_search = body_text is not None
 
     collect_limit = limit + 1  # +1 for has_more probe; offset is decremented separately
@@ -368,7 +400,16 @@ def _build_search_script(
         # a no-hit subject does not exist can exceed wrapper timeouts. Keep the
         # scan bounded by the caller's requested page, and only widen as the
         # requested recent window widens.
-        if subject_terms and not sender and body_text is None and has_attachments is None and read_status == "all":
+        if (
+            subject_terms
+            and not sender
+            and not sender_exact
+            and not sender_domain
+            and not internet_message_id
+            and body_text is None
+            and has_attachments is None
+            and read_status == "all"
+        ):
             scan_cap = base_cap
         else:
             scan_cap = max(base_cap, window_cap)
@@ -477,6 +518,16 @@ def _build_search_script(
         candidate_subject_checks = ""
     if sender:
         per_msg_conditions.append(f'messageSender contains "{escaped_sender}"')
+    if escaped_sender_exact:
+        per_msg_conditions.append(
+            f'(messageSender is "{escaped_sender_exact}" or messageSender contains "<{escaped_sender_exact}>")'
+        )
+    if escaped_sender_domain:
+        per_msg_conditions.append(f'messageSender contains "@{escaped_sender_domain}"')
+    if escaped_internet_message_id:
+        per_msg_conditions.append(
+            f'(internetMessageId is "{escaped_internet_message_id}" or internetMessageId is "{escaped_internet_message_id.strip("<>")}")'
+        )
     if read_status == "read":
         per_msg_conditions.append("messageRead is true")
     elif read_status == "unread":
@@ -495,6 +546,9 @@ def _build_search_script(
     if (
         subject_terms
         and not sender
+        and not sender_exact
+        and not sender_domain
+        and not internet_message_id
         and has_attachments is None
         and read_status == "all"
         and not use_body_search
@@ -542,6 +596,10 @@ def _build_search_script(
                                         {early_date_break}
                                         set messageSubject to subject of aMessage
                                         set messageSender to sender of aMessage
+                                        set internetMessageId to ""
+                                        try
+                                            set internetMessageId to message id of aMessage
+                                        end try
                                         set messageRead to read status of aMessage
                                         {content_read_block}
                                         if {combined_condition} then
@@ -771,6 +829,9 @@ def _search_one_account(
     mailbox: str,
     subject_terms: list[str] | None,
     sender: str | None,
+    sender_exact: str | None,
+    sender_domain: str | None,
+    internet_message_id: str | None,
     has_attachments: bool | None,
     read_status: str,
     date_from: str | None,
@@ -802,6 +863,9 @@ def _search_one_account(
         mailbox=mailbox,
         subject_terms=subject_terms,
         sender=sender,
+        sender_exact=sender_exact,
+        sender_domain=sender_domain,
+        internet_message_id=internet_message_id,
         has_attachments=has_attachments,
         read_status=read_status,
         date_from=date_from,
@@ -828,6 +892,9 @@ async def _search_mail_records(
     mailbox: str = "INBOX",
     subject_terms: list[str] | None = None,
     sender: str | None = None,
+    sender_exact: str | None = None,
+    sender_domain: str | None = None,
+    internet_message_id: str | None = None,
     has_attachments: bool | None = None,
     read_status: str = "all",
     date_from: str | None = None,
@@ -872,6 +939,9 @@ async def _search_mail_records(
                 mailbox,
                 subject_terms,
                 sender,
+                sender_exact,
+                sender_domain,
+                internet_message_id,
                 has_attachments,
                 read_status,
                 date_from,
@@ -911,6 +981,9 @@ async def _search_mail_records(
                 mailbox,
                 subject_terms,
                 sender,
+                sender_exact,
+                sender_domain,
+                internet_message_id,
                 has_attachments,
                 read_status,
                 date_from,
@@ -976,6 +1049,9 @@ def _search_mail_records_sync(**kwargs: Any) -> list[dict[str, Any]]:
                 mailbox=kwargs.get("mailbox", "INBOX"),
                 subject_terms=kwargs.get("subject_terms"),
                 sender=kwargs.get("sender"),
+                sender_exact=kwargs.get("sender_exact"),
+                sender_domain=kwargs.get("sender_domain"),
+                internet_message_id=kwargs.get("internet_message_id"),
                 has_attachments=kwargs.get("has_attachments"),
                 read_status=kwargs.get("read_status", "all"),
                 date_from=kwargs.get("date_from"),
@@ -1013,6 +1089,9 @@ async def search_emails(
     subject_keyword: str | None = None,
     subject_keywords: list[str] | None = None,
     sender: str | None = None,
+    sender_exact: str | None = None,
+    sender_domain: str | None = None,
+    internet_message_id: str | None = None,
     has_attachments: bool | None = None,
     read_status: str = "all",
     date_from: str | None = None,
@@ -1036,8 +1115,9 @@ async def search_emails(
 
     Unified search tool with JSON output, pagination, and real date filtering.
 
-    Consolidates subject search, sender search, body content search, and
-    cross-account search into a single tool.
+    Consolidates subject search, sender search, exact sender/domain discovery,
+    body content search, exact Internet Message-ID lookup, and cross-account
+    search into a single tool.
 
     Smart defaults:
         - When `date_from` is None and `recent_days > 0`, an effective window
@@ -1071,7 +1151,11 @@ async def search_emails(
         mailbox: Mailbox to search (default: "INBOX", use "All" for all mailboxes, or specific folder name)
         subject_keyword: Optional keyword to search in subject
         subject_keywords: Optional list of subject keywords; matches any keyword
-        sender: Optional sender email or name to filter by
+        sender: Optional fuzzy sender email or name to filter by
+        sender_exact: Optional exact sender address discovery filter
+        sender_domain: Optional exact sender domain discovery filter, with or without "@"
+        internet_message_id: Optional exact Internet Message-ID discovery filter.
+            Angle brackets are optional.
         has_attachments: Optional filter for emails with attachments (True/False/None)
         read_status: Filter by read status: "all", "read", "unread" (default: "all")
         date_from: Optional start date filter (format: "YYYY-MM-DD")
@@ -1123,8 +1207,11 @@ async def search_emails(
 
     sender_only_hint = bool(
         sender
+        and not sender_exact
+        and not sender_domain
         and not subject_keyword
         and not subject_keywords
+        and not internet_message_id
         and date_from is None
         and not body_text
         and has_attachments is None
@@ -1198,6 +1285,9 @@ async def search_emails(
             mailbox=mailbox,
             subject_terms=subject_terms,
             sender=sender,
+            sender_exact=sender_exact,
+            sender_domain=sender_domain,
+            internet_message_id=internet_message_id,
             has_attachments=has_attachments,
             read_status=read_status,
             date_from=date_from,
@@ -1268,6 +1358,8 @@ async def search_emails(
             mailbox_count_capped=_mailbox_all,
             mailboxes_truncated=_mailbox_all,
             sender_only_hint=sender_only_hint,
+            include_content_hint=include_content,
+            body_text_hint=bool(body_text),
         )
     except ValueError as exc:
         return f"Error: {exc}"
@@ -1428,6 +1520,171 @@ def _fetch_email_record_by_id(
     return item
 
 
+def _fetch_email_records_by_ids(
+    account: str,
+    message_ids: list[str],
+    mailbox: str = "INBOX",
+    include_content: bool = True,
+    max_content_length: int = 5000,
+    timeout: int | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch exact message records by numeric Mail ids, chunked for AppleScript safety."""
+    normalized_ids = normalize_message_ids(message_ids)
+    if not normalized_ids:
+        return []
+
+    if max_content_length < 0:
+        raise ValueError("max_content_length must be >= 0")
+
+    safe_account = escape_applescript(account)
+    effective_timeout = timeout if timeout is not None else 120
+    sanitize_script = sanitize_field_handler()
+    to_recipients_script = recipient_addresses_block(
+        message_var="aMessage",
+        recipient_kind="to",
+        output_var="toRecips",
+        include_on_error=True,
+    )
+    cc_recipients_script = recipient_addresses_block(
+        message_var="aMessage",
+        recipient_kind="cc",
+        output_var="ccRecips",
+        include_on_error=True,
+    )
+    bcc_recipients_script = recipient_addresses_block(
+        message_var="aMessage",
+        recipient_kind="bcc",
+        output_var="bccRecips",
+        include_on_error=True,
+    )
+    thread_headers_script = thread_headers_block(
+        message_var="aMessage",
+        in_reply_to_var="inReplyTo",
+        references_var="refsValue",
+        include_on_error=True,
+    )
+    content_preview_script = ""
+    if include_content:
+        content_preview_script = f"""
+                            try
+                                set msgContent to content of aMessage
+                                set AppleScript's text item delimiters to {{return, linefeed, tab}}
+                                set contentParts to text items of msgContent
+                                set AppleScript's text item delimiters to " "
+                                set cleanText to contentParts as string
+                                set AppleScript's text item delimiters to ""
+                                if {max_content_length} > 0 and length of cleanText > {max_content_length} then
+                                    set contentPreview to my sanitize_field(text 1 thru {max_content_length} of cleanText & "...")
+                                else
+                                    set contentPreview to my sanitize_field(cleanText)
+                                end if
+                            end try
+"""
+
+    rows: list[str] = []
+    for chunk in iter_id_chunks(normalized_ids):
+        id_condition = build_whose_id_list(chunk)
+        script = f'''
+        {sanitize_script}
+
+        on pad2(numberValue)
+            if numberValue < 10 then
+                return "0" & (numberValue as string)
+            end if
+            return numberValue as string
+        end pad2
+
+        on month_number(monthValue)
+            set monthValues to {{January, February, March, April, May, June, July, August, September, October, November, December}}
+            repeat with monthIndex from 1 to 12
+                if item monthIndex of monthValues is monthValue then
+                    return monthIndex
+                end if
+            end repeat
+            return 0
+        end month_number
+
+        on iso_datetime(dateValue)
+            set yearValue to year of dateValue as integer
+            set monthValue to my month_number(month of dateValue)
+            set dayValue to day of dateValue as integer
+            set hourValue to hours of dateValue
+            set minuteValue to minutes of dateValue
+            set secondValue to seconds of dateValue
+            return (yearValue as string) & "-" & my pad2(monthValue) & "-" & my pad2(dayValue) & "T" & my pad2(hourValue) & ":" & my pad2(minuteValue) & ":" & my pad2(secondValue)
+        end iso_datetime
+
+        tell application "Mail"
+            with timeout of {effective_timeout} seconds
+                try
+                    set recordLines to {{}}
+                    set targetAccount to account "{safe_account}"
+                    {build_mailbox_ref(mailbox, var_name="targetMailbox")}
+                    set targetMessages to every message of targetMailbox whose {id_condition}
+
+                    repeat with aMessage in targetMessages
+                        try
+                            set messageId to my sanitize_field(id of aMessage)
+                            set internetMessageId to ""
+                            try
+                                set internetMessageId to my sanitize_field(message id of aMessage)
+                            end try
+                            set messageSubject to my sanitize_field(subject of aMessage)
+                            set messageSender to my sanitize_field(sender of aMessage)
+                            set messageRead to read status of aMessage
+                            set messageDate to date received of aMessage
+                            set receivedAt to my iso_datetime(messageDate)
+                            set mailboxName to my sanitize_field(name of targetMailbox)
+                            set accountName to my sanitize_field(name of targetAccount)
+                            set contentPreview to ""
+{content_preview_script}
+
+                            set readValue to "false"
+                            if messageRead then
+                                set readValue to "true"
+                            end if
+
+                            {to_recipients_script}
+
+                            {cc_recipients_script}
+
+                            {thread_headers_script}
+
+                            {bcc_recipients_script}
+
+                            set end of recordLines to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips
+                        end try
+                    end repeat
+
+                    set AppleScript's text item delimiters to linefeed
+                    set outputText to recordLines as string
+                    set AppleScript's text item delimiters to ""
+                    return outputText
+                on error errMsg
+                    return "ERROR|||" & errMsg
+                end try
+            end timeout
+        end tell
+        '''
+
+        result = run_applescript(script, timeout=effective_timeout)
+        if result.startswith("ERROR|||"):
+            raise ValueError(result.split("|||", 1)[1])
+        if result:
+            rows.extend(result.splitlines())
+
+    records, _mb_errors = _parse_search_records("\n".join(rows))
+    if include_content:
+        for item in records:
+            preview = item.get("content_preview", "") or ""
+            item["has_quoted_original"] = bool(
+                re.search(r"On .+wrote:", preview, re.DOTALL)
+                or re.search(r"(?m)^>", preview)
+                or "-----Original Message-----" in preview
+            )
+    return records
+
+
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def get_email_by_id(
@@ -1513,6 +1770,109 @@ def get_email_by_id(
     return _format_search_records_text([item])
 
 
+@mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@inject_preferences
+def get_email_by_ids(
+    account: str,
+    message_ids: list[str],
+    mailbox: str = "INBOX",
+    include_content: bool = False,
+    max_content_length: int = 1000,
+    output_format: str = "json",
+    timeout: int | None = None,
+) -> str:
+    """
+    Fetch multiple emails by exact Apple Mail message ids.
+
+    Use this after `search_emails`, `list_inbox_emails`, or `get_email_thread`
+    returns reviewed numeric ids. The implementation chunks internally using
+    the repository's 50-id AppleScript predicate cap, preserves the input id
+    order, and returns per-id not-found information without running broad
+    keyword or sender searches.
+
+    Args:
+        account: Account name to search in (e.g., "Gmail", "Work").
+        message_ids: Exact numeric Apple Mail message ids returned by discovery tools.
+        mailbox: Mailbox to search in (default: "INBOX").
+        include_content: Whether to include email content previews (default: False).
+        max_content_length: Maximum content characters to return when include_content=True.
+        output_format: Output format: "json" or "text" (default: "json").
+        timeout: Optional per-chunk AppleScript timeout in seconds (default: 120s).
+
+    Returns:
+        JSON with requested_ids, items in requested order, missing_ids, invalid_ids,
+        returned count, and chunk_size. Text mode formats found items and lists
+        missing or invalid ids.
+    """
+    if output_format not in {"text", "json"}:
+        return "Error: Invalid output_format. Use: text, json"
+
+    validation_timeout = 30 if timeout is None else min(timeout, 30)
+    account_err = validate_account_name(account, timeout=validation_timeout)
+    if account_err:
+        if output_format == "json":
+            return account_not_found_json(account, timeout=validation_timeout)
+        return account_err
+
+    raw_ids = [str(value).strip() for value in (message_ids or []) if str(value).strip()]
+    normalized_ids = normalize_message_ids(raw_ids)
+    invalid_ids = [value for value in raw_ids if not value.isdigit()]
+    if not normalized_ids:
+        return "Error: message_ids must contain one or more numeric Apple Mail message ids"
+
+    if max_content_length < 0:
+        return "Error: max_content_length must be >= 0"
+
+    effective_timeout = timeout if timeout is not None else 120
+
+    try:
+        records = _fetch_email_records_by_ids(
+            account=account,
+            message_ids=normalized_ids,
+            mailbox=mailbox,
+            include_content=include_content,
+            max_content_length=max_content_length,
+            timeout=effective_timeout,
+        )
+    except AppleScriptTimeout:
+        return (
+            f"Error: AppleScript timed out while fetching {len(normalized_ids)} message_ids "
+            f"on account {account!r}. Try fewer ids or pass a larger `timeout`."
+        )
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+    records_by_id = {str(item.get("message_id", "")): item for item in records}
+    ordered_items = [records_by_id[mid] for mid in normalized_ids if mid in records_by_id]
+    missing_ids = [mid for mid in normalized_ids if mid not in records_by_id]
+
+    if output_format == "json":
+        return json.dumps(
+            {
+                "requested_ids": normalized_ids,
+                "items": ordered_items,
+                "returned": len(ordered_items),
+                "missing_ids": missing_ids,
+                "invalid_ids": invalid_ids,
+                "account": account,
+                "mailbox": mailbox,
+                "include_content": include_content,
+                "chunk_size": MAX_WHOSE_IDS,
+            }
+        )
+
+    lines: list[str] = []
+    if ordered_items:
+        lines.append(_format_search_records_text(ordered_items))
+    else:
+        lines.append("No emails found for requested message_ids.")
+    if missing_ids:
+        lines.append(f"Missing message_ids: {', '.join(missing_ids)}")
+    if invalid_ids:
+        lines.append(f"Ignored invalid message_ids: {', '.join(invalid_ids)}")
+    return "\n".join(lines)
+
+
 def _thread_strip_prefixes_handler() -> str:
     """AppleScript handler to strip Re:/Fwd:/etc. prefixes from subjects."""
     prefix_checks = ""
@@ -1542,6 +1902,84 @@ def _thread_strip_prefixes_handler() -> str:
 """
 
 
+_HEADER_MESSAGE_ID_RE = re.compile(r"<([^<>]+)>|([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)")
+
+
+def _normalize_thread_header_id(value: str) -> str:
+    """Normalize a Message-ID-like token for thread graph comparisons."""
+    return value.strip().strip("<>").strip().lower()
+
+
+def _extract_thread_header_tokens(*values: str | None) -> list[str]:
+    """Return normalized header Message-ID tokens from Message-ID/References fields."""
+    tokens: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        for bracketed, bare in _HEADER_MESSAGE_ID_RE.findall(value):
+            token = _normalize_thread_header_id(bracketed or bare)
+            if token:
+                tokens.add(token)
+    return sorted(tokens)
+
+
+def _applescript_string_list(values: list[str]) -> str:
+    """Render a Python string list as an AppleScript list literal."""
+    return "{" + ", ".join(f'"{escape_applescript(value)}"' for value in values) + "}"
+
+
+def _thread_mailbox_script(mailbox: str, mailboxes: list[str] | None) -> str:
+    """Build bounded mailbox selection setup for get_email_thread."""
+    if mailboxes:
+        mailbox_lines = [
+            """
+            set searchMailboxes to {}
+            set useAllMailboxes to false
+            """
+        ]
+        for mb in mailboxes:
+            escaped_mb = escape_applescript(mb)
+            if mb.lower() == "inbox":
+                mailbox_lines.append(
+                    """
+            try
+                set resolvedMailbox to mailbox "INBOX" of targetAccount
+            on error
+                set resolvedMailbox to mailbox "Inbox" of targetAccount
+            end try
+            set end of searchMailboxes to resolvedMailbox
+                    """
+                )
+            else:
+                mailbox_lines.append(
+                    f"""
+            set end of searchMailboxes to mailbox "{escaped_mb}" of targetAccount
+                    """
+                )
+        return "\n".join(mailbox_lines)
+
+    escaped_mailbox = escape_applescript(mailbox)
+    return f'''
+        try
+            set searchMailbox to mailbox "{escaped_mailbox}" of targetAccount
+        on error
+            if "{escaped_mailbox}" is "INBOX" then
+                set searchMailbox to mailbox "Inbox" of targetAccount
+            else if "{escaped_mailbox}" is "All" then
+                set searchMailboxes to every mailbox of targetAccount
+                set useAllMailboxes to true
+            else
+                error "Mailbox not found: {escaped_mailbox}"
+            end if
+        end try
+
+        if "{escaped_mailbox}" is not "All" then
+            set searchMailboxes to {{searchMailbox}}
+            set useAllMailboxes to false
+        end if
+    '''
+
+
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
 def get_email_thread(
@@ -1549,8 +1987,11 @@ def get_email_thread(
     subject_keyword: str | None = None,
     message_id: str | None = None,
     mailbox: str = "INBOX",
+    mailboxes: list[str] | None = None,
     max_messages: int = 50,
     recent_days: float = 2.0,
+    include_preview: bool = True,
+    output_format: str = "text",
     timeout: int | None = None,
 ) -> str:
     """
@@ -1561,7 +2002,9 @@ def get_email_thread(
       audited full-mailbox escape hatch. Subject matching is case-insensitive.
 
     Preferred: pass ``message_id`` from ``search_emails`` or ``list_inbox_emails``
-    to fetch the anchor message by id and derive the thread subject automatically.
+    to fetch the anchor message by id and match related messages by
+    Internet Message-ID, In-Reply-To, and References headers before falling
+    back to subject matching.
 
       Args:
           account: Account name (e.g., "Gmail", "Work")
@@ -1569,14 +2012,19 @@ def get_email_thread(
               Optional when ``message_id`` is provided.
           message_id: Optional numeric Apple Mail message id. When set, fetches the
               anchor message first and derives the thread subject from it.
-          mailbox: Mailbox to search in (default: "INBOX", use "All" for all mailboxes)
+          mailbox: Mailbox to search in (default: "INBOX", use "All" for all mailboxes).
+              Ignored when ``mailboxes`` is provided.
+          mailboxes: Explicit mailbox list to search. Prefer this over ``mailbox="All"``.
           max_messages: Maximum number of thread messages to return (default: 50)
           recent_days: Only scan messages received within this many days (default: 2.0
               = 48h). ``recent_days=0`` is rejected with ``UNBOUNDED_SCAN_REQUIRED``.
+          include_preview: Include content previews in output. Set false to avoid
+              reading message bodies during thread discovery.
+          output_format: Output format: "text" or "json" (default: "text").
           timeout: Optional AppleScript timeout in seconds (default: 120).
 
       Returns:
-          Formatted thread view with all related messages sorted by date
+          Formatted thread view, or JSON with items, ids, headers, anchor, and strategy.
     """
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
@@ -1586,8 +2034,18 @@ def get_email_thread(
     if not message_id and not subject_keyword:
         return "Error: Provide either message_id or subject_keyword"
 
+    if output_format not in {"text", "json"}:
+        return "Error: Invalid output_format. Use: text, json"
+
     if max_messages <= 0:
         return "Error: max_messages must be > 0"
+
+    if mailboxes is not None:
+        mailboxes = [mb.strip() for mb in mailboxes if mb and mb.strip()]
+        if not mailboxes:
+            return "Error: mailboxes must contain at least one mailbox name"
+        if any(mb.lower() == "all" for mb in mailboxes):
+            return 'Error: mailboxes does not accept "All"; use mailbox="All" only as a degraded fallback'
 
     effective_recent_days = float(recent_days) if recent_days else 0.0
     if effective_recent_days <= 0:
@@ -1608,35 +2066,39 @@ def get_email_thread(
 
     resolved_mailbox = mailbox
     resolved_subject = subject_keyword or ""
+    anchor: dict[str, Any] | None = None
 
     if message_id:
         normalized_ids = normalize_message_ids([message_id])
         if not normalized_ids:
             return "Error: message_id must be a numeric Apple Mail message id"
-        try:
-            anchor = _fetch_email_record_by_id(
-                account=account,
-                message_id=message_id,
-                mailbox=mailbox,
-                include_content=False,
-                max_content_length=0,
-                timeout=effective_timeout,
-            )
-        except AppleScriptTimeout:
-            return (
-                f"Error: AppleScript timed out while fetching message_id={normalized_ids[0]} "
-                f"on account {account!r}. Try again or pass a larger `timeout`."
-            )
-        except ValueError as exc:
-            return f"Error: {exc}"
+        lookup_mailboxes = mailboxes or [mailbox]
+        for lookup_mailbox in lookup_mailboxes:
+            try:
+                anchor = _fetch_email_record_by_id(
+                    account=account,
+                    message_id=message_id,
+                    mailbox=lookup_mailbox,
+                    include_content=False,
+                    max_content_length=0,
+                    timeout=effective_timeout,
+                )
+            except AppleScriptTimeout:
+                return (
+                    f"Error: AppleScript timed out while fetching message_id={normalized_ids[0]} "
+                    f"on account {account!r}. Try again or pass a larger `timeout`."
+                )
+            except ValueError as exc:
+                return f"Error: {exc}"
+            if anchor is not None:
+                break
         if anchor is None:
-            return f"Error: No email found for message_id={normalized_ids[0]} in {mailbox}"
+            searched = ", ".join(lookup_mailboxes)
+            return f"Error: No email found for message_id={normalized_ids[0]} in {searched}"
         resolved_subject = anchor.get("subject", "") or resolved_subject
         resolved_mailbox = anchor.get("mailbox") or mailbox
 
-    # Escape user inputs for AppleScript
     escaped_account = escape_applescript(account)
-    escaped_mailbox = escape_applescript(resolved_mailbox)
 
     cleaned_keyword = resolved_subject
     for prefix in THREAD_PREFIXES:
@@ -1644,6 +2106,14 @@ def get_email_thread(
     if not cleaned_keyword:
         cleaned_keyword = resolved_subject
     escaped_keyword = escape_applescript(cleaned_keyword)
+    header_tokens = _extract_thread_header_tokens(
+        anchor.get("internet_message_id") if anchor else None,
+        anchor.get("in_reply_to") if anchor else None,
+        anchor.get("references") if anchor else None,
+    )
+    header_matching_enabled = bool(message_id and header_tokens)
+    thread_strategy = "header_first" if header_matching_enabled else "subject"
+    header_tokens_literal = _applescript_string_list(header_tokens)
 
     date_setup = ""
     if effective_recent_days > 0:
@@ -1659,6 +2129,13 @@ def get_email_thread(
 
     scan_cap = max_messages
     date_check = "if messageDate < cutoffDate then exit repeat" if effective_recent_days > 0 else ""
+    sanitize_script = sanitize_field_handler()
+    thread_headers_script = thread_headers_block(
+        message_var="aMessage",
+        in_reply_to_var="inReplyTo",
+        references_var="refsValue",
+        include_on_error=True,
+    )
     candidate_collection = f"""
                                 set candidateMessages to {{}}
                                 set messageCount to count of messages of currentMailbox
@@ -1671,36 +2148,75 @@ def get_email_thread(
                                     set candidateMessages to messages 1 thru scanUpperBound of currentMailbox
                                 end if
     """
+    mailbox_script = _thread_mailbox_script(resolved_mailbox, mailboxes)
+    preview_collect_block = ""
+    preview_text_block = ""
+    if include_preview:
+        preview_collect_block = """
+                        -- Get content preview
+                        try
+                            set msgContent to content of aMessage
+                            set AppleScript's text item delimiters to {return, linefeed}
+                            set contentParts to text items of msgContent
+                            set AppleScript's text item delimiters to " "
+                            set cleanText to contentParts as string
+                            set AppleScript's text item delimiters to ""
 
-    mailbox_script = f'''
-        try
-            set searchMailbox to mailbox "{escaped_mailbox}" of targetAccount
-        on error
-            if "{escaped_mailbox}" is "INBOX" then
-                set searchMailbox to mailbox "Inbox" of targetAccount
-            else if "{escaped_mailbox}" is "All" then
-                set searchMailboxes to every mailbox of targetAccount
-                set useAllMailboxes to true
-            else
-                error "Mailbox not found: {escaped_mailbox}"
-            end if
-        end try
-
-        if "{escaped_mailbox}" is not "All" then
-            set searchMailboxes to {{searchMailbox}}
-            set useAllMailboxes to false
-        end if
-    '''
+                            if length of cleanText > 150 then
+                                set contentPreview to my sanitize_field(text 1 thru 150 of cleanText & "...")
+                            else
+                                set contentPreview to my sanitize_field(cleanText)
+                            end if
+                        end try
+        """
+        preview_text_block = """
+                    if contentPreview is not "" then
+                        set outputText to outputText & "   Preview: " & contentPreview & return
+                    end if
+        """
 
     script = f'''
+    {sanitize_script}
     {_thread_strip_prefixes_handler()}
+
+    on pad2(numberValue)
+        if numberValue < 10 then
+            return "0" & (numberValue as string)
+        end if
+        return numberValue as string
+    end pad2
+
+    on month_number(monthValue)
+        set monthValues to {{January, February, March, April, May, June, July, August, September, October, November, December}}
+        repeat with monthIndex from 1 to 12
+            if item monthIndex of monthValues is monthValue then
+                return monthIndex
+            end if
+        end repeat
+        return 0
+    end month_number
+
+    on iso_datetime(dateValue)
+        set yearValue to year of dateValue as integer
+        set monthValue to my month_number(month of dateValue)
+        set dayValue to day of dateValue as integer
+        set hourValue to hours of dateValue
+        set minuteValue to minutes of dateValue
+        set secondValue to seconds of dateValue
+        return (yearValue as string) & "-" & my pad2(monthValue) & "-" & my pad2(dayValue) & "T" & my pad2(hourValue) & ":" & my pad2(minuteValue) & ":" & my pad2(secondValue)
+    end iso_datetime
 
     tell application "Mail"
         set outputText to "EMAIL THREAD VIEW" & return & return
         set outputText to outputText & "Thread topic: {escaped_keyword}" & return
         set outputText to outputText & "Account: {escaped_account}" & return
         set outputText to outputText & "{window_line}" & return & return
+        set recordRows to {{}}
+        set headerThreadMessages to {{}}
+        set subjectFallbackMessages to {{}}
         set threadMessages to {{}}
+        set threadHeaderTokens to {header_tokens_literal}
+        set selectedStrategy to "subject"
         {date_setup}
 
         try
@@ -1709,28 +2225,65 @@ def get_email_thread(
 
             -- Collect matching messages from mailboxes with date filter + cap
             repeat with currentMailbox in searchMailboxes
-                if (count of threadMessages) >= {max_messages} then exit repeat
+                if (count of headerThreadMessages) >= {max_messages} then exit repeat
+                if (not {str(header_matching_enabled).lower()}) and (count of subjectFallbackMessages) >= {max_messages} then exit repeat
 
                 try
                     {candidate_collection}
 
                     ignoring case
                         repeat with aMessage in candidateMessages
-                            if (count of threadMessages) >= {max_messages} then exit repeat
+                            if (count of headerThreadMessages) >= {max_messages} then exit repeat
+                            if (not {str(header_matching_enabled).lower()}) and (count of subjectFallbackMessages) >= {max_messages} then exit repeat
 
                             try
                                 set messageSubject to subject of aMessage
                                 set messageDate to date received of aMessage
                                 {date_check}
                                 set cleanSubject to my stripThreadPrefixes(messageSubject)
+                                set subjectMatched to false
                                 if cleanSubject contains "{escaped_keyword}" or messageSubject contains "{escaped_keyword}" then
-                                    set end of threadMessages to aMessage
+                                    set subjectMatched to true
+                                end if
+
+                                set headerMatched to false
+                                if {str(header_matching_enabled).lower()} then
+                                    set internetMessageIdForMatch to ""
+                                    try
+                                        set internetMessageIdForMatch to message id of aMessage
+                                    end try
+                                    {thread_headers_script}
+                                    set candidateHeaderText to internetMessageIdForMatch & " " & inReplyTo & " " & refsValue
+                                    ignoring case
+                                        repeat with threadToken in threadHeaderTokens
+                                            if candidateHeaderText contains (threadToken as string) then
+                                                set headerMatched to true
+                                                exit repeat
+                                            end if
+                                        end repeat
+                                    end ignoring
+                                end if
+
+                                if headerMatched then
+                                    set end of headerThreadMessages to aMessage
+                                else if subjectMatched and (count of subjectFallbackMessages) < {max_messages} then
+                                    set end of subjectFallbackMessages to aMessage
                                 end if
                             end try
                         end repeat
                     end ignoring
                 end try
             end repeat
+
+            if {str(header_matching_enabled).lower()} and (count of headerThreadMessages) > 0 then
+                set threadMessages to headerThreadMessages
+                set selectedStrategy to "header"
+            else if {str(header_matching_enabled).lower()} then
+                set selectedStrategy to "subject_fallback"
+                set threadMessages to subjectFallbackMessages
+            else
+                set threadMessages to subjectFallbackMessages
+            end if
 
             -- Display thread messages
             set messageCount to count of threadMessages
@@ -1744,34 +2297,32 @@ def get_email_thread(
                     set messageSender to sender of aMessage
                     set messageDate to date received of aMessage
                     set messageRead to read status of aMessage
+                    set messageId to my sanitize_field(id of aMessage)
+                    set internetMessageId to ""
+                    try
+                        set internetMessageId to my sanitize_field(message id of aMessage)
+                    end try
+                    set mailboxName to my sanitize_field(name of mailbox of aMessage)
+                    set accountName to my sanitize_field(name of account of mailbox of aMessage)
+                    set receivedAt to my iso_datetime(messageDate)
+                    {thread_headers_script}
+                    set contentPreview to ""
+                    {preview_collect_block}
 
                     if messageRead then
                         set readIndicator to "✓"
+                        set readValue to "true"
                     else
                         set readIndicator to "✉"
+                        set readValue to "false"
                     end if
+
+                    set end of recordRows to messageId & "|||" & internetMessageId & "|||" & my sanitize_field(messageSubject) & "|||" & my sanitize_field(messageSender) & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||||||||" & inReplyTo & "|||" & refsValue & "|||"
 
                     set outputText to outputText & readIndicator & " " & messageSubject & return
                     set outputText to outputText & "   From: " & messageSender & return
                     set outputText to outputText & "   Date: " & (messageDate as string) & return
-
-                    -- Get content preview
-                    try
-                        set msgContent to content of aMessage
-                        set AppleScript's text item delimiters to {{return, linefeed}}
-                        set contentParts to text items of msgContent
-                        set AppleScript's text item delimiters to " "
-                        set cleanText to contentParts as string
-                        set AppleScript's text item delimiters to ""
-
-                        if length of cleanText > 150 then
-                            set contentPreview to text 1 thru 150 of cleanText & "..."
-                        else
-                            set contentPreview to cleanText
-                        end if
-
-                        set outputText to outputText & "   Preview: " & contentPreview & return
-                    end try
+                    {preview_text_block}
 
                     set outputText to outputText & return
                 end try
@@ -1780,6 +2331,13 @@ def get_email_thread(
         on error errMsg
             return "Error: " & errMsg
         end try
+
+        if "{output_format}" is "json" then
+            set AppleScript's text item delimiters to return
+            set outputRows to recordRows as string
+            set AppleScript's text item delimiters to ""
+            return "THREAD_STRATEGY|||" & selectedStrategy & return & outputRows
+        end if
 
         return outputText
     end tell
@@ -1792,4 +2350,40 @@ def get_email_thread(
             f"Error: get_email_thread timed out on account '{account}' after "
             f"{effective_timeout}s. Retry with a larger timeout or tighter filters."
         )
+    if output_format == "json":
+        selection_strategy = thread_strategy
+        parse_result = result
+        if result.startswith("THREAD_STRATEGY|||"):
+            first_line, _, remaining = result.partition("\n")
+            selection_strategy = first_line.split("|||", 1)[1].strip() or selection_strategy
+            parse_result = remaining
+        records, _mailbox_errors = _parse_search_records(parse_result)
+        payload: dict[str, Any] = {
+            "items": records,
+            "returned": len(records),
+            "account": account,
+            "mailbox": resolved_mailbox,
+            "mailboxes": mailboxes or [resolved_mailbox],
+            "subject_keyword": cleaned_keyword,
+            "strategy": thread_strategy,
+            "selection_strategy": selection_strategy,
+            "subject_fallback_used": selection_strategy == "subject_fallback",
+            "include_preview": include_preview,
+            "recent_days_applied": effective_recent_days,
+            "max_messages": max_messages,
+        }
+        if anchor is not None:
+            payload["anchor"] = {
+                "message_id": anchor.get("message_id", ""),
+                "internet_message_id": anchor.get("internet_message_id", ""),
+                "subject": anchor.get("subject", ""),
+                "mailbox": anchor.get("mailbox", resolved_mailbox),
+                "in_reply_to": anchor.get("in_reply_to", ""),
+                "references": anchor.get("references", ""),
+            }
+        if message_id and not header_tokens:
+            payload["warnings"] = [
+                "message_id anchor had no thread headers; subject fallback was used",
+            ]
+        return json.dumps(payload)
     return result

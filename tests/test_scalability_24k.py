@@ -1,11 +1,9 @@
 """Scalability hardening for 24K-mailbox safety (v3.1.9 + v3.1.10).
 
 Covers:
-- Subject-keyword fallback in reply/forward refuses recent_days<=0 and
-  returns a structured UNBOUNDED_SCAN_REQUIRED ToolError envelope (the
-  legacy allow_full_scan opt-in was retired in the whose-elimination
-  refactor — callers must pass message_id or fall back to
-  full_inbox_export).
+- Subject-keyword target selection in reply/forward returns a structured
+  TARGET_SELECTOR_DEPRECATED ToolError envelope; callers must discover a
+  message_id first.
 - get_statistics and get_top_senders require allow_full_scan when days_back=0.
 - list_inbox_emails accepts deprecated aliases `limit` / `unread_only` and
   surfaces a warning.
@@ -22,8 +20,8 @@ import json
 import unittest
 from unittest.mock import patch
 
-from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools import analytics as analytics_tools
+from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools import inbox as inbox_tools
 from apple_mail_mcp.tools import search as search_tools
 from apple_mail_mcp.tools import smart_inbox as smart_inbox_tools
@@ -34,7 +32,7 @@ def _main_reply_script(scripts):
 
 
 class ComposeFullScanGateTests(unittest.TestCase):
-    def test_reply_subject_without_date_bound_is_blocked(self):
+    def test_reply_subject_target_selector_is_deprecated(self):
         with patch("apple_mail_mcp.tools.compose.run_applescript") as runner:
             result = compose_tools.reply_to_email(
                 account="Work",
@@ -42,23 +40,15 @@ class ComposeFullScanGateTests(unittest.TestCase):
                 reply_body="Hi",
                 recent_days=0,
             )
-        # Post-allow_full_scan-retirement: tools return a JSON-encoded
-        # ToolError envelope (string) steering callers toward message_id
-        # or full_inbox_export. The tool signature is `-> str`, so the
-        # response must be a string whose JSON body carries the envelope.
         self.assertIsInstance(result, str)
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
         self.assertTrue(parsed.get("error"))
-        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
-        self.assertIn("recent_days", parsed.get("message", ""))
-        self.assertEqual(
-            parsed.get("remediation", {}).get("fallback_tool"),
-            "full_inbox_export",
-        )
+        self.assertEqual(parsed.get("code"), "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(parsed.get("remediation", {}).get("exact_selector"), "message_id")
         runner.assert_not_called()
 
-    def test_forward_subject_without_date_bound_is_blocked(self):
+    def test_forward_subject_target_selector_is_deprecated(self):
         with patch("apple_mail_mcp.tools.compose.run_applescript") as runner:
             result = compose_tools.forward_email(
                 account="Work",
@@ -70,11 +60,8 @@ class ComposeFullScanGateTests(unittest.TestCase):
         parsed = json.loads(result)
         self.assertIsInstance(parsed, dict)
         self.assertTrue(parsed.get("error"))
-        self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
-        self.assertEqual(
-            parsed.get("remediation", {}).get("fallback_tool"),
-            "full_inbox_export",
-        )
+        self.assertEqual(parsed.get("code"), "TARGET_SELECTOR_DEPRECATED")
+        self.assertEqual(parsed.get("remediation", {}).get("exact_selector"), "message_id")
         runner.assert_not_called()
 
     def test_reply_message_id_path_unaffected(self):
@@ -93,7 +80,7 @@ class ComposeFullScanGateTests(unittest.TestCase):
                 message_id="9876",
                 reply_body="Hi",
                 recent_days=0,
-        )
+            )
         # message_id path skips the subject-scan branch entirely.
         self.assertTrue(captured, "Expected reply AppleScript to be invoked")
         self.assertIn("whose id is 9876", _main_reply_script(captured))
@@ -274,8 +261,7 @@ class ListInboxUnreadFilterBoundedTests(unittest.TestCase):
         self.assertLess(
             idx_slice,
             idx_filter,
-            "bounded slice must appear BEFORE the in-loop filter, "
-            "otherwise Mail materializes the entire 24K mailbox",
+            "bounded slice must appear BEFORE the in-loop filter, otherwise Mail materializes the entire 24K mailbox",
         )
         # The dangerous `whose` over a bound slice must NOT appear.
         self.assertNotIn("candidateMessages whose read status is false", script)

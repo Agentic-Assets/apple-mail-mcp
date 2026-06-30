@@ -2,7 +2,7 @@
 
 Source of truth for the MCP server and repo CLI. Packaged on PyPI as **`mcp-apple-mail`** (`pyproject.toml` → `plugin/apple_mail_mcp/` plus `plugin/ui/` for the dashboard).
 
-Tool/CLI work: delegate to subagents for implementation; use **`plugin-dev:plugin-validator`** after tool-count or manifest changes. See root [`CLAUDE.md`](../../CLAUDE.md) § Agent orchestration.
+Tool/CLI work: delegate to subagents when available and permitted; use **`plugin-dev:plugin-validator`** after tool-count or manifest changes when available. If not, document the gap and run local validation. See root [`CLAUDE.md`](../../CLAUDE.md), Agent orchestration section.
 
 ## Entry flow
 
@@ -24,7 +24,7 @@ Tool/CLI work: delegate to subagents for implementation; use **`plugin-dev:plugi
 
 ## `tools/` subfolder
 
-**29 tools** in **6 modules** (inbox 6, search 3, compose 6, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | awk -F: '{sum+=$NF} END {print sum}'`. For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
+**31 tools** in **6 modules** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | awk -F: '{sum+=$NF} END {print sum}'`. For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
 
 ## Shared state (`server.py`)
 

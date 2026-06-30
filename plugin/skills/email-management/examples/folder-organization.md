@@ -93,7 +93,7 @@ move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=10)
 move_email(message_ids=ids, to_mailbox="Archive", max_moves=10)
 
 # Find anything later with search
-search_emails(mailbox="All", subject_keyword="...")
+search_emails(mailboxes=["INBOX", "Archive"], subject_keyword="...")
 ```
 
 ### Project-Based Structure
@@ -171,7 +171,7 @@ get_statistics(scope="account_overview")
 # 2. Create client folders in Mail app
 
 # 3. Batch move by sender (ID-first)
-preview = search_emails(sender="contact@clienta.com", mailbox="INBOX", recent_days=90, limit=50)
+preview = search_emails(sender_exact="contact@clienta.com", mailbox="INBOX", recent_days=90, limit=50)
 ids = [e["message_id"] for e in preview["emails"]]
 move_email(dry_run=True, message_ids=ids, to_mailbox="Clients/Client A", max_moves=50)
 move_email(message_ids=ids, to_mailbox="Clients/Client A", max_moves=50)
@@ -299,7 +299,7 @@ list_mailboxes(include_counts=True)
 **For sender-based migration**:
 ```
 # Find all emails from a sender
-preview = search_emails(sender="client@example.com", mailbox="INBOX", recent_days=90, limit=50)
+preview = search_emails(sender_exact="client@example.com", mailbox="INBOX", recent_days=90, limit=50)
 ids = [e["message_id"] for e in preview["emails"]]
 
 # Simulate, then move
@@ -434,9 +434,9 @@ This is fine! You're a search-first person.
 
 2. Rely on search:
    ```
-   search_emails(mailbox="All", subject_keyword="...")
-   search_emails(mailbox="All", sender="...")
-   search_emails(mailbox="All", date_from="...")
+   search_emails(mailboxes=["INBOX", "Archive"], subject_keyword="...")
+   search_emails(mailboxes=["INBOX", "Archive"], sender_exact="sender@example.com")
+   search_emails(mailboxes=["INBOX", "Archive"], date_from="...")
    ```
 
 3. Use flags instead of folders:
@@ -520,10 +520,10 @@ Low Priority/
 search_emails(subject_keyword="urgent", read_status="unread")
 
 # From boss (high priority)
-search_emails(sender="boss@company.com", read_status="unread")
+search_emails(sender_exact="boss@company.com", read_status="unread")
 
 # Flagged (action items)
-search_emails(mailbox="All")  # View flags in results
+search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # View flags in results
 
 # Old (low priority)
 search_emails(date_to="2025-01-01")
@@ -622,7 +622,7 @@ Archive/
 | View structure | `list_mailboxes()` | include_counts=True |
 | Move emails | `move_email()` | message_ids=[...], to_mailbox="path/to/folder" |
 | Batch move | `search_emails` → `move_email()` | dry_run=True first; max_moves=20 |
-| Find emails | `search_emails()` | mailbox="All" |
+| Find emails | `search_emails()` | mailboxes=["INBOX", "Archive"] |
 | Check patterns | `get_statistics()` | scope="account_overview" |
 | Mailbox stats | `get_statistics()` | scope="mailbox_breakdown" |
 | Export folder | `export_emails()` | scope="entire_mailbox" |

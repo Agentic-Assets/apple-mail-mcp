@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from apple_mail_mcp import server as _server
-from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
@@ -106,6 +106,23 @@ def _filter_scan_disabled_error(tool_name: str) -> str:
 def _with_filter_scan_warning(text: str) -> str:
     """Prefix filter-scan escape-hatch responses with an explicit warning."""
     return f"{FILTER_SCAN_WARNING}\n\n{text}"
+
+
+def _deprecated_target_selectors(
+    *,
+    subject_keyword: str | None = None,
+    subject_keywords: list[str] | None = None,
+    sender: str | None = None,
+) -> tuple[str, ...]:
+    """Return legacy target selectors present in a call."""
+    selectors: list[str] = []
+    if subject_keyword:
+        selectors.append("subject_keyword")
+    if subject_keywords:
+        selectors.append("subject_keywords")
+    if sender:
+        selectors.append("sender")
+    return tuple(selectors)
 
 
 def _format_dry_run_records(
@@ -317,14 +334,26 @@ def move_email(
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
         return "Error: account is required (and no DEFAULT_MAIL_ACCOUNT configured)."
+    if not to_mailbox:
+        return "Error: to_mailbox is required."
+    deprecated_selectors = _deprecated_target_selectors(
+        subject_keyword=subject_keyword,
+        subject_keywords=subject_keywords,
+        sender=sender,
+    )
+    if message_ids is None and deprecated_selectors:
+        return target_selector_deprecated_error(
+            "move_email",
+            deprecated_selectors,
+            preferred="Call search_emails(...) or list_inbox_emails(...) first, then pass message_ids=[...].",
+            discovery="search_emails(..., recent_days=..., limit=...) or list_inbox_emails(...)",
+            exact_selector="message_ids",
+        )
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
     if account_err:
         return account_err
-
-    if not to_mailbox:
-        return "Error: to_mailbox is required."
 
     safe_to = escape_applescript(to_mailbox)
     effective_timeout = timeout if timeout is not None else 300
@@ -458,6 +487,7 @@ def save_email_attachment(
     attachment_name: str = "",
     save_path: str = "",
     message_ids: list[str] | None = None,
+    attachment_index: int | None = None,
     timeout: int | None = None,
     max_size_bytes: int = 100 * 1024 * 1024,
 ) -> str:
@@ -465,7 +495,10 @@ def save_email_attachment(
     Save a specific attachment from an email to disk.
 
     When ``message_ids`` is provided, locates the message by exact ID and
-    ignores ``subject_keyword``.
+    ignores ``subject_keyword``. Prefer ``attachment_index`` from
+    ``list_email_attachments(output_format="json")`` for deterministic
+    selection; ``attachment_name`` remains for compatibility and rejects
+    ambiguous duplicate matches.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
@@ -473,6 +506,9 @@ def save_email_attachment(
         attachment_name: Name of the attachment to save
         save_path: Full path where to save the attachment
         message_ids: Optional list of exact Mail message ids for precise targeting
+        attachment_index: Optional 1-based attachment index from
+            ``list_email_attachments(output_format="json")``. Requires exactly
+            one ``message_id``.
         timeout: Optional AppleScript timeout in seconds (default: 120s).
         max_size_bytes: Maximum attachment size in bytes (default: 100 MB). Refuses to
             save attachments larger than this limit. Also checks that the target directory
@@ -487,15 +523,25 @@ def save_email_attachment(
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
         return "Error: account is required (and no DEFAULT_MAIL_ACCOUNT configured)."
+    if message_ids is None and subject_keyword:
+        return target_selector_deprecated_error(
+            "save_email_attachment",
+            ("subject_keyword",),
+            preferred="Call search_emails(..., has_attachments=True) first, then pass message_ids=[...].",
+            discovery="search_emails(subject_keyword=..., has_attachments=True, recent_days=..., limit=...)",
+            exact_selector="message_ids",
+        )
 
     account_err = validate_account_name(account, timeout=30 if timeout is None else min(timeout, 30))
     if account_err:
         return account_err
 
-    if message_ids is None and (not subject_keyword or not attachment_name or not save_path):
-        return "Error: subject_keyword, attachment_name, and save_path are required."
-    if not attachment_name or not save_path:
-        return "Error: attachment_name and save_path are required."
+    if attachment_index is not None and attachment_index < 1:
+        return "Error: attachment_index must be a positive 1-based integer."
+    if message_ids is None and (not subject_keyword or not (attachment_name or attachment_index) or not save_path):
+        return "Error: subject_keyword, attachment_name or attachment_index, and save_path are required."
+    if not (attachment_name or attachment_index) or not save_path:
+        return "Error: attachment_name or attachment_index, and save_path are required."
 
     if message_ids is None:
         try:
@@ -536,6 +582,19 @@ def save_email_attachment(
         cap_error = _check_message_ids_cap(normalized_ids, "save_email_attachment")
         if cap_error:
             return cap_error
+        if attachment_index is not None and len(normalized_ids) != 1:
+            err = ToolError(
+                code="AMBIGUOUS_ATTACHMENT_SELECTOR",
+                message="attachment_index requires exactly one message_id because indexes are per message.",
+                remediation={
+                    "preferred": (
+                        "Call list_email_attachments(message_ids=[...], output_format='json') and then "
+                        "call save_email_attachment(message_ids=[one_id], attachment_index=N, ...)."
+                    ),
+                    "exact_selector": "message_ids + attachment_index",
+                },
+            )
+            return serialize_tool_error(err)
         id_condition = build_whose_id_list(normalized_ids)
         message_filter_script = f"set inboxMessages to every message of inboxMailbox whose {id_condition}"
         not_found_detail = f"Message ids: {', '.join(normalized_ids)}"
@@ -560,6 +619,11 @@ def save_email_attachment(
     escaped_account = escape_applescript(account)
     escaped_attachment = escape_applescript(attachment_name)
     escaped_path = escape_applescript(expanded_path)
+    use_attachment_index = attachment_index is not None
+    attachment_index_value = attachment_index if attachment_index is not None else 0
+    attachment_selector_label = (
+        f"Attachment index: {attachment_index}" if use_attachment_index else f"Attachment name: {escaped_attachment}"
+    )
 
     # --- Attachment size probe ---
     # Run a cheap AppleScript to get the attachment file size before saving.
@@ -573,42 +637,80 @@ def save_email_attachment(
     else:
         _probe_message_lookup = "messages 1 thru 1 of inboxMailbox"
     _escaped_att_probe = escape_applescript(attachment_name)
+    _attachment_index_probe = attachment_index_value
     _probe_script = f'''
     tell application "Mail"
         try
             set targetAccount to account "{escaped_account}"
             {inbox_mailbox_script("inboxMailbox", "targetAccount")}
             set probeMessages to {_probe_message_lookup}
+            set matchCount to 0
+            set firstSize to -1
             repeat with aMessage in probeMessages
-                repeat with anAttachment in (mail attachments of aMessage)
-                    if (name of anAttachment) contains "{_escaped_att_probe}" then
+                set msgAttachments to mail attachments of aMessage
+                set attachmentCount to count of msgAttachments
+                repeat with attachmentIndex from 1 to attachmentCount
+                    set anAttachment to item attachmentIndex of msgAttachments
+                    set attachmentMatches to false
+                    if {_attachment_index_probe} > 0 then
+                        if attachmentIndex is {_attachment_index_probe} then set attachmentMatches to true
+                    else if (name of anAttachment) contains "{_escaped_att_probe}" then
+                        set attachmentMatches to true
+                    end if
+                    if attachmentMatches then
+                        set matchCount to matchCount + 1
                         try
-                            return file size of anAttachment as integer
+                            if firstSize is -1 then set firstSize to file size of anAttachment as integer
                         on error
-                            return -1
+                            if firstSize is -1 then set firstSize to -1
                         end try
                     end if
                 end repeat
             end repeat
-            return -1
+            return (matchCount as string) & "|||" & (firstSize as string)
         on error
-            return -1
+            return "0|||-1"
         end try
     end tell
     '''
     _probe_timeout = 30 if timeout is None else min(timeout, 30)
     try:
         _probe_raw = run_applescript(_probe_script, timeout=_probe_timeout).strip()
-        _attachment_size = int(_probe_raw) if _probe_raw.lstrip("-").isdigit() else -1
+        if "|||" in _probe_raw:
+            _match_count_text, _size_text = (_probe_raw.split("|||", 1) + ["-1"])[:2]
+            _attachment_match_count = int(_match_count_text) if _match_count_text.isdigit() else 0
+            _attachment_size = int(_size_text) if _size_text.lstrip("-").isdigit() else -1
+        else:
+            _attachment_size = int(_probe_raw) if _probe_raw.lstrip("-").isdigit() else -1
+            _attachment_match_count = 1 if _attachment_size >= 0 else 0
     except (AppleScriptTimeout, ValueError, OSError):
         _attachment_size = -1
+        _attachment_match_count = 0
+
+    if not use_attachment_index and _attachment_match_count > 1:
+        err = ToolError(
+            code="AMBIGUOUS_ATTACHMENT_SELECTOR",
+            message=(
+                f"Attachment name '{attachment_name}' matched {_attachment_match_count} attachments. "
+                "Filename substring selection is ambiguous."
+            ),
+            remediation={
+                "preferred": (
+                    "Call list_email_attachments(message_ids=[...], output_format='json') and retry with "
+                    "attachment_index for the chosen row."
+                ),
+                "exact_selector": "message_ids + attachment_index",
+                "matches": _attachment_match_count,
+            },
+        )
+        return serialize_tool_error(err)
 
     if _attachment_size >= 0:
         if _attachment_size > max_size_bytes:
             err = ToolError(
                 code="ATTACHMENT_TOO_LARGE",
                 message=(
-                    f"Attachment '{attachment_name}' is {_attachment_size:,} bytes "
+                    f"Attachment '{attachment_name or f'index {attachment_index}'}' is {_attachment_size:,} bytes "
                     f"({_attachment_size / (1024 * 1024):.1f} MB), which exceeds the "
                     f"cap of {max_size_bytes:,} bytes ({max_size_bytes / (1024 * 1024):.0f} MB)."
                 ),
@@ -675,10 +777,18 @@ def save_email_attachment(
                     set messageSubject to subject of aMessage
                     set msgAttachments to mail attachments of aMessage
 
-                    repeat with anAttachment in msgAttachments
+                    set attachmentCount to count of msgAttachments
+                    repeat with attachmentLoopIndex from 1 to attachmentCount
+                        set anAttachment to item attachmentLoopIndex of msgAttachments
                         set attachmentFileName to name of anAttachment
+                        set attachmentMatches to false
+                        if {attachment_index_value} > 0 then
+                            if attachmentLoopIndex is {attachment_index_value} then set attachmentMatches to true
+                        else if attachmentFileName contains "{escaped_attachment}" then
+                            set attachmentMatches to true
+                        end if
 
-                        if attachmentFileName contains "{escaped_attachment}" then
+                        if attachmentMatches then
                             -- Save the attachment
                             save anAttachment in POSIX file "{escaped_path}"
 
@@ -699,7 +809,7 @@ def save_email_attachment(
             if not foundAttachment then
                 set outputText to "⚠ Attachment not found" & return
                 set outputText to outputText & "{not_found_detail}" & return
-                set outputText to outputText & "Attachment name: {escaped_attachment}" & return
+                set outputText to outputText & "{attachment_selector_label}" & return
             end if
 
         on error errMsg
@@ -769,6 +879,19 @@ def update_email_status(
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
         return "Error: account is required (and no DEFAULT_MAIL_ACCOUNT configured)."
+    deprecated_selectors = _deprecated_target_selectors(
+        subject_keyword=subject_keyword,
+        subject_keywords=subject_keywords,
+        sender=sender,
+    )
+    if message_ids is None and deprecated_selectors:
+        return target_selector_deprecated_error(
+            "update_email_status",
+            deprecated_selectors,
+            preferred="Call search_emails(...) or list_inbox_emails(...) first, then pass message_ids=[...].",
+            discovery="search_emails(..., recent_days=..., limit=...) or list_inbox_emails(...)",
+            exact_selector="message_ids",
+        )
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)
@@ -1057,6 +1180,19 @@ def manage_trash(
         account = _server.DEFAULT_MAIL_ACCOUNT
     if not account:
         return "Error: account is required (and no DEFAULT_MAIL_ACCOUNT configured)."
+    deprecated_selectors = _deprecated_target_selectors(
+        subject_keyword=subject_keyword,
+        subject_keywords=subject_keywords,
+        sender=sender,
+    )
+    if message_ids is None and action != "empty_trash" and deprecated_selectors:
+        return target_selector_deprecated_error(
+            "manage_trash",
+            deprecated_selectors,
+            preferred="Call search_emails(...) or list_inbox_emails(...) first, then pass message_ids=[...].",
+            discovery="search_emails(..., recent_days=..., limit=...) or list_inbox_emails(...)",
+            exact_selector="message_ids",
+        )
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = validate_account_name(account, timeout=validation_timeout)

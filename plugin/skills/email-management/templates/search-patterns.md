@@ -1,805 +1,279 @@
-# Email Search Patterns Reference
+# ID-First Email Search Patterns
 
-This document provides a comprehensive reference for search patterns using the Apple Mail MCP. Master these patterns to find any email quickly.
+Use search as discovery, not action authorization. Search tools return candidate handles. Action tools operate on exact handles such as `message_id`, `draft_id`, or a future exact attachment selector.
 
-## Basic Search Tools
+## Core Workflow
 
-The MCP provides two main search tools:
-
-1. **`search_emails()`** - Advanced filtering with multiple criteria, optionally with content preview via `include_content=True`
-2. **`get_email_thread()`** - Best for viewing conversation threads
-
-Note: `search_emails` defaults to the last 48 hours and the configured default account. Prefer widening to `recent_days=7` or `recent_days=30`. `recent_days=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; if you really need every message, call `full_inbox_export` (slow; documented cost). Otherwise pass a bounded `recent_days` / `max_emails`. When you pass an explicit `date_from`, `recent_days` does not apply.
-
-## Search Pattern Cheat Sheet
-
-### By Subject
+1. Run a bounded discovery query.
+2. Review the returned subjects, senders, accounts, mailboxes, dates, and ids.
+3. Collect exact `message_id` values from the reviewed candidate set.
+4. Call action tools with `message_ids=[...]` and a clear cap.
+5. Use `dry_run=True` before moves, status updates, trash operations, or large attachment saves.
 
 ```python
-# Simple subject search (fast, with content)
-search_emails(
+results = search_emails(
     account="Work",
-    subject_keyword="meeting",
-    include_content=True,
-    max_results=5,
-    max_content_length=300
-)
-
-# Advanced subject search (more filtering options)
-search_emails(
-    account="Work",
-    subject_keyword="meeting",
     mailbox="INBOX",
-    max_results=20
+    subject_keyword="Project Alpha",
+    recent_days=7,
+    limit=10,
+    output_format="json",
 )
 
-# Case-insensitive automatic
-# Both "MEETING", "Meeting", and "meeting" will match
+ids = [item["message_id"] for item in results["items"]]
+# Review subjects, senders, dates, mailboxes, and ids before acting.
+move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/Alpha", max_moves=len(ids))
+move_email(dry_run=False, message_ids=ids, to_mailbox="Projects/Alpha", max_moves=len(ids))
 ```
 
-### By Sender
+Do not pass subject, sender, or draft-subject selectors to action tools. Those legacy selectors return `TARGET_SELECTOR_DEPRECATED` on action surfaces.
+
+## Discovery Tools
+
+Use `list_inbox_emails` for a fast recent inbox skim. Use `search_emails` for bounded discovery across date, subject, sender, read status, attachments, and explicit mailbox sets. Use `get_email_by_id` when an exact Mail id is already known.
 
 ```python
-# All emails from a sender
-search_emails(
+recent = list_inbox_emails(
     account="Work",
-    sender="colleague@company.com",
-    mailbox="All",
+    max_emails=20,
+    include_read=True,
+    include_content=False,
+    output_format="json",
+)
+
+matches = search_emails(
+    account="Work",
+    mailbox="INBOX",
+    recent_days=7,
+    limit=20,
+    output_format="json",
+)
+```
+
+`search_emails` defaults to a recent bounded window. If you need a larger search, widen deliberately with `recent_days=7`, `recent_days=30`, or an explicit `date_from`. `recent_days=0` without `date_from` is refused with `UNBOUNDED_SCAN_REQUIRED`.
+
+## Subject Discovery
+
+Subject keywords are candidate discovery only. They are useful for finding likely ids, then the follow-up action must use ids.
+
+```python
+results = search_emails(
+    account="Work",
+    mailbox="INBOX",
+    subject_keyword="board packet",
+    recent_days=14,
+    limit=10,
+    output_format="json",
+)
+
+ids = [item["message_id"] for item in results["items"]]
+```
+
+Use narrower terms when broad terms return too many candidates. Prefer adding `mailbox`, `recent_days`, `read_status`, `has_attachments`, or sender filters instead of expanding to every folder.
+
+## Sender Discovery
+
+Prefer exact sender or domain filters when known.
+
+```python
+from_person = search_emails(
+    account="Work",
+    mailbox="INBOX",
+    sender_exact="person@example.com",
     recent_days=30,
-    max_results=50
+    limit=25,
+    output_format="json",
 )
 
-# Partial sender matching
-search_emails(
+from_domain = search_emails(
     account="Work",
-    sender="@company.com",  # All from company domain
-    mailbox="All",
-    recent_days=30
-)
-
-# Sender + subject
-search_emails(
-    account="Work",
-    sender="boss@company.com",
-    subject_keyword="review",
-    mailbox="All",
-    recent_days=30
-)
-```
-
-### By Date Range
-
-```python
-# Emails from specific period
-search_emails(
-    account="Work",
-    date_from="2025-01-01",
-    date_to="2025-01-31",
-    mailbox="All",
-    max_results=100
-)
-
-# Recent emails (last 7 days)
-search_emails(
-    account="Work",
-    date_from="2025-01-09",  # 7 days ago
-    mailbox="All"
-)
-
-# Old emails (before specific date)
-search_emails(
-    account="Work",
-    date_from="2020-01-01",
-    date_to="2024-12-31",
-    read_status="read",
-    mailbox="INBOX"
-)
-```
-
-### By Read Status
-
-```python
-# Unread emails only
-search_emails(
-    account="Work",
-    read_status="unread",
-    mailbox="INBOX",
-    max_results=50
-)
-
-# Read emails only
-search_emails(
-    account="Work",
-    read_status="read",
-    mailbox="INBOX",
-    max_results=50
-)
-
-# All emails (read and unread)
-search_emails(
-    account="Work",
-    read_status="all",
-    mailbox="INBOX"
-)
-```
-
-### By Attachment Status
-
-```python
-# Emails with attachments
-search_emails(
-    account="Work",
-    has_attachments=True,
-    mailbox="INBOX",
-    max_results=20
-)
-
-# Emails without attachments
-search_emails(
-    account="Work",
-    has_attachments=False,
-    mailbox="INBOX"
-)
-
-# With attachments from specific sender
-search_emails(
-    account="Work",
-    sender="vendor@example.com",
-    has_attachments=True,
-    mailbox="All",
-    recent_days=30
-)
-```
-
-### By Mailbox/Folder
-
-```python
-# Search in specific mailbox
-search_emails(
-    account="Work",
-    mailbox="Projects/Alpha",
-    subject_keyword="update",
-    recent_days=30
-)
-
-# Search across all mailboxes
-search_emails(
-    account="Work",
-    mailbox="All",
-    subject_keyword="important",
-    recent_days=30
-)
-
-# Search in inbox only (default)
-search_emails(
-    account="Work",
-    mailbox="INBOX",
-    subject_keyword="todo"
-)
-```
-
-## Advanced Search Patterns
-
-### Multi-Criteria Searches
-
-```python
-# Unread emails with attachments from specific sender
-search_emails(
-    account="Work",
-    sender="client@example.com",
-    has_attachments=True,
-    read_status="unread",
-    mailbox="All",
+    mailboxes=["INBOX", "Archive", "Sent"],
+    sender_domain="example.com",
     recent_days=30,
-    max_results=20
-)
-
-# Recent important emails
-search_emails(
-    account="Work",
-    subject_keyword="urgent",
-    date_from="2025-01-01",
-    read_status="unread",
-    mailbox="INBOX"
-)
-
-# Old read emails with attachments (for cleanup)
-search_emails(
-    account="Work",
-    date_from="2020-01-01",
-    date_to="2024-06-30",
-    has_attachments=True,
-    read_status="read",
-    mailbox="All",
-    max_results=100
+    limit=50,
+    output_format="json",
 )
 ```
 
-### Thread Searches
+Use fuzzy `sender="..."` only when the exact address or domain is unknown, and keep it bounded with account, mailbox, date window, and limit.
+
+## Exact Message-ID Discovery
+
+If another tool, a saved note, or a prior thread result gives you an Internet Message-ID, use it as an exact discovery filter. Angle brackets are optional.
 
 ```python
-# Get full conversation thread
-get_email_thread(
+by_header = search_emails(
     account="Work",
-    subject_keyword="Project Discussion",
-    mailbox="All",
-    max_messages=50
-)
-
-# Thread from specific mailbox
-get_email_thread(
-    account="Work",
-    subject_keyword="Client Meeting",
-    mailbox="Clients/ClientName"
-)
-
-# Note: Thread search automatically handles "Re:" and "Fwd:" prefixes
-```
-
-### Content Preview Searches
-
-```python
-# Quick preview (300 chars)
-search_emails(
-    account="Work",
-    subject_keyword="proposal",
-    include_content=True,
-    mailbox="All",
-    max_results=5
-)
-
-# Full content preview
-search_emails(
-    account="Work",
-    subject_keyword="contract",
-    include_content=True,
-    max_content_length=0,  # 0 = unlimited
-    max_results=1
-)
-
-# Long preview (1000 chars)
-search_emails(
-    account="Work",
-    subject_keyword="requirements",
-    include_content=True,
-    max_content_length=1000,
-    max_results=3
+    mailboxes=["INBOX", "Sent", "Archive"],
+    internet_message_id="<reply@example.com>",
+    output_format="json",
+    limit=5,
 )
 ```
 
-## Common Search Scenarios
+Use the returned numeric `message_id` for follow-up actions.
 
-### Finding Urgent/Priority Emails
+## Explicit Mailbox Sets
 
-```python
-# Urgent keyword searches
-search_emails(account="Work", subject_keyword="urgent", read_status="unread")
-search_emails(account="Work", subject_keyword="ASAP", read_status="unread")
-search_emails(account="Work", subject_keyword="immediate", read_status="unread")
-search_emails(account="Work", subject_keyword="deadline", mailbox="All")
-search_emails(account="Work", subject_keyword="action required", read_status="unread")
-
-# From important people
-search_emails(account="Work", sender="boss@company.com", read_status="unread")
-search_emails(account="Work", sender="ceo@company.com", mailbox="All")
-search_emails(account="Work", sender="key-client@", read_status="unread")
-```
-
-### Finding Specific Documents/Attachments
+Prefer a short explicit mailbox list over the whole-account search path.
 
 ```python
-# Invoices
-search_emails(
+results = search_emails(
     account="Work",
-    subject_keyword="invoice",
-    has_attachments=True,
-    mailbox="All",
-    max_results=50
-)
-
-# Contracts
-search_emails(
-    account="Work",
-    subject_keyword="contract",
-    has_attachments=True,
-    sender="legal@"
-)
-
-# Reports
-search_emails(
-    account="Work",
-    subject_keyword="report",
-    has_attachments=True,
-    date_from="2025-01-01"
-)
-
-# Then list and download
-list_email_attachments(
-    account="Work",
-    subject_keyword="invoice"
-)
-
-save_email_attachment(
-    account="Work",
-    subject_keyword="invoice",
-    attachment_name="invoice.pdf",
-    save_path="~/Desktop/invoice.pdf"
+    mailboxes=["INBOX", "Sent", "Archive"],
+    subject_keyword="closing checklist",
+    recent_days=30,
+    limit=25,
+    output_format="json",
 )
 ```
 
-### Finding Automated/System Emails
+Whole-account mailbox search is a capped fallback for cases where the likely folder is unknown. Use it only after narrower mailbox choices fail, and expect warnings about incomplete results on accounts with many labels or folders.
+
+## Date And Status Discovery
 
 ```python
-# No-reply emails
-search_emails(
+unread = search_emails(
     account="Work",
-    sender="no-reply@",
     mailbox="INBOX",
-    max_results=50
-)
-
-search_emails(
-    account="Work",
-    sender="noreply@",
-    mailbox="INBOX"
-)
-
-# Automated notifications
-search_emails(
-    account="Work",
-    sender="notifications@",
-    mailbox="All"
-)
-
-search_emails(
-    account="Work",
-    subject_keyword="[Automated]",
-    mailbox="INBOX"
-)
-
-# Newsletters (for unsubscribe candidates)
-search_emails(
-    account="Personal",
-    subject_keyword="unsubscribe",
     read_status="unread",
-    max_results=50
+    recent_days=7,
+    limit=50,
+    output_format="json",
+)
+
+range_results = search_emails(
+    account="Work",
+    mailboxes=["INBOX", "Archive"],
+    date_from="2026-01-01",
+    date_to="2026-01-31",
+    limit=100,
+    output_format="json",
 )
 ```
 
-### Finding Project/Client Emails
+Date-only and status-only queries can still produce many candidates. Review result counts and ids before any mutation.
+
+## Attachment Discovery
+
+Find candidate messages with `has_attachments=True`, then list or save attachments by exact `message_ids`.
 
 ```python
-# By project name in subject
-search_emails(
+candidates = search_emails(
     account="Work",
+    mailbox="INBOX",
+    has_attachments=True,
+    sender_domain="example.com",
+    recent_days=30,
+    limit=20,
+    output_format="json",
+)
+
+ids = [item["message_id"] for item in candidates["items"]]
+list_email_attachments(message_ids=ids, max_results=20)
+```
+
+`save_email_attachment` should be called after the candidate message ids are known. Prefer `attachment_index` from `list_email_attachments(output_format="json")`; exact attachment names remain compatible, but duplicate filename matches require retrying with the exact index.
+
+## Threads And Replies
+
+When a search or list result contains a `message_id`, use that id for the thread and reply flow.
+
+```python
+thread = get_email_thread(
+    account="Work",
+    message_id="12345",
+    mailboxes=["INBOX", "Sent"],
+    max_messages=20,
+    output_format="json",
+    include_preview=False,
+)
+
+reply_to_email(
+    account="Work",
+    message_id="12345",
+    reply_body="Thanks, I will review and follow up.",
+    mode="draft",
+)
+```
+
+Do not reply or forward by subject. If no id is known, run `search_emails` or `list_inbox_emails` first.
+
+## Body Search
+
+Body search is slow because it reads message contents. It requires explicit opt-in.
+
+```python
+body_matches = search_emails(
+    account="Work",
+    mailbox="INBOX",
+    body_text="specific phrase",
+    allow_body_scan=True,
+    recent_days=7,
+    limit=10,
+    output_format="json",
+)
+```
+
+Pair body search with a tight account, mailbox, date window, and limit. Use it for discovery only.
+
+## Safe Action Patterns
+
+### Move Reviewed Messages
+
+```python
+ids = ["101", "202"]
+move_email(dry_run=True, message_ids=ids, to_mailbox="Archive/Reviewed", max_moves=len(ids))
+move_email(dry_run=False, message_ids=ids, to_mailbox="Archive/Reviewed", max_moves=len(ids))
+```
+
+### Mark Reviewed Messages
+
+```python
+update_email_status(action="flag", message_ids=["101", "202"], max_updates=2)
+update_email_status(action="mark_read", message_ids=["101", "202"], max_updates=2)
+```
+
+### Move Reviewed Messages To Trash
+
+```python
+manage_trash(action="move_to_trash", dry_run=True, message_ids=["101"], max_deletes=1)
+manage_trash(action="move_to_trash", dry_run=False, message_ids=["101"], max_deletes=1)
+```
+
+Permanent delete and empty-trash operations need explicit confirmation and, for valuable mailboxes, an export first.
+
+## Slow Or Broad Fallbacks
+
+Use `full_inbox_export` for audited full-mailbox work rather than trying to bypass bounded search rules.
+
+```python
+full_inbox_export(
+    account="Work",
+    max_emails=1000,
+    fields=["subject", "sender", "date", "message_id", "mailbox"],
+    output_format="ndjson",
+)
+```
+
+Treat exports and large scans as evidence-gathering steps. They do not authorize mutations by themselves.
+
+## Anti-Patterns
+
+Do not call action tools with subject, sender, or draft-subject selectors.
+Do not make the whole-account mailbox scan the default discovery shape.
+
+Use this instead:
+
+```python
+results = search_emails(
+    account="Work",
+    mailboxes=["INBOX", "Archive"],
     subject_keyword="Project Alpha",
-    mailbox="All",
-    max_results=100
+    recent_days=30,
+    limit=25,
+    output_format="json",
 )
-
-# By client domain
-search_emails(
-    account="Work",
-    sender="@clientdomain.com",
-    mailbox="All",
-    max_results=50
-)
-
-# Project + timeframe
-search_emails(
-    account="Work",
-    subject_keyword="Project Alpha",
-    date_from="2025-01-01",
-    date_to="2025-03-31",
-    mailbox="All"
-)
-
-# Project + unread
-search_emails(
-    account="Work",
-    subject_keyword="Project Alpha",
-    read_status="unread",
-    mailbox="All"
-)
+ids = [item["message_id"] for item in results["items"]]
+move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=len(ids))
 ```
-
-### Finding Old Emails for Cleanup
-
-```python
-# Old read emails (>90 days)
-search_emails(
-    account="Work",
-    date_to="2024-10-01",
-    read_status="read",
-    mailbox="INBOX",
-    max_results=100
-)
-
-# Old emails with attachments (storage cleanup)
-search_emails(
-    account="Work",
-    date_to="2024-01-01",
-    has_attachments=True,
-    mailbox="All",
-    max_results=100
-)
-
-# Old unread (probably not important)
-search_emails(
-    account="Work",
-    date_to="2024-12-01",
-    read_status="unread",
-    mailbox="INBOX"
-)
-```
-
-### Finding Emails Needing Action
-
-```python
-# Action-related keywords
-search_emails(account="Work", subject_keyword="action required", read_status="unread")
-search_emails(account="Work", subject_keyword="please review", read_status="unread")
-search_emails(account="Work", subject_keyword="waiting for", mailbox="All")
-search_emails(account="Work", subject_keyword="pending", read_status="unread")
-search_emails(account="Work", subject_keyword="approval", read_status="unread")
-search_emails(account="Work", subject_keyword="sign off", read_status="unread")
-search_emails(account="Work", subject_keyword="feedback needed", read_status="unread")
-```
-
-### Finding Meeting/Calendar Related
-
-```python
-# Meeting invites
-search_emails(
-    account="Work",
-    subject_keyword="meeting",
-    mailbox="INBOX"
-)
-
-# Calendar invites
-search_emails(
-    account="Work",
-    subject_keyword="invitation",
-    date_from="2025-01-15"
-)
-
-# Accepted meetings
-search_emails(
-    account="Work",
-    subject_keyword="Accepted:",
-    mailbox="All"
-)
-
-# Meeting agendas
-search_emails(
-    account="Work",
-    subject_keyword="agenda",
-    has_attachments=True
-)
-```
-
-## Search Optimization Tips
-
-### 1. Start Broad, Then Narrow
-
-```python
-# Step 1: Broad search
-search_emails(
-    account="Work",
-    subject_keyword="project",
-    mailbox="All",
-    max_results=20
-)
-
-# Step 2: Add filters based on results
-search_emails(
-    account="Work",
-    subject_keyword="project",
-    sender="client@example.com",
-    date_from="2025-01-01",
-    mailbox="All"
-)
-```
-
-### 2. Use Mailbox="All" When Location Unknown
-
-```python
-# Don't know where it is? Search everywhere
-search_emails(
-    account="Work",
-    subject_keyword="rare email",
-    mailbox="All",
-    max_results=50
-)
-```
-
-### 3. Combine Multiple Searches for OR Logic
-
-```python
-# Want emails matching "urgent" OR "ASAP"?
-# Run two searches:
-
-urgent_results = search_emails(
-    account="Work",
-    subject_keyword="urgent",
-    read_status="unread"
-)
-
-asap_results = search_emails(
-    account="Work",
-    subject_keyword="ASAP",
-    read_status="unread"
-)
-
-# Then combine results
-```
-
-### 4. Use Partial Matches
-
-```python
-# Partial subject (finds "invoice 123", "invoice-2025", etc.)
-search_emails(
-    account="Work",
-    subject_keyword="invoice",
-    mailbox="All"
-)
-
-# Partial sender (all Gmail addresses)
-search_emails(
-    account="Work",
-    sender="@gmail.com",
-    mailbox="All"
-)
-
-# Partial domain (all company emails)
-search_emails(
-    account="Work",
-    sender="@company.com",
-    mailbox="All"
-)
-```
-
-### 5. Preview Content Sparingly
-
-```python
-# Fast search (no content)
-search_emails(
-    account="Work",
-    subject_keyword="project",
-    include_content=False,  # Default, fastest
-    max_results=50
-)
-
-# Slower search (with content preview)
-search_emails(
-    account="Work",
-    subject_keyword="project",
-    include_content=True,  # Slower, shows previews
-    max_results=10  # Limit results when including content
-)
-```
-
-## Special Search Techniques
-
-### Finding Emails You Sent
-
-```python
-# Note: MCP searches received emails only
-# To find sent emails, search in "Sent" mailbox
-search_emails(
-    account="Work",
-    mailbox="Sent",
-    subject_keyword="proposal",
-    max_results=20
-)
-```
-
-### Finding CCs/BCCs
-
-```python
-# Search where you might be CC'd
-search_emails(
-    account="Work",
-    subject_keyword="FYI",
-    mailbox="All"
-)
-
-# Or look for typical CC patterns
-search_emails(
-    account="Work",
-    subject_keyword="CC:",
-    mailbox="All"
-)
-```
-
-### Finding Drafts
-
-```python
-# List all drafts
-manage_drafts(
-    account="Work",
-    action="list"
-)
-
-# Inspect the returned Id values; use action="open" with draft_id after choosing one.
-```
-
-### Fuzzy Matching
-
-```python
-# Use partial keywords for fuzzy matching
-# Instead of exact "Project Alpha Phase 2"
-search_emails(
-    account="Work",
-    subject_keyword="Alpha",  # Matches any email with "Alpha"
-    mailbox="All"
-)
-
-# Or combine multiple searches for different spellings
-search_emails(account="Work", subject_keyword="project alpha")
-search_emails(account="Work", subject_keyword="proj alpha")
-search_emails(account="Work", subject_keyword="alpha project")
-```
-
-## Search Result Management
-
-### Understanding Max Results
-
-```python
-# Small searches (quick checks)
-search_emails(..., max_results=5)
-
-# Medium searches (normal use)
-search_emails(..., max_results=20)  # Default
-
-# Large searches (comprehensive)
-search_emails(..., max_results=100)
-
-# Note: If you get max_results back, there might be more
-# Run search again with higher limit or add more filters
-```
-
-### Handling Large Result Sets
-
-```python
-# Step 1: Count results with limited search
-initial_search = search_emails(
-    account="Work",
-    subject_keyword="newsletter",
-    mailbox="INBOX",
-    max_results=20
-)
-# If returns 20, there are likely more
-
-# Step 2: Add filters to narrow
-filtered_search = search_emails(
-    account="Work",
-    subject_keyword="newsletter",
-    date_from="2025-01-01",
-    mailbox="INBOX",
-    max_results=50
-)
-
-# Step 3: Process in batches
-# Use move_email or update_email_status with max_moves/max_updates
-```
-
-## Search Troubleshooting
-
-### "No Results Found"
-
-**Try these**:
-
-1. **Check spelling**: Subject searches are exact substring matches
-   ```python
-   # Try variations
-   search_emails(subject_keyword="project")
-   search_emails(subject_keyword="proj")
-   search_emails(subject_keyword="Project")  # Case doesn't matter
-   ```
-
-2. **Expand mailbox**: Search all folders
-   ```python
-   search_emails(mailbox="All", ...)
-   ```
-
-3. **Remove filters**: Start with just subject
-   ```python
-   search_emails(subject_keyword="term", mailbox="All")
-   ```
-
-4. **Check account**: Verify correct account
-   ```python
-   list_accounts()  # See all accounts
-   search_emails(account="CorrectName", ...)
-   ```
-
-### "Too Many Results"
-
-**Try these**:
-
-1. **Add sender filter**
-   ```python
-   search_emails(subject_keyword="meeting", sender="specific@person.com")
-   ```
-
-2. **Add date filter**
-   ```python
-   search_emails(subject_keyword="report", date_from="2025-01-01")
-   ```
-
-3. **Add read status filter**
-   ```python
-   search_emails(subject_keyword="update", read_status="unread")
-   ```
-
-4. **Search specific mailbox**
-   ```python
-   search_emails(subject_keyword="project", mailbox="Projects/Alpha")
-   ```
-
-### "Wrong Emails Returned"
-
-**Try these**:
-
-1. **Use more specific keywords**
-   ```python
-   # Instead of: subject_keyword="update"
-   # Try: subject_keyword="status update"
-   ```
-
-2. **Combine filters**
-   ```python
-   search_emails(
-       subject_keyword="invoice",
-       sender="vendor@",
-       has_attachments=True
-   )
-   ```
-
-3. **Use message-id thread lookup for conversations**
-   ```python
-   results = search_emails(subject_keyword="discussion topic", limit=5)
-   get_email_thread(message_id=results["emails"][0]["message_id"])
-   ```
-
-## Quick Reference Table
-
-| I Want To... | Use This |
-|-------------|----------|
-| Quick subject search | `search_emails(subject_keyword="...", include_content=True)` |
-| Advanced filtering | `search_emails(...)` |
-| View conversation | `search_emails(...)` → `get_email_thread(message_id="...")`; use subject lookup only when no id is available |
-| Find by sender | `search_emails(sender="...")` |
-| Find by date | `search_emails(date_from="...", date_to="...")` |
-| Find unread | `search_emails(read_status="unread")` |
-| Find with attachments | `search_emails(has_attachments=True)` |
-| Search all folders | `search_emails(mailbox="All")` |
-| Get content preview | `search_emails(include_content=True)` |
-| Find sent emails | `search_emails(mailbox="Sent")` |
-| Find drafts | `manage_drafts(action="list")` |
-
-## Practice Searches
-
-Try these common searches right now:
-
-```python
-# 1. What's urgent right now?
-search_emails(account="Work", subject_keyword="urgent", read_status="unread")
-
-# 2. What emails have I not read this week?
-search_emails(account="Work", read_status="unread", date_from="2025-01-13")
-
-# 3. What did my boss send me recently?
-search_emails(account="Work", sender="boss@", date_from="2025-01-01")
-
-# 4. Where are emails about Project X?
-search_emails(account="Work", subject_keyword="Project X", mailbox="All")
-
-# 5. What old emails can I clean up?
-search_emails(account="Work", date_to="2024-06-30", read_status="read", max_results=50)
-```
-
----
-
-**Pro Tip**: Save your most common search patterns as comments in a note file for quick copy-paste access!

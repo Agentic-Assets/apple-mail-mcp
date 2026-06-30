@@ -19,16 +19,15 @@ import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
-
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.tools import compose as compose_tools
-
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_proc(returncode=0, stdout=b"saved", stderr=b""):
     """Build a mock subprocess.CompletedProcess."""
@@ -71,6 +70,7 @@ class _ScriptCapture:
 # at runtime — but mypy sees str | None from the return annotation.
 # The bug manifests when DEFAULT_MAIL_ACCOUNT is unset and no account is passed.
 # ---------------------------------------------------------------------------
+
 
 class TestCreateRichEmailDraftNoneHandling(unittest.TestCase):
     """Bug 1 & 2: account.strip() and string concat on Optional account."""
@@ -138,6 +138,7 @@ class TestCreateRichEmailDraftNoneHandling(unittest.TestCase):
 # the helper should be Optional[ToolError] to let mypy validate the str return.
 # ---------------------------------------------------------------------------
 
+
 class TestReplyToEmailLookupErrorType(unittest.TestCase):
     """Bug 3: reply_to_email serialize_tool_error / lookup_error return."""
 
@@ -154,22 +155,23 @@ class TestReplyToEmailLookupErrorType(unittest.TestCase):
 
         self.assertIsInstance(result, str)
 
-    def test_reply_with_recent_days_zero_returns_structured_error(self):
-        """Bug 3: UNBOUNDED_SCAN_REQUIRED error must be serialized as a string dict."""
+    def test_reply_with_subject_keyword_returns_structured_deprecation_error(self):
+        """Bug 3 regression: structured lookup errors must stay serialized strings."""
         with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
             result = compose_tools.reply_to_email(
                 account="Work",
                 subject_keyword="test",
                 reply_body="body",
-                recent_days=0,  # triggers UNBOUNDED_SCAN_REQUIRED
+                recent_days=0,
             )
 
         self.assertIsInstance(result, str)
-        self.assertIn("UNBOUNDED_SCAN_REQUIRED", result)
+        self.assertIn("TARGET_SELECTOR_DEPRECATED", result)
+        self.assertIn("message_id", result)
         mock_run.assert_not_called()
 
-    def test_forward_with_recent_days_zero_returns_structured_error(self):
-        """Bug 6 (forward_email): same lookup_error return must be str."""
+    def test_forward_with_subject_keyword_returns_structured_deprecation_error(self):
+        """Bug 6 (forward_email): same structured error return must be str."""
         with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
             result = compose_tools.forward_email(
                 account="Work",
@@ -179,7 +181,8 @@ class TestReplyToEmailLookupErrorType(unittest.TestCase):
             )
 
         self.assertIsInstance(result, str)
-        self.assertIn("UNBOUNDED_SCAN_REQUIRED", result)
+        self.assertIn("TARGET_SELECTOR_DEPRECATED", result)
+        self.assertIn("message_id", result)
         mock_run.assert_not_called()
 
 
@@ -196,23 +199,26 @@ class TestReplyToEmailLookupErrorType(unittest.TestCase):
 # can never happen because account is narrowed to str before the call.
 # ---------------------------------------------------------------------------
 
+
 class TestNoNoneLiteralInAppleScript(unittest.TestCase):
     """Verify no 'None' literal leaks into AppleScript synthesis after fix."""
 
     def _check_no_none_literal(self, scripts: list[str]) -> None:
         """Assert 'None' doesn't appear as a quoted string value in AppleScript."""
         import re
+
         for script in scripts:
             # Look for "None" as a quoted value in AppleScript (the literal injection)
             matches = re.findall(r'"None"', script)
             self.assertEqual(
-                matches, [],
+                matches,
+                [],
                 f'Found literal "None" in AppleScript: {script[:200]!r}',
             )
 
     def test_compose_email_no_none_in_applescript(self):
         """Bug 5: compose_email must not inject 'None' into AppleScript."""
-        cap = _ScriptCapture(return_value='SAVING EMAIL AS DRAFT\n\n✓ Email saved as draft!\n')
+        cap = _ScriptCapture(return_value="SAVING EMAIL AS DRAFT\n\n✓ Email saved as draft!\n")
 
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap):
             result = compose_tools.compose_email(
@@ -228,9 +234,7 @@ class TestNoNoneLiteralInAppleScript(unittest.TestCase):
 
     def test_reply_to_email_no_none_in_applescript(self):
         """Bug 4: reply_to_email must not inject 'None' into AppleScript."""
-        cap = _ScriptCapture(
-            return_value="SAVING REPLY AS DRAFT\n\nReply saved as draft!\n"
-        )
+        cap = _ScriptCapture(return_value="SAVING REPLY AS DRAFT\n\nReply saved as draft!\n")
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap):
             result = compose_tools.reply_to_email(
                 account="Work",
@@ -257,9 +261,7 @@ class TestNoNoneLiteralInAppleScript(unittest.TestCase):
 
     def test_manage_drafts_list_no_none_in_applescript(self):
         """Bug 7: manage_drafts list action must not inject 'None' into AppleScript."""
-        cap = _ScriptCapture(
-            return_value="DRAFT EMAILS - Work\n\nFound 0 draft(s)\n"
-        )
+        cap = _ScriptCapture(return_value="DRAFT EMAILS - Work\n\nFound 0 draft(s)\n")
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap):
             result = compose_tools.manage_drafts(account="Work", action="list")
 
@@ -341,9 +343,7 @@ def test_compose_email_optional_params_never_raise(
                 mode="draft",
             )
         except Exception as exc:
-            raise AssertionError(
-                f"compose_email raised {type(exc).__name__}: {exc}"
-            ) from exc
+            raise AssertionError(f"compose_email raised {type(exc).__name__}: {exc}") from exc
 
     assert isinstance(result, str), f"Expected str, got {type(result)}"
 
@@ -406,6 +406,7 @@ def test_no_none_literal_in_captured_applescript(
 # ---------------------------------------------------------------------------
 # Additional: reply and forward also never inject "None" with optional params
 # ---------------------------------------------------------------------------
+
 
 class TestReplyForwardNoNoneLiteralProperty(unittest.TestCase):
     """Targeted None-literal tests for reply and forward tools."""
