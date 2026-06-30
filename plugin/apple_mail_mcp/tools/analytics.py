@@ -1120,6 +1120,104 @@ _EXPORT_ENTIRE_MAILBOX_DEFAULT = 100
 _EXPORT_ENTIRE_MAILBOX_WARN_THRESHOLD = 500
 
 
+def _build_exact_message_export_script(
+    *,
+    safe_account: str,
+    safe_mailbox: str,
+    safe_format: str,
+    safe_save_dir: str,
+    message_ids: list[str],
+) -> str:
+    requested_ids = ", ".join(message_ids)
+    return f'''
+            tell application "Mail"
+                set outputText to "EXPORTING MESSAGES BY ID" & return & return
+                set requestedIds to {{{requested_ids}}}
+                set exportCount to 0
+
+                try
+                    set targetAccount to account "{safe_account}"
+                    try
+                        set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
+                    on error
+                        if "{safe_mailbox}" is "INBOX" then
+                            set targetMailbox to mailbox "Inbox" of targetAccount
+                        else
+                            error "Mailbox not found: {safe_mailbox}"
+                        end if
+                    end try
+
+                    set exportDir to "{safe_save_dir}/message_id_export"
+                    do shell script "mkdir -p " & quoted form of exportDir
+
+                    repeat with requestedId in requestedIds
+                        set requestedIdText to requestedId as string
+                        set matchedMessages to (every message of targetMailbox whose id is requestedId)
+                        set foundMessage to missing value
+                        if (count of matchedMessages) > 0 then
+                            set foundMessage to item 1 of matchedMessages
+                        end if
+
+                        if foundMessage is not missing value then
+                            try
+                                set messageSubject to subject of foundMessage
+                                set messageSender to sender of foundMessage
+                                set messageDate to date received of foundMessage
+                                set messageContent to content of foundMessage
+
+                                set safeSubject to messageSubject
+                                set AppleScript's text item delimiters to "/"
+                                set safeSubjectParts to text items of safeSubject
+                                set AppleScript's text item delimiters to "-"
+                                set safeSubject to safeSubjectParts as string
+                                set AppleScript's text item delimiters to ""
+
+                                set exportCount to exportCount + 1
+                                set fileName to exportCount & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
+                                set filePath to exportDir & "/" & fileName
+
+                                if "{safe_format}" is "txt" then
+                                    set exportContent to "Subject: " & messageSubject & return
+                                    set exportContent to exportContent & "From: " & messageSender & return
+                                    set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
+                                    set exportContent to exportContent & messageContent
+                                else if "{safe_format}" is "html" then
+                                    set exportContent to "<html><body>"
+                                    set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
+                                    set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
+                                    set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
+                                    set exportContent to exportContent & "<hr>" & messageContent
+                                    set exportContent to exportContent & "</body></html>"
+                                end if
+
+                                set fileRef to open for access POSIX file filePath with write permission
+                                set eof of fileRef to 0
+                                write exportContent to fileRef as «class utf8»
+                                close access fileRef
+
+                                set outputText to outputText & "✓ Exported message_id " & requestedIdText & ": " & messageSubject & return
+                            on error exportErr
+                                try
+                                    close access fileRef
+                                end try
+                                set outputText to outputText & "Error exporting message_id " & requestedIdText & ": " & exportErr & return
+                            end try
+                        else
+                            set outputText to outputText & "⚠ No email found for message_id " & requestedIdText & return
+                        end if
+                    end repeat
+
+                    set outputText to outputText & return & "Exported: " & exportCount & return
+                    set outputText to outputText & "Location: " & exportDir & return
+                on error errMsg
+                    return "Error: " & errMsg
+                end try
+
+                return outputText
+            end tell
+            '''
+
+
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
 @inject_preferences
 def export_emails(
@@ -1127,6 +1225,7 @@ def export_emails(
     scope: str = "entire_mailbox",
     subject_keyword: str | None = None,
     message_id: str | None = None,
+    message_ids: list[str] | None = None,
     mailbox: str = "INBOX",
     save_directory: str = "~/Desktop",
     format: str = "txt",
@@ -1153,6 +1252,7 @@ def export_emails(
             or "entire_mailbox"
         subject_keyword: Keyword to find email (optional when message_id is set)
         message_id: Optional numeric Apple Mail message id for single_email scope
+        message_ids: Optional list of exact Apple Mail message ids to export
         mailbox: Mailbox to export from (default: "INBOX")
         save_directory: Directory to save exports (default: "~/Desktop")
         format: Export format: "txt", "html" (default: "txt")
@@ -1205,6 +1305,31 @@ def export_emails(
     safe_mailbox = escape_applescript(mailbox)
     safe_format = escape_applescript(format)
     safe_save_dir = escape_applescript(save_dir)
+
+    if message_ids is not None:
+        raw_ids = [str(value).strip() for value in message_ids if str(value).strip()]
+        normalized_ids = normalize_message_ids(raw_ids)
+        invalid_ids = [value for value in raw_ids if not value.isdigit()]
+        if not normalized_ids:
+            return "Error: 'message_ids' must contain one or more numeric Mail ids"
+
+        chunk_results: list[str] = []
+        for chunk in iter_id_chunks(normalized_ids):
+            script = _build_exact_message_export_script(
+                safe_account=safe_account,
+                safe_mailbox=safe_mailbox,
+                safe_format=safe_format,
+                safe_save_dir=safe_save_dir,
+                message_ids=chunk,
+            )
+            try:
+                chunk_results.append(run_applescript(script, timeout=timeout if timeout is not None else 120))
+            except AppleScriptTimeout:
+                return f"Error: AppleScript timed out while exporting message_ids for '{account}'"
+
+        if invalid_ids:
+            chunk_results.append(f"Ignored invalid message_ids: {', '.join(invalid_ids)}")
+        return "\n\n".join(chunk_results)
 
     if scope == "single_email":
         if not message_id and not subject_keyword:

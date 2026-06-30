@@ -348,7 +348,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 75 messages, longer windows 20 × 250 |
-| `export_emails` | Export single emails by `message_id` or subject, or full mailboxes to TXT/HTML (default cap 1000) |
+| `export_emails` | Export exact `message_ids`, single emails by `message_id`, or full mailboxes to TXT/HTML (default cap 1000) |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Audited full-inbox walk; only tool that scans every message. Slow (minutes on 24K mailboxes). Named in `UNBOUNDED_SCAN_REQUIRED` remediation as the legitimate fallback. |
 

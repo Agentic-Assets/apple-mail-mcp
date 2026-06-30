@@ -1222,6 +1222,62 @@ class AnalyticsMessageIdPathTests(unittest.TestCase):
         self.assertIn("whose id is 888", captured["script"])
         self.assertIn("EXPORTING EMAIL", result)
 
+    def test_export_emails_message_ids_use_exact_batch_path_with_default_scope(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "EXPORTING MESSAGES BY ID\n\nExported: 2"
+
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            result = analytics_tools.export_emails(
+                account="Work",
+                message_ids=["101", "bad", "202", "101"],
+                save_directory="~/Desktop",
+            )
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn("set requestedIds to {101, 202}", captured[0])
+        self.assertIn("whose id is requestedId", captured[0])
+        self.assertIn("message_id_export", captured[0])
+        self.assertNotIn("subject_keyword", captured[0])
+        self.assertNotIn("messages 1 thru", captured[0])
+        self.assertIn("EXPORTING MESSAGES BY ID", result)
+        self.assertIn("Ignored invalid message_ids: bad", result)
+
+    def test_export_emails_message_ids_chunk_120_ids(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "EXPORTING MESSAGES BY ID\n\nExported: 0"
+
+        ids = [str(i) for i in range(1, 121)]
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            result = analytics_tools.export_emails(
+                account="Work",
+                message_ids=ids,
+                save_directory="~/Desktop",
+            )
+
+        self.assertEqual(len(captured), 3)
+        self.assertIn("set requestedIds to {1, 2", captured[0])
+        self.assertIn("50}", captured[0])
+        self.assertIn("set requestedIds to {51", captured[1])
+        self.assertIn("set requestedIds to {101", captured[2])
+        self.assertEqual(result.count("EXPORTING MESSAGES BY ID"), 3)
+
+    def test_export_emails_message_ids_rejects_invalid_only_without_applescript(self):
+        with patch("apple_mail_mcp.tools.analytics.run_applescript") as mock_run:
+            result = analytics_tools.export_emails(
+                account="Work",
+                message_ids=["bad"],
+                save_directory="~/Desktop",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("'message_ids' must contain one or more numeric", result)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -167,7 +167,7 @@
     },
     {
       "name": "export_emails",
-      "description": "Export emails to txt or html. Single email by message_id (preferred) or subject keyword, or up to max_emails messages from a mailbox (default 1000)."
+      "description": "Export emails to txt or html. Exact message_ids are preferred for reviewed batches; single_email supports message_id; entire_mailbox exports up to max_emails messages from a mailbox."
     },
     {
       "name": "full_inbox_export",

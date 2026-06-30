@@ -166,7 +166,7 @@ Mindset:
 | Flag / mark read | `update_email_status(action="...", message_ids=[...])` | ID-first; default cap 10 |
 | Move to trash / delete | `manage_trash(action="...", message_ids=[...])` | See `references/bulk-cleanup.md` |
 | Analytics | `get_statistics()` and `get_top_senders()` | See `references/analytics.md` |
-| Export for backup | `export_emails(scope="...", mailbox="...")` | Run before any large delete |
+| Export for backup | `export_emails(message_ids=[...])` or `export_emails(scope="...", mailbox="...")` | Prefer reviewed ids for batches; run before any large delete |
 | Sync stale account | `synchronize_account(account="...", confirm_sync=True)` | Only after the user explicitly accepts that Mail may fetch a large backlog |
 
 ## Common Scenarios

@@ -68,7 +68,7 @@ Rules:
 
 Echo saved path, approximate size expectation, optionally open file externally (outside MCP).
 
-When batch exports help (entire mailbox evidence trail), optionally layer **`export_emails`** afterward.
+When batch exports help, optionally layer **`export_emails(message_ids=[...])`** afterward. Use entire-mailbox exports only for mailbox-level evidence trails.
 
 ### 5. Aftercare
 

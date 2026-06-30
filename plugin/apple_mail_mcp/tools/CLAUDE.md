@@ -9,7 +9,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | `search.py` | 4 | Find & fetch: `search_emails`, `get_email_by_id`, `get_email_by_ids`, `get_email_thread` |
 | `compose.py` | 7 | Send & drafts: `create_rich_email_draft`, `compose_email`, `reply_to_email`, `forward_email`, `manage_drafts`, `verify_draft`, `verify_drafts` |
 | `manage.py` | 6 | Move/status/trash/sync: `move_email`, `save_email_attachment`, `update_email_status`, `manage_trash`, `create_mailbox`, `synchronize_account` |
-| `analytics.py` | 5 | Stats & export: `list_email_attachments`, `get_statistics`, `export_emails`, `inbox_dashboard`, `full_inbox_export` |
+| `analytics.py` | 5 | Stats & export: `list_email_attachments`, `get_statistics`, `export_emails` by exact ids or mailbox cap, `inbox_dashboard`, `full_inbox_export` |
 | `smart_inbox.py` | 3 | Triage heuristics: `get_awaiting_reply`, `get_needs_response`, `get_top_senders` |
 
 ## Add a tool

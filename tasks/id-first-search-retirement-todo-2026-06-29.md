@@ -77,6 +77,13 @@ Completed in the draft batch verification pass:
 - Updated MCPB, README, plugin guidance, packaged skills, and read-only registry surfaces for the 31-tool contract.
 - Added mocked tests for order preservation, deduplication, invalid ids, missing drafts, expectation forwarding, and 120-id batches.
 
+Completed in the exact-id export pass:
+
+- Added `export_emails(message_ids=[...])` for reviewed exact-id batch exports without subject search or full-mailbox enumeration.
+- Chunked exact-id export scripts with `MAX_WHOSE_IDS`, preserving requested id order within each chunk.
+- Updated README, MCPB manifest text, packaged skills, and task docs for the new exact-id export path.
+- Added mocked tests for default-scope exact-id export, 120-id chunking, invalid-only rejection, and existing single `message_id` behavior.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
@@ -307,7 +314,7 @@ Candidate APIs:
 - [x] `get_email_by_ids(message_ids=[...])`
 - [x] `verify_drafts(draft_ids=[...])`
 - [x] `list_email_attachments(message_ids=[...])`
-- [ ] `export_emails(message_ids=[...])`
+- [x] `export_emails(message_ids=[...])`
 
 ## Phase 6: Final Verification And Release Readiness
 
