@@ -83,6 +83,50 @@ def _count_open_outgoing_messages(timeout: int = 10) -> int:
         return -1
 
 
+def _applescript_id_list_literal(ids: "set[str] | list[str] | None") -> str:
+    """Render Mail outgoing-message ids as an AppleScript string-list literal.
+
+    Ids are numeric in practice, but they are escaped defensively so a malformed
+    value can never break out of the literal. An empty/None input yields ``{}``.
+    """
+    if not ids:
+        return "{}"
+    quoted = ", ".join('"' + escape_applescript(str(i)) + '"' for i in ids)
+    return "{" + quoted + "}"
+
+
+def _list_outgoing_message_ids(timeout: int | None = None) -> list[str]:
+    """Return the ids of every currently-open outgoing message (compose window).
+
+    Snapshot the open compose windows *before* opening a new draft so the
+    post-open save can target only the newly-created window via an id diff.
+    Returns ``[]`` when the probe fails (fail-open), degrading the save to
+    best-effort rather than blocking the draft.
+    """
+    script = """
+    tell application "Mail"
+        set idList to {}
+        try
+            repeat with composeMessage in outgoing messages
+                set end of idList to ((id of composeMessage) as string)
+            end repeat
+        end try
+        set AppleScript's text item delimiters to linefeed
+        set idText to idList as string
+        set AppleScript's text item delimiters to ""
+        return idText
+    end tell
+    """
+    try:
+        if timeout is None:
+            raw = run_applescript(script).strip()
+        else:
+            raw = run_applescript(script, timeout=timeout).strip()
+    except Exception:  # noqa: BLE001 — snapshot probe must fail-open
+        return []
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
 def _check_open_compose_window_cap(timeout: int = 10) -> "str | None":
     """Return a serialized ToolError if the open-compose-window cap is reached.
 
@@ -980,14 +1024,28 @@ def _send_blocked(mode: str | None) -> str | None:
     return None
 
 
-def _save_front_compose_window_as_draft(
+def _save_new_compose_window_as_draft(
     *,
+    prior_outgoing_ids: "set[str] | list[str] | None" = None,
     close_after_save: bool = False,
     retries: int = 10,
     delay_seconds: float = 0.5,
     timeout: int | None = None,
 ) -> bool:
-    """Ask Mail to save the newest open outgoing message as a draft."""
+    """Save the compose window opened after ``prior_outgoing_ids`` was captured.
+
+    ``prior_outgoing_ids`` is the set of ``outgoing message`` ids that existed
+    *before* the new draft window opened (via ``open -a Mail``). The save targets
+    the first outgoing message whose id is **not** in that set, so a pre-existing,
+    unrelated compose window is never saved or closed by mistake. When the set is
+    empty/None (no other window can be open, or the snapshot probe failed) the
+    first outgoing message is used as a best-effort fallback.
+
+    The diff also drives the per-retry wait: a freshly ``open``-ed ``.eml`` may
+    take a moment to materialize as an outgoing message, so "no new window yet"
+    returns ``not-found`` and retries instead of grabbing the wrong window.
+    """
+    prior_list_literal = _applescript_id_list_literal(prior_outgoing_ids)
     close_script = ""
     if close_after_save:
         close_script = """
@@ -999,10 +1057,18 @@ def _save_front_compose_window_as_draft(
     script = f"""
     tell application "Mail"
         try
-            if (count of outgoing messages) is 0 then
+            set priorIds to {prior_list_literal}
+            set targetMessage to missing value
+            repeat with candidateMessage in outgoing messages
+                set candidateId to (id of candidateMessage) as string
+                if priorIds does not contain candidateId then
+                    set targetMessage to candidateMessage
+                    exit repeat
+                end if
+            end repeat
+            if targetMessage is missing value then
                 return "not-found"
             end if
-            set targetMessage to item 1 of outgoing messages
             save targetMessage
             delay 0.5
             {close_script}
@@ -1059,7 +1125,7 @@ def create_rich_email_draft(
         cc: Optional CC recipients, comma-separated for multiple
         bcc: Optional BCC recipients, comma-separated for multiple
         output_path: Optional path for the generated `.eml` file
-        open_in_mail: If True and the subject is nonblank, open the generated `.eml` in Mail and save the front compose window to Drafts (default: True). Blank-subject drafts are written as `.eml` only by default to avoid opening incomplete drafts. Pass False to only create the `.eml` file.
+        open_in_mail: If True and the subject is nonblank, open the generated `.eml` in Mail and save the newly-opened compose window to Drafts (identified by an id diff against the compose windows open before this call, so a pre-existing draft window is never touched). Default: True. Blank-subject drafts are written as `.eml` only by default to avoid opening incomplete drafts. Pass False to only create the `.eml` file.
         save_as_draft: Retained for compatibility; opened Mail drafts are always saved before being closed or left open.
         review_in_mail: If True, leave the saved compose window open for review. Defaults to closing the saved window after creating the draft.
         from_address: Optional sender address to stamp into the `.eml` `From:` header. Must be one of the account's configured email addresses. When omitted, Mail fills the account's default "Send new messages from" address on open.
@@ -1150,6 +1216,11 @@ def create_rich_email_draft(
     opened = False
     saved = False
     if open_in_mail and can_open_in_mail:
+        # Snapshot the open compose windows BEFORE opening this draft so the
+        # post-open save targets only the window we are about to create, never a
+        # pre-existing unrelated compose window (the blind ``item 1 of outgoing
+        # messages`` save reported false "Saved: yes" against the wrong window).
+        prior_outgoing_ids = set(_list_outgoing_message_ids(timeout=timeout))
         try:
             subprocess.run(["open", "-a", "Mail", str(draft_path)], check=True)
         except (subprocess.CalledProcessError, FileNotFoundError) as exc:
@@ -1158,7 +1229,8 @@ def create_rich_email_draft(
             )
         opened = True
         try:
-            saved = _save_front_compose_window_as_draft(
+            saved = _save_new_compose_window_as_draft(
+                prior_outgoing_ids=prior_outgoing_ids,
                 close_after_save=not review_in_mail,
                 timeout=timeout,
             )

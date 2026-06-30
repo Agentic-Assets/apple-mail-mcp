@@ -38,6 +38,14 @@ def _main_reply_script(scripts):
     return reply_scripts[0]
 
 
+def _save_draft_script(scripts):
+    """Return the save-as-draft script, skipping the sender/snapshot probes."""
+    save_scripts = [script for script in scripts if "save targetMessage" in script]
+    if len(save_scripts) != 1:
+        raise AssertionError(f"expected one save-draft script, got {len(save_scripts)}")
+    return save_scripts[0]
+
+
 def _saved_reply_draft_output(
     *,
     to="Sender <sender@example.com>",
@@ -307,20 +315,25 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Opened in Mail: yes", result)
             self.assertIn("Saved in Drafts: yes", result)
             mock_run.assert_called_once_with(["open", "-a", "Mail", str(output_path)], check=True)
-            self.assertNotIn("every outgoing message whose subject is", scripts[1])
-            # Save the opened .eml compose object through Mail's dictionary,
-            # then close the matching compose window without a second persist.
+            save_script = _save_draft_script(scripts)
+            self.assertNotIn("every outgoing message whose subject is", save_script)
+            # Save the newly-opened .eml compose object (the outgoing message
+            # whose id was not present before the open), then close that exact
+            # compose window without a second persist or a blind item-1 grab.
+            self.assertNotIn("item 1 of outgoing messages", save_script)
             _assert_ordered(
                 self,
-                scripts[1],
-                "set targetMessage to item 1 of outgoing messages",
+                save_script,
+                "set priorIds to {",
+                "repeat with candidateMessage in outgoing messages",
+                "if priorIds does not contain candidateId then",
                 "save targetMessage",
                 "close (window of targetMessage) saving no",
             )
-            self.assertNotIn("System Events", scripts[1])
-            self.assertNotIn('keystroke "s" using command down', scripts[1])
-            self.assertNotIn("close window 1 saving no", scripts[1])
-            self.assertNotIn("close window 1 saving yes", scripts[1])
+            self.assertNotIn("System Events", save_script)
+            self.assertNotIn('keystroke "s" using command down', save_script)
+            self.assertNotIn("close window 1 saving no", save_script)
+            self.assertNotIn("close window 1 saving yes", save_script)
 
     def test_create_rich_email_draft_default_saves_and_closes_mail_window(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -352,20 +365,24 @@ class ComposeToolTests(unittest.TestCase):
             mock_run.assert_called_once_with(["open", "-a", "Mail", str(output_path)], check=True)
             self.assertIn("Saved in Drafts: yes", result)
             self.assertIn("Left open for review: no", result)
-            self.assertNotIn("every outgoing message whose subject is", scripts[1])
-            # Save the opened .eml compose object through Mail's dictionary,
-            # then close the matching compose window without a second persist.
+            save_script = _save_draft_script(scripts)
+            self.assertNotIn("every outgoing message whose subject is", save_script)
+            # Save the newly-opened .eml compose object (id-diff against the
+            # pre-open snapshot), then close that exact compose window.
+            self.assertNotIn("item 1 of outgoing messages", save_script)
             _assert_ordered(
                 self,
-                scripts[1],
-                "set targetMessage to item 1 of outgoing messages",
+                save_script,
+                "set priorIds to {",
+                "repeat with candidateMessage in outgoing messages",
+                "if priorIds does not contain candidateId then",
                 "save targetMessage",
                 "close (window of targetMessage) saving no",
             )
-            self.assertNotIn("System Events", scripts[1])
-            self.assertNotIn('keystroke "s" using command down', scripts[1])
-            self.assertNotIn("close window 1 saving no", scripts[1])
-            self.assertNotIn("close window 1 saving yes", scripts[1])
+            self.assertNotIn("System Events", save_script)
+            self.assertNotIn('keystroke "s" using command down', save_script)
+            self.assertNotIn("close window 1 saving no", save_script)
+            self.assertNotIn("close window 1 saving yes", save_script)
 
     def test_create_rich_email_draft_allows_partial_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -422,7 +439,9 @@ class ComposeToolTests(unittest.TestCase):
     def test_create_rich_email_draft_can_save_to_drafts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "saved.eml"
-            run_results = ["sender@example.com", "saved"]
+            # Three AppleScript calls: sender resolution, pre-open outgoing-id
+            # snapshot, then the save-as-draft script.
+            run_results = ["sender@example.com", "", "saved"]
 
             def fake_run_applescript(script, timeout=120):
                 return run_results.pop(0)
@@ -445,8 +464,8 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Saved in Drafts: yes", result)
 
 
-class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
-    def test_saves_front_compose_window_without_subject_lookup(self):
+class SaveNewComposeWindowAsDraftTests(unittest.TestCase):
+    def test_saves_new_compose_window_without_subject_lookup(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -457,16 +476,20 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            result = compose_tools._save_front_compose_window_as_draft(close_after_save=True)
+            result = compose_tools._save_new_compose_window_as_draft(close_after_save=True)
 
         self.assertTrue(result)
         self.assertEqual(len(captured), 1)
         self.assertNotIn("every outgoing message whose subject is", captured[0])
-        # Save through Mail's outgoing-message object model, not System Events.
+        # Save through Mail's outgoing-message object model via id-diff, not a
+        # blind item-1 grab and not System Events.
+        self.assertNotIn("item 1 of outgoing messages", captured[0])
         _assert_ordered(
             self,
             captured[0],
-            "set targetMessage to item 1 of outgoing messages",
+            "set priorIds to {",
+            "repeat with candidateMessage in outgoing messages",
+            "if priorIds does not contain candidateId then",
             "save targetMessage",
             "close (window of targetMessage) saving no",
         )
@@ -475,7 +498,7 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
         self.assertNotIn("close window 1 saving no", captured[0])
         self.assertNotIn("close window 1 saving yes", captured[0])
 
-    def test_can_leave_front_compose_window_open_for_review(self):
+    def test_can_leave_new_compose_window_open_for_review(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -486,7 +509,7 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            result = compose_tools._save_front_compose_window_as_draft(close_after_save=False)
+            result = compose_tools._save_new_compose_window_as_draft(close_after_save=False)
 
         self.assertTrue(result)
         self.assertIn("save targetMessage", captured[0])
@@ -494,6 +517,47 @@ class SaveFrontComposeWindowAsDraftTests(unittest.TestCase):
         self.assertNotIn('keystroke "s" using command down', captured[0])
         self.assertNotIn("close (window of targetMessage) saving no", captured[0])
         self.assertNotIn("close window 1 saving yes", captured[0])
+
+    def test_prior_outgoing_ids_are_excluded_from_save_target(self):
+        """A pre-existing compose window (id in the snapshot) is never saved."""
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "saved"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools._save_new_compose_window_as_draft(
+                prior_outgoing_ids={"41", "57"},
+                close_after_save=False,
+            )
+
+        self.assertTrue(result)
+        # Both pre-open ids land in the priorIds literal so the diff skips them.
+        self.assertIn('"41"', captured[0])
+        self.assertIn('"57"', captured[0])
+        self.assertIn("if priorIds does not contain candidateId then", captured[0])
+
+    def test_no_new_outgoing_window_returns_false(self):
+        """When only pre-existing windows exist, the save reports failure."""
+
+        def fake_run(script, timeout=120):
+            return "not-found"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools._save_new_compose_window_as_draft(
+                prior_outgoing_ids={"7"},
+                retries=2,
+                delay_seconds=0,
+            )
+
+        self.assertFalse(result)
 
 
 class StripCdataTests(unittest.TestCase):

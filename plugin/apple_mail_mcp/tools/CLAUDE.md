@@ -79,7 +79,7 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
 | `create_rich_email_draft` | saves + closes | Standalone only; same reply-like guard; `review_in_mail=True` for saved-open review |
 
-Do not match outgoing rich drafts by subject — `_save_front_compose_window_as_draft()` saves Mail's front compose window. Detail: [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Compose and draft modes.
+Do not match outgoing rich drafts by subject — `_save_new_compose_window_as_draft()` saves the compose window opened by this call, identified by an id diff against the `outgoing messages` snapshot taken before the open (never `item 1`, never a pre-existing window). Detail: [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Compose and draft modes.
 
 ## Related
 
