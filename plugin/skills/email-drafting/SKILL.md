@@ -1,6 +1,6 @@
 ---
 name: email-drafting
-description: 'Use when drafting, replying, forwarding, or verifying Apple Mail drafts. Covers compose_email, reply_to_email, forward_email, create_rich_email_draft, manage_drafts, and verify_draft with draft-safe defaults, exact message ids for replies, standalone-draft guardrails, signatures, and post-draft verification. Do NOT use for inbox triage, Mail MCP setup, folder taxonomy, Mail rules, staged bulk moves, or attachment extraction.'
+description: 'Use when drafting, replying, forwarding, or verifying Apple Mail drafts. Covers compose_email, reply_to_email, forward_email, create_rich_email_draft, manage_drafts, verify_draft, and verify_drafts with draft-safe defaults, exact message ids for replies, standalone-draft guardrails, signatures, and post-draft verification. Do NOT use for inbox triage, Mail MCP setup, folder taxonomy, Mail rules, staged bulk moves, or attachment extraction.'
 ---
 
 # Email Drafting
@@ -69,7 +69,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list; `subject_keyword` is a degraded path only after confirming ids are unavailable |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params. Use plain compose tools when a named signature is required |
 | Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, accepts `limit=...`, and accepts `subject_contains="..."` (case-insensitive "find the draft I just made"). `action="find"` locates reply drafts by bounded In-Reply-To / References header scan. For `send`, `open`, or `delete`, prefer exact `draft_id` from the list output over `draft_subject` |
-| Exact draft readiness check | `verify_draft` | Read-only JSON snapshot for one Drafts id: recipients, body sentinel, attachments, signature state, quoted original, and thread headers |
+| Exact draft readiness check | `verify_draft` / `verify_drafts` | Read-only JSON snapshot for one or more Drafts ids: recipients, body sentinel, attachments, signature state, quoted original, and thread headers |
 | Remove orphaned blank drafts | `manage_drafts(action="cleanup_empty")` | Deletes drafts with blank subject AND empty body; `dry_run=True` by default (preview first), capped by `max_deletes` (default 20). Confirm the preview count with the user before `dry_run=False` |
 
 ## Safety And Compliance
@@ -102,7 +102,7 @@ Summarize artifacts for the operator:
 To verify a freshly-created draft, do **not** use `search_emails` — it runs a
 date-filtered scan that is slow on large accounts and silently drops brand-new
 drafts (an unsent `outgoing message` has a null received date). Instead use the
-exact Drafts verification: `verify_draft(draft_id="...", expected_body_contains="...")`
+exact Drafts verification: `verify_draft(draft_id="...", expected_body_contains="...")` or `verify_drafts(draft_ids=[...])`
 or bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
 (newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Use
 the returned exact `draft_id` for `manage_drafts(action="open"|"delete"|"send")`. Confirm

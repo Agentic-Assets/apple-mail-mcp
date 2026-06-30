@@ -114,7 +114,7 @@ Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/
 
 | Path | Role |
 |------|------|
-| `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**30 tools**) |
+| `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**31 tools**) |
 | `start_mcp.sh` | Creates `venv/`, installs `requirements.txt`, execs Python entry |
 | `requirements.txt` | Runtime Python dependencies |
 | `ui/` | MCP Apps dashboard helpers for `inbox_dashboard` |

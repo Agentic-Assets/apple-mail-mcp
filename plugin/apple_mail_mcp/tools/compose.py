@@ -22,7 +22,9 @@ from apple_mail_mcp.applescript_snippets import (
 )
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.bounded_scan import (
+    MAX_WHOSE_IDS,
     build_bounded_message_scan,
+    iter_id_chunks,
 )
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
@@ -1609,6 +1611,79 @@ def verify_draft(
         require_quoted_original=require_quoted_original,
     )
     return json.dumps(payload)
+
+
+@mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@inject_preferences
+def verify_drafts(
+    account: str | None = None,
+    draft_ids: list[str] | None = None,
+    expected_to: str | None = None,
+    expected_cc: str | None = None,
+    expected_subject: str | None = None,
+    expected_body_contains: str | None = None,
+    expected_attachments: str | list[str] | None = None,
+    expected_signature: bool | None = None,
+    require_quoted_original: bool | None = None,
+    timeout: int | None = None,
+) -> str:
+    """
+    Verify multiple saved Apple Mail Drafts messages by exact draft ids.
+
+    This batches calls to the exact Drafts verifier without using subject or
+    keyword lookup. The per-draft payload is the same JSON object returned by
+    ``verify_draft``.
+    """
+    account, account_error = _resolve_account(account, timeout=timeout)
+    if account_error:
+        return account_error
+    assert account is not None
+
+    raw_ids = [str(value).strip() for value in (draft_ids or []) if str(value).strip()]
+    normalized_ids = normalize_message_ids(raw_ids)
+    invalid_ids = [value for value in raw_ids if not value.isdigit()]
+    if not normalized_ids:
+        return "Error: 'draft_ids' must contain one or more numeric Mail Drafts message ids"
+
+    items: list[dict[str, Any]] = []
+    for chunk in iter_id_chunks(normalized_ids):
+        for draft_id in chunk:
+            raw_result = verify_draft(
+                account=account,
+                draft_id=draft_id,
+                expected_to=expected_to,
+                expected_cc=expected_cc,
+                expected_subject=expected_subject,
+                expected_body_contains=expected_body_contains,
+                expected_attachments=expected_attachments,
+                expected_signature=expected_signature,
+                require_quoted_original=require_quoted_original,
+                timeout=timeout,
+            )
+            try:
+                payload = json.loads(raw_result)
+            except json.JSONDecodeError:
+                payload = {"draft_id": draft_id, "found": False, "error": raw_result}
+            items.append(payload)
+
+    missing_ids = [
+        str(item.get("draft_id", ""))
+        for item in items
+        if item.get("found") is False and "draft_not_found" in (item.get("warnings") or [])
+    ]
+
+    return json.dumps(
+        {
+            "draft_ids": normalized_ids,
+            "items": items,
+            "returned": len(items),
+            "found": sum(1 for item in items if item.get("found") is True),
+            "missing_ids": missing_ids,
+            "invalid_ids": invalid_ids,
+            "account": account,
+            "chunk_size": MAX_WHOSE_IDS,
+        }
+    )
 
 
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)

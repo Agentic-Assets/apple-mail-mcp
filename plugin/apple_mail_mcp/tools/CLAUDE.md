@@ -1,5 +1,5 @@
 # tools/ — MCP tool registrations
-All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six modules (side-effect registration). **30 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l`.
+All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six modules (side-effect registration). **31 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l`.
 
 ## Module map
 
@@ -7,7 +7,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 |--------|---|-----------------|
 | `inbox.py` | 6 | Listing & overview: `list_inbox_emails`, `get_mailbox_unread_counts`, `list_accounts`, `list_account_addresses`, `list_mailboxes`, `get_inbox_overview` |
 | `search.py` | 4 | Find & fetch: `search_emails`, `get_email_by_id`, `get_email_by_ids`, `get_email_thread` |
-| `compose.py` | 6 | Send & drafts: `create_rich_email_draft`, `compose_email`, `reply_to_email`, `forward_email`, `manage_drafts`, `verify_draft` |
+| `compose.py` | 7 | Send & drafts: `create_rich_email_draft`, `compose_email`, `reply_to_email`, `forward_email`, `manage_drafts`, `verify_draft`, `verify_drafts` |
 | `manage.py` | 6 | Move/status/trash/sync: `move_email`, `save_email_attachment`, `update_email_status`, `manage_trash`, `create_mailbox`, `synchronize_account` |
 | `analytics.py` | 5 | Stats & export: `list_email_attachments`, `get_statistics`, `export_emails`, `inbox_dashboard`, `full_inbox_export` |
 | `smart_inbox.py` | 3 | Triage heuristics: `get_awaiting_reply`, `get_needs_response`, `get_top_senders` |
@@ -73,6 +73,7 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 | `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True` |
 | `reply_to_email` | `mode="draft"` (via `send=False`) | Native Mail reply composer; quoted prior messages are automatic; verifies saved draft before success |
 | `verify_draft` | read-only | Exact Drafts id snapshot for recipients, body, attachments, signatures, quoted original, and thread headers |
+| `verify_drafts` | read-only | Batch exact Drafts id snapshots with per-draft JSON payloads |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
 | `create_rich_email_draft` | saves + closes | Standalone only; same reply-like guard; `review_in_mail=True` for saved-open review |
 

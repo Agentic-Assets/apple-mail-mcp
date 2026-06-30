@@ -26,7 +26,7 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 ## Plugin workflow skills (Claude Code and Codex)
 
-Nine skills ship under [`plugin/skills/`](../plugin/skills/) and auto-load with Claude Code and Codex plugin installs. They teach **when** and **how** to call the 30 MCP tools — they do not implement tool logic.
+Nine skills ship under [`plugin/skills/`](../plugin/skills/) and auto-load with Claude Code and Codex plugin installs. They teach **when** and **how** to call the 31 MCP tools — they do not implement tool logic.
 
 | Skill | Use when the user wants… |
 |-------|---------------------------|

@@ -70,6 +70,13 @@ Completed in the attachment batch exact-ID pass:
 - Preserved JSON attachment metadata while adding `chunk_size` to merged batch output.
 - Added mocked tests for 51-id and 120-id attachment listing batches.
 
+Completed in the draft batch verification pass:
+
+- Added `verify_drafts(draft_ids=[...])` as a read-only batch wrapper around exact Drafts id verification.
+- Preserved the existing per-draft `verify_draft` JSON payload while adding batch `invalid_ids`, `missing_ids`, `found`, and `chunk_size` metadata.
+- Updated MCPB, README, plugin guidance, packaged skills, and read-only registry surfaces for the 31-tool contract.
+- Added mocked tests for order preservation, deduplication, invalid ids, missing drafts, expectation forwarding, and 120-id batches.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
@@ -298,7 +305,7 @@ Todos:
 Candidate APIs:
 
 - [x] `get_email_by_ids(message_ids=[...])`
-- [ ] `verify_drafts(draft_ids=[...])`
+- [x] `verify_drafts(draft_ids=[...])`
 - [x] `list_email_attachments(message_ids=[...])`
 - [ ] `export_emails(message_ids=[...])`
 

@@ -40,7 +40,7 @@ claude plugin marketplace add .
 claude plugin install apple-mail@apple-mail-mcp
 ```
 
-Installs the MCP server (30 tools, **`--draft-safe`** by default) plus **nine** auto-discovered workflow skills under `plugin/skills/` — see [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md).
+Installs the MCP server (31 tools, **`--draft-safe`** by default) plus **nine** auto-discovered workflow skills under `plugin/skills/` — see [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md).
 
 Codex users install through the sibling Codex marketplace:
 

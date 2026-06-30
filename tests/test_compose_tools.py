@@ -1957,6 +1957,70 @@ class ManageDraftsListTests(unittest.TestCase):
         self.assertFalse(payload["checks"]["to_matches_expected"])
         self.assertIn("to_mismatch", payload["warnings"])
 
+    def test_verify_drafts_preserves_order_and_reports_missing_invalid_ids(self):
+        calls: list[dict[str, object]] = []
+
+        def fake_verify(**kwargs):
+            calls.append(kwargs)
+            draft_id = kwargs["draft_id"]
+            found = draft_id != "303"
+            return json.dumps(
+                {
+                    "draft_id": draft_id,
+                    "found": found,
+                    "warnings": [] if found else ["draft_not_found"],
+                    "checks": {"body_contains_expected": kwargs["expected_body_contains"] == "hello"},
+                }
+            )
+
+        with patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify):
+            result = compose_tools.verify_drafts(
+                account="Work",
+                draft_ids=["101", "bad", "202", "101", "303"],
+                expected_body_contains="hello",
+                expected_signature=True,
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["draft_ids"], ["101", "202", "303"])
+        self.assertEqual(payload["invalid_ids"], ["bad"])
+        self.assertEqual(payload["missing_ids"], ["303"])
+        self.assertEqual(payload["found"], 2)
+        self.assertEqual(payload["chunk_size"], 50)
+        self.assertEqual([item["draft_id"] for item in payload["items"]], ["101", "202", "303"])
+        self.assertEqual([call["draft_id"] for call in calls], ["101", "202", "303"])
+        self.assertTrue(all(call["expected_body_contains"] == "hello" for call in calls))
+        self.assertTrue(all(call["expected_signature"] is True for call in calls))
+
+    def test_verify_drafts_rejects_non_numeric_draft_ids_without_calling_verifier(self):
+        with patch("apple_mail_mcp.tools.compose.verify_draft") as mock_verify:
+            result = compose_tools.verify_drafts(account="Work", draft_ids=["abc", ""])
+
+        mock_verify.assert_not_called()
+        self.assertIn("'draft_ids' must contain one or more numeric", result)
+
+    def test_verify_drafts_handles_120_ids(self):
+        calls: list[str] = []
+
+        def fake_verify(**kwargs):
+            draft_id = kwargs["draft_id"]
+            calls.append(draft_id)
+            return json.dumps({"draft_id": draft_id, "found": False, "warnings": ["draft_not_found"]})
+
+        ids = [str(i) for i in range(1, 121)]
+        with patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify):
+            result = compose_tools.verify_drafts(account="Work", draft_ids=ids)
+
+        payload = json.loads(result)
+        self.assertEqual(payload["draft_ids"], ids)
+        self.assertEqual(payload["found"], 0)
+        self.assertEqual(payload["missing_ids"], ids)
+        self.assertEqual(payload["chunk_size"], 50)
+        self.assertEqual(len(calls), 120)
+        self.assertEqual(calls[0], "1")
+        self.assertEqual(calls[50], "51")
+        self.assertEqual(calls[100], "101")
+
     def test_list_uses_newest_first_slice(self):
         captured = []
 

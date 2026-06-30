@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **30 tools**, **822 tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **822 tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -45,7 +45,7 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (30 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
+One install — MCP server (31 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -295,7 +295,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 
 </details>
 
-## Tools (30)
+## Tools (31)
 
 ### Reading & Search
 | Tool | Description |
@@ -328,6 +328,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
 | `manage_drafts` | Create, list, send, open, and delete drafts; list returns Drafts ids, and send/open/delete prefer exact `draft_id` over subject matching; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `verify_draft` | Verify one exact Drafts message id; returns JSON snapshot for recipients, body sentinel, attachments, signature state, quoted-original status, and thread headers |
+| `verify_drafts` | Verify multiple exact Drafts message ids and merge the per-draft JSON snapshots |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
@@ -608,7 +609,7 @@ apple-mail-mcp/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
-│   ├── apple_mail_mcp/        # Python MCP server package (30 tools)
+│   ├── apple_mail_mcp/        # Python MCP server package (31 tools)
 │   ├── apple_mail_mcp.py      # Entry point
 │   ├── start_mcp.sh           # Startup wrapper (auto-creates venv)
 │   └── requirements.txt

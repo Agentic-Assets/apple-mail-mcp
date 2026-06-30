@@ -24,7 +24,7 @@ Tool/CLI work: delegate to subagents for implementation; use **`plugin-dev:plugi
 
 ## `tools/` subfolder
 
-**30 tools** in **6 modules** (inbox 6, search 4, compose 6, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | awk -F: '{sum+=$NF} END {print sum}'`. For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
+**31 tools** in **6 modules** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | awk -F: '{sum+=$NF} END {print sum}'`. For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
 
 ## Shared state (`server.py`)
 
