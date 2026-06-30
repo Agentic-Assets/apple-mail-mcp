@@ -64,6 +64,12 @@ Completed in the batch exact-ID read pass:
 - Updated MCPB, README, guidance, and read-only registry surfaces for the 30-tool contract.
 - Added mocked tests for requested-order preservation, missing ids, invalid ids, 51-id and 120-id chunking, and content-preview quote detection.
 
+Completed in the attachment batch exact-ID pass:
+
+- Updated `list_email_attachments(message_ids=[...])` to chunk exact-id requests internally instead of returning `WHOSE_ID_LIST_TOO_LARGE`.
+- Preserved JSON attachment metadata while adding `chunk_size` to merged batch output.
+- Added mocked tests for 51-id and 120-id attachment listing batches.
+
 Still open:
 
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
@@ -293,7 +299,7 @@ Candidate APIs:
 
 - [x] `get_email_by_ids(message_ids=[...])`
 - [ ] `verify_drafts(draft_ids=[...])`
-- [ ] `list_email_attachments(message_ids=[...])`
+- [x] `list_email_attachments(message_ids=[...])`
 - [ ] `export_emails(message_ids=[...])`
 
 ## Phase 6: Final Verification And Release Readiness

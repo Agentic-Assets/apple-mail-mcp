@@ -1082,6 +1082,57 @@ class AnalyticsMessageIdPathTests(unittest.TestCase):
         self.assertIn("id of aMessage as string", captured["script"])
         self.assertIn("attachmentIndex from 1 to attachmentCount", captured["script"])
 
+    def test_list_email_attachments_chunks_51_message_ids_json(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "id is 51" in script:
+                return "51|||Second chunk|||sender@example.com|||2026-06-29|||1|||second.pdf|||2048"
+            return "1|||First chunk|||sender@example.com|||2026-06-29|||1|||first.pdf|||1024"
+
+        ids = [str(i) for i in range(1, 52)]
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            result = analytics_tools.list_email_attachments(
+                account="Work",
+                message_ids=ids,
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["message_ids"], ids)
+        self.assertEqual(payload["chunk_size"], 50)
+        self.assertEqual(payload["returned"], 2)
+        self.assertEqual([item["message_id"] for item in payload["items"]], ["1", "51"])
+        self.assertEqual(len(captured), 2)
+        self.assertIn("id is 1", captured[0])
+        self.assertIn("id is 50", captured[0])
+        self.assertNotIn("id is 51", captured[0])
+        self.assertIn("id is 51", captured[1])
+
+    def test_list_email_attachments_chunks_120_message_ids_json(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return ""
+
+        ids = [str(i) for i in range(1, 121)]
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            result = analytics_tools.list_email_attachments(
+                account="Work",
+                message_ids=ids,
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["message_ids"], ids)
+        self.assertEqual(payload["returned"], 0)
+        self.assertEqual(len(captured), 3)
+        self.assertIn("id is 1", captured[0])
+        self.assertIn("id is 51", captured[1])
+        self.assertIn("id is 101", captured[2])
+
     def test_list_email_attachments_rejects_invalid_output_format(self):
         result = analytics_tools.list_email_attachments(
             account="Work",

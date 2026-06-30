@@ -192,7 +192,7 @@ Add or extend:
 
 - `get_email_by_ids(message_ids=[...])` (implemented on `codex/id-first-search-retirement-implementation`)
 - `verify_drafts(draft_ids=[...])`
-- `list_email_attachments(message_ids=[...])`
+- `list_email_attachments(message_ids=[...])` (implemented with internal chunking on `codex/id-first-search-retirement-implementation`)
 - `export_emails(message_ids=[...])`
 
 Batching lets agents avoid re-running discovery loops and makes exact-ID workflows efficient.

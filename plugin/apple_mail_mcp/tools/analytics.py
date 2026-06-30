@@ -15,7 +15,7 @@ from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTAT
 logger = logging.getLogger(__name__)
 
 from apple_mail_mcp.backend.base import ToolError, target_selector_deprecated_error
-from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
+from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list, iter_id_chunks
 from apple_mail_mcp.constants import SCAN_BOUNDS, SKIP_FOLDERS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
@@ -136,19 +136,37 @@ def list_email_attachments(
         if not normalized_ids:
             return "Error: 'message_ids' must contain one or more numeric Mail ids"
         if len(normalized_ids) > MAX_WHOSE_IDS:
-            return json.dumps(
-                ToolError(
-                    code="WHOSE_ID_LIST_TOO_LARGE",
-                    message=(
-                        f"list_email_attachments received {len(normalized_ids)} message_ids; "
-                        f"hard cap is {MAX_WHOSE_IDS} per call."
-                    ),
-                    remediation={
-                        "preferred": (f"Split message_ids into batches of {MAX_WHOSE_IDS} or fewer"),
+            chunk_outputs = [
+                list_email_attachments(
+                    account=account,
+                    message_ids=chunk,
+                    max_results=max_results,
+                    timeout=timeout,
+                    output_format=output_format,
+                )
+                for chunk in iter_id_chunks(normalized_ids)
+            ]
+            if output_format == "json":
+                items: list[dict[str, Any]] = []
+                for chunk_output in chunk_outputs:
+                    try:
+                        payload = json.loads(chunk_output)
+                    except json.JSONDecodeError:
+                        return chunk_output
+                    if isinstance(payload, dict) and payload.get("code"):
+                        return chunk_output
+                    items.extend(payload.get("items", []))
+                return json.dumps(
+                    {
+                        "items": items,
+                        "returned": len(items),
+                        "message_ids": normalized_ids,
+                        "selector": "message_ids",
+                        "chunk_size": MAX_WHOSE_IDS,
                     },
-                ).to_dict(),
-                indent=2,
-            )
+                    indent=2,
+                )
+            return "\n\n".join(chunk_outputs)
         id_condition = build_whose_id_list(normalized_ids)
         use_id_lookup = True
         header_label = f"message_ids: {', '.join(normalized_ids)}"
