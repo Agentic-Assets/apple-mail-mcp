@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, **822 tests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, **932 collected tests**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. Recount tests with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
 ## Agent orchestration (required)
 
-**Always use subagents** for both **research and implementation** — not just exploration. Delegate real fixes, tests, docs, and live verification to subagents; the lead agent orchestrates and reviews.
+When the host exposes this repo's subagent tools, use subagents for both **research and implementation**, not just exploration. Delegate real fixes, tests, docs, and live verification to subagents; the lead agent orchestrates and reviews. If the host, task owner, or safety lane forbids subagents, do the work directly and state that constraint in the handoff.
 
 | When | Subagent |
 |------|----------|
@@ -14,7 +14,7 @@ Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, **82
 | Independent workstreams | Run subagents **in parallel** |
 | Dependent steps (e.g. perf gates before tool edits) | Run subagents **sequentially** |
 
-**Always use plugin-dev experts** for plugin, MCP, marketplace, and skill work — invoke before and after substantive changes:
+Use plugin-dev experts for plugin, MCP, marketplace, and skill work when they are available; invoke before and after substantive changes:
 
 | Expert | Use for |
 |--------|---------|
@@ -22,7 +22,7 @@ Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, **82
 | **`plugin-dev:skill-reviewer`** | Bundled skill descriptions, trigger overlap, safety language |
 | Skills: **`plugin-dev:mcp-integration`**, **`plugin-dev:plugin-structure`**, **`mcp-builder`** | MCP server design, `.mcp.json` / `plugin.json`, tool quality |
 
-Do not solo large plugin or perf workstreams without at least one plugin-dev expert pass.
+Do not solo large plugin or perf workstreams without at least one plugin-dev expert pass unless the current host or task lane makes those experts unavailable; in that case, document the gap and run the repo's local validation gates.
 
 **Run `code-simplifier:code-simplifier` regularly** — after any non-trivial change to tools, backend, helpers, or tests. Especially after refactors that touched many sites (e.g. capability-token / structured-error / bounded-scan work). Behavior must be preserved; the simplifier collapses duplication, drops dead branches, and tightens names. Trigger it as part of every "ready to ship" pass alongside `plugin-validator` and `skill-reviewer`, and any time a file grows past ~600 LOC or a helper sprouts >3 near-copies.
 
@@ -51,7 +51,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/pytest tests/                    # 822 tests
+.venv/bin/pytest tests/                    # 932 collected tests on current branch
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```

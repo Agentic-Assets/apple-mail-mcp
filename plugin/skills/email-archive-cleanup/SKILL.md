@@ -37,7 +37,7 @@ Use only when the user has explicitly approved a bulk campaign and ID collection
 ### 1. Frame The Objective And Scope
 
 - Confirm target **account**, mailbox, sender/topic/date window.
-- Decide whether backlog is exploratory (`recent_days` wide) or targeted (`sender=`, `subject_keyword=`).
+- Decide whether backlog is exploratory (`recent_days` wide) or targeted with discovery filters (`sender_exact=`, `sender_domain=`, `subject_keyword=`).
 
 ### 2. Establish Evidence
 

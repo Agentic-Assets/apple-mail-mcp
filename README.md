@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **822 tests**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, **932 collected tests**, Python **3.10+**.
 
 ## Documentation map
 
@@ -126,7 +126,7 @@ python3 -m venv .venv
   --arg ./start_mcp.sh \
   --arg=--draft-safe \
   --cwd "$PWD/plugin" \
-  --expect-count 29 \
+  --expect-count 31 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -158,7 +158,7 @@ replace the path below if the details output shows a different install path:
   --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
   --arg=--draft-safe \
   --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1" \
-  --expect-count 29 \
+  --expect-count 31 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -492,8 +492,8 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 ```
 Show me an overview of my inbox
 Search for emails about "project update" in my Gmail
-Reply to the email about "Domain name" with "Thanks for the update!"
-Move emails with "invoice" in the subject to my Archive folder
+Find the recent "Domain name" message, show me its message_id, then draft a reply by id
+Search for recent invoice messages, show me the candidate ids, then move the reviewed message_ids to Archive
 Show me email statistics for the last 30 days
 Draft replies to unread messages with mode=open for review, or create a rich HTML weekly-update draft
 ```

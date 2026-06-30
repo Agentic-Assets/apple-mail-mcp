@@ -4,8 +4,8 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 ## Agent orchestration
 
-- Use **subagents** for research **and** implementation (not research-only).
-- Use **plugin-dev experts** (`plugin-dev:plugin-validator`, `plugin-dev:skill-reviewer`, and the `plugin-dev:mcp-integration` / `plugin-dev:plugin-structure` skills) whenever docs or conventions touch manifests, skills, or MCP integration.
+- Use **subagents** for research **and** implementation when the host exposes them and the task lane permits them.
+- Use **plugin-dev experts** (`plugin-dev:plugin-validator`, `plugin-dev:skill-reviewer`, and the `plugin-dev:mcp-integration` / `plugin-dev:plugin-structure` skills) whenever available and docs or conventions touch manifests, skills, or MCP integration. If unavailable, say so and run local validation.
 
 ## Files
 

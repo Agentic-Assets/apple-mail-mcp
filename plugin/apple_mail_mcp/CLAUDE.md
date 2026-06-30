@@ -2,7 +2,7 @@
 
 Source of truth for the MCP server and repo CLI. Packaged on PyPI as **`mcp-apple-mail`** (`pyproject.toml` → `plugin/apple_mail_mcp/` plus `plugin/ui/` for the dashboard).
 
-Tool/CLI work: delegate to subagents for implementation; use **`plugin-dev:plugin-validator`** after tool-count or manifest changes. See root [`CLAUDE.md`](../../CLAUDE.md) § Agent orchestration.
+Tool/CLI work: delegate to subagents when available and permitted; use **`plugin-dev:plugin-validator`** after tool-count or manifest changes when available. If not, document the gap and run local validation. See root [`CLAUDE.md`](../../CLAUDE.md), Agent orchestration section.
 
 ## Entry flow
 

@@ -9,7 +9,7 @@ Codex Desktop/CLI uses a separate marketplace file at [`../.agents/plugins/marke
 | Field | Example | Meaning |
 |-------|---------|---------|
 | `metadata.version` | `1.0.0` | **This marketplace JSON** — not the plugin. Don't bump on every release. |
-| `plugins[0].version` | `3.6.1` | **Plugin release** — sync with `pyproject.toml`, `plugin.json`, `server.json`, mcpb manifest. |
+| `plugins[0].version` | `3.7.1` | **Plugin release**: sync with `pyproject.toml`, `plugin.json`, `server.json`, mcpb manifest. |
 
 `validate_manifests.sh` checks `plugins[0].version`, tool-count in `plugins[0].description`, `source`, listed skill paths, plugin name/version parity with `plugin/.claude-plugin/plugin.json`, **and the dual-component-conflict rule below**.
 
@@ -51,7 +51,7 @@ codex plugin add apple-mail@apple-mail-mcp
 
 For a local checkout, use `codex plugin marketplace add .` before the same `codex plugin add apple-mail@apple-mail-mcp` command.
 
-After edits: `plugin-dev:plugin-validator` + `tools/validate_manifests.sh` (+ `plugin-dev:skill-reviewer` when skills change).
+After edits: `plugin-dev:plugin-validator` when available + `tools/validate_manifests.sh` (+ `plugin-dev:skill-reviewer` when skills change).
 
 ## Related
 
