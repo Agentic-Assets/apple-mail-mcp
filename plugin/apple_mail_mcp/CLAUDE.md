@@ -26,6 +26,8 @@ Tool/CLI work: delegate to subagents when available and permitted; use **`plugin
 
 **31 tools** in **6 modules** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | awk -F: '{sum+=$NF} END {print sum}'`. For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
 
+**Module line budget:** all six tool modules exceed **600 LOC** today; CI warns and blocks further growth (`docs/CLAUDE-conventions.md` § Module line budget).
+
 ## Shared state (`server.py`)
 
 - `DEFAULT_MAIL_ACCOUNT` — from env; tools read lazily via `server.DEFAULT_MAIL_ACCOUNT`

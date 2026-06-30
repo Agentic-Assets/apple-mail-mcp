@@ -9,23 +9,15 @@ Operational guide for using the Apple Mail MCP safely and quickly. Focus on boot
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight checklist.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist.
 
 ### When to reach for `full_inbox_export`
 
 `full_inbox_export` is the only tool that walks the entire inbox. Use it for the rare full-inbox case — annual cleanup, full audit, compliance archive — and warn the user it is slow (minutes on a 24k inbox). For routine discovery, always pass a bounded `recent_days` / `max_emails` instead.
 
-## Already-replied safeguard
+## Before drafting
 
-Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. Discovery tools can help, but the final pre-draft thread check is still required:
-
-- `get_needs_response(check_already_replied=True)` filters or annotates already-replied emails by matching each candidate `internet_message_id` against Sent `In-Reply-To` / `References` headers. Keep `include_already_replied=False` unless the user explicitly asks to see already-handled messages.
-- `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
-- As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
-
-Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` with `check_already_replied=True` on `get_needs_response`, or `exclude_replied=False` elsewhere.
-
-See **[[email-drafting]]** for the required pre-draft verification step.
+If triage or search surfaced a `message_id` and the user wants a reply, load **`email-drafting`**. Pre-draft rules (already-replied check, thread verification, native reply): [`pre-draft-verification.md`](references/pre-draft-verification.md).
 
 ## When To Use This Skill
 
@@ -91,6 +83,16 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 - You need consolidated unread + recent + suggested-action data without paying three separate AppleScript round-trips.
 
 It is heavier than a compact `get_inbox_overview` on small inboxes, so keep `get_inbox_overview(output_format="compact", ...)` as the daily-loop default. Escalate to `inbox_dashboard()` as the rescue path.
+
+## Reply drafting handoff
+
+This skill covers read/search navigation, not compose. When the user wants to reply after you have a `message_id`, load **`email-drafting`** and call `reply_to_email(message_id=..., reply_body=..., mode="draft")`.
+
+- **Default path:** `native_format=True` (Mail's native reply window, colored quote bar, logo signature). Requires Mail focus and Accessibility permission for the host process.
+- **On `REPLY_WINDOW_FOCUS_FAILED`:** no draft was saved. Retry with Mail visible and unfocused elsewhere, or retry with `native_format=False` (windowless fallback, plain-text quote, no logo signature, no Accessibility needed).
+- **Never** substitute `compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")` for in-thread replies. Collect ids via `search_emails` / `list_inbox_emails`; never pass `subject_keyword` to `reply_to_email`.
+
+Full pre-draft verification, standalone-draft guards, and post-draft checks live in **`email-drafting`**.
 
 ## Additional Resources
 

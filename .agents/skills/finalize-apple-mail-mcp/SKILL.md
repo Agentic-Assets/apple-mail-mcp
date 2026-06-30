@@ -49,6 +49,7 @@ Finalize progress:
 - [ ] 3. Code + tests verified
 - [ ] 4. code-simplifier — pass over the diff (REQUIRED for any non-trivial change)
 - [ ] 5. Docs, CLAUDE.md, skills, manifests synced (remaining drift)
+- [ ] 5b. tasks/ hygiene — if planning artifacts moved or a workstream shipped: follow `tasks/CLAUDE.md` § Agent requirements; update `todo.md` + `INDEX.md`; run `python3 tools/validate_tasks_layout.py`
 - [ ] 6. skill-reviewer (if plugin/skills touched)
 - [ ] 7. Rebuild release artifacts — `bash tools/dev-check.sh release` (rebuilds **all three** artifacts: `apple-mail-plugin.zip` + `apple-mail.plugin` + `apple-mail-mcp-v{VERSION}.mcpb`, runs full validators including byte-parity check, runs mcpb unpack smoke). NEVER skip this step.
 - [ ] 8. Final review checklist
@@ -85,7 +86,9 @@ From repo root with `.venv/`:
 ```bash
 .venv/bin/pytest tests/ -q
 bash tools/validate_manifests.sh
-.venv/bin/pytest tests/test_validate_manifests.py tests/test_wrapper_surface.py -q
+python3 tools/validate_tasks_layout.py
+python3 tools/check_module_line_budget.py   # 600 LOC warn report (regression enforced in pytest + manifests)
+.venv/bin/pytest tests/test_module_line_budget.py tests/test_validate_manifests.py tests/test_tasks_layout.py -q
 ```
 
 Optional when tools or CLI changed:
@@ -128,7 +131,9 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 | MCP tools (`@mcp.tool`, params, defaults) | `plugin/apple_mail_mcp/tools/CLAUDE.md`, tool docstrings, `README.md` tool table, `docs/CLAUDE-conventions.md`, `apple-mail-mcpb/manifest.json` `tools[].description` |
 | Plugin wiring / flags | `plugin/docs/CLAUDE.md`, `plugin/apple_mail_mcp/CLAUDE.md`, `README.md` Configuration |
 | Agent workflows | `plugin/skills/*/SKILL.md`, `plugin/skills/CLAUDE.md`, `docs/CLAUDE.md` skill map |
+| Planning / task artifacts | `tasks/todo.md`, `tasks/INDEX.md`, `tasks/active/` (see `tasks/CLAUDE.md` § Agent requirements) |
 | Test count | Root `CLAUDE.md`, `README.md`, any doc citing test totals — use `pytest tests/ -q` result from step 3 |
+| Module line budget | After intentional splits: `python3 tools/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json`; do not refresh merely to allow growth |
 | Tool count | Five version files only on release; always sync **claims**: `grep -c '^@mcp.tool' plugin/apple_mail_mcp/tools/*.py` vs `plugin.json`, marketplace, MCPB `tools[]` |
 
 **CLAUDE.md hubs to spot-check** (stale cross-links or wrong counts):
@@ -184,6 +189,8 @@ If any step fails, fix the underlying issue — do not commit stale artifacts. *
 - [ ] No stale "open by default" or subject-matching guidance where `message_id` is preferred
 - [ ] No skill suggests `compose_email` / `create_rich_email_draft` / `manage_drafts(action="create")` for replies; `standalone_confirmed=True` is documented where standalone-with-Re: is legitimate
 - [ ] `email-drafting` and `apple-mail-operator` skills agree with README draft-safe section
+- [ ] `tasks/INDEX.md` and `tasks/todo.md` updated if a workstream opened, shipped, or archived
+- [ ] `python3 tools/validate_tasks_layout.py` passes (no loose files at `tasks/` root)
 - [ ] No secrets or local paths committed
 - [ ] Unrelated dirty files left unstaged
 

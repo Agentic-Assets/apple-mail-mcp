@@ -161,17 +161,8 @@ class DefaultAccountFallbackTests(unittest.TestCase):
     # --- analytics ---
 
     def test_list_email_attachments_uses_default_account(self):
-        # list_email_attachments now runs a preflight via the search helper
-        # before invoking analytics.run_applescript. Patch both so the
-        # preflight returns a hit and we capture the analytics-side script.
         cap = _ScriptCapture(return_value="ok")
-        with (
-            patch(
-                "apple_mail_mcp.tools.analytics._search_mail_records",
-                return_value=[{"subject": "Invoice"}],
-            ),
-            patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap),
-        ):
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=cap):
             result = analytics_tools.list_email_attachments(message_ids=["42"], max_results=5)
         self.assertNotIn("DEFAULT_MAIL_ACCOUNT", result)
         self.assertIn(f'account "{self.ACCOUNT}"', cap.last_script)
@@ -409,9 +400,6 @@ class AppleScriptTimeoutHandlingTests(unittest.TestCase):
         self.assertIn("timed out", result.lower())
 
     def test_analytics_list_attachments_handles_timeout(self):
-        # list_email_attachments preflight goes through the search helper.
-        # Patch search.run_applescript so the preflight times out — the tool
-        # must surface this as a structured "timed out" error.
         with patch(
             "apple_mail_mcp.tools.analytics.run_applescript",
             side_effect=self._timeout,

@@ -16,9 +16,9 @@
   - `.venv/bin/mypy --strict plugin/apple_mail_mcp/` -> `116` errors in `9` files
 - Because the goal says to stop and report if strict ruff/mypy surfaces more than 50 issues needing triage, no MCP behavior changes have been made yet.
 - Bootstrapped durable task sidecars:
-  - `tasks/v4-performance-consolidation-2026-05-27/phase-plan.md`
-  - `tasks/v4-performance-consolidation-2026-05-27/progress-log.md`
-  - `tasks/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`
+  - `tasks/active/v4-performance-consolidation-2026-05-27/phase-plan.md`
+  - `tasks/active/v4-performance-consolidation-2026-05-27/progress-log.md`
+  - `tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`
 - Updated `tasks/todo.md` and `tasks/INDEX.md` so future agents land on the v4 workstream rather than stale v3.2.1 release notes.
 - User confirmed the strict lint/type errors should be treated as real cleanup work and asked to continue with the strict version.
 - Ran `.venv/bin/ruff check plugin/apple_mail_mcp/ --fix` and `.venv/bin/ruff format plugin/apple_mail_mcp/`, then completed semantic strict fixes for typed decorators, AppleScript runner injection, search/inbox tuple contracts, path handling, temp-file context managers, exception chaining, and unused variables.

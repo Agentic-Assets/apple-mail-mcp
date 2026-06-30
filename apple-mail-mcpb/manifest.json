@@ -79,11 +79,11 @@
     },
     {
       "name": "move_email",
-      "description": "Move emails by message_ids (preferred, fast) or rarely by filters with allow_filter_scan=true. Nested mailbox paths use '/'. Default max 50; dry_run=true previews ID moves without scanning."
+      "description": "Move emails by message_ids (preferred, fast). allow_filter_scan=true plus older_than_days is the only filter escape hatch for date/bulk moves; subject_keyword and sender are schema-compat only and always return TARGET_SELECTOR_DEPRECATED even with allow_filter_scan=true. Nested mailbox paths use '/'. Default max 50; dry_run=true previews ID moves."
     },
     {
       "name": "reply_to_email",
-      "description": "Reply to an email by message_id (preferred) or subject keyword. By default (native_format=true) the reply is composed in Mail's native reply window so the draft keeps Mail's colored quote bar and the account's default signature (with logo); reply_body is typed in above the quote with a keystroke, which needs the Mail window to take focus and Accessibility permission for the host process. Set native_format=false to compose through the object model with no window (headless/bulk-safe, no Accessibility needed); that path assigns reply_body above a plain-text quoted original, flattening the rich quote and signature. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED. Default mode saves to Drafts, verifies exact Drafts id first when Mail exposes one, and uses bounded newest-Drafts fallback only when needed. Verification fails with a structured artifact id if the body is missing or appears after the quote; if the native window cannot take focus the tool returns REPLY_WINDOW_FOCUS_FAILED without saving. mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, and CC/BCC. body_html is accepted for backward compatibility but ignored for native replies."
+      "description": "Reply by message_id (required — discover via search_emails or list_inbox_emails). subject_keyword on this tool is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Default native_format=true composes in Mail's native reply window (keeps colored quote bar and logo signature); reply_body is typed above the quote and needs Mail window focus plus Accessibility permission for the host, or returns REPLY_WINDOW_FOCUS_FAILED. native_format=false is the windowless object-model fallback (plain-text quote). Default mode saves to Drafts and verifies exact Drafts id when Mail exposes one. mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, and CC/BCC. body_html is accepted for backward compatibility but ignored for native replies."
     },
     {
       "name": "compose_email",
@@ -91,7 +91,7 @@
     },
     {
       "name": "forward_email",
-      "description": "Forward an email by message_id (preferred) or subject keyword. Subject-keyword fallback requires recent_days > 0 (default 2.0 / 48h); recent_days<=0 is rejected with UNBOUNDED_SCAN_REQUIRED — pass message_id for constant-cost lookups or route audited full-mailbox sweeps through full_inbox_export. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, optional prepended message, and CC/BCC."
+      "description": "Forward by message_id (required — discover via search_emails or list_inbox_emails). subject_keyword is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, optional prepended message, and CC/BCC."
     },
     {
       "name": "create_rich_email_draft",
@@ -99,7 +99,7 @@
     },
     {
       "name": "manage_drafts",
-      "description": "Complete draft lifecycle: list, find by thread header, create, send, open, delete. action=list returns Drafts ids; action=find scans bounded newest Drafts headers for In-Reply-To or References; send/open/delete prefer exact draft_id over subject matching. action=create makes a standalone draft and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Send action is blocked in --read-only and --draft-safe mode."
+      "description": "Complete draft lifecycle: list, find by thread header, create, send, open, delete. action=list returns Drafts ids; action=find scans bounded newest Drafts headers for In-Reply-To or References; send/open/delete require exact draft_id (draft_subject is schema-compat only and returns TARGET_SELECTOR_DEPRECATED). action=create makes a standalone draft and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Send action is blocked in --read-only and --draft-safe mode."
     },
     {
       "name": "verify_draft",
@@ -111,11 +111,11 @@
     },
     {
       "name": "list_email_attachments",
-      "description": "List attachments by message_ids (preferred) or subject keyword. Capped at max_results (default 50) for fast responses on large inboxes."
+      "description": "List attachments by message_ids (required — discover via search_emails or list_inbox_emails). subject_keyword is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Capped at max_results (default 50) for fast responses on large inboxes."
     },
     {
       "name": "save_email_attachment",
-      "description": "Save a specific attachment to disk. Validates target path — blocks writes to sensitive directories."
+      "description": "Save a specific attachment to disk. Requires message_ids from prior search_emails, list_inbox_emails, or list_email_attachments; use list_email_attachments to pick attachment_index. Validates target path — blocks writes to sensitive directories."
     },
     {
       "name": "search_emails",
@@ -135,11 +135,11 @@
     },
     {
       "name": "update_email_status",
-      "description": "Batch mark read/unread, flag/unflag by message_ids (preferred). Filter scans require allow_filter_scan=true. Default max 10 per call."
+      "description": "Batch mark read/unread, flag/unflag by message_ids (preferred). allow_filter_scan=true plus older_than_days or apply_to_all is the only filter escape hatch; subject_keyword and sender are schema-compat only and always return TARGET_SELECTOR_DEPRECATED. Default max 10 per call."
     },
     {
       "name": "manage_trash",
-      "description": "Trash lifecycle: move_to_trash, delete_permanent, empty_trash. Prefer message_ids; filter scans need allow_filter_scan=true. empty_trash requires confirm_empty=True. Default max 5."
+      "description": "Trash lifecycle: move_to_trash, delete_permanent, empty_trash. Prefer message_ids; allow_filter_scan=true plus older_than_days only for date/bulk paths — subject_keyword and sender always return TARGET_SELECTOR_DEPRECATED. empty_trash requires confirm_empty=True. Default max 5."
     },
     {
       "name": "create_mailbox",
@@ -167,7 +167,7 @@
     },
     {
       "name": "export_emails",
-      "description": "Export emails to txt or html. Exact message_ids are preferred for reviewed batches; single_email supports message_id; entire_mailbox exports up to max_emails messages from a mailbox."
+      "description": "Export emails to txt or html. Prefer exact message_ids for reviewed batches. single_email scope requires message_id (subject_keyword returns TARGET_SELECTOR_DEPRECATED). entire_mailbox exports up to max_emails messages from a mailbox."
     },
     {
       "name": "full_inbox_export",

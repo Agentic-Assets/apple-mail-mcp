@@ -28,7 +28,6 @@ from apple_mail_mcp.core import (
     validate_account_name,
     validate_save_path,
 )
-from apple_mail_mcp.tools.search import _search_mail_records_sync as _search_mail_records
 
 
 def _parse_attachment_listing_rows(text: str) -> list[dict[str, Any]]:
@@ -85,9 +84,9 @@ def list_email_attachments(
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal"). Falls back
             to ``DEFAULT_MAIL_ACCOUNT`` when None.
-        subject_keyword: Keyword to search for in email subjects (omit when
-            message_ids is set)
-        message_ids: Optional list of exact Mail message ids for precise targeting
+        subject_keyword: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
+        message_ids: List of exact Mail message ids (required for targeting)
         max_results: Maximum number of messages to inspect from the inbox
             (default: 50). The AppleScript only enumerates this many messages.
         timeout: Optional AppleScript timeout in seconds. Defaults to the
@@ -107,7 +106,10 @@ def list_email_attachments(
         return "Error: 'account' is required (no DEFAULT_MAIL_ACCOUNT configured)"
 
     if message_ids is None and not subject_keyword:
-        return "Error: subject_keyword or message_ids is required"
+        return (
+            "Error: message_ids is required (discover via search_emails(..., has_attachments=True) "
+            "or list_email_attachments, then pass message_ids=[...])"
+        )
     if message_ids is None and subject_keyword:
         return target_selector_deprecated_error(
             "list_email_attachments",
@@ -123,97 +125,49 @@ def list_email_attachments(
         return account_err
 
     # Escape for AppleScript
-    escaped_keyword = escape_applescript(subject_keyword)
     escaped_account = escape_applescript(account)
     sanitize_script = sanitize_field_handler()
 
-    header_label = subject_keyword
-    use_id_lookup = False
-    id_filter_script = ""
-
-    if message_ids is not None:
-        normalized_ids = normalize_message_ids(message_ids)
-        if not normalized_ids:
-            return "Error: 'message_ids' must contain one or more numeric Mail ids"
-        if len(normalized_ids) > MAX_WHOSE_IDS:
-            chunk_outputs = [
-                list_email_attachments(
-                    account=account,
-                    message_ids=chunk,
-                    max_results=max_results,
-                    timeout=timeout,
-                    output_format=output_format,
-                )
-                for chunk in iter_id_chunks(normalized_ids)
-            ]
-            if output_format == "json":
-                items: list[dict[str, Any]] = []
-                for chunk_output in chunk_outputs:
-                    try:
-                        payload = json.loads(chunk_output)
-                    except json.JSONDecodeError:
-                        return chunk_output
-                    if isinstance(payload, dict) and payload.get("code"):
-                        return chunk_output
-                    items.extend(payload.get("items", []))
-                return json.dumps(
-                    {
-                        "items": items,
-                        "returned": len(items),
-                        "message_ids": normalized_ids,
-                        "selector": "message_ids",
-                        "chunk_size": MAX_WHOSE_IDS,
-                    },
-                    indent=2,
-                )
-            return "\n\n".join(chunk_outputs)
-        id_condition = build_whose_id_list(normalized_ids)
-        use_id_lookup = True
-        header_label = f"message_ids: {', '.join(normalized_ids)}"
-        id_filter_script = f"set inboxMessages to every message of inboxMailbox whose {id_condition}"
-    else:
-        # Fast no-hit path: use the optimized search helper first so no-match
-        # attachment checks don't scan the inbox with a Python-side loop.
-        try:
-            preflight_records = _search_mail_records(
+    normalized_ids = normalize_message_ids(message_ids)
+    if not normalized_ids:
+        return "Error: 'message_ids' must contain one or more numeric Mail ids"
+    if len(normalized_ids) > MAX_WHOSE_IDS:
+        chunk_outputs = [
+            list_email_attachments(
                 account=account,
-                mailbox="INBOX",
-                subject_terms=[subject_keyword],
-                has_attachments=True,
-                include_content=False,
-                offset=0,
-                limit=max_results,
+                message_ids=chunk,
+                max_results=max_results,
                 timeout=timeout,
+                output_format=output_format,
             )
-        except AppleScriptTimeout:
-            return f"Error: AppleScript timed out while listing attachments for '{account}'"
-        if not preflight_records:
-            return (
-                f"ATTACHMENTS FOR: {subject_keyword}\n\n"
-                "========================================\n"
-                "FOUND: 0 matching email(s)\n"
-                "========================================"
+            for chunk in iter_id_chunks(normalized_ids)
+        ]
+        if output_format == "json":
+            items: list[dict[str, Any]] = []
+            for chunk_output in chunk_outputs:
+                try:
+                    payload = json.loads(chunk_output)
+                except json.JSONDecodeError:
+                    return chunk_output
+                if isinstance(payload, dict) and payload.get("code"):
+                    return chunk_output
+                items.extend(payload.get("items", []))
+            return json.dumps(
+                {
+                    "items": items,
+                    "returned": len(items),
+                    "message_ids": normalized_ids,
+                    "selector": "message_ids",
+                    "chunk_size": MAX_WHOSE_IDS,
+                },
+                indent=2,
             )
+        return "\n\n".join(chunk_outputs)
+    id_condition = build_whose_id_list(normalized_ids)
+    header_label = f"message_ids: {', '.join(normalized_ids)}"
+    message_lookup_script = f"set inboxMessages to every message of inboxMailbox whose {id_condition}"
 
     escaped_header = escape_applescript(header_label)
-    message_lookup_script = (
-        id_filter_script
-        if use_id_lookup
-        else f"""
-            if (count of messages of inboxMailbox) > {max_results} then
-                set inboxMessages to messages 1 thru {max_results} of inboxMailbox
-            else
-                set inboxMessages to messages of inboxMailbox
-            end if"""
-    )
-    subject_match_block = (
-        ""
-        if use_id_lookup
-        else f"""
-                    -- Check if subject contains keyword
-                    if messageSubject contains "{escaped_keyword}" then"""
-    )
-    subject_match_close = "" if use_id_lookup else "                    end if"
 
     if output_format == "json":
         script = f'''
@@ -234,23 +188,21 @@ def list_email_attachments(
                     set messageSubject to subject of aMessage
                     set messageSender to sender of aMessage
                     set messageDate to date received of aMessage
-{subject_match_block}
-                        set msgAttachments to mail attachments of aMessage
-                        set attachmentCount to count of msgAttachments
+                    set msgAttachments to mail attachments of aMessage
+                    set attachmentCount to count of msgAttachments
 
-                        repeat with attachmentIndex from 1 to attachmentCount
-                            set anAttachment to item attachmentIndex of msgAttachments
-                            set attachmentName to name of anAttachment
-                            set attachmentSizeText to ""
-                            try
-                                set attachmentSizeText to (file size of anAttachment as integer) as string
-                            end try
+                    repeat with attachmentIndex from 1 to attachmentCount
+                        set anAttachment to item attachmentIndex of msgAttachments
+                        set attachmentName to name of anAttachment
+                        set attachmentSizeText to ""
+                        try
+                            set attachmentSizeText to (file size of anAttachment as integer) as string
+                        end try
 
-                            set outputText to outputText & messageId & "|||" & my sanitize_field(messageSubject) & "|||" & my sanitize_field(messageSender) & "|||" & my sanitize_field(messageDate) & "|||" & (attachmentIndex as string) & "|||" & my sanitize_field(attachmentName) & "|||" & attachmentSizeText & return
-                        end repeat
+                        set outputText to outputText & messageId & "|||" & my sanitize_field(messageSubject) & "|||" & my sanitize_field(messageSender) & "|||" & my sanitize_field(messageDate) & "|||" & (attachmentIndex as string) & "|||" & my sanitize_field(attachmentName) & "|||" & attachmentSizeText & return
+                    end repeat
 
-                        set resultCount to resultCount + 1
-{subject_match_close}
+                    set resultCount to resultCount + 1
                 end try
             end repeat
 
@@ -277,38 +229,36 @@ def list_email_attachments(
 
                 try
                     set messageSubject to subject of aMessage
-{subject_match_block}
-                        set messageSender to sender of aMessage
-                        set messageDate to date received of aMessage
+                    set messageSender to sender of aMessage
+                    set messageDate to date received of aMessage
 
-                        set outputText to outputText & "✉ " & messageSubject & return
-                        set outputText to outputText & "   From: " & messageSender & return
-                        set outputText to outputText & "   Date: " & (messageDate as string) & return & return
+                    set outputText to outputText & "✉ " & messageSubject & return
+                    set outputText to outputText & "   From: " & messageSender & return
+                    set outputText to outputText & "   Date: " & (messageDate as string) & return & return
 
-                        -- Get attachments
-                        set msgAttachments to mail attachments of aMessage
-                        set attachmentCount to count of msgAttachments
+                    -- Get attachments
+                    set msgAttachments to mail attachments of aMessage
+                    set attachmentCount to count of msgAttachments
 
-                        if attachmentCount > 0 then
-                            set outputText to outputText & "   Attachments (" & attachmentCount & "):" & return
+                    if attachmentCount > 0 then
+                        set outputText to outputText & "   Attachments (" & attachmentCount & "):" & return
 
-                            repeat with anAttachment in msgAttachments
-                                set attachmentName to name of anAttachment
-                                try
-                                    set attachmentSize to file size of anAttachment
-                                    set sizeInKB to (attachmentSize / 1024) as integer
-                                    set outputText to outputText & "   📎 " & attachmentName & " (" & sizeInKB & " KB)" & return
-                                on error
-                                    set outputText to outputText & "   📎 " & attachmentName & return
-                                end try
-                            end repeat
-                        else
-                            set outputText to outputText & "   No attachments" & return
-                        end if
+                        repeat with anAttachment in msgAttachments
+                            set attachmentName to name of anAttachment
+                            try
+                                set attachmentSize to file size of anAttachment
+                                set sizeInKB to (attachmentSize / 1024) as integer
+                                set outputText to outputText & "   📎 " & attachmentName & " (" & sizeInKB & " KB)" & return
+                            on error
+                                set outputText to outputText & "   📎 " & attachmentName & return
+                            end try
+                        end repeat
+                    else
+                        set outputText to outputText & "   No attachments" & return
+                    end if
 
-                        set outputText to outputText & return
-                        set resultCount to resultCount + 1
-{subject_match_close}
+                    set outputText to outputText & return
+                    set resultCount to resultCount + 1
                 end try
             end repeat
 
@@ -336,7 +286,7 @@ def list_email_attachments(
             {
                 "items": items,
                 "returned": len(items),
-                "message_ids": normalize_message_ids(message_ids or []),
+                "message_ids": normalized_ids,
                 "selector": "message_ids",
             },
             indent=2,
@@ -1248,10 +1198,12 @@ def export_emails(
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
             ``DEFAULT_MAIL_ACCOUNT`` when None.
-        scope: Export scope: "single_email" (requires subject_keyword or message_id)
-            or "entire_mailbox"
-        subject_keyword: Keyword to find email (optional when message_id is set)
-        message_id: Optional numeric Apple Mail message id for single_email scope
+        scope: Export scope: "single_email" (requires ``message_id`` or
+            ``message_ids``; ``subject_keyword`` path returns
+            ``TARGET_SELECTOR_DEPRECATED``) or "entire_mailbox"
+        subject_keyword: Deprecated schema-compat selector for single_email scope.
+            Returns ``TARGET_SELECTOR_DEPRECATED`` when ``message_id`` is omitted.
+        message_id: Exact numeric Apple Mail message id for single_email scope
         message_ids: Optional list of exact Apple Mail message ids to export
         mailbox: Mailbox to export from (default: "INBOX")
         save_directory: Directory to save exports (default: "~/Desktop")
@@ -1333,7 +1285,10 @@ def export_emails(
 
     if scope == "single_email":
         if not message_id and not subject_keyword:
-            return "Error: 'message_id' or 'subject_keyword' required for single_email scope"
+            return (
+                "Error: message_id is required for single_email scope "
+                "(discover via search_emails(...) or list_inbox_emails(...), then pass message_id)"
+            )
         if not message_id and subject_keyword:
             return target_selector_deprecated_error(
                 "export_emails",
@@ -1343,30 +1298,11 @@ def export_emails(
                 exact_selector="message_id",
             )
 
-        safe_subject_keyword = escape_applescript(subject_keyword or "")
-        if message_id:
-            normalized_ids = normalize_message_ids([message_id])
-            if not normalized_ids:
-                return "Error: message_id must be a numeric Apple Mail message id"
-            target_message_id = normalized_ids[0]
-        else:
-            try:
-                records = _search_mail_records(
-                    account=account,
-                    mailbox=mailbox,
-                    subject_terms=[subject_keyword],
-                    include_content=False,
-                    offset=0,
-                    limit=1,
-                    timeout=timeout if timeout is not None else 45,
-                )
-            except AppleScriptTimeout:
-                return f"Error: AppleScript timed out while locating email for '{account}'"
-            if not records:
-                return f"⚠ No email found matching: {safe_subject_keyword}"
-            target_message_id = str(records[0].get("message_id", "")).strip()
-            if not target_message_id.isdigit():
-                return f"⚠ No email found matching: {safe_subject_keyword}"
+        normalized_ids = normalize_message_ids([message_id])
+        if not normalized_ids:
+            return "Error: message_id must be a numeric Apple Mail message id"
+        target_message_id = normalized_ids[0]
+        safe_not_found_label = escape_applescript(f"message_id={target_message_id}")
 
         script = f'''
         tell application "Mail"
@@ -1385,9 +1321,7 @@ def export_emails(
                     end if
                 end try
 
-                -- Resolve the subject through the bounded Python search helper,
-                -- then export by exact Mail id so this path does not broad-scan
-                -- a large remote mailbox by subject.
+                -- Export by exact Mail message id (no subject scan).
                 set matchedMessages to (every message of targetMailbox whose id is {target_message_id})
                 set foundMessage to missing value
                 if (count of matchedMessages) > 0 then
@@ -1437,7 +1371,7 @@ def export_emails(
                     set outputText to outputText & "Saved to: " & filePath & return
 
                 else
-                    set outputText to outputText & "⚠ No email found matching: {safe_subject_keyword}" & return
+                    set outputText to outputText & "⚠ No email found matching: {safe_not_found_label}" & return
                 end if
 
             on error errMsg

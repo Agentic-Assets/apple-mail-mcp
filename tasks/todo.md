@@ -1,5 +1,7 @@
 # Active Pointer — apple-mail-mcp
 
+**Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; CI enforces).
+
 **Branch:** `codex/pr38-guidance-verifier-followup`. Native-reply workstream SHIPPED in
 **v3.8.0** (committed; see CHANGELOG 3.8.0).
 
@@ -8,9 +10,9 @@
 drafts keep the colored quote bar + the account's default logo signature. Object-model
 flatten path preserved as `native_format=False` (headless/bulk-safe).
 
-**Handoff (READ THIS FIRST):** [`tasks/native-reply-handoff-2026-06-30.md`](native-reply-handoff-2026-06-30.md)
+**Handoff (READ THIS FIRST):** [`tasks/active/native-reply/native-reply-handoff-2026-06-30.md`](active/native-reply/native-reply-handoff-2026-06-30.md)
 for full Done / To-test detail. Findings + reusable probes:
-[`tasks/native-reply-probes-2026-06-30.md`](native-reply-probes-2026-06-30.md).
+[`tasks/active/native-reply/native-reply-probes-2026-06-30.md`](active/native-reply/native-reply-probes-2026-06-30.md).
 
 **Done this pass (2026-06-30):** Test suite re-aligned to the native default (8
 flatten-path tests pinned to `native_format=False`, 4 default-path tests rewritten to
@@ -31,7 +33,10 @@ that throws on a list, degrading every matched attachment to `"unsupported"`) by
 switching to `set item N ... to missing value` (dictionary- and live-verified). Also
 centralized the collected-test count to `tools/expected_test_count.txt` (single source
 of truth) and added a `dev-check.sh` gate that fails on drift, so the number no longer
-lives hardcoded across CLAUDE.md/AGENTS.md/README/tests+tasks CLAUDE.md.
+lives hardcoded across CLAUDE.md/AGENTS.md/README/tests+tasks CLAUDE.md. **Module line
+budget** gate added (`tools/check_module_line_budget.py`, `tests/test_module_line_budget.py`):
+600 LOC warn on `plugin/apple_mail_mcp/` + `tools/`, baseline regression in CI/dev-check/validate_manifests;
+documented across `docs/CLAUDE-conventions.md` § Module line budget and agent hubs.
 
 **Deferred follow-up (brand-voice, not a blocker):** `plugin-validator` flagged
 pre-existing em dashes in ~10 shipped descriptions (top-level + 8 tool descriptions in
@@ -59,4 +64,4 @@ thread, and `GUARD_ABORT` under real focus contention. See the handoff TO-TEST s
 ---
 
 _Superseded 2026-06-08 pointer:_ Cleanup/simplification after native-reply/Codex
-launcher fixes; plan `tasks/cleanup-docs-and-simplify-2026-06-08/phase-plan.md`.
+launcher fixes; plan `tasks/archive/2026-06/shipped/cleanup-docs-and-simplify-2026-06-08/phase-plan.md`.

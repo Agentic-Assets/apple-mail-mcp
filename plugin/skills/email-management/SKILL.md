@@ -9,23 +9,15 @@ Sustained inbox organization for Apple Mail: repeatable processing habits plus I
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight checklist.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist.
 
 ### When to reach for `full_inbox_export`
 
 `full_inbox_export` is the only tool that walks the entire inbox. Reserve it for the rare full-inbox case — annual cleanup, complete audit, compliance archive, or pre-migration snapshot. It is slow (minutes on a 24k inbox); never use it inside a habitual triage loop. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
 
-## Already-replied safeguard
+## Before drafting
 
-Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. Discovery tools can help, but the final pre-draft thread check is still required:
-
-- `get_needs_response(check_already_replied=True)` filters or annotates already-replied emails by matching each candidate `internet_message_id` against Sent `In-Reply-To` / `References` headers. Keep `include_already_replied=False` unless the user explicitly asks to see already-handled messages.
-- `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
-- As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
-
-Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` with `check_already_replied=True` on `get_needs_response`, or `exclude_replied=False` elsewhere.
-
-See **[[email-drafting]]** for the required pre-draft verification step.
+Umbrella programs may end in replies. Load **`email-drafting`** and follow [`pre-draft-verification.md`](references/pre-draft-verification.md) before any `reply_to_email` call.
 
 ## When To Use This Skill
 
@@ -33,7 +25,7 @@ Use when the request is about reducing inbox volume through **habitual** process
 
 Do NOT use for:
 
-- Composing or replying to a specific message — route to **`email-drafting`** (still uses compose MCP tools under the hood).
+- Composing or replying to a specific message — route to **`email-drafting`** (`reply_to_email(message_id=...)` for thread replies).
 - A brief read-first scan — see **`inbox-triage`**.
 - Saving attachments — see **`email-attachments`**.
 - Pure Mail MCP setup / timeouts — see **`apple-mail-operator`**.
@@ -64,6 +56,8 @@ When in doubt, run a narrow query first and widen only if results are insufficie
 | Compose / drafts | `email-drafting` (+ `email-style-profile` beforehand) |
 | Attachments extraction | `email-attachments` |
 | Single lookup | Prefer `apple-mail-operator` cheat sheet vs loading this umbrella |
+
+**Templates are examples, not the skill contract.** Copy-paste workflows under `templates/` and `examples/` must follow `templates/search-patterns.md` (discovery → ids → action). When in doubt, route to the narrow sibling skill above.
 
 ## Destructive Operations — Safety Caps
 
@@ -97,7 +91,7 @@ Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 min
 2. Surface priorities: `get_needs_response(days_back=2, max_results=20, output_format="json")` for likely replies. Use each row's numeric `message_id` for downstream reads, replies, moves, and status updates; keep `internet_message_id` only for replied-header correlation. Optionally use `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
 3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(message_id=...)` for full content — do not re-search by subject.
 4. Decide per message using the four-option rule: respond, defer, file, or delete.
-   - For responses, defer to **`email-drafting`** (compose MCP stack).
+   - For responses, defer to **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail.
    - To defer, flag with `update_email_status(action="flag", message_ids=["..."])`.
    - To file, use `move_email(message_ids=["..."], to_mailbox="...", dry_run=True)` then execute.
    - To delete, use `manage_trash(action="move_to_trash", message_ids=["..."])` with an explicit cap.
@@ -135,7 +129,7 @@ Goal: drain the inbox by processing every message exactly once.
    - Delete: spam, expired notifications — `manage_trash(action="move_to_trash", message_ids=[...])`.
    - Delegate: forward — use **`email-drafting`** (`forward_email` tool) after user confirms recipients.
    - Defer: flag and move to a "Follow Up" mailbox.
-   - Do: respond now if under two minutes — use **`email-drafting`** (compose stack); never auto-send under `--draft-safe`. Always route replies through `reply_to_email(message_id=...)`; `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
+   - Do: respond now if under two minutes — use **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail. Never auto-send under `--draft-safe`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
    - File: `move_email(message_ids=[...], to_mailbox="...")` for reference material.
 3. Keep folders sparing: an "Action Required", "Waiting For", and "Reference" trio handles most cases.
 4. Maintain daily — Inbox Zero is a habit, not a one-time event.
@@ -161,7 +155,7 @@ Mindset:
 | Search email bodies | `search_emails(body_text="...", allow_body_scan=True)` | Slower; requires explicit opt-in |
 | Cross-account search | `search_emails(account=None, all_accounts=True)` | Costly on Exchange; use sparingly |
 | Recent inbox listing | `list_inbox_emails(max_emails=50, read_status="unread", include_content=False)` | Default cap is 50; `read_status="unread"` is the cheapest pass on a large inbox. Legacy `include_read=False` still works but deprecated. |
-| View a conversation | `get_email_thread(message_id="...")` | Use subject lookup only as a degraded path after confirming no id is available |
+| View a conversation | `get_email_thread(message_id="...")` | **Discovery-only:** if no id yet, run bounded `search_emails` or `list_inbox_emails` first, then pass returned `message_id` |
 | Move messages | `move_email(message_ids=[...], max_moves=N)` | ID-first; filter scans need `allow_filter_scan=True` |
 | Flag / mark read | `update_email_status(action="...", message_ids=[...])` | ID-first; default cap 10 |
 | Move to trash / delete | `manage_trash(action="...", message_ids=[...])` | See `references/bulk-cleanup.md` |

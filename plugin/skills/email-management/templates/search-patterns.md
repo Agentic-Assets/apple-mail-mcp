@@ -20,7 +20,8 @@ results = search_emails(
     output_format="json",
 )
 
-ids = [item["message_id"] for item in results["items"]]
+ids = [item["message_id"] for item in results["items"]]  # search_emails JSON key is "items"
+# list_inbox_emails uses results["emails"] instead
 # Review subjects, senders, dates, mailboxes, and ids before acting.
 move_email(dry_run=True, message_ids=ids, to_mailbox="Projects/Alpha", max_moves=len(ids))
 move_email(dry_run=False, message_ids=ids, to_mailbox="Projects/Alpha", max_moves=len(ids))
@@ -195,6 +196,8 @@ reply_to_email(
     reply_body="Thanks, I will review and follow up.",
     mode="draft",
 )
+# Default native_format=True (rich quote + logo signature); load email-drafting for
+# Accessibility / REPLY_WINDOW_FOCUS_FAILED recovery. Use native_format=False headless only.
 ```
 
 Do not reply or forward by subject. If no id is known, run `search_emails` or `list_inbox_emails` first.

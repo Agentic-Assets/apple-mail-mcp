@@ -95,8 +95,8 @@ bash tools/dev-check.sh manifest
 **Steps:**
 
 1. Capture full strict baselines to files under the workstream folder:
-   - `.venv/bin/ruff check plugin/apple_mail_mcp/ > tasks/v4-performance-consolidation-2026-05-27/ruff-baseline.txt`
-   - `.venv/bin/mypy --strict plugin/apple_mail_mcp/ > tasks/v4-performance-consolidation-2026-05-27/mypy-strict-baseline.txt`
+   - `.venv/bin/ruff check plugin/apple_mail_mcp/ > tasks/active/v4-performance-consolidation-2026-05-27/ruff-baseline.txt`
+   - `.venv/bin/mypy --strict plugin/apple_mail_mcp/ > tasks/active/v4-performance-consolidation-2026-05-27/mypy-strict-baseline.txt`
 2. Split issues into mechanical formatting/pyupgrade/import fixes versus semantic typing fixes.
 3. Land the mechanical ruff cleanup only if its diff is reviewable and tests stay green.
 4. Land strict mypy cleanup module-by-module, starting with helper modules before tool modules.

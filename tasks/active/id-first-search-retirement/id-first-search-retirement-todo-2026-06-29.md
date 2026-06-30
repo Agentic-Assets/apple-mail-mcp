@@ -1,7 +1,7 @@
 # ID-First Search Retirement Todo
 
 **Date:** 2026-06-29
-**Source report:** `tasks/id-first-search-retirement-recommendations-2026-06-29.md`
+**Source report:** `id-first-search-retirement-recommendations-2026-06-29.md` (same folder)
 **Goal:** Move Apple Mail MCP action tools away from keyword, substring, and broad search target selection. Keep keyword search as bounded discovery only.
 
 ## Core Recommendation
@@ -94,7 +94,7 @@ Completed in the metadata-index feasibility contract pass:
 
 - Added a non-integrated `metadata_index_contract` module for cache root policy, opt-in runtime-read gating, TTL freshness, exact keys, coverage tiers, and hydrated capability checks.
 - Added unit tests proving `bulk_metadata` rows cannot answer recipient, header, thread, attachment, or body queries.
-- Saved `tasks/metadata-index-feasibility-spike-2026-06-30.md` with Mail dictionary evidence, privacy rules, integration boundary, and measurement next steps.
+- Saved `metadata-index-feasibility-spike-2026-06-30.md` with Mail dictionary evidence, privacy rules, integration boundary, and measurement next steps.
 
 Completed in the offline perf-budget fixture pass:
 
@@ -116,12 +116,12 @@ Completed in the Envelope Index schema-spike helper pass:
 
 Completed in the final verification audit pass:
 
-- Saved `tasks/id-first-search-retirement-completion-audit-2026-06-29.md` with explicit proof commands, passed results, branch-scope claims, and remaining Cayman/live-proof blockers.
+- Saved `id-first-search-retirement-completion-audit-2026-06-29.md` with explicit proof commands, passed results, branch-scope claims, and remaining Cayman/live-proof blockers.
 - Re-ran the Phase 6 focused bundle for compose, manage, analytics, search, smart-inbox, CLI, dashboard, no-unbounded-scan, bounded-scan, read-only registry, metadata-index, helper, and perf-budget coverage.
 
 Completed in the decision-brief pass:
 
-- Saved `tasks/id-first-search-retirement-decision-brief-2026-06-29.md` with concrete options and recommended defaults for v3.x selector behavior, `allow_filter_scan`, `mailbox="All"`, fuzzy `sender`, release boundary, and live read-only measurements.
+- Saved `id-first-search-retirement-decision-brief-2026-06-29.md` with concrete options and recommended defaults for v3.x selector behavior, `allow_filter_scan`, `mailbox="All"`, fuzzy `sender`, release boundary, and live read-only measurements.
 
 Still open:
 
@@ -374,7 +374,7 @@ Verification:
 - [x] `git diff --check`.
 - [x] Sensitive-data scan over changed source, tests, docs, skills, UI, and package artifacts.
 
-Evidence: `tasks/id-first-search-retirement-completion-audit-2026-06-29.md`.
+Evidence: `id-first-search-retirement-completion-audit-2026-06-29.md` (same folder).
 
 ## Worker Prompt Template
 
@@ -383,7 +383,7 @@ Use this shape when dispatching subagents:
 ```text
 Repo: /Users/caymanseagraves/.codex/worktrees/79e8/apple-mail-mcp
 Task: <one focused lane>
-Read first: AGENTS.md, relevant CLAUDE.md, tasks/id-first-search-retirement-todo-2026-06-29.md, and relevant skill docs.
+Read first: AGENTS.md, relevant CLAUDE.md, `tasks/active/id-first-search-retirement/id-first-search-retirement-todo-2026-06-29.md`, and relevant skill docs.
 Scope: <exact files or modules>
 Do not: send email, create live Mail drafts, print private content, push, merge, or edit outside scope.
 Goal: implement the lane with focused mocked/local tests.

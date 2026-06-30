@@ -22,7 +22,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 - Default `recent_days=2.0` (48h). Tools refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED`. The only tool that walks the entire inbox is `full_inbox_export` (slow; documented cost). Prefer bounded newest-message slices (`messages 1 thru N`) over broad `whose` clauses on large remote mailboxes.
 - Pass `timeout` through to `run_applescript`; catch `AppleScriptTimeout` → structured error with account name.
-- **ID-first mutations (v3.7.0+):** `move_email`, `update_email_status`, and `manage_trash` prefer `message_ids` from a prior list/search. Filter paths require `allow_filter_scan=True` or return `FILTER_SCAN_DISABLED`. `search_emails` requires `allow_body_scan=True` when `body_text` is set or returns `BODY_SCAN_DISABLED`.
+- **ID-first mutations (v3.7.0+):** `move_email`, `update_email_status`, and `manage_trash` prefer `message_ids` from a prior list/search. `subject_keyword` / `sender` on action tools return `TARGET_SELECTOR_DEPRECATED` before any scan (even with `allow_filter_scan=True`). Date/bulk filter paths require `allow_filter_scan=True` or return `FILTER_SCAN_DISABLED`. `search_emails` requires `allow_body_scan=True` when `body_text` is set or returns `BODY_SCAN_DISABLED`.
 - **Scan caps (v3.7.1):** bounded slices read `SCAN_BOUNDS` in `constants.py` (search ceiling 250, inbox max 500, `mailbox="All"` fan-out 10). See `docs/CLAUDE-conventions.md` § Centralized scan caps.
 - Mutations: `normalize_message_ids` / `message_ids` for targeted ops. Detail: `docs/CLAUDE-conventions.md`.
 
@@ -80,6 +80,10 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 | `create_rich_email_draft` | saves + closes | Standalone only; same reply-like guard; `review_in_mail=True` for saved-open review |
 
 Do not match outgoing rich drafts by subject — `_save_new_compose_window_as_draft()` saves the compose window opened by this call, identified by an id diff against the `outgoing messages` snapshot taken before the open (never `item 1`, never a pre-existing window). Detail: [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Compose and draft modes.
+
+## Module size
+
+All six tool modules currently exceed the **600 LOC** budget (`compose.py` largest). CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer splitting by tool domain (reply, forward, verification, rich draft) into focused files rather than extending monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
 
 ## Related
 

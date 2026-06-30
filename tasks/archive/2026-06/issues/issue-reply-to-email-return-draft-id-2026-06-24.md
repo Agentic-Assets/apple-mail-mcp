@@ -16,7 +16,7 @@ accounts (see companion issue `issue-manage-drafts-list-timeout-2026-06-24.md`).
 
 This is a standing ask: prior ops logs already requested "return draft ids from
 `reply_to_email` success output." The verification hardening in
-`tasks/reply-draft-verification-hardening-2026-06-19.md` added
+`tasks/archive/2026-06/issues/reply-draft-verification-hardening-2026-06-19.md` added
 `_verify_saved_reply_draft(draft_id=...)`, which means an exact draft id is
 already computed internally. It is simply discarded before the response is built.
 

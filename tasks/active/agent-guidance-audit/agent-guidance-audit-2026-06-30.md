@@ -3,7 +3,21 @@
 **Date:** 2026-06-30 (verified same day by three codebase review passes)  
 **Branch reviewed:** `codex/pr38-guidance-verifier-followup` (v3.8.0 native-reply release)  
 **Scope:** Agent-facing training surface for coding agents (skills, MCP tool descriptions, README, templates, conventions)  
-**Status:** Actionable fix plan; runtime behavior confirmed correct for deprecated paths  
+**Status:** Complete 2026-06-30 (agent-training fix pass; runtime unchanged; verification re-run same day)
+
+### Implementation checklist (all steps landed)
+
+| Step | Item | Status |
+|------|------|--------|
+| 1 | `common-workflows.md`, `inbox-zero-workflow.md`, `email-triage.md` banner | Done |
+| 2 | Docstrings in `compose.py`, `manage.py`, `analytics.py` | Done |
+| 3 | `apple-mail-mcpb/manifest.json`, `README.md` | Done |
+| 4 | Skills + `plugin/skills/CLAUDE.md` + `docs/CLAUDE-conventions.md` L156 | Done |
+| 5 | `tests/test_id_first_guidance.py` extended | Done |
+| 6 | Stale banners on `scalability-24k-hardening`, `id-first-refactor-spec`, `LIVE_FIELD_REPORT` | Done |
+| — | P3-2 brand-voice em-dash manifest sweep | Deferred (pre-existing; see `tasks/todo.md`) |
+
+**Verification:** `pytest tests/test_id_first_guidance.py` (5 tests) green on 2026-06-30.
 
 ---
 
@@ -63,19 +77,25 @@ When templates or docs are wrong, agents see **different** failures. Fix docs to
 
 | Asset | Role | Caveat |
 |-------|------|--------|
-| `docs/CLAUDE-conventions.md` | ID-first policy, `native_format`, deprecation contracts | **L156 overclaims** that `apple-mail-operator` documents native reply; it does not yet |
-| `plugin/skills/email-drafting/SKILL.md` | Native reply, verification, standalone guards | Internal "degraded path" wording contradicts L45 (P1-1) |
+| `docs/CLAUDE-conventions.md` | ID-first policy, `native_format`, deprecation contracts; operator → `email-drafting` handoff (L156) | — |
+| `plugin/skills/email-drafting/SKILL.md` | Native reply, verification, standalone guards, discovery-only `subject_keyword` wording | — |
+| `plugin/skills/apple-mail-operator/SKILL.md` | Bootstrap, navigation, reply drafting handoff (`native_format`, Accessibility) | — |
 | `plugin/skills/email-management/templates/search-patterns.md` | Gold copy-paste: discovery → ids → action | — |
+| `plugin/skills/email-management/templates/common-workflows.md` | Repaired mutation examples (id-first, correct param names) | — |
+| `plugin/skills/references/agent-id-first-workflow.md` | One-page ID-first contract for agents | — |
+| `plugin/skills/references/pre-draft-verification.md` | Shared pre-draft verification checklist | — |
 | `plugin/skills/references/large-inbox-rules.md` | ID-first mutations, scan caps | — |
 | `plugin/skills/email-archive-cleanup/SKILL.md` | Staged cleanup + deprecation warnings | — |
-| `plugin/skills/inbox-triage/SKILL.md` | Read-first triage; correct archive handoff | Frontmatter already routes drafting to `email-drafting` |
-| `plugin/skills/email-management/SKILL.md` | Umbrella program | Decision tree L60/L94 already routes "check my email" → `inbox-triage` |
-| `list_email_attachments` docstring | Explicit `subject_keyword` deprecation block | Copy pattern to `save_email_attachment` |
+| `plugin/skills/inbox-triage/SKILL.md` | Read-first triage; archive handoff; routes drafting to `email-drafting` | — |
+| `plugin/skills/email-management/SKILL.md` | Umbrella program; decision tree routes daily triage → `inbox-triage` | — |
+| `list_email_attachments` / `save_email_attachment` docstrings | ID-first `message_ids` + deprecation blocks; attachment index workflow | — |
+| `README.md` + `apple-mail-mcpb/manifest.json` | Tool tables aligned with runtime ID-first policy | — |
+| `tests/test_id_first_guidance.py` | README, manifest, skills, and `common-workflows.md` guardrails | — |
 | Runtime structured errors | `TARGET_SELECTOR_DEPRECATED`, `FILTER_SCAN_DISABLED`, `REPLY_WINDOW_FOCUS_FAILED` | — |
 
 **Tool count unchanged (31).** No tools should be removed in v3.x.
 
-**False security:** `tests/test_id_first_guidance.py` **passes today** while `common-workflows.md` is broken because it matches `sender=` but not `sender_exact=`, and does not flag filter-only `move_email` without deprecated selectors. Extend tests in step 5 (see implementation order).
+**Guidance verification:** `pytest tests/test_id_first_guidance.py` and packaged reference parity (`tests/test_packaged_skill_paths.py`) green after the 2026-06-30 fix pass. P3-2 brand-voice em-dash manifest sweep remains deferred (`tasks/todo.md`).
 
 ---
 
@@ -267,8 +287,8 @@ Files mentioning `reply_to_email` **without** `native_format` / Accessibility / 
 
 | File | Stale content | Note |
 |------|---------------|------|
-| `tasks/scalability-24k-hardening-2026-05-22.md` | `move_email(sender=...)` co-filter advice | Pre-3.7; `sender=` now **C** |
-| `tasks/id-first-refactor-spec.md` | **Corrected:** not reply `subject_keyword` fallback; stale **`get_email_thread` Path 2** subject fallback (still valid for read path) + filter-path matrix without `TARGET_SELECTOR_DEPRECATED` emphasis |
+| `tasks/archive/2026-05/scalability-24k-hardening-2026-05-22.md` | `move_email(sender=...)` co-filter advice | Pre-3.7; `sender=` now **C** |
+| `tasks/reference/id-first-refactor-spec.md` | **Corrected:** not reply `subject_keyword` fallback; stale **`get_email_thread` Path 2** subject fallback (still valid for read path) + filter-path matrix without `TARGET_SELECTOR_DEPRECATED` emphasis |
 | `LIVE_FIELD_REPORT_2026-06-04.md` | `search_emails` on Drafts for verify/find | Historical anti-pattern; operator now forbids |
 
 **Recommendation:** One-line stale banner on pre-3.7 task docs → `docs/CLAUDE-conventions.md` + this audit.
@@ -332,6 +352,7 @@ Pre-existing em dashes in ~10 shipped descriptions (`tasks/todo.md`). Separate p
 
 | Step | Work | Primary files | Verification |
 |------|------|---------------|--------------|
+| **0** | Agent quick references | `references/agent-id-first-workflow.md`, `references/pre-draft-verification.md` | Linked from `plugin/skills/CLAUDE.md` |
 | **1** | Repair copy-paste templates | `common-workflows.md`, `inbox-zero-workflow.md`, banner on `examples/email-triage.md` | Manual review + extended guidance tests |
 | **2** | Honest deprecation in docstrings | `compose.py`, `manage.py`, `analytics.py` | Existing pytest; `mypy` |
 | **3** | Manifest + README alignment | `apple-mail-mcpb/manifest.json`, `README.md` | `bash tools/dev-check.sh release` |
@@ -339,7 +360,7 @@ Pre-existing em dashes in ~10 shipped descriptions (`tasks/todo.md`). Separate p
 | **5** | Guidance test extension | `tests/test_id_first_guidance.py` | `pytest tests/test_id_first_guidance.py` (should **fail** on current `common-workflows.md` until step 1 lands) |
 | **6** | Stale banners on historical tasks | `scalability-24k-hardening`, `id-first-refactor-spec`, `LIVE_FIELD_REPORT` | Optional |
 
-**v3.x rule:** Keep deprecated schema params; document them as hard-fail. **v4 target:** `tasks/id-first-search-retirement-recommendations-2026-06-29.md`.
+**v3.x rule:** Keep deprecated schema params; document them as hard-fail. **v4 target:** `tasks/active/id-first-search-retirement/id-first-search-retirement-recommendations-2026-06-29.md`.
 
 **Do not implement code behavior changes** for this audit unless product intent shifts; this is a **documentation and agent-training** fix pass.
 
@@ -349,9 +370,9 @@ Pre-existing em dashes in ~10 shipped descriptions (`tasks/todo.md`). Separate p
 
 | Document | Relevance |
 |----------|-----------|
-| `tasks/id-first-search-retirement-recommendations-2026-06-29.md` | v4 schema removal plan |
-| `tasks/native-reply-handoff-2026-06-30.md` | Native reply ship + live TO-TEST |
-| `tasks/reply-draft-pr38-review-findings-2026-06-30.md` | PR #38 verification context |
+| `tasks/active/id-first-search-retirement/id-first-search-retirement-recommendations-2026-06-29.md` | v4 schema removal plan |
+| `tasks/active/native-reply/native-reply-handoff-2026-06-30.md` | Native reply ship + live TO-TEST |
+| `tasks/active/native-reply/reply-draft-pr38-review-findings-2026-06-30.md` | PR #38 verification context |
 | `docs/CLAUDE-conventions.md` | Canonical policy (fix L156 operator claim) |
 | `plugin/skills/email-management/templates/search-patterns.md` | Template gold standard |
 | `CHANGELOG.md` 3.8.0 | `native_format=True` default, `REPLY_WINDOW_FOCUS_FAILED` |

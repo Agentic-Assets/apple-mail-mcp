@@ -1,6 +1,6 @@
 ---
 name: email-attachments
-description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses bounded search_emails (has_attachments filters) to collect message_ids first, then list_email_attachments, save_email_attachment, get_email_by_id for confirmation, and optionally export_emails for bundles. Subject lookup is a degraded discovery path only when exact ids are unavailable. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
+description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses bounded search_emails (has_attachments filters) to collect message_ids first, then list_email_attachments, save_email_attachment, get_email_by_id for confirmation, and optionally export_emails for bundles. Discovery-only — pass subject_keyword to search_emails when ids are unknown; never pass subject_keyword to list_email_attachments or save_email_attachment. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
 ---
 
 # Email Attachments
@@ -46,7 +46,7 @@ If ids are unknown, run bounded discovery first, then call by reviewed ids:
 list_email_attachments(message_ids=[12345], max_results=10)
 ```
 
-See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight.
 
 `list_email_attachments` and `save_email_attachment` require exact `message_ids`; use bounded `search_emails(..., has_attachments=True)` first when ids are unknown. JSON attachment listing returns each row's `message_id`, `attachment_index`, filename, and size. Treat `message_id + attachment_index` as the exact selector for saving.
 

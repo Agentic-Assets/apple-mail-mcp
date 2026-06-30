@@ -9,7 +9,6 @@ from typing import Any
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
-from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     build_mailbox_ref,
@@ -302,10 +301,13 @@ def move_email(
     timeout: int | None = None,
 ) -> str:
     """
-      Move email(s) by exact ``message_ids`` (fast) or, rarely, by filters.
+      Move email(s) by exact ``message_ids`` (fast) or, rarely, by date/bulk filters.
 
     Preferred: pass ``message_ids`` from ``list_inbox_emails`` or ``search_emails``.
-    Filter-based moves require ``allow_filter_scan=True`` (slow on large mailboxes).
+    ``subject_keyword``, ``subject_keywords``, and ``sender`` are deprecated target
+    selectors and return ``TARGET_SELECTOR_DEPRECATED`` even when
+    ``allow_filter_scan=True``. Date/bulk paths (``older_than_days``,
+    ``apply_to_all``) require ``allow_filter_scan=True`` (slow on large mailboxes).
     Use ``dry_run=True`` with ``message_ids`` for a fast preview without moving.
 
       When ``message_ids`` is provided, moves exact IDs and ignores keyword/sender
@@ -315,16 +317,20 @@ def move_email(
           account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
           to_mailbox: Destination mailbox name. For nested mailboxes, use "/" separator (e.g., "Projects/Amplify Impact")
           message_ids: List of exact Mail message ids (preferred path)
-          subject_keyword: Filter by subject (requires allow_filter_scan=True)
+          subject_keyword: Deprecated schema-compat selector. Returns
+              ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
           from_mailbox: Source mailbox name (default: "INBOX")
           max_moves: Maximum number of emails to move (default: 50, safety limit)
-          subject_keywords: Optional list of keywords to match in subjects; matches any keyword
-          sender: Optional sender to filter emails by (requires allow_filter_scan=True)
+          subject_keywords: Deprecated schema-compat selector (same as subject_keyword).
+          sender: Deprecated schema-compat selector. Returns
+              ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
           older_than_days: Optional age filter - only move emails older than N days
+              (requires ``allow_filter_scan=True`` when ``message_ids`` is omitted)
           dry_run: If True, preview without acting. Fast with message_ids; slow with filters.
           only_read: If True, only move emails that have been read (default: False)
-          recent_days: Recent window when using filter scan (default: 2.0).
-          allow_filter_scan: Opt in to slow subject/sender filter scans (default: False).
+          recent_days: Recent window when using date/bulk filter scan (default: 2.0).
+          allow_filter_scan: Opt in to slow date/bulk filter scans only (default: False).
+              Does not enable subject/sender selectors.
           timeout: Optional AppleScript timeout in seconds (default: 300s).
 
       Returns:
@@ -382,8 +388,9 @@ def move_email(
     subject_terms = normalize_search_terms(subject_keyword, subject_keywords)
     if not subject_terms and not sender and not older_than_days:
         return (
-            "Error: At least one filter is required (subject_keyword, sender, "
-            "or older_than_days), or pass message_ids=[...]. "
+            "Error: Pass message_ids=[...] (preferred), or older_than_days with "
+            "allow_filter_scan=True for approved date/bulk moves. subject_keyword and "
+            "sender are deprecated (TARGET_SELECTOR_DEPRECATED). "
             "This prevents accidentally moving everything."
         )
 
@@ -494,18 +501,24 @@ def save_email_attachment(
     """
     Save a specific attachment from an email to disk.
 
-    When ``message_ids`` is provided, locates the message by exact ID and
-    ignores ``subject_keyword``. Prefer ``attachment_index`` from
-    ``list_email_attachments(output_format="json")`` for deterministic
-    selection; ``attachment_name`` remains for compatibility and rejects
-    ambiguous duplicate matches.
+    ``subject_keyword`` is a deprecated selector retained for v3.x schema
+    compatibility. Use ``search_emails(..., has_attachments=True)`` or
+    ``list_email_attachments`` to discover candidate ids, then pass
+    ``message_ids``. Passing ``subject_keyword`` without ``message_ids`` returns
+    ``TARGET_SELECTOR_DEPRECATED``.
+
+    When ``message_ids`` is provided, locates the message by exact ID.
+    Prefer ``attachment_index`` from ``list_email_attachments(output_format="json")``
+    for deterministic selection; ``attachment_name`` remains for compatibility and
+    rejects ambiguous duplicate matches.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
-        subject_keyword: Keyword to search for in email subjects (omit when message_ids is set)
+        subject_keyword: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
         attachment_name: Name of the attachment to save
         save_path: Full path where to save the attachment
-        message_ids: Optional list of exact Mail message ids for precise targeting
+        message_ids: List of exact Mail message ids (required for targeting)
         attachment_index: Optional 1-based attachment index from
             ``list_email_attachments(output_format="json")``. Requires exactly
             one ``message_id``.
@@ -538,66 +551,36 @@ def save_email_attachment(
 
     if attachment_index is not None and attachment_index < 1:
         return "Error: attachment_index must be a positive 1-based integer."
-    if message_ids is None and (not subject_keyword or not (attachment_name or attachment_index) or not save_path):
-        return "Error: subject_keyword, attachment_name or attachment_index, and save_path are required."
+    if message_ids is None:
+        return (
+            "Error: message_ids is required (discover via search_emails(..., has_attachments=True) "
+            "or list_email_attachments, then pass message_ids=[...])"
+        )
     if not (attachment_name or attachment_index) or not save_path:
         return "Error: attachment_name or attachment_index, and save_path are required."
 
-    if message_ids is None:
-        try:
-            records = _search_mail_records(
-                account=account,
-                mailbox="INBOX",
-                subject_terms=[subject_keyword],
-                include_content=False,
-                offset=0,
-                limit=1,
-                timeout=timeout if timeout is not None else 45,
-            )
-        except AppleScriptTimeout:
-            return (
-                f"Error: AppleScript timed out while locating attachment email "
-                f"on account {account!r}. Try again with a tighter subject or "
-                "larger `timeout`."
-            )
-        if not records:
-            return (
-                "⚠ Attachment not found\n"
-                f"Email keyword: {escape_applescript(subject_keyword)}\n"
-                f"Attachment name: {escape_applescript(attachment_name)}"
-            )
-        resolved_ids = [str(record.get("message_id")) for record in records if record.get("message_id") is not None]
-        if not resolved_ids:
-            return (
-                "⚠ Attachment not found\n"
-                f"Email keyword: {escape_applescript(subject_keyword)}\n"
-                f"Attachment name: {escape_applescript(attachment_name)}"
-            )
-        message_ids = resolved_ids
-
-    if message_ids is not None:
-        normalized_ids = normalize_message_ids(message_ids)
-        if not normalized_ids:
-            return "Error: 'message_ids' must contain one or more numeric Mail ids"
-        cap_error = _check_message_ids_cap(normalized_ids, "save_email_attachment")
-        if cap_error:
-            return cap_error
-        if attachment_index is not None and len(normalized_ids) != 1:
-            err = ToolError(
-                code="AMBIGUOUS_ATTACHMENT_SELECTOR",
-                message="attachment_index requires exactly one message_id because indexes are per message.",
-                remediation={
-                    "preferred": (
-                        "Call list_email_attachments(message_ids=[...], output_format='json') and then "
-                        "call save_email_attachment(message_ids=[one_id], attachment_index=N, ...)."
-                    ),
-                    "exact_selector": "message_ids + attachment_index",
-                },
-            )
-            return serialize_tool_error(err)
-        id_condition = build_whose_id_list(normalized_ids)
-        message_filter_script = f"set inboxMessages to every message of inboxMailbox whose {id_condition}"
-        not_found_detail = f"Message ids: {', '.join(normalized_ids)}"
+    normalized_ids = normalize_message_ids(message_ids)
+    if not normalized_ids:
+        return "Error: 'message_ids' must contain one or more numeric Mail ids"
+    cap_error = _check_message_ids_cap(normalized_ids, "save_email_attachment")
+    if cap_error:
+        return cap_error
+    if attachment_index is not None and len(normalized_ids) != 1:
+        err = ToolError(
+            code="AMBIGUOUS_ATTACHMENT_SELECTOR",
+            message="attachment_index requires exactly one message_id because indexes are per message.",
+            remediation={
+                "preferred": (
+                    "Call list_email_attachments(message_ids=[...], output_format='json') and then "
+                    "call save_email_attachment(message_ids=[one_id], attachment_index=N, ...)."
+                ),
+                "exact_selector": "message_ids + attachment_index",
+            },
+        )
+        return serialize_tool_error(err)
+    id_condition = build_whose_id_list(normalized_ids)
+    message_filter_script = f"set inboxMessages to every message of inboxMailbox whose {id_condition}"
+    not_found_detail = f"Message ids: {', '.join(normalized_ids)}"
 
     # Expand tilde in save_path (POSIX file in AppleScript does not expand ~)
     expanded_path = str(Path(save_path).expanduser())
@@ -630,12 +613,7 @@ def save_email_attachment(
     # ``file size of anAttachment`` is available on macOS 10.15+. We wrap it in
     # a try block so that if the property is absent on an older OS the probe
     # returns -1 and we skip the cap (safe fail-open rather than blocking saves).
-    _probe_normalized_ids = normalize_message_ids(message_ids) if message_ids else []
-    if _probe_normalized_ids:
-        id_condition = build_whose_id_list(_probe_normalized_ids)
-        _probe_message_lookup = f"every message of inboxMailbox whose {id_condition}"
-    else:
-        _probe_message_lookup = "messages 1 thru 1 of inboxMailbox"
+    _probe_message_lookup = f"every message of inboxMailbox whose {id_condition}"
     _escaped_att_probe = escape_applescript(attachment_name)
     _attachment_index_probe = attachment_index_value
     _probe_script = f'''
@@ -750,17 +728,7 @@ def save_email_attachment(
             )
             return serialize_tool_error(err)
 
-    # Cap candidate set for subject search only — ID lookup is exact.
-    # Sourced from ``constants.SCAN_BOUNDS["TRASH_SCAN"]`` so the cap is tunable
-    # in one place alongside other bounded-scan limits.
-    scan_cap = SCAN_BOUNDS["TRASH_SCAN"]
-    cap_script = ""
-    if message_ids is None:
-        cap_script = f"""
-            if (count of inboxMessages) > {scan_cap} then
-                set inboxMessages to items 1 thru {scan_cap} of inboxMessages
-            end if"""
-
+    # ID lookup is exact; no subject-scan cap needed.
     script = f'''
     tell application "Mail"
         set outputText to ""
@@ -769,7 +737,6 @@ def save_email_attachment(
             set targetAccount to account "{escaped_account}"
             {inbox_mailbox_script("inboxMailbox", "targetAccount")}
             {message_filter_script}
-            {cap_script}
             set foundAttachment to false
 
             repeat with aMessage in inboxMessages
@@ -851,7 +818,10 @@ def update_email_status(
     Update email status - mark as read/unread or flag/unflag emails.
 
     Preferred: pass ``message_ids`` from a prior list/search call.
-    Filter-based updates require ``allow_filter_scan=True`` (slow on large mailboxes).
+    ``subject_keyword``, ``subject_keywords``, and ``sender`` are deprecated target
+    selectors and return ``TARGET_SELECTOR_DEPRECATED`` even when
+    ``allow_filter_scan=True``. Date/bulk paths (``older_than_days``,
+    ``apply_to_all``) require ``allow_filter_scan=True`` (slow on large mailboxes).
 
     When message_ids is provided, uses exact ID matching (ignores other filters).
 
@@ -860,16 +830,20 @@ def update_email_status(
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
         action: Action to perform: "mark_read", "mark_unread", "flag", "unflag"
-        subject_keyword: Filter by subject (requires allow_filter_scan=True)
-        subject_keywords: Optional list of subject keywords; matches any keyword
-        sender: Optional sender to filter emails by (requires allow_filter_scan=True)
+        subject_keyword: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
+        subject_keywords: Deprecated schema-compat selector (same as subject_keyword).
+        sender: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
         mailbox: Mailbox to search in (default: "INBOX")
         max_updates: Maximum number of emails to update (safety limit, default: 10)
         apply_to_all: Bulk update without filters (requires allow_filter_scan=True)
         message_ids: List of exact Mail message ids (preferred path)
         older_than_days: Optional age filter - only update emails older than N days
-        recent_days: Recent window when using filter scan (default: 2.0).
-        allow_filter_scan: Opt in to slow filter scans (default: False).
+            (requires ``allow_filter_scan=True`` when ``message_ids`` is omitted)
+        recent_days: Recent window when using date/bulk filter scan (default: 2.0).
+        allow_filter_scan: Opt in to slow date/bulk filter scans only (default: False).
+            Does not enable subject/sender selectors.
         timeout: Optional AppleScript timeout in seconds (default: 300s).
 
     Returns:
@@ -995,8 +969,9 @@ def update_email_status(
     has_filter = bool(subject_terms) or bool(sender) or (older_than_days is not None and older_than_days > 0)
     if not has_filter and not apply_to_all:
         return (
-            "Error: No filter provided. Provide message_ids=[...], subject_keyword, sender, "
-            "or older_than_days to filter emails, or set apply_to_all=True."
+            "Error: Pass message_ids=[...] (preferred), older_than_days, or "
+            "apply_to_all=True with allow_filter_scan=True. subject_keyword and sender "
+            "are deprecated (TARGET_SELECTOR_DEPRECATED)."
         )
 
     if not allow_filter_scan:
@@ -1148,7 +1123,10 @@ def manage_trash(
     Manage trash operations - delete emails or empty trash.
 
     Preferred: pass ``message_ids`` from a prior list/search call.
-    Filter-based trash ops require ``allow_filter_scan=True`` (slow on large mailboxes).
+    ``subject_keyword``, ``subject_keywords``, and ``sender`` are deprecated target
+    selectors and return ``TARGET_SELECTOR_DEPRECATED`` even when
+    ``allow_filter_scan=True``. Date/bulk paths (``older_than_days``,
+    ``apply_to_all``) require ``allow_filter_scan=True`` (slow on large mailboxes).
     When dry_run=True (default), previews without acting; fast with message_ids.
 
     When ``message_ids`` is provided for ``move_to_trash`` or ``delete_permanent``,
@@ -1160,17 +1138,21 @@ def manage_trash(
         account: Account name (e.g., "Gmail", "Work"). Defaults to DEFAULT_MAIL_ACCOUNT.
         action: Action to perform: "move_to_trash", "delete_permanent", "empty_trash"
         message_ids: List of exact Mail message ids (preferred path)
-        subject_keyword: Filter by subject (requires allow_filter_scan=True)
-        subject_keywords: Optional list of subject keywords; matches any keyword
-        sender: Optional sender to filter emails (requires allow_filter_scan=True)
+        subject_keyword: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
+        subject_keywords: Deprecated schema-compat selector (same as subject_keyword).
+        sender: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
         mailbox: Source mailbox (default: "INBOX", not used for empty_trash or delete_permanent)
         max_deletes: Maximum number of emails to delete (safety limit, default: 5)
         confirm_empty: Must be True to execute "empty_trash" action (safety confirmation)
         apply_to_all: Bulk trash without filters (requires allow_filter_scan=True)
         older_than_days: Optional age filter - only affect emails older than N days
+            (requires ``allow_filter_scan=True`` when ``message_ids`` is omitted)
         dry_run: If True (default), preview what would be affected without acting
-        recent_days: Recent window when using filter scan (default: 2.0).
-        allow_filter_scan: Opt in to slow filter scans (default: False).
+        recent_days: Recent window when using date/bulk filter scan (default: 2.0).
+        allow_filter_scan: Opt in to slow date/bulk filter scans only (default: False).
+            Does not enable subject/sender selectors.
         timeout: Optional AppleScript timeout in seconds (default: 300s).
 
     Returns:
@@ -1356,8 +1338,9 @@ def manage_trash(
         # Safety check: require at least one filter or explicit apply_to_all
         if not subject_terms and not sender and not apply_to_all:
             return (
-                "Error: No filter provided. Provide message_ids=[...], subject_keyword, sender, "
-                "or set apply_to_all=True."
+                "Error: Pass message_ids=[...] (preferred) or apply_to_all=True with "
+                "allow_filter_scan=True. subject_keyword and sender are deprecated "
+                "(TARGET_SELECTOR_DEPRECATED)."
             )
 
         if not allow_filter_scan:
@@ -1462,8 +1445,9 @@ def manage_trash(
         has_filter = bool(subject_terms) or bool(sender) or (older_than_days is not None and older_than_days > 0)
         if not has_filter and not apply_to_all:
             return (
-                "Error: No filter provided. Provide message_ids=[...], subject_keyword, sender, "
-                "or older_than_days, or set apply_to_all=True."
+                "Error: Pass message_ids=[...] (preferred), older_than_days, or "
+                "apply_to_all=True with allow_filter_scan=True. subject_keyword and sender "
+                "are deprecated (TARGET_SELECTOR_DEPRECATED)."
             )
 
         if not allow_filter_scan:

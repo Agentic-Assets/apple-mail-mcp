@@ -2,6 +2,8 @@
 
 Skills are the **primary entry point** for email workflows in Claude Code. They teach the model when and how to call MCP tools — they do not implement tool logic.
 
+**Agent contract (read first):** [`references/agent-id-first-workflow.md`](references/agent-id-first-workflow.md)
+
 New or edited skills: delegate drafting to subagents when available and permitted; run **`plugin-dev:plugin-validator`** and **`plugin-dev:skill-reviewer`** before merge when available. If not, document the gap and run local validation. See root [`CLAUDE.md`](../../CLAUDE.md), Agent orchestration section.
 
 ## Skills-only policy
@@ -22,14 +24,20 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `email-style-profile/` | Learn writing voice from Sent mail + `USER_EMAIL_PREFERENCES` |
 | `email-attachments/` | List + save attachments safely |
 
-**Shared references:** Single-sourced large-inbox safety rules live in [`references/large-inbox-rules.md`](references/large-inbox-rules.md), included by `apple-mail-operator`, `inbox-triage`, `email-archive-cleanup`, and `email-management`.
+**Shared references:** Canonical sources live in [`references/`](references/) at this directory level (maintainer edit + `python3 tools/sync_skill_references.py` to copy into each skill's `references/`). Packaged skills must only link in-skill paths like `references/large-inbox-rules.md`, never `../references/...` — enforced by `tests/test_packaged_skill_paths.py`.
 
-Already-replied safeguard — honored by:
+| Canonical file | Synced into |
+|----------------|-------------|
+| `references/large-inbox-rules.md` | operator, triage, management, archive-cleanup, style-profile, attachments, mail-rules-advisor, mailbox-taxonomy |
+| `references/pre-draft-verification.md` | operator, triage, management, email-drafting |
+| `references/agent-id-first-workflow.md` | maintainer index only (not copied; link from this CLAUDE.md) |
 
-- `email-drafting/` — honors already-replied safeguard (pre-draft thread verification required before `reply_to_email`; never compose-as-reply).
-- `inbox-triage/` — honors already-replied safeguard (default `include_already_replied=False`; pass `exclude_replied=True` on list/search).
-- `email-management/` — honors already-replied safeguard (cross-references email-drafting for verification).
-- `apple-mail-operator/` — honors already-replied safeguard (operator guidance for the new params and overrides).
+Already-replied safeguard — canonical rules in [`references/pre-draft-verification.md`](references/pre-draft-verification.md); honored by:
+
+- `email-drafting/` — full compose workflow and native reply defaults.
+- `inbox-triage/` — default `include_already_replied=False`; pass `exclude_replied=True` on list/search.
+- `email-management/` — cross-references pre-draft verification before replies in program workflows.
+- `apple-mail-operator/` — hands off to `email-drafting` when navigation leads to a reply.
 
 ## Sibling routing cheat sheet
 
@@ -44,6 +52,8 @@ Already-replied safeguard — honored by:
 | Draft mail | `email-drafting` |
 | Match my tone | `email-style-profile` → `email-drafting` |
 | Save PDFs / zips | `email-attachments` |
+
+**Reply drafting after triage or operator navigation:** `inbox-triage` and `apple-mail-operator` stay read-first. When the user wants a reply, hand off to **`email-drafting`**: `reply_to_email(message_id=..., reply_body=..., mode="draft")` with default `native_format=True` (Mail focus + Accessibility). On `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible or `native_format=False`. Never pass `subject_keyword` to action tools; discover via `search_emails` / `list_inbox_emails` first.
 
 ## SKILL.md conventions (summary)
 

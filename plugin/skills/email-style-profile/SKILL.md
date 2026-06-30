@@ -9,7 +9,7 @@ Establish a repeatable **voice contract** derived from observable mail plus expl
 
 ## Large-inbox pre-flight (required when Sent mailbox is large)
 
-See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonical pre-flight checklist. The Sent-mail harvest below uses bounded `recent_days` windows; never pass `recent_days=0`.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. The Sent-mail harvest below uses bounded `recent_days` windows; never pass `recent_days=0`.
 
 ## Workflow
 
@@ -29,7 +29,7 @@ Encode durable preferences inside **`USER_EMAIL_PREFERENCES`** so every preferen
 | Step | Tool call |
 |------|-----------|
 | Pull recent Sends | `search_emails(mailbox="Sent", include_content=true, recent_days=30, limit=15)` — on large mailboxes, follow this ladder: try `recent_days=7` first; if timeouts, drop to `3`; if still slow, anchor on a specific `message_id` from a known recent Send. If the user insists on the full Sent corpus, escalate to `full_inbox_export` (slow; minutes on a 24k mailbox) rather than ratcheting `recent_days`; never pass `recent_days=0` |
-| Deepen hallmark threads | `get_email_by_id(message_id="...")` or `get_email_thread(message_id="...")`; use subject lookup only as a degraded path after confirming no id is available |
+| Deepen hallmark threads | `get_email_by_id(message_id="...")` or `get_email_thread(message_id="...")`; if no id yet, run bounded `search_emails` or `list_inbox_emails` first and pass the returned `message_id` |
 | Check alternate aliases | Cross-check `list_account_addresses` outputs if tone shifts per persona |
 
 Interpret samples **summaristically** — do not stash full bodies into long-term prose outside the negotiated profile document the user accepts.
@@ -45,7 +45,7 @@ Deliver a concise artifact (bullet list acceptable) containing:
 
 ### 4. Wire Into Draft Flow
 
-Always cross-link to **`email-drafting`** for actual compose operations. Mention when **draft-safe** mode means output must stop at drafts pending human send. Reply-style examples must be authored via `reply_to_email`, not `compose_email` or `create_rich_email_draft`; the latter now refuse `Re:`/`Fwd:` drafts unless `standalone_confirmed=True`.
+Always cross-link to **`email-drafting`** for actual compose operations. Mention when **draft-safe** mode means output must stop at drafts pending human send. Reply-style examples must be authored via `reply_to_email(message_id=..., reply_body=...)`, not `compose_email` or `create_rich_email_draft`; the latter now refuse `Re:`/`Fwd:` drafts unless `standalone_confirmed=True`. Default `native_format=True` on replies needs Mail focus + Accessibility; hand off `REPLY_WINDOW_FOCUS_FAILED` recovery to **`email-drafting`**.
 
 ### 5. Maintain And Refresh
 

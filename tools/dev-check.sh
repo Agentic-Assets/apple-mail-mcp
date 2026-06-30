@@ -36,6 +36,21 @@ run_manifests() {
   bash tools/validate_manifests.sh
 }
 
+run_module_line_budget() {
+  echo "→ module line budget (600 LOC warn; regression enforced in pytest + validate_manifests)"
+  "$PY" tools/check_module_line_budget.py
+}
+
+run_skill_reference_sync() {
+  echo "→ packaged skill reference sync (canonical plugin/skills/references → */references/)"
+  "$PY" tools/sync_skill_references.py --check
+}
+
+run_tasks_layout() {
+  echo "→ tasks/ layout (active/reference/archive buckets; enforced for agent handoffs)"
+  "$PY" tools/validate_tasks_layout.py
+}
+
 run_pytest() {
   "$PYTEST" tests/ -q
 }
@@ -97,6 +112,8 @@ staged_touches_tool_surface() {
 
 run_default() {
   run_manifests
+  run_tasks_layout
+  run_module_line_budget
   run_pytest
   run_test_count_check
 }
@@ -138,6 +155,7 @@ case "$TIER" in
   release)
     run_lint
     bash tools/build-artifacts.sh
+    run_tasks_layout
     run_pytest
     run_test_count_check
     run_wrapper

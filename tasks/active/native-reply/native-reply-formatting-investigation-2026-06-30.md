@@ -60,8 +60,8 @@ The reply body insertion mechanism went through several designs (from git histor
 - `6bfe72b` (v3.6.0, 2026-06-05): removed the original GUI/clipboard compose path; rebuilt replies as plain-text `>`-quoted drafts. Lost native `In-Reply-To`/`References` threading.
 - `80b0d82` (2026-06-08): switched to Mail's native `reply` command and inserted the body via clipboard plus `keystroke "v"`. This preserved the colored bar and signature.
 - `67db4d2` (2026-06-08): added post-save bounded Drafts verification.
-- `5590efd` (2026-06-19): pivotal revert. Removed the native `reply` plus clipboard/keystroke insertion and replaced it with today's `set content` reconstruction. Reason: the GUI paste was focus sensitive and silently dropped the body, saving drafts that contained only the signature and quoted original. See `tasks/reply-body-insertion-failure-2026-06-18.md` ("unsafe false progress").
-- Repo doctrine after the revert (`tasks/reply-draft-verification-hardening-2026-06-19.md`): avoid reply-body insertion through UI scripting, clipboard paste, or focus-sensitive windows. Enforced by tests with `assertNotIn("System Events")`, `assertNotIn('keystroke "v"')`, `assertNotIn("NSPasteboard")`.
+- `5590efd` (2026-06-19): pivotal revert. Removed the native `reply` plus clipboard/keystroke insertion and replaced it with today's `set content` reconstruction. Reason: the GUI paste was focus sensitive and silently dropped the body, saving drafts that contained only the signature and quoted original. See `tasks/archive/2026-06/issues/reply-body-insertion-failure-2026-06-18.md` ("unsafe false progress").
+- Repo doctrine after the revert (`tasks/archive/2026-06/issues/reply-draft-verification-hardening-2026-06-19.md`): avoid reply-body insertion through UI scripting, clipboard paste, or focus-sensitive windows. Enforced by tests with `assertNotIn("System Events")`, `assertNotIn('keystroke "v"')`, `assertNotIn("NSPasteboard")`.
 
 Key takeaway: the GUI-paste approach is not a new idea. It shipped and was deliberately removed because it failed silently. Any return to it has to address that failure mode, not just the rendering.
 
@@ -165,9 +165,9 @@ Net: A can be made safe-failing but not focus immune, so it is the interactive f
 ## References
 
 - `plugin/apple_mail_mcp/tools/compose.py` (`reply_to_email`, `_build_native_reply_applescript`, `_save_front_compose_window_as_draft`, `_verify_saved_reply_draft`)
-- `tasks/reply-body-insertion-failure-2026-06-18.md` (the original silent body-drop report)
-- `tasks/reply-draft-verification-hardening-2026-06-19.md` (the no-UI-scripting doctrine)
-- `tasks/mail-scripting-dictionary-audit-2026-06-19.md` (dictionary constraints, `html content` deprecated)
+- `tasks/archive/2026-06/issues/reply-body-insertion-failure-2026-06-18.md` (the original silent body-drop report)
+- `tasks/archive/2026-06/issues/reply-draft-verification-hardening-2026-06-19.md` (the no-UI-scripting doctrine)
+- `tasks/archive/2026-06/issues/mail-scripting-dictionary-audit-2026-06-19.md` (dictionary constraints, `html content` deprecated)
 - Git commits: `6bfe72b`, `80b0d82`, `67db4d2`, `5590efd`
 - `/System/Applications/Mail.app/Contents/Resources/Mail.sdef`
 - MacScripter: "Reply to a Mail message: insert text above signature and quoted text" (https://www.macscripter.net/t/reply-to-a-mail-message-insert-text-above-signature-and-quoted-text/72391)
@@ -206,7 +206,7 @@ On this macOS (Darwin 25.5), **`count of outgoing messages` returns 0 even while
 
 ### Reusable probe scripts
 
-Saved to [`tasks/native-reply-probes-2026-06-30.md`](native-reply-probes-2026-06-30.md): open-native-reply, AXRaise targeting test, guarded keystroke+save, saved-source verifier, and window/outgoing diagnostics.
+Saved to [`native-reply-probes-2026-06-30.md`](native-reply-probes-2026-06-30.md): open-native-reply, AXRaise targeting test, guarded keystroke+save, saved-source verifier, and window/outgoing diagnostics.
 
 ### CONFIRMED: `reply with opening window` leaves empty shell drafts
 

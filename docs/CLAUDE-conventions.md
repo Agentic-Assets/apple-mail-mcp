@@ -153,7 +153,7 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 **Attachment targeting:** pass `message_ids` to `list_email_attachments`; `subject_keyword` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`. Use `output_format="json"` to get per-row `message_id`, `attachment_index`, filename, and size. Prefer `save_email_attachment(message_ids=[one_id], attachment_index=N, ...)` for exact saves. `attachment_name` remains compatible, but duplicate filename matches return `AMBIGUOUS_ATTACHMENT_SELECTOR` and instruct callers to retry with `attachment_index`.
 
-**Agent guidance:** skills under `plugin/skills/email-drafting/` and `plugin/skills/apple-mail-operator/` document the quiet-default vs saved-open review split. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
+**Agent guidance:** `plugin/skills/email-drafting/` documents the quiet-default vs saved-open review split, native reply (`native_format=True`), Accessibility requirements, and `REPLY_WINDOW_FOCUS_FAILED` recovery. `apple-mail-operator` covers bootstrap and navigation and hands off reply drafting to `email-drafting`. Sync `apple-mail-mcpb/manifest.json` tool descriptions when compose behavior changes.
 
 ---
 
@@ -228,6 +228,7 @@ Every skill under `plugin/skills/` follows the same shape so siblings trigger cr
 - **`description`**: third-person, scenario-rich, ends with "Do NOT use for X (see \<sibling\>)". Include 4–6 quoted trigger phrases and name 3–5 central MCP tools.
 - **Body**: imperative/infinitive ("Start with `get_inbox_overview()`"). Addresses the executing model, not a human reader.
 - **`SKILL.md`**: 1,500–2,000 words. Detail → `references/`, code → `examples/`, scripts → `scripts/`. Link in "Additional Resources".
+- **Packaged skill paths:** Agents only see files inside each `plugin/skills/<name>/` directory. Do not link to `../references/` or other paths outside the skill folder. Canonical shared refs live in `plugin/skills/references/`; run `python3 tools/sync_skill_references.py` after edits to refresh per-skill `references/` copies. `tests/test_packaged_skill_paths.py` enforces both rules.
 - **Top of body**: (1) purpose, (2) when-to-use / when-NOT-to-use, (3) performance defaults, (4) sibling decision tree, (5) red-flag table for destructive ops.
 - **No persona openers** ("You are an expert…").
 - **Verify** with `plugin-dev:skill-reviewer` before merge when available. If unavailable, run manifest/release validation and note the missing expert pass. Template: `plugin/skills/email-management/SKILL.md`.
@@ -251,6 +252,39 @@ Entry points ship as skills only. Do not restore `plugin/commands/`; the old `/e
 **Routing cheat sheet:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). **Narrow skills** may stay shorter than the umbrella template if they include triggers, sibling matrix, performance notes, and destructive red lines. **Umbrella template:** `plugin/skills/email-management/SKILL.md` (also has `references/`, `examples/`, `templates/`).
 
 After adding or editing any skill: run **`plugin-dev:skill-reviewer`** when available. After manifest, package, artifact, or skill-count marketing copy changes: run **`plugin-dev:plugin-validator`** when available plus `bash tools/dev-check.sh release`.
+
+---
+
+## Module line budget (600 LOC)
+
+Keep production modules focused and splittable. The repo enforces a **600 physical-line** soft target on `plugin/apple_mail_mcp/` and `tools/` (aligned with agent guidance and the `python-project-structure` skill's 300–500 line split heuristic).
+
+### Automated gates
+
+| Layer | Behavior |
+|-------|----------|
+| **`tools/check_module_line_budget.py`** | Warn-only CLI; lists modules over budget |
+| **`tests/test_module_line_budget.py`** | Pytest warning on oversize modules; **hard fail** on baseline regression |
+| **`validate_manifests.py`** | Same regression check during manifest validation; prints WARN lines |
+| **`dev-check.sh`** | Prints budget report before pytest (default, release, live, surface, all) |
+| **GitHub CI** | Dedicated step + pytest `-rw` (warnings visible in log) |
+| **Pre-commit** | Via `dev-check.sh default` |
+
+### Baseline fixture
+
+Known oversized modules are snapshotted in [`tests/fixtures/module_line_budget/baseline.json`](../tests/fixtures/module_line_budget/baseline.json). CI **fails** when a tracked file grows past its baseline count. Refresh only after an intentional split or measured shrink:
+
+```bash
+python3 tools/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json
+```
+
+Do not refresh the baseline merely to silence growth from new features; split helpers into focused modules first (`plugin/apple_mail_mcp/tools/CLAUDE.md` module map). Run **`code-simplifier:code-simplifier`** after splits.
+
+### Current debt (tool modules)
+
+All six MCP tool modules exceed 600 LOC today (`compose.py` largest). The gate prevents further sprawl until decomposition work lands (see [`tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`](../tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md)).
+
+Detail: [`tools/CLAUDE.md`](../tools/CLAUDE.md) § `check_module_line_budget.py` · [`tests/CLAUDE.md`](../tests/CLAUDE.md) § Module line budget.
 
 ---
 

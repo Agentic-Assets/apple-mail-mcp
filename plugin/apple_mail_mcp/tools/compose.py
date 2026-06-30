@@ -53,6 +53,9 @@ from apple_mail_mcp.tools.draft_verification import (
 # updates in tests/test_phase_2_scan_hardening.py.
 DRAFT_LIST_CAP = SCAN_BOUNDS["DRAFT_LOOKUP"]
 MESSAGE_LOOKUP_CAP = SCAN_BOUNDS["MESSAGE_LOOKUP"]
+_MESSAGE_ID_REQUIRED_ERROR = (
+    "Error: message_id is required (discover via search_emails(...) or list_inbox_emails(...), then pass message_id)"
+)
 # Maximum number of Mail compose windows that may be open simultaneously when
 # mode="open" is used. Each call in mode="open" leaves a window open; at high
 # counts NSWindowServer OOMs. Agents doing bulk drafting must use mode="draft".
@@ -2195,11 +2198,17 @@ def reply_to_email(
     native_format: bool = True,
 ) -> str:
     """
-    Reply to an email by message_id (preferred) or subject keyword.
+    Reply to an email by exact ``message_id``.
+
+    ``subject_keyword`` is a deprecated selector retained for v3.x schema
+    compatibility. Use ``search_emails(...)`` or ``list_inbox_emails(...)`` to
+    discover candidate ids, then pass ``message_id``. Passing ``subject_keyword``
+    without ``message_id`` returns ``TARGET_SELECTOR_DEPRECATED``.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
-        subject_keyword: Keyword to search for in email subjects (omit when message_id is set)
+        subject_keyword: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_id`` is omitted.
         reply_body: The body text of the reply
         reply_to_all: If True, reply to all recipients; if False, reply only to sender (default: False)
         cc: Optional CC recipients, comma-separated for multiple
@@ -2210,8 +2219,10 @@ def reply_to_email(
         body_html: Accepted for backwards compatibility but ignored. Replies use Mail's native reply composer and
             insert reply_body as plain text above Mail's native quoted thread.
         from_address: Optional sender address to use for this reply. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
-        message_id: Exact numeric Apple Mail message id from search/list tools. Required preference over subject_keyword whenever an id is available.
-        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). Must be > 0 — full-mailbox subject scans are refused; pass `message_id` for constant-cost lookups or fall back to `full_inbox_export`.
+        message_id: Required. Exact numeric Apple Mail message id from
+            ``search_emails`` or ``list_inbox_emails``.
+        recent_days: Schema-compat parameter for deprecated subject_keyword path
+            (default: 2.0 / 48h). Ignored when ``message_id`` is set.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to 120s for the main reply script and up to 30s for alias validation.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
@@ -2233,7 +2244,7 @@ def reply_to_email(
         return "Error: Invalid output_format. Use: text, json"
 
     if not message_id and not subject_keyword:
-        return "Error: 'subject_keyword' or 'message_id' is required"
+        return _MESSAGE_ID_REQUIRED_ERROR
     if not message_id and subject_keyword:
         return target_selector_deprecated_error(
             "reply_to_email",
@@ -2251,7 +2262,7 @@ def reply_to_email(
     lookup_script, lookup_error = _build_found_message_lookup(
         "inboxMailbox",
         message_id=message_id,
-        subject_keyword=subject_keyword or None,
+        subject_keyword=None,
         recent_days=recent_days,
         messages_var="inboxMessages",
         tool_name="reply_to_email",
@@ -2302,12 +2313,7 @@ def reply_to_email(
 
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
-    safe_subject_keyword = escape_applescript(subject_keyword) if subject_keyword else ""
-    not_found_message = (
-        f"Error: No email found for message_id={message_id}"
-        if message_id
-        else f"Error: No email found matching: {safe_subject_keyword}"
-    )
+    not_found_message = f"Error: No email found for message_id={message_id}"
 
     # Write reply body to a temp file to avoid AppleScript string escaping
     # issues with special characters (em dashes, curly quotes, colons, etc.)
@@ -2747,11 +2753,17 @@ def forward_email(
     signature_name: str | None = None,
 ) -> str:
     """
-    Forward an email to one or more recipients.
+    Forward an email to one or more recipients by exact ``message_id``.
+
+    ``subject_keyword`` is a deprecated selector retained for v3.x schema
+    compatibility. Use ``search_emails(...)`` or ``list_inbox_emails(...)`` to
+    discover candidate ids, then pass ``message_id``. Passing ``subject_keyword``
+    without ``message_id`` returns ``TARGET_SELECTOR_DEPRECATED``.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
-        subject_keyword: Keyword to search for in email subjects (omit when message_id is set)
+        subject_keyword: Deprecated schema-compat selector. Returns
+            ``TARGET_SELECTOR_DEPRECATED`` when ``message_id`` is omitted.
         to: Recipient email address(es), comma-separated for multiple
         message: Optional message to add before forwarded content
         mailbox: Mailbox to search in (default: "INBOX")
@@ -2759,8 +2771,10 @@ def forward_email(
         bcc: Optional BCC recipients, comma-separated for multiple
         from_address: Optional sender address to use when forwarding. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         mode: Delivery mode — "draft" (default, save quietly to Drafts), "open" (save first, then leave compose window open for review), or "send" (send immediately)
-        message_id: Exact numeric Apple Mail message id from search/list tools. Required preference over subject_keyword whenever an id is available.
-        recent_days: When searching by subject_keyword, only scan messages from the last N days (default: 2.0 / 48h). Must be > 0 — full-mailbox subject scans are refused; pass `message_id` for constant-cost lookups or fall back to `full_inbox_export`.
+        message_id: Required. Exact numeric Apple Mail message id from
+            ``search_emails`` or ``list_inbox_emails``.
+        recent_days: Schema-compat parameter for deprecated subject_keyword path
+            (default: 2.0 / 48h). Ignored when ``message_id`` is set.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
@@ -2770,7 +2784,7 @@ def forward_email(
     """
 
     if not message_id and not subject_keyword:
-        return "Error: 'subject_keyword' or 'message_id' is required"
+        return _MESSAGE_ID_REQUIRED_ERROR
     if not to:
         return "Error: 'to' is required"
     if not message_id and subject_keyword:
@@ -2790,7 +2804,7 @@ def forward_email(
     lookup_script, lookup_error = _build_found_message_lookup(
         "targetMailbox",
         message_id=message_id,
-        subject_keyword=subject_keyword or None,
+        subject_keyword=None,
         recent_days=recent_days,
         tool_name="forward_email",
     )
@@ -2826,14 +2840,9 @@ def forward_email(
 
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
-    safe_subject_keyword = escape_applescript(subject_keyword) if subject_keyword else ""
     safe_to = escape_applescript(to)
     safe_mailbox = escape_applescript(mailbox)
-    not_found_message = (
-        f"Error: No email found for message_id={message_id}"
-        if message_id
-        else f"Error: No email found matching: {safe_subject_keyword}"
-    )
+    not_found_message = f"Error: No email found for message_id={message_id}"
 
     sender_script = _compose_sender_script("forwardMessage", "targetAccount", sender_override)
     signature_script = _compose_signature_script("forwardMessage", resolved_signature_name)
@@ -3241,8 +3250,11 @@ def manage_drafts(
         body: Email body (required for create)
         cc: Optional CC recipients for create
         bcc: Optional BCC recipients for create
-        draft_subject: Subject keyword to find draft for send/open/delete when draft_id is unavailable
-        draft_id: Exact numeric Drafts message id for send/open/delete; preferred over draft_subject
+        draft_subject: Deprecated subject keyword selector retained for v3.x schema
+            compatibility. Use ``manage_drafts(action="list", subject_contains=...)``
+            or ``manage_drafts(action="find", ...)`` to discover ``draft_id``. Passing
+            ``draft_subject`` without ``draft_id`` returns ``TARGET_SELECTOR_DEPRECATED``.
+        draft_id: Exact numeric Drafts message id for send/open/delete (required for targeting).
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
@@ -3296,12 +3308,11 @@ def manage_drafts(
                 f"draft_id={numeric_id}",
                 f"No draft found for draft_id={numeric_id}",
             )
-        if not draft_subject:
-            return None, "Error: 'draft_subject' or 'draft_id' is required for this draft action", None
         return (
-            _build_draft_lookup(draft_subject),
-            escape_applescript(draft_subject),
-            f"No draft found matching: {escape_applescript(draft_subject)}",
+            None,
+            "Error: draft_id is required for this draft action "
+            "(discover via manage_drafts(action='list') or action='find')",
+            None,
         )
 
     if action == "list":

@@ -315,9 +315,9 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 |------|-------------|
 | `list_mailboxes` | Folder hierarchy with optional message counts |
 | `create_mailbox` | Create new mailboxes (supports nested paths) |
-| `move_email` | Move by `message_ids` (preferred) or filters with `allow_filter_scan=True`. Default max 50 |
-| `update_email_status` | Mark read/unread, flag/unflag by `message_ids` (preferred) or filters with `allow_filter_scan=True`. Default max 10 |
-| `manage_trash` | Soft delete, permanent delete, empty trash; prefer `message_ids`, filters need `allow_filter_scan=True`. Default max 5 |
+| `move_email` | Move by `message_ids` (required for targeting). `allow_filter_scan=True` + `older_than_days` only for date/bulk moves; `subject_keyword`/`sender` return `TARGET_SELECTOR_DEPRECATED`. Default max 50 |
+| `update_email_status` | Mark read/unread, flag/unflag by `message_ids` (preferred). `allow_filter_scan=True` + date/bulk filters only; `subject_keyword`/`sender` return `TARGET_SELECTOR_DEPRECATED`. Default max 10 |
+| `manage_trash` | Soft delete, permanent delete, empty trash; prefer `message_ids`. `allow_filter_scan=True` + `older_than_days` only; `subject_keyword`/`sender` return `TARGET_SELECTOR_DEPRECATED`. Default max 5 |
 | `synchronize_account` | Explicitly confirmed Mail.app sync for an account (can fetch large backlogs) |
 
 ### Composition
@@ -325,8 +325,8 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 |------|-------------|
 | `compose_email` | Create a new standalone draft by default; refuses reply-like subjects/bodies unless `standalone_confirmed=True`; does not include original thread context |
 | `reply_to_email` | Native Mail reply or reply-all draft. Default `native_format=True` composes in Mail's reply window (keeps the rich quote bar + logo signature) and types `reply_body` above the quote — needs window focus + Accessibility permission, else returns `REPLY_WINDOW_FOCUS_FAILED`; `native_format=False` is the windowless object-model fallback (plain-text quote). Verifies exact Drafts id first with bounded fallback; returns verification status, verified draft id, attachment status, and signature status for draft/open modes |
-| `forward_email` | Forward with optional message, CC/BCC; prefer `message_id` from search/list results |
-| `manage_drafts` | Create, list, send, open, and delete drafts; list returns Drafts ids, and send/open/delete prefer exact `draft_id` over subject matching; standalone create refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
+| `forward_email` | Forward by `message_id` (required — discover via `search_emails` or `list_inbox_emails`). `subject_keyword` is schema-compat only and returns `TARGET_SELECTOR_DEPRECATED`. Optional message, CC/BCC; default saves to Drafts |
+| `manage_drafts` | Create, list, send, open, and delete drafts; `action=list` returns Drafts ids; send/open/delete require exact `draft_id` (`draft_subject` is schema-compat only and returns `TARGET_SELECTOR_DEPRECATED`). Standalone `action=create` refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
 | `verify_draft` | Verify one exact Drafts message id; returns JSON snapshot for recipients, body sentinel, attachments, signature state, quoted-original status, and thread headers |
 | `verify_drafts` | Verify multiple exact Drafts message ids and merge the per-draft JSON snapshots |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
@@ -334,8 +334,8 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Attachments
 | Tool | Description |
 |------|-------------|
-| `list_email_attachments` | List attachments by `message_ids` (preferred) or subject keyword (capped at 50 by default) |
-| `save_email_attachment` | Save attachments to disk (validates target path) |
+| `list_email_attachments` | List attachments by `message_ids` (required — discover via `search_emails` or `list_inbox_emails`); `subject_keyword` returns `TARGET_SELECTOR_DEPRECATED`. Capped at 50 by default |
+| `save_email_attachment` | Save a specific attachment to disk. Requires `message_ids` from prior `search_emails`, `list_inbox_emails`, or `list_email_attachments`; use `list_email_attachments` to pick `attachment_index`. Validates target path |
 
 ### Smart Inbox
 | Tool | Description |
@@ -389,9 +389,8 @@ In draft-safe mode:
 - `compose_email`, `reply_to_email`, and `forward_email` default to `mode="draft"` (quiet save to Drafts, no leftover compose windows); native replies assign `reply_body` above the quoted original, and saved replies/forwards verify exact Drafts id first when Mail exposes it before returning verification metadata
 - they apply `DEFAULT_MAIL_SIGNATURE` by default when set; pass `include_signature=False` or CLI `--no-signature` to suppress it. For replies, disabling signatures cannot skip `reply_body` insertion
 - use `mode="open"` only when you want each draft saved and left open in Mail for review (bulk reply UIs)
+- **ID-first workflow:** discover with `search_emails` or `list_inbox_emails`, collect `message_id`, then `reply_to_email(message_id=..., reply_body=...)` or `forward_email(message_id=...)`. Never pass `subject_keyword` to action tools — it returns `TARGET_SELECTOR_DEPRECATED`.
 - reply drafting requires `reply_to_email(message_id=...)`; standalone draft creators (`compose_email`, `create_rich_email_draft`, `manage_drafts(action="create")`) block reply-like `Re:` / `Fwd:` drafts unless `standalone_confirmed=True`
-- treat `subject_keyword` reply targeting or any degraded reply fallback as Cayman-approved-only for the specific message
-- pass `message_id` from search/list tools for reply/forward when available; `subject_keyword` is fallback only
 - explicit `mode="send"` calls return an error
 - `manage_drafts action="send"` returns an error; when send is enabled outside draft-safe mode, target drafts by exact `draft_id` from `manage_drafts(action="list")`
 
@@ -466,8 +465,8 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
 | Unbounded scans refused | All routine scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is a separate audited export tool, not a normal search fallback |
-| **ID-first mutations** | `move_email`, `update_email_status`, `manage_trash` | Pass `message_ids=[...]` from `search_emails`, `list_inbox_emails`, or `get_needs_response(output_format="json")` (fast, preferred). Filter-based bulk moves/updates/trash require `allow_filter_scan=True` or return `code: FILTER_SCAN_DISABLED`. |
-| **Gated filter scans** | `move_email`, `update_email_status`, `manage_trash` (filter path only) | `allow_filter_scan=True` (slow; timeout-prone on 24k+ inboxes). Filter paths still default to a 48h `recent_days` window. |
+| **ID-first mutations** | `move_email`, `update_email_status`, `manage_trash` | Pass `message_ids=[...]` from `search_emails`, `list_inbox_emails`, or `get_needs_response(output_format="json")` (fast, preferred). Date/bulk filter paths require `allow_filter_scan=True` or return `code: FILTER_SCAN_DISABLED`. `subject_keyword` and `sender` on action tools always return `TARGET_SELECTOR_DEPRECATED`, even with `allow_filter_scan=True`. |
+| **Gated filter scans** | `move_email`, `update_email_status`, `manage_trash` (date/bulk path only) | `allow_filter_scan=True` + `older_than_days` or `apply_to_all` (slow; timeout-prone on 24k+ inboxes). Subject/sender selectors never work on action tools. Filter paths still default to a 48h `recent_days` window. |
 | **Body scan gate** | `search_emails` | `body_text` requires `allow_body_scan=True` or returns `code: BODY_SCAN_DISABLED`. Prefer subject/sender/date filters; pair body scans with a tight date window. |
 
 **Recommended mutation flow:** search, list, or `get_needs_response(output_format="json")` → collect numeric `message_id` values → call `move_email`, `update_email_status`, or `manage_trash` with `message_ids`. Use `dry_run=True` with ids for a fast preview without acting.
@@ -622,8 +621,18 @@ apple-mail-mcp/
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit and push
-4. Open a Pull Request
+3. Run local gates before opening a PR:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]" pytest
+bash tools/dev-check.sh          # manifests, 600 LOC module budget report, pytest
+bash tools/dev-check.sh release  # before plugin/manifest/package changes
+```
+
+The **module line budget** warns when `plugin/apple_mail_mcp/` or `tools/` Python files exceed **600 lines**, and CI fails if a tracked large file grows further. See [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) § Module line budget.
+
+4. Commit and push
+5. Open a Pull Request
 
 ## License
 

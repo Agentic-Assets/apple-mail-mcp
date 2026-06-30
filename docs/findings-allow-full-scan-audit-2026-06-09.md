@@ -108,7 +108,7 @@ Enforcement:
 
 ### Historical tools that **used to** expose `allow_full_scan` (pre-v3.2.0)
 
-Planning map in `tasks/whose-elimination-2026-05-22/05-codebase-whose-map.md` (historical; behavior since changed):
+Planning map in `tasks/archive/2026-05/whose-elimination-2026-05-22/05-codebase-whose-map.md` (historical; behavior since changed):
 
 | Tool | Module | Old gate |
 |------|--------|----------|
@@ -277,8 +277,8 @@ This is the **only** tool designed for whole-mailbox walks. No boolean opt-in on
 | Location | Status |
 |----------|--------|
 | `plugin/**` (current) | Clean |
-| `tasks/whose-elimination-2026-05-22/*` | Historical planning (explicitly marked historical) |
-| `tasks/scalability-24k-hardening-2026-05-22.md` | Historical planning |
+| `tasks/archive/2026-05/whose-elimination-2026-05-22/*` | Historical planning (explicitly marked historical) |
+| `tasks/archive/2026-05/scalability-24k-hardening-2026-05-22.md` | Historical planning |
 | Cursor cache v3.1.7 skills + `tools/CLAUDE.md` | **Stale — still teaches `allow_full_scan`** |
 | Cursor MCP JSON descriptors | **Stale — still exposes parameter** |
 
