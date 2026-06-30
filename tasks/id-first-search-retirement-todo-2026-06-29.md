@@ -89,7 +89,6 @@ Still open:
 - Product decisions for v4 schema removal, `mailbox="All"` opt-in, and fate of fuzzy sender discovery.
 - Forward draft id capture and verification.
 - Metadata index feasibility and integration.
-- Batch exact-ID APIs.
 
 ## Required Skills
 

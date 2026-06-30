@@ -262,30 +262,31 @@ The dashboard is a required dependency before runtime removal. Current quick act
 
 ### Phase 1: Guidance, CLI, UI, And Static Gates
 
-- [ ] Update `docs/CLAUDE-conventions.md` from "prefer message_ids" to "action tools must target by ids."
-- [ ] Update packaged skills to remove routine filter mutation examples, starting with unsafe `move_email`, `update_email_status`, and `manage_trash` examples.
-- [ ] Replace `search-patterns.md` with an ID-first discovery structure instead of patching individual broad examples.
-- [ ] Update reply, forward, Drafts, thread, attachment, and style-profile skills so subject fallback requires explicit degraded-path approval.
-- [ ] Add static docs tests that flag action calls like `move_email(subject_keyword=...)`, `update_email_status(sender=...)`, `manage_trash(sender=...)`, `reply_to_email(subject_keyword=...)`, `forward_email(subject_keyword=...)`, `list_email_attachments(subject_keyword=...)`, `save_email_attachment(subject_keyword=...)`, and unqualified `mailbox="All"` unless explicitly labeled as fallback.
-- [ ] Add CLI `--allow-body-scan`, `--message-ids` for dry-run commands, and explicit `--allow-filter-scan` if filter dry-runs remain.
-- [ ] Update CLI help to say `search` is discovery and actions are ID-first.
-- [ ] Convert live/perf probes to ID-based dry-run coverage or label old subject probes as compatibility checks.
-- [ ] Add dashboard payload ids and migrate dashboard quick actions to ID-first calls.
+- [x] Update `docs/CLAUDE-conventions.md` from "prefer message_ids" to "action tools must target by ids."
+- [x] Update packaged skills to remove routine filter mutation examples, starting with unsafe `move_email`, `update_email_status`, and `manage_trash` examples.
+- [x] Replace `search-patterns.md` with an ID-first discovery structure instead of patching individual broad examples.
+- [x] Update reply, forward, Drafts, thread, attachment, and style-profile skills so subject fallback requires explicit degraded-path approval.
+- [x] Add static docs tests that flag action calls like `move_email(subject_keyword=...)`, `update_email_status(sender=...)`, `manage_trash(sender=...)`, `reply_to_email(subject_keyword=...)`, `forward_email(subject_keyword=...)`, `list_email_attachments(subject_keyword=...)`, `save_email_attachment(subject_keyword=...)`, and unqualified `mailbox="All"` unless explicitly labeled as fallback.
+- [x] Add CLI `--allow-body-scan`, `--message-ids` for dry-run commands, and explicit `--allow-filter-scan` if filter dry-runs remain.
+- [x] Update CLI help to say `search` is discovery and actions are ID-first.
+- [x] Convert live/perf probes to ID-based dry-run coverage or label old subject probes as compatibility checks.
+- [x] Add dashboard payload ids and migrate dashboard quick actions to ID-first calls.
 
 ### Phase 2a: Schema-Compatible Runtime Deprecation
 
-- [ ] Keep legacy selector params in v3.x schemas, but return structured `TARGET_SELECTOR_DEPRECATED` errors before AppleScript runs.
-- [ ] `reply_to_email`: return deprecation error for `subject_keyword` without `message_id`.
-- [ ] `forward_email`: return deprecation error for `subject_keyword` without `message_id`; separately capture and verify forward draft ids.
-- [ ] `manage_drafts`: return deprecation error for `draft_subject` on `send`, `open`, and `delete`.
+- [x] Keep legacy selector params in v3.x schemas, but return structured `TARGET_SELECTOR_DEPRECATED` errors before AppleScript runs.
+- [x] `reply_to_email`: return deprecation error for `subject_keyword` without `message_id`.
+- [x] `forward_email`: return deprecation error for `subject_keyword` without `message_id`.
+- [ ] Separately capture and verify forward draft ids.
+- [x] `manage_drafts`: return deprecation error for `draft_subject` on `send`, `open`, and `delete`.
 - [ ] `move_email`: keep `message_ids` as the normal path; decide whether `allow_filter_scan=True` becomes a deprecation error or moves to a separate bulk tool.
 - [ ] `update_email_status`: same migration shape as `move_email`.
 - [ ] `manage_trash`: same migration shape as `move_email`; keep `empty_trash` as a separate confirmation-based path.
-- [ ] `list_email_attachments`: return deprecation error for `subject_keyword`; add JSON output carrying attachment metadata.
-- [ ] `save_email_attachment`: return deprecation error for `subject_keyword`; add exact `attachment_id` or exact-name semantics and ambiguous-duplicate errors.
-- [ ] `export_emails(scope="single_email")`: return deprecation error for `subject_keyword`.
-- [ ] Add migration tests proving deprecation errors include `code`, `message`, `remediation.preferred`, and do not call AppleScript.
-- [ ] Add read-only and draft-safe precedence tests for `manage_drafts(action="send", draft_subject=...)`.
+- [x] `list_email_attachments`: return deprecation error for `subject_keyword`; add JSON output carrying attachment metadata.
+- [x] `save_email_attachment`: return deprecation error for `subject_keyword`; add exact `attachment_id` or exact-name semantics and ambiguous-duplicate errors.
+- [x] `export_emails(scope="single_email")`: return deprecation error for `subject_keyword`.
+- [x] Add migration tests proving deprecation errors include `code`, `message`, `remediation.preferred`, and do not call AppleScript.
+- [x] Add read-only and draft-safe precedence tests for `manage_drafts(action="send", draft_subject=...)`.
 
 ### Phase 2b: Breaking Schema Removal
 
@@ -295,15 +296,15 @@ The dashboard is a required dependency before runtime removal. Current quick act
 
 ### Phase 3: Better Discovery
 
-- [ ] Add `sender_exact` and `sender_domain` to `search_emails`.
-- [ ] Add `internet_message_id` lookup support where Mail headers are available.
+- [x] Add `sender_exact` and `sender_domain` to `search_emails`.
+- [x] Add `internet_message_id` lookup support where Mail headers are available.
 - [ ] Decide whether fuzzy `sender` stays forever as discovery or becomes deprecated after exact/domain fields exist.
-- [ ] Add `get_email_thread` JSON output with message ids and headers.
-- [ ] Add `get_email_thread` header-first implementation for `message_id` anchors: exact anchor headers first, cached headers if available, explicit mailbox set only, subject fallback last.
-- [ ] Add `include_preview=False` default or option for `get_email_thread`.
-- [ ] Add `mailboxes=[...]` examples everywhere `mailbox="All"` is currently suggested.
-- [ ] Add warnings in JSON/text responses for sender-only, body, content-preview, and All-mailbox searches.
-- [ ] Add tests for renamed threads and common-subject overmatch.
+- [x] Add `get_email_thread` JSON output with message ids and headers.
+- [x] Add `get_email_thread` header-first implementation for `message_id` anchors: exact anchor headers first, cached headers where available, explicit mailbox set only, subject fallback last.
+- [x] Add `include_preview=False` default or option for `get_email_thread`.
+- [x] Add `mailboxes=[...]` examples everywhere `mailbox="All"` is currently suggested.
+- [x] Add warnings in JSON/text responses for sender-only, body, content-preview, and All-mailbox searches.
+- [x] Add tests for renamed threads and common-subject overmatch.
 
 ### Phase 4a: Index Feasibility Spike
 
@@ -327,12 +328,12 @@ The dashboard is a required dependency before runtime removal. Current quick act
 
 - [ ] Add schema tests proving action tools no longer expose keyword target params when the removal phase lands.
 - [ ] Add backward-compat tests for structured deprecation errors during the transition.
-- [ ] Add CLI tests for `--allow-body-scan`, `--message-ids`, and filter-scan escape hatch behavior if retained.
-- [ ] Add static scan tests for skill examples and CLI help.
-- [ ] Keep `test_no_unbounded_whose.py`, `test_bounded_scan_contract.py`, and exact-id regression tests as merge gates.
-- [ ] Treat no-unbounded-scan gates as design constraints for cache misses: fallback only through bounded AppleScript paths or explicit `full_inbox_export`.
+- [x] Add CLI tests for `--allow-body-scan`, `--message-ids`, and filter-scan escape hatch behavior if retained.
+- [x] Add static scan tests for skill examples and CLI help.
+- [x] Keep `test_no_unbounded_whose.py`, `test_bounded_scan_contract.py`, and exact-id regression tests as merge gates.
+- [x] Treat no-unbounded-scan gates as design constraints for cache misses: fallback only through bounded AppleScript paths or explicit `full_inbox_export`.
 - [ ] Add metadata-index tests for cache hit, cache miss, stale fallback, and post-write invalidation.
-- [ ] Add batch-id tests for 50, 51, and 120 ids.
+- [x] Add batch-id tests for 50, 51, and 120 ids.
 - [ ] Add performance budget tests and before/after p50/p95 fixtures for `search_emails`, `get_email_thread`, `get_email_by_id`, `full_inbox_export`, and new batch APIs.
 
 ## Suggested Issue Breakdown
