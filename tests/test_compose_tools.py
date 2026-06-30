@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apple_mail_mcp import server as _server
+from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import compose as compose_tools
 
 
@@ -194,6 +195,41 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
                     any(f'set message signature of {message_var} to signature "TU"' in script for script in captured),
                     captured,
                 )
+
+    def test_default_signature_applies_to_reply_via_mail_signature_property(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return ""
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|detected"
+            return "ok"
+
+        with (
+            patch.object(compose_tools.server, "DEFAULT_MAIL_SIGNATURE", "TU", create=True),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        script = _main_reply_script(captured)
+        _assert_ordered(
+            self,
+            script,
+            'set message signature of replyMessage to signature "TU"',
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "save replyMessage",
+        )
+        verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
+        self.assertIn("set signatureWasRequested to true", verifier_script)
+        self.assertIn("Signature Verification Status: detected", result)
 
 
 class ComposeToolTests(unittest.TestCase):
@@ -895,6 +931,12 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertNotIn("System Events", script)
         self.assertNotIn('keystroke "v"', script)
 
+    def test_reply_to_email_accepts_output_format_parameter(self):
+        params = inspect.signature(compose_tools.reply_to_email).parameters
+
+        self.assertIn("output_format", params)
+        self.assertEqual(params["output_format"].default, "text")
+
     def test_empty_reply_body_keeps_body_assignment_guarded(self):
         captured = []
 
@@ -947,6 +989,41 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
         self.assertIn("return exactResult", verifier_script)
 
+    def test_reply_draft_success_json_outputs_contract(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["mode"], "draft")
+        self.assertFalse(payload["sent"])
+        self.assertEqual(payload["subject"], "Re: Test")
+        self.assertEqual(payload["draft_id"], "84053")
+        self.assertEqual(payload["verified_draft_id"], "84053")
+        self.assertEqual(payload["verification_status"], "found")
+        self.assertTrue(payload["exact_id_verified"])
+        self.assertTrue(payload["body_present"])
+        self.assertEqual(payload["attachment_status"], "not_requested")
+        self.assertEqual(payload["signature_status"], "not_requested")
+        self.assertEqual(payload["mailbox"], "Drafts")
+
     def test_reply_draft_success_outputs_attachment_and_signature_verification(self):
         captured = []
 
@@ -957,7 +1034,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             if "reply foundMessage" in script:
                 return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
             if 'set targetDraftIdText to "84053"' in script:
-                return "FOUND|84053|verified|missing"
+                return "FOUND|84053|verified|missing|1|support.pdf::2048;;"
             return "ok"
 
         with (
@@ -981,11 +1058,203 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         self.assertIn("Attachment Verification Status: verified", result)
+        self.assertIn("Attachments Applied Count: 1", result)
+        self.assertIn("support.pdf (2048 bytes)", result)
         self.assertIn("Signature Verification Status: missing", result)
         self.assertIn("requested Mail signature was not detected", result)
         verifier_script = next(script for script in captured if "set expectedAttachmentCount to" in script)
         self.assertIn("set expectedAttachmentCount to 1", verifier_script)
         self.assertIn("set signatureWasRequested to true", verifier_script)
+        self.assertIn("file size of anAttachment", verifier_script)
+
+    def test_reply_draft_attachment_warning_includes_applied_count(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|missing|not_requested|0|"
+            return "ok"
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
+                "apple_mail_mcp.tools.compose.run_applescript",
+                side_effect=fake_run,
+            ),
+            patch("apple_mail_mcp.tools.compose._validate_attachment_paths") as mock_validate,
+        ):
+            attachment = Path(tmpdir) / "support.pdf"
+            attachment.write_text("pdf")
+            mock_validate.return_value = ([str(attachment)], None)
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                attachments=str(attachment),
+                include_signature=False,
+            )
+
+        self.assertIn("Attachment Verification Status: missing", result)
+        self.assertIn("Attachments Applied Count: 0", result)
+        self.assertIn("requested attachments could not be verified", result)
+
+    def test_reply_verification_parser_preserves_pipe_in_attachment_filename(self):
+        verification = compose_tools._reply_verification_from_output(
+            "FOUND|84053|verified|not_requested|1|support|final.pdf::2048;;"
+        )
+
+        self.assertTrue(verification.ok)
+        self.assertEqual(verification.attachment_status, "verified")
+        self.assertEqual(verification.attachment_count, 1)
+        self.assertEqual(
+            verification.attachments_applied,
+            [{"filename": "support|final.pdf", "size": 2048}],
+        )
+
+    def test_reply_success_text_hides_attachment_count_when_not_requested(self):
+        verification = compose_tools._reply_verification_from_output(
+            "FOUND|84053|not_requested|not_requested|1|leftover.pdf::2048;;"
+        )
+
+        result = compose_tools._format_reply_verification_lines(verification, "84053")
+
+        self.assertIn("Attachment Verification Status: not_requested", result)
+        self.assertNotIn("Attachments Applied Count", result)
+        self.assertNotIn("leftover.pdf", result)
+
+    def test_reply_draft_success_json_includes_attachment_and_signature_status(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "availableSignatures" in script:
+                return ""
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84054|verified|missing|1|support|final.pdf::2048;;"
+            return "ok"
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
+                "apple_mail_mcp.tools.compose.run_applescript",
+                side_effect=fake_run,
+            ),
+            patch("apple_mail_mcp.tools.compose._validate_attachment_paths") as mock_validate,
+        ):
+            attachment = Path(tmpdir) / "support.pdf"
+            attachment.write_text("pdf")
+            mock_validate.return_value = ([str(attachment)], None)
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                attachments=str(attachment),
+                include_signature=True,
+                signature_name="TU",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["draft_id"], "84053")
+        self.assertEqual(payload["verified_draft_id"], "84054")
+        self.assertEqual(payload["verification_status"], "found")
+        self.assertFalse(payload["exact_id_verified"])
+        self.assertEqual(payload["attachment_status"], "verified")
+        self.assertEqual(payload["attachment_count"], 1)
+        self.assertEqual(
+            payload["attachments_applied"],
+            [{"filename": "support|final.pdf", "size": 2048}],
+        )
+        self.assertEqual(payload["signature_status"], "missing")
+        self.assertFalse(payload["sent"])
+
+    def test_reply_draft_success_text_warns_when_fallback_verified_different_draft(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84054|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        self.assertIn("Draft ID: 84053", result)
+        self.assertIn("Verified Draft ID: 84054", result)
+        self.assertIn("verified by bounded Drafts fallback", result)
+
+    def test_reply_all_with_attachment_preserves_single_body_and_verifies_exact_draft(self):
+        captured = []
+        body_sentinel = "AA-REPLY-ALL-BODY-SENTINEL-84053"
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id="84053",
+                    quote_needle="On Today, Sender <sender@example.com> wrote:",
+                )
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|verified|not_requested"
+            return "ok"
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
+                "apple_mail_mcp.tools.compose.run_applescript",
+                side_effect=fake_run,
+            ),
+            patch("apple_mail_mcp.tools.compose._validate_attachment_paths") as mock_validate,
+        ):
+            attachment = Path(tmpdir) / "support.pdf"
+            attachment.write_text("pdf")
+            mock_validate.return_value = ([str(attachment)], None)
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body=f"{body_sentinel}\n\nReply body",
+                reply_to_all=True,
+                attachments=str(attachment),
+                include_signature=False,
+            )
+
+        self.assertIn("Reply saved as draft!", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 84053", result)
+        self.assertIn("Attachment Verification Status: verified", result)
+
+        reply_script = _main_reply_script(captured)
+        self.assertIn("set replyMessage to reply foundMessage with reply to all", reply_script)
+        self.assertNotIn("System Events", reply_script)
+        self.assertNotIn('keystroke "v"', reply_script)
+        self.assertNotIn("set the clipboard to replyBodyText", reply_script)
+        self.assertEqual(reply_script.count("set content of replyMessage to"), 1)
+        self.assertEqual(reply_script.count("replyBodyText & return & return & quotedOriginalText"), 1)
+        _assert_ordered(
+            self,
+            reply_script,
+            "set replyMessage to reply foundMessage with reply to all",
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "set content of replyMessage to (composedReplyContent as rich text)",
+            "make new attachment with properties {file name:theFile} at after the last paragraph of content",
+            "save replyMessage",
+        )
+
+        verifier_script = next(script for script in captured if "set targetDraftIdText" in script)
+        self.assertIn('set targetDraftIdText to "84053"', verifier_script)
+        self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
+        self.assertIn("set expectedAttachmentCount to 1", verifier_script)
+        self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
 
     def test_reply_defaults_to_draft_mode(self):
         captured = []
@@ -1086,7 +1355,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         exact_branch = script[exact_lookup:fallback_lookup]
         self.assertNotIn('return "NOT_FOUND"', exact_branch)
 
-    def test_reply_signature_verification_only_runs_for_resolved_signature(self):
+    def test_reply_signature_verification_runs_when_signature_requested_without_resolved_name(self):
         captured = []
 
         def fake_run(script, timeout=120):
@@ -1109,7 +1378,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
-        self.assertIn("set signatureWasRequested to false", verifier_script)
+        self.assertIn("set signatureWasRequested to true", verifier_script)
 
     def test_reply_draft_success_reports_structured_artifact_error_when_body_missing(self):
         sentinel = "AA-REPLY-BODY-SENTINEL-84053"
@@ -1134,8 +1403,95 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         payload = json.loads(result)
         self.assertEqual(payload["code"], "REPLY_DRAFT_BODY_MISSING")
         self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["draft_id"], "84053")
         self.assertEqual(payload["remediation"]["expected_body_needle"], sentinel)
         self.assertIn("No email was sent", payload["message"])
+
+    def test_reply_draft_verifier_timeout_preserves_saved_draft_id(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                raise AppleScriptTimeout("simulated verifier timeout")
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_DRAFT_VERIFICATION_TIMEOUT")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["draft_id"], "84053")
+        self.assertEqual(payload["remediation"]["verification_status"], "verification_timeout")
+        self.assertIn("No email was sent", payload["message"])
+
+    def test_reply_draft_verifier_error_preserves_saved_draft_id(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(draft_id="84053")
+            if 'set targetDraftIdText to "84053"' in script:
+                raise RuntimeError("simulated verifier failure")
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_DRAFT_VERIFICATION_ERROR")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
+        self.assertEqual(payload["remediation"]["draft_id"], "84053")
+        self.assertEqual(payload["remediation"]["verification_status"], "applescript_error")
+        self.assertIn("No email was sent", payload["message"])
+
+    def test_reply_to_email_rejects_json_mode_send_before_main_script(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", False),
+            patch.object(compose_tools._server, "DRAFT_SAFE", False),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                mode="send",
+                output_format="json",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("output_format='json' is only supported", result)
+
+    def test_reply_to_email_rejects_json_send_alias_before_main_script(self):
+        with (
+            patch.object(compose_tools._server, "READ_ONLY", False),
+            patch.object(compose_tools._server, "DRAFT_SAFE", False),
+            patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                send=True,
+                output_format="json",
+            )
+
+        mock_run.assert_not_called()
+        self.assertIn("output_format='json' is only supported", result)
 
     def test_reply_draft_verifier_rejects_body_after_quoted_original(self):
         def fake_run(script, timeout=120):
@@ -1272,6 +1628,50 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("Draft ID: 84053", result)
         self.assertIn("Verification Status: found", result)
         self.assertIn("Verified Draft ID: 84053", result)
+
+    def test_reply_open_success_json_outputs_open_mode(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
+            if "OPENING REPLY FOR REVIEW" in script:
+                return (
+                    _saved_reply_draft_output(
+                        subject="Re: Test",
+                        draft_id="84053",
+                        quote_needle="On Today, Sender <sender@example.com> wrote:",
+                    )
+                    .replace("SAVING REPLY AS DRAFT", "OPENING REPLY FOR REVIEW")
+                    .replace(
+                        "Reply saved as draft!",
+                        "Reply opened in Mail for review. Edit and send when ready.",
+                    )
+                )
+            if 'set targetDraftIdText to "84053"' in script:
+                return "FOUND|84053|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                mode="open",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["mode"], "open")
+        self.assertFalse(payload["sent"])
+        self.assertEqual(payload["subject"], "Re: Test")
+        self.assertEqual(payload["draft_id"], "84053")
+        self.assertEqual(payload["verified_draft_id"], "84053")
+        self.assertEqual(payload["verification_status"], "found")
 
     def test_default_emits_single_alias_fallback_for_reply_message(self):
         captured = []
@@ -1426,6 +1826,62 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             "set content of replyMessage to (composedReplyContent as rich text)",
             "save replyMessage",
         )
+
+    def test_include_signature_false_suppresses_default_signature_and_verifies_one_draft(self):
+        captured = []
+        body_sentinel = "AA-NO-SIGNATURE-BODY-SENTINEL-81121"
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id="81121",
+                    quote_needle="On Today, Sender <sender@example.com> wrote:",
+                )
+            if 'set targetDraftIdText to "81121"' in script:
+                return "FOUND|81121|not_requested|not_requested"
+            return "ok"
+
+        with (
+            patch.object(compose_tools.server, "DEFAULT_MAIL_SIGNATURE", "TU", create=True),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body=f"{body_sentinel}\n\nReply body",
+                include_signature=False,
+            )
+
+        self.assertIn("Draft ID: 81121", result)
+        self.assertIn("Verification Status: found", result)
+        self.assertIn("Verified Draft ID: 81121", result)
+        self.assertIn("Signature Verification Status: not_requested", result)
+
+        script = _main_reply_script(captured)
+        self.assertIn("set replyMessage to reply foundMessage", script)
+        self.assertIn("set message signature of replyMessage to missing value", script)
+        self.assertNotIn('set message signature of replyMessage to signature "TU"', script)
+        self.assertNotIn("with opening window", script)
+        self.assertNotIn("close (window of replyMessage)", script)
+        self.assertNotIn("close front window", script)
+        self.assertEqual(script.count("save replyMessage"), 1)
+        _assert_ordered(
+            self,
+            script,
+            "set message signature of replyMessage to missing value",
+            "set composedReplyContent to replyBodyText & return & return & quotedOriginalText",
+            "set content of replyMessage to (composedReplyContent as rich text)",
+            "save replyMessage",
+            "set replyDraftId to id of replyMessage as string",
+        )
+
+        verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
+        self.assertIn('set targetDraftIdText to "81121"', verifier_script)
+        self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
+        self.assertIn("set signatureWasRequested to false", verifier_script)
+        self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
 
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):
         captured = []
@@ -2151,7 +2607,11 @@ class ManageDraftsListTests(unittest.TestCase):
             "apple_mail_mcp.tools.compose.run_applescript",
             side_effect=fake_run,
         ):
-            compose_tools.manage_drafts(account="Work", action="list", subject_contains="Q3 Report")
+            compose_tools.manage_drafts(
+                account="Work",
+                action="list",
+                subject_contains="Q3 Report",
+            )
 
         self.assertEqual(len(captured), 1)
         script = captured[0]
@@ -2161,6 +2621,28 @@ class ManageDraftsListTests(unittest.TestCase):
         # No date filter is ever added (would drop null-date new drafts).
         self.assertNotIn("recentCutoffDate", script)
         self.assertNotIn("current date", script)
+
+    def test_list_subject_contains_filters_before_body_and_recipient_reads(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "Found 0 draft(s)"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.manage_drafts(account="Work", action="list", subject_contains="Q3 Report")
+
+        script = captured[0]
+        _assert_ordered(
+            self,
+            script,
+            'does not contain "Q3 Report"',
+            'set draftBody to ""',
+            'set draftTo to ""',
+        )
 
     def test_list_without_subject_contains_omits_filter(self):
         captured = []

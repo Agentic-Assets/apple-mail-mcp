@@ -41,6 +41,7 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools.draft_verification import (
     _build_verify_draft_payload,
+    _normalize_attachment_rows,
     _parse_expected_attachments,
     _split_csv_addresses,
 )
@@ -340,24 +341,35 @@ class _ReplyDraftVerification:
     ok: bool
     status: str = "not_found"
     body_missing_artifact_id: str | None = None
+    error_artifact_id: str | None = None
     matched_artifact_id: str | None = None
     attachment_status: str | None = None
+    attachment_count: int | None = None
+    attachments_applied: list[dict[str, Any]] | None = None
     signature_status: str | None = None
 
 
 def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     """Parse the saved-reply verifier AppleScript response."""
-    parts = output.strip().split("|")
+    parts = output.strip().split("|", 5)
     status = parts[0] if parts else ""
     artifact_id = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
     attachment_status = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
     signature_status = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+    attachment_count_text = parts[4].strip() if len(parts) > 4 and parts[4].strip() else None
+    try:
+        attachment_count = int(attachment_count_text) if attachment_count_text is not None else None
+    except ValueError:
+        attachment_count = None
+    attachments_applied = _normalize_attachment_rows(parts[5]) if len(parts) > 5 and parts[5].strip() else None
     if status == "FOUND":
         return _ReplyDraftVerification(
             ok=True,
             status="found",
             matched_artifact_id=artifact_id,
             attachment_status=attachment_status,
+            attachment_count=attachment_count,
+            attachments_applied=attachments_applied,
             signature_status=signature_status,
         )
     if status == "BODY_MISSING":
@@ -375,6 +387,16 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     return _ReplyDraftVerification(ok=False, status="not_found")
 
 
+def _reply_exact_id_verified(verification: _ReplyDraftVerification, draft_id: str | None) -> bool:
+    """Return whether verification proved the exact saved Drafts artifact."""
+    return bool(verification.ok and draft_id and verification.matched_artifact_id == draft_id)
+
+
+def _reply_attachment_details_requested(verification: _ReplyDraftVerification) -> bool:
+    """Return whether attachment details describe a requested attachment check."""
+    return bool(verification.attachment_status and verification.attachment_status != "not_requested")
+
+
 def _format_reply_verification_lines(verification: _ReplyDraftVerification, fallback_draft_id: str | None) -> str:
     """Return stable success metadata lines for a verified reply draft."""
     verified_id = verification.matched_artifact_id or fallback_draft_id or ""
@@ -383,8 +405,21 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
     ]
     if verified_id:
         lines.append(f"Verified Draft ID: {verified_id}")
+    if verification.ok and fallback_draft_id and verified_id and verified_id != fallback_draft_id:
+        lines.append(
+            "Warning: saved draft was verified by bounded Drafts fallback, not by the exact Draft ID returned by Mail"
+        )
     if verification.attachment_status:
         lines.append(f"Attachment Verification Status: {verification.attachment_status}")
+        if _reply_attachment_details_requested(verification) and verification.attachment_count is not None:
+            lines.append(f"Attachments Applied Count: {verification.attachment_count}")
+        if _reply_attachment_details_requested(verification) and verification.attachments_applied:
+            lines.append("Attachments Applied:")
+            for attachment in verification.attachments_applied:
+                filename = attachment.get("filename") or ""
+                size = attachment.get("size")
+                size_text = f" ({size} bytes)" if size is not None else ""
+                lines.append(f"  {filename}{size_text}")
         if verification.attachment_status in {"missing", "unsupported"}:
             lines.append("Warning: requested attachments could not be verified on the saved draft")
     if verification.signature_status:
@@ -392,6 +427,32 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
         if verification.signature_status == "missing":
             lines.append("Warning: requested Mail signature was not detected above the quoted original")
     return "\n".join(lines) + "\n"
+
+
+def _reply_success_payload(
+    *,
+    mode: str,
+    reply_subject: str | None,
+    draft_id: str | None,
+    verification: _ReplyDraftVerification,
+) -> dict[str, Any]:
+    """Return the machine-readable success contract for verified reply drafts."""
+    verified_id = verification.matched_artifact_id or draft_id
+    return {
+        "mode": mode,
+        "sent": False,
+        "subject": reply_subject or "",
+        "draft_id": draft_id,
+        "verified_draft_id": verified_id,
+        "verification_status": verification.status,
+        "exact_id_verified": _reply_exact_id_verified(verification, draft_id),
+        "body_present": verification.status == "found",
+        "attachment_status": verification.attachment_status,
+        "attachment_count": verification.attachment_count,
+        "attachments_applied": verification.attachments_applied or [],
+        "signature_status": verification.signature_status,
+        "mailbox": "Drafts",
+    }
 
 
 def _format_forward_verification_lines(
@@ -471,8 +532,11 @@ def _verify_saved_reply_draft(
         "missing value" if signature_requested is None else ("true" if signature_requested else "false")
     )
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
+    sanitize_script = sanitize_field_handler(include_attachment_row_delimiter=True)
     text_offset_script = text_offset_handler()
     script = f'''
+    {sanitize_script}
+
     {text_offset_script}
 
     on replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
@@ -497,6 +561,29 @@ def _verify_saved_reply_draft(
         end try
     end attachmentStatus
 
+    on attachmentCount(draftMessage)
+        try
+            return count of mail attachments of draftMessage
+        on error
+            return ""
+        end try
+    end attachmentCount
+
+    on attachmentRows(draftMessage)
+        set attachmentRowsText to ""
+        try
+            repeat with anAttachment in mail attachments of draftMessage
+                set attachmentName to my sanitize_field(name of anAttachment)
+                set attachmentSize to ""
+                try
+                    set attachmentSize to file size of anAttachment as string
+                end try
+                set attachmentRowsText to attachmentRowsText & attachmentName & "::" & attachmentSize & ";;"
+            end repeat
+        end try
+        return attachmentRowsText
+    end attachmentRows
+
     on signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
         if signatureWasRequested is missing value then return "not_requested"
         if signatureWasRequested is false then return "not_requested"
@@ -518,10 +605,12 @@ def _verify_saved_reply_draft(
         set draftId to id of draftMessage as string
         set draftContent to content of draftMessage as string
         set draftAttachmentStatus to my attachmentStatus(draftMessage, expectedAttachmentCount)
+        set draftAttachmentCount to my attachmentCount(draftMessage)
+        set draftAttachmentRows to my attachmentRows(draftMessage)
         set draftSignatureStatus to my signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested)
-        if replyBodyNeedle is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus
+        if replyBodyNeedle is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         set bodyStatus to my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
-        if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus
+        if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         if bodyStatus is "after_quote" then return "BODY_AFTER_QUOTE|" & draftId
         return "BODY_MISSING|" & draftId
     end verifyReplyDraft
@@ -600,8 +689,10 @@ def _verify_saved_reply_draft(
     '''
     try:
         output = run_applescript(script, timeout=verification_timeout).strip()
+    except AppleScriptTimeout:
+        return _ReplyDraftVerification(ok=False, status="verification_timeout", error_artifact_id=draft_id)
     except Exception:  # noqa: BLE001 - caller converts verification failure into a safe error
-        return _ReplyDraftVerification(ok=False, status="applescript_error")
+        return _ReplyDraftVerification(ok=False, status="applescript_error", error_artifact_id=draft_id)
     return _reply_verification_from_output(output)
 
 
@@ -1347,7 +1438,7 @@ def _reply_draft_verification_error(
     reply_body: str,
 ) -> str:
     """Serialize a structured draft-verification failure when an artifact id is known."""
-    artifact_id = verification.body_missing_artifact_id
+    artifact_id = verification.body_missing_artifact_id or verification.error_artifact_id
     if not artifact_id:
         return (
             f"Error: Reply draft was {mode_text}, but Mail did not verify it in the newest Drafts "
@@ -1357,9 +1448,15 @@ def _reply_draft_verification_error(
     if verification.status == "body_after_quote":
         code = "REPLY_DRAFT_BODY_AFTER_QUOTE"
         detail = "contains the inserted reply body after the quoted original instead of above it"
-    else:
+    elif verification.status == "body_missing":
         code = "REPLY_DRAFT_BODY_MISSING"
         detail = "does not contain the inserted reply body"
+    elif verification.status == "verification_timeout":
+        code = "REPLY_DRAFT_VERIFICATION_TIMEOUT"
+        detail = "could not be verified before the verifier timed out"
+    else:
+        code = "REPLY_DRAFT_VERIFICATION_ERROR"
+        detail = "could not be verified because Mail returned a verifier error"
 
     return serialize_tool_error(
         ToolError(
@@ -1369,6 +1466,7 @@ def _reply_draft_verification_error(
             ),
             remediation={
                 "artifact_message_id": artifact_id,
+                "draft_id": artifact_id,
                 "mailbox": "Drafts",
                 "verification_status": verification.status,
                 "expected_body_needle": _first_non_empty_line(reply_body),
@@ -1760,6 +1858,7 @@ def reply_to_email(
     timeout: int | None = None,
     include_signature: bool = True,
     signature_name: str | None = None,
+    output_format: str = "text",
 ) -> str:
     """
     Reply to an email by message_id (preferred) or subject keyword.
@@ -1782,10 +1881,15 @@ def reply_to_email(
         timeout: Optional per-AppleScript timeout in seconds. Defaults to 120s for the main reply script and up to 30s for alias validation.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
+        output_format: "text" (default) preserves the existing success output.
+            "json" returns machine-readable draft/open success metadata after
+            saved-draft verification succeeds.
 
     Returns:
         Confirmation message with details of the reply sent, saved draft, or opened draft
     """
+    if output_format not in {"text", "json"}:
+        return "Error: Invalid output_format. Use: text, json"
 
     if not message_id and not subject_keyword:
         return "Error: 'subject_keyword' or 'message_id' is required"
@@ -1835,6 +1939,26 @@ def reply_to_email(
     if signature_error:
         return signature_error
 
+    # Resolve delivery mode before creating temp files so early contract errors
+    # leave no local artifacts behind.
+    if mode is not None:
+        if mode not in ("send", "draft", "open"):
+            return f"Error: Invalid mode '{mode}'. Use: send, draft, open"
+        effective_mode = mode
+    else:
+        effective_mode = "send" if send else "draft"
+
+    blocked = _send_blocked(effective_mode)
+    if blocked:
+        return blocked
+    if output_format == "json" and effective_mode == "send":
+        return "Error: output_format='json' is only supported for mode='draft' or mode='open'."
+
+    if effective_mode == "open":
+        cap_err = _check_open_compose_window_cap()
+        if cap_err:
+            return cap_err
+
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
     safe_subject_keyword = escape_applescript(subject_keyword) if subject_keyword else ""
@@ -1881,23 +2005,6 @@ def reply_to_email(
     safe_bcc = escape_applescript(bcc) if bcc else ""
     safe_attachment_info = escape_applescript(attachment_info) if attachment_info else ""
 
-    # Resolve delivery mode: mode parameter takes precedence over send boolean
-    if mode is not None:
-        if mode not in ("send", "draft", "open"):
-            return f"Error: Invalid mode '{mode}'. Use: send, draft, open"
-        effective_mode = mode
-    else:
-        effective_mode = "send" if send else "draft"
-
-    blocked = _send_blocked(effective_mode)
-    if blocked:
-        return blocked
-
-    if effective_mode == "open":
-        cap_err = _check_open_compose_window_cap()
-        if cap_err:
-            return cap_err
-
     mode_plan = _reply_mode_plan(effective_mode)
 
     cleanup_script = f'do shell script "rm -f " & quoted form of "{body_temp_path}"'
@@ -1943,7 +2050,7 @@ def reply_to_email(
                 draft_id=draft_id,
                 quoted_needle=quoted_needle,
                 expected_attachment_count=len(validated_paths) if validated_paths else None,
-                signature_requested=resolved_signature_name is not None,
+                signature_requested=include_signature,
                 timeout=timeout,
             )
             if not verification.ok:
@@ -1952,6 +2059,15 @@ def reply_to_email(
                     verification,
                     mode_text=mode_text,
                     reply_body=reply_body,
+                )
+            if output_format == "json":
+                return json.dumps(
+                    _reply_success_payload(
+                        mode=effective_mode,
+                        reply_subject=reply_subject,
+                        draft_id=draft_id,
+                        verification=verification,
+                    )
                 )
             result += _format_reply_verification_lines(verification, draft_id)
         return result
@@ -2568,43 +2684,45 @@ def _build_manage_drafts_list_script(
                         set skipThisDraft to false
                         set draftSubject to subject of aDraft
                         set draftId to (id of aDraft) as string
-                        set draftDate to "(unsent)"
-                        try
-                            set draftDate to (date sent of aDraft) as string
-                        end try
-
-                        -- Body snippet (first 140 chars, whitespace collapsed)
-                        set draftBody to ""
-                        try
-                            set draftBody to content of aDraft
-                        end try
-                        set AppleScript's text item delimiters to {{return, linefeed, tab}}
-                        set bodyParts to text items of draftBody
-                        set AppleScript's text item delimiters to " "
-                        set bodySnippet to bodyParts as string
-                        set AppleScript's text item delimiters to ""
-                        if length of bodySnippet > 140 then
-                            set bodySnippet to (text 1 thru 140 of bodySnippet) & "..."
-                        end if
-
                         {subject_filter_script}
 
                         if skipThisDraft then
                             -- filtered out by subject_contains
-                        else if hideEmpty and draftSubject is "" and bodySnippet is "" then
-                            -- skip orphaned blank draft
                         else
-                            -- Recipients (Drafts is a small, bounded mailbox)
-                            {to_recipients_script}
+                            set draftDate to "(unsent)"
+                            try
+                                set draftDate to (date sent of aDraft) as string
+                            end try
 
-                            set shownCount to shownCount + 1
-                            set draftLines to draftLines & "✉ " & draftSubject & return
-                            set draftLines to draftLines & "   Id: " & draftId & "   To: " & draftTo & return
-                            set draftLines to draftLines & "   Created: " & (draftDate as string) & return
-                            if bodySnippet is not "" then
-                                set draftLines to draftLines & "   " & bodySnippet & return
+                            -- Body snippet (first 140 chars, whitespace collapsed)
+                            set draftBody to ""
+                            try
+                                set draftBody to content of aDraft
+                            end try
+                            set AppleScript's text item delimiters to {{return, linefeed, tab}}
+                            set bodyParts to text items of draftBody
+                            set AppleScript's text item delimiters to " "
+                            set bodySnippet to bodyParts as string
+                            set AppleScript's text item delimiters to ""
+                            if length of bodySnippet > 140 then
+                                set bodySnippet to (text 1 thru 140 of bodySnippet) & "..."
                             end if
-                            set draftLines to draftLines & return
+
+                            if hideEmpty and draftSubject is "" and bodySnippet is "" then
+                                -- skip orphaned blank draft
+                            else
+                                -- Recipients (Drafts is a small, bounded mailbox)
+                                {to_recipients_script}
+
+                                set shownCount to shownCount + 1
+                                set draftLines to draftLines & "✉ " & draftSubject & return
+                                set draftLines to draftLines & "   Id: " & draftId & "   To: " & draftTo & return
+                                set draftLines to draftLines & "   Created: " & (draftDate as string) & return
+                                if bodySnippet is not "" then
+                                    set draftLines to draftLines & "   " & bodySnippet & return
+                                end if
+                                set draftLines to draftLines & return
+                            end if
                         end if
                     end try
                 end repeat

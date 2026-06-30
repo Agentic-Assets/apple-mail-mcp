@@ -60,7 +60,9 @@ When in doubt, copy the pattern from `search.py`'s per-message loop — it has b
 
 ## JSON `output_format`
 
-Normalized: `get_statistics`, `get_inbox_overview`; also `list_inbox_emails`, `list_mailboxes` (`output_format="json"`).
+Normalized dict JSON: `get_statistics`, `get_inbox_overview`, `list_inbox_emails`, `list_mailboxes`, `get_needs_response`, `get_awaiting_reply`, and `get_top_senders`.
+
+`reply_to_email(output_format="json")` is a compose contract for verified `mode="draft"` / `mode="open"` only. It returns reply artifact metadata including `draft_id`, `verified_draft_id`, `exact_id_verified`, `attachment_status`, `attachment_count`, `attachments_applied`, and verification status fields. Effective `mode="send"` with JSON is rejected before mutation because sent replies do not produce a verifiable Drafts artifact.
 
 ## Agent-facing selection
 
@@ -71,7 +73,7 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 | Tool | Default | Notes |
 |------|---------|-------|
 | `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True` |
-| `reply_to_email` | `mode="draft"` (via `send=False`) | Native Mail reply composer; quoted prior messages are automatic; verifies saved draft before success |
+| `reply_to_email` | `mode="draft"` (via `send=False`) | Native Mail reply composer; verifies exact Drafts id first with bounded fallback, exposes `exact_id_verified` in JSON, and preserves known `draft_id` on verifier timeout/error |
 | `verify_draft` | read-only | Exact Drafts id snapshot for recipients, body, attachments, signatures, quoted original, and thread headers |
 | `verify_drafts` | read-only | Batch exact Drafts id snapshots with per-draft JSON payloads |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |

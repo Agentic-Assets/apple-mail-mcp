@@ -15,15 +15,15 @@ See [`large-inbox-rules.md`](../references/large-inbox-rules.md) for the canonic
 
 `full_inbox_export` is the only tool that walks the entire inbox. Use it for the rare full-inbox case — annual cleanup, full audit, compliance archive — and warn the user it is slow (minutes on a 24k inbox). For routine discovery, always pass a bounded `recent_days` / `max_emails` instead.
 
-## Already-replied safeguard (default)
+## Already-replied safeguard
 
-Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. The discovery tools enforce this by default:
+Before creating a draft reply, the agent **must** verify the user hasn't already replied to the email. Discovery tools can help, but the final pre-draft thread check is still required:
 
-- `get_needs_response()` filters out already-replied emails (Message-ID matched against the Sent mailbox). Pass `include_already_replied=True` only if the user explicitly asks to see them.
+- `get_needs_response(check_already_replied=True)` filters or annotates already-replied emails by matching each candidate `internet_message_id` against Sent `In-Reply-To` / `References` headers. Keep `include_already_replied=False` unless the user explicitly asks to see already-handled messages.
 - `list_inbox_emails()` and `search_emails()` accept `exclude_replied=True` and `flag_replied=True` — when sourcing candidates for drafting, set `exclude_replied=True`.
 - As a final check before calling `reply_to_email`, fetch the thread with `get_email_thread()` and confirm no message in the thread was sent by the user (one of `list_account_addresses` outputs).
 
-Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` (on `get_needs_response`) or `exclude_replied=False` (elsewhere).
+Override: if the user explicitly says "include already-replied" or "I want to redraft", set `include_already_replied=True` with `check_already_replied=True` on `get_needs_response`, or `exclude_replied=False` elsewhere.
 
 See **[[email-drafting]]** for the required pre-draft verification step.
 
@@ -78,7 +78,7 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 | No accidental sends | Keep `--draft-safe`; require explicit user confirmation before any send attempt |
 | Quiet bulk drafts | Default `mode="draft"` on compose tools; do not leave unsaved compose windows |
 | Review each draft in Mail | Use `mode="open"` (saves first, then leaves window open); for rich `.eml`, `review_in_mail=True` |
-| Reply to a known message | Use `reply_to_email(message_id=...)`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and **error out** on `Re:`/`Fwd:` subjects or quoted-thread bodies unless you explicitly pass `standalone_confirmed=True` (use that override only for a genuinely new message that happens to start with `Re:`) |
+| Reply to a known message | Use `reply_to_email(message_id=...)`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and **error out** on `Re:`/`Fwd:` subjects or quoted-thread bodies unless you explicitly pass `standalone_confirmed=True` (use that override only for a confirmed new message that happens to start with `Re:`) |
 | Read-only auditing | Mention `--read-only` server flag — removes send-facing compose registrations |
 | Destructive moves/deletes | Defer to `email-archive-cleanup` or `email-management`; never bury trash/delete actions inside troubleshooting |
 

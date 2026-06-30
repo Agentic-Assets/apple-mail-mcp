@@ -1511,6 +1511,15 @@ def _fetch_email_record_by_id(
     item = records[0] if records else None
     if item is not None and include_content:
         preview = item.get("content_preview", "") or ""
+        content_truncated = bool(
+            max_content_length > 0 and preview.endswith("...") and len(preview) >= max_content_length + 3
+        )
+        item["content"] = preview
+        item["content_available"] = bool(preview)
+        item["content_truncated"] = content_truncated
+        item["content_status"] = (
+            "truncated" if content_truncated else "available" if preview else "empty_or_unavailable"
+        )
         has_quoted = bool(
             re.search(r"On .+wrote:", preview, re.DOTALL)
             or re.search(r"(?m)^>", preview)
@@ -1721,9 +1730,10 @@ def get_email_by_id(
 
     Returns:
         One matching email as text, or JSON with {"item": ...}. If no message is
-        found, JSON returns {"item": null}. JSON items include ``to``, ``cc``,
-        ``bcc``, ``in_reply_to``, ``references``, and ``has_quoted_original``
-        when available.
+        found, JSON returns {"item": null}. JSON items include ``content``,
+        ``content_available``, ``content_truncated``, ``content_status``,
+        ``to``, ``cc``, ``bcc``, ``in_reply_to``, ``references``, and
+        ``has_quoted_original`` when available.
     """
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"

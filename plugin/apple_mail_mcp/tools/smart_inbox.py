@@ -19,6 +19,7 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     inject_preferences,
     run_applescript,
+    sanitize_pipe_delimited_field,
     validate_account_name,
 )
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
@@ -481,18 +482,24 @@ def get_awaiting_reply(
 class _NeedsResponseRow:
     """Structured per-message candidate emitted by the inbox script."""
 
-    message_id: str  # Internet Message-ID (or "" when missing)
+    mail_app_id: str
+    internet_message_id: str
     subject: str
     sender: str
     date_str: str
     is_flagged: bool
     has_question: bool
 
+    @property
+    def message_id(self) -> str:
+        """Backward-compatible alias for older internal tests/helpers."""
+        return self.internet_message_id
+
 
 def _parse_needs_response_inbox_rows(raw: str) -> list[_NeedsResponseRow]:
     """Parse ``MSG|||...`` lines into ``_NeedsResponseRow`` instances.
 
-    Schema: MSG|||message_id|||subject|||sender|||date_str|||is_flagged|||has_question
+    Schema: MSG|||mail_app_id|||internet_message_id|||subject|||sender|||date_str|||is_flagged|||has_question
     Booleans are encoded as ``"true"`` / ``"false"``. Malformed rows are
     skipped silently so a single bad message can't poison the result.
     """
@@ -500,17 +507,25 @@ def _parse_needs_response_inbox_rows(raw: str) -> list[_NeedsResponseRow]:
     for line in raw.splitlines():
         if not line.startswith("MSG|||"):
             continue
-        parts = line.split("|||", 6)
-        if len(parts) != 7:
+        parts = line.split("|||", 7)
+        if len(parts) == 7:
+            # Backwards-compatible parser for older tests/log captures that
+            # emitted only the Internet Message-ID in the message_id slot.
+            _, internet_message_id, subject, sender, date_str, is_flagged, has_question = parts
+            mail_app_id = ""
+        elif len(parts) == 8:
+            _, mail_app_id, internet_message_id, subject, sender, date_str, is_flagged, has_question = parts
+        else:
             continue
         rows.append(
             _NeedsResponseRow(
-                message_id=parts[1],
-                subject=parts[2],
-                sender=parts[3],
-                date_str=parts[4],
-                is_flagged=parts[5].strip().lower() == "true",
-                has_question=parts[6].strip().lower() == "true",
+                mail_app_id=mail_app_id,
+                internet_message_id=internet_message_id,
+                subject=subject,
+                sender=sender,
+                date_str=date_str,
+                is_flagged=is_flagged.strip().lower() == "true",
+                has_question=has_question.strip().lower() == "true",
             )
         )
     return rows
@@ -553,8 +568,8 @@ def _classify_needs_response_rows(
         if len(high) + len(normal) >= max_results:
             break
         already_replied = False
-        if row.message_id and replied_ids:
-            already_replied = _normalize_message_id(row.message_id) in replied_ids
+        if row.internet_message_id and replied_ids:
+            already_replied = _normalize_message_id(row.internet_message_id) in replied_ids
 
         if already_replied and not include_already_replied:
             skipped += 1
@@ -571,7 +586,8 @@ def _classify_needs_response_rows(
             "date": row.date_str,
             "priority": priority,
             "already_replied": already_replied,
-            "message_id": row.message_id,
+            "message_id": row.mail_app_id,
+            "internet_message_id": row.internet_message_id,
         }
         if row.has_question or row.is_flagged:
             high.append(entry)
@@ -709,14 +725,16 @@ def _build_needs_response_inbox_script(
                                 set isFlagged to flagged status of aMessage
                             end try
 
+                            set mailAppMessageId to id of aMessage as string
+
                             -- Internet Message-ID may not be available on every
                             -- message; emit "" in that case so Python treats it
                             -- as never-replied.
-                            set inboxMessageId to ""
+                            set inboxInternetMessageId to ""
                             try
                                 set rawMessageId to message id of aMessage
                                 if rawMessageId is not missing value then
-                                    set inboxMessageId to rawMessageId as string
+                                    set inboxInternetMessageId to rawMessageId as string
                                 end if
                             end try
 
@@ -724,8 +742,10 @@ def _build_needs_response_inbox_script(
                             if isFlagged then set flagText to "true"
                             set questionText to "false"
                             if hasQuestion then set questionText to "true"
+                            {sanitize_pipe_delimited_field("messageSubject")}
+                            {sanitize_pipe_delimited_field("messageSender")}
 
-                            set end of outputLines to "MSG|||" & inboxMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText
+                            set end of outputLines to "MSG|||" & mailAppMessageId & "|||" & inboxInternetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText
                             set emittedCount to emittedCount + 1
                         end if
                     end if

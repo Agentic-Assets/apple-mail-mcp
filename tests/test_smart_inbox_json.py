@@ -24,9 +24,9 @@ class GetNeedsResponseTextOutputTests(unittest.TestCase):
 
     def test_text_mode_renders_high_and_normal_sections(self):
         inbox_raw = (
-            "MSG|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
-            "MSG|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
-            "MSG|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||301|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
+            "MSG|||302|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
+            "MSG|||303|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
         )
 
         with patch(
@@ -60,9 +60,9 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
 
     def test_json_mode_returns_dict_with_expected_keys(self):
         inbox_raw = (
-            "MSG|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
-            "MSG|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
-            "MSG|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||301|||<flagged-1@example.com>|||URGENT review|||boss@example.com|||2026-05-20|||true|||false\n"
+            "MSG|||302|||<question-1@example.com>|||Got a minute?|||alice@example.com|||2026-05-20|||false|||true\n"
+            "MSG|||303|||<normal-1@example.com>|||FYI status|||bob@example.com|||2026-05-19|||false|||false"
         )
         with patch(
             "apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=inbox_raw
@@ -92,15 +92,35 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
             self.assertIn("priority", entry)
             self.assertIn("already_replied", entry)
             self.assertIn("message_id", entry)
+            self.assertIn("internet_message_id", entry)
             self.assertFalse(entry["already_replied"])
         self.assertEqual(result["skipped_replied_count"], 0)
         self.assertEqual(result["errors"], [])
 
+    def test_json_mode_returns_numeric_message_id_and_internet_message_id(self):
+        inbox_raw = (
+            "MSG|||301|||<flagged-1@example.com>|||URGENT review|||"
+            "boss@example.com|||2026-05-20|||true|||false"
+        )
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=inbox_raw
+        ):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=2,
+                max_results=10,
+                output_format="json",
+            )
+
+        entry = result["high_priority"][0]
+        self.assertEqual(entry["message_id"], "301")
+        self.assertEqual(entry["internet_message_id"], "<flagged-1@example.com>")
+
     def test_json_mode_marks_already_replied_when_replied_set_matches(self):
         # Two inbox candidates; the second was already replied to.
         inbox_raw = (
-            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
-            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||401|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||402|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
         )
         replied_raw = "<replied-1@example.com>"
         sequence = [inbox_raw, replied_raw]
@@ -128,11 +148,45 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
         # The already-replied entry gets the [ALREADY REPLIED] prefix on its priority.
         replied_entry = next(e for e in all_entries if e["subject"] == "Old thread")
         self.assertIn("[ALREADY REPLIED]", replied_entry["priority"])
+        self.assertEqual(replied_entry["message_id"], "402")
+        self.assertEqual(replied_entry["internet_message_id"], "<replied-1@example.com>")
+
+    def test_json_mode_keeps_numeric_ids_when_sent_matching_uses_internet_ids(self):
+        inbox_raw = (
+            "MSG|||501|||<high@example.com>|||Flagged item|||lead@example.com|||2026-05-20|||true|||false\n"
+            "MSG|||502|||<normal@example.com>|||Routine item|||peer@example.com|||2026-05-19|||false|||false"
+        )
+        replied_raw = "<normal@example.com>"
+        sequence = [inbox_raw, replied_raw]
+
+        def fake_run(script, timeout=120):
+            return sequence.pop(0) if sequence else ""
+
+        with patch(
+            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
+        ):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=2,
+                max_results=10,
+                include_already_replied=True,
+                check_already_replied=True,
+                output_format="json",
+            )
+
+        high_entry = result["high_priority"][0]
+        normal_entry = result["normal_priority"][0]
+        self.assertEqual(high_entry["message_id"], "501")
+        self.assertEqual(high_entry["internet_message_id"], "<high@example.com>")
+        self.assertFalse(high_entry["already_replied"])
+        self.assertEqual(normal_entry["message_id"], "502")
+        self.assertEqual(normal_entry["internet_message_id"], "<normal@example.com>")
+        self.assertTrue(normal_entry["already_replied"])
 
     def test_json_mode_skips_replied_when_include_replied_false(self):
         inbox_raw = (
-            "MSG|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
-            "MSG|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
+            "MSG|||401|||<keep-1@example.com>|||Project sync|||alice@example.com|||2026-05-20|||false|||false\n"
+            "MSG|||402|||<replied-1@example.com>|||Old thread|||bob@example.com|||2026-05-19|||false|||false"
         )
         replied_raw = "<replied-1@example.com>"
         sequence = [inbox_raw, replied_raw]
@@ -192,7 +246,7 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
     def test_json_mode_respects_max_results_cap(self):
         # Five candidates, all normal priority. max_results=2 must trim.
         inbox_raw = "\n".join(
-            f"MSG|||<m{i}@example.com>|||Subj {i}|||u{i}@example.com|||2026-05-{20 - i:02d}|||false|||false"
+            f"MSG|||{300 + i}|||<m{i}@example.com>|||Subj {i}|||u{i}@example.com|||2026-05-{20 - i:02d}|||false|||false"
             for i in range(5)
         )
         with patch(
@@ -341,6 +395,22 @@ class NeedsResponseRowParsingTests(unittest.TestCase):
         self.assertEqual(subjects, ["Good", "Another"])
         self.assertTrue(rows[1].is_flagged)
         self.assertTrue(rows[1].has_question)
+
+    def test_parser_supports_numeric_and_internet_message_ids(self):
+        raw = "MSG|||301|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false"
+
+        rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
+
+        self.assertEqual(rows[0].mail_app_id, "301")
+        self.assertEqual(rows[0].internet_message_id, "<a@example.com>")
+
+    def test_parser_keeps_legacy_internet_id_rows_as_non_actionable(self):
+        raw = "MSG|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false"
+
+        rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
+
+        self.assertEqual(rows[0].mail_app_id, "")
+        self.assertEqual(rows[0].internet_message_id, "<a@example.com>")
 
     def test_parser_ignores_non_msg_prefixed_lines(self):
         raw = (

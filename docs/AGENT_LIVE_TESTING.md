@@ -196,6 +196,7 @@ Known wrapper checks to keep separate from manifest validation:
 - Some wrapper commands only expose `--raw <json>` for advanced options.
 - Repo CLI flags like `--output-format` may not exist on every wrapper command; use the wrapper help as the source of truth.
 - `list_inbox_emails`, `get_statistics`, `get_inbox_overview`, `inbox_dashboard`, `get_needs_response`, `get_awaiting_reply`, and `get_top_senders` all return a Python `dict` for `output_format="json"` (not a JSON string). Through the generated wrapper the dict is rendered as JSON; through the MCP transport it crosses as a structured object.
+- `reply_to_email(output_format="json")` is different from the read-only JSON tools: it is returned as a JSON string and is defined only for verified draft/open reply artifacts, not send mode.
 
 **Wrapper command-surface check** (repo script; skips if no wrapper on PATH):
 

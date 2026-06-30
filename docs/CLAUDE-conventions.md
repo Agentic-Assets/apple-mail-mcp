@@ -51,7 +51,7 @@ Destructive and bulk mutation tools default to **exact `message_ids`** from a pr
 - Lists longer than `MAX_WHOSE_IDS` (50) → `code: WHOSE_ID_LIST_TOO_LARGE`; chunk with `bounded_scan.iter_id_chunks`.
 - Filter paths still honor `recent_days` defaults and refuse unbounded scans with `UNBOUNDED_SCAN_REQUIRED` when no date window is set.
 
-Agent workflow: **search/list -> collect `message_id` -> mutate by ids**. Prefer `sender_exact="person@example.com"`, `sender_domain="example.com"`, or `internet_message_id="<id@example.com>"` over fuzzy `sender="..."` when the exact address, domain, or Message-ID is known. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk/date or full-text campaigns.
+Agent workflow: **search/list -> collect numeric `message_id` -> mutate by ids**. `get_needs_response(output_format="json")` also returns numeric Apple Mail `message_id` for downstream reads, replies, moves, and status updates, plus `internet_message_id` for Sent-header correlation only. Prefer `sender_exact="person@example.com"`, `sender_domain="example.com"`, or `internet_message_id="<id@example.com>"` over fuzzy `sender="..."` when the exact address, domain, or Message-ID is known. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk/date or full-text campaigns.
 
 ### Centralized scan caps (`SCAN_BOUNDS`, v3.7.1)
 
@@ -139,9 +139,9 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 | Mode | Behavior | When agents should use it |
 |------|----------|---------------------------|
-| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. Native replies use Mail's dictionary-backed `reply` command, assign `reply_body` above the quoted original without clipboard/UI scripting, and verify exact Drafts id first with bounded fallback. | Bulk drafting, background agent work, default under `--draft-safe` |
+| `draft` (default) | Save to Drafts quietly; do not leave fresh compose windows open. Native replies use Mail's dictionary-backed `reply` command, assign `reply_body` above the quoted original without clipboard/UI scripting, and verify exact Drafts id first with bounded fallback. Reply JSON exposes `exact_id_verified`; `false` means bounded fallback verified a different or non-exact Drafts artifact. | Bulk drafting, background agent work, default under `--draft-safe` |
 | `open` | Save first, then leave the compose window open for human review | User wants each draft to pop up in Mail (e.g. review 10 replies in sequence) |
-| `send` | Send immediately | Explicit user authorization only; blocked when `DRAFT_SAFE` or `READ_ONLY` |
+| `send` | Send immediately. `reply_to_email(output_format="json", mode="send")` is rejected before mutation; send replies use the normal text/send path only. | Explicit user authorization only; blocked when `DRAFT_SAFE` or `READ_ONLY` |
 
 **Reply/forward targeting:** pass `message_id` from `search_emails`, `list_inbox_emails`, or `get_email_by_id`. `subject_keyword` is schema-compatible only and returns `TARGET_SELECTOR_DEPRECATED`; run discovery first. `reply_to_email` uses Mail's native reply command, constructs and assigns `reply_body` above the quoted-original block, and saved replies/forwards verify exact Drafts id first when Mail exposes one. `body_html` is ignored on replies for compatibility. Do not use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer existing mail: they create standalone messages with no quoted original thread. These paths refuse reply-like `Re:` / `Fwd:` subjects or quoted-thread bodies unless the caller explicitly passes `standalone_confirmed=True`.
 

@@ -341,7 +341,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `get_awaiting_reply` | Sent emails that haven't received a reply (default last 7 days) |
-| `get_needs_response` | Unread emails likely needing a response (filters out newsletters/automated) |
+| `get_needs_response` | Unread emails likely needing a response (filters out newsletters/automated); JSON rows include numeric `message_id` for actions and `internet_message_id` for replied-header correlation |
 | `get_top_senders` | Most frequent senders by count or domain over a date window |
 
 ### Analytics & Export
@@ -466,11 +466,11 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
 | Unbounded scans refused | All routine scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is a separate audited export tool, not a normal search fallback |
-| **ID-first mutations** | `move_email`, `update_email_status`, `manage_trash` | Pass `message_ids=[...]` from `search_emails` or `list_inbox_emails` (fast, preferred). Filter-based bulk moves/updates/trash require `allow_filter_scan=True` or return `code: FILTER_SCAN_DISABLED`. |
+| **ID-first mutations** | `move_email`, `update_email_status`, `manage_trash` | Pass `message_ids=[...]` from `search_emails`, `list_inbox_emails`, or `get_needs_response(output_format="json")` (fast, preferred). Filter-based bulk moves/updates/trash require `allow_filter_scan=True` or return `code: FILTER_SCAN_DISABLED`. |
 | **Gated filter scans** | `move_email`, `update_email_status`, `manage_trash` (filter path only) | `allow_filter_scan=True` (slow; timeout-prone on 24k+ inboxes). Filter paths still default to a 48h `recent_days` window. |
 | **Body scan gate** | `search_emails` | `body_text` requires `allow_body_scan=True` or returns `code: BODY_SCAN_DISABLED`. Prefer subject/sender/date filters; pair body scans with a tight date window. |
 
-**Recommended mutation flow:** search or list → collect `message_id` values → call `move_email`, `update_email_status`, or `manage_trash` with `message_ids`. Use `dry_run=True` with ids for a fast preview without acting.
+**Recommended mutation flow:** search, list, or `get_needs_response(output_format="json")` → collect numeric `message_id` values → call `move_email`, `update_email_status`, or `manage_trash` with `message_ids`. Use `dry_run=True` with ids for a fast preview without acting.
 
 When a per-account call fails in a multi-account fan-out, you get partial results plus an `errors` field naming the account. JSON responses also include `error_details` when the tool can distinguish a timeout from another Mail/App permission error.
 
