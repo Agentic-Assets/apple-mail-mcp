@@ -1,11 +1,11 @@
 ---
 name: email-attachments
-description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses bounded search_emails (has_attachments filters) to collect message_ids first, then list_email_attachments, save_email_attachment, get_email_by_id for confirmation, and optionally export_emails for bundles. Discovery-only — pass subject_keyword to search_emails when ids are unknown; never pass subject_keyword to list_email_attachments or save_email_attachment. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
+description: This skill should be used when the user asks to "list attachments on messages about X", "save this PDF from email", "which invoices have ZIP files", or needs disk-safe attachment extraction. Uses bounded search_emails (has_attachments filters) to collect message_ids first, then list_email_attachments, save_email_attachment, get_email_by_id for confirmation, and optionally export_emails for bundles. Discovery-only; pass subject_keyword to search_emails when ids are unknown; never pass subject_keyword to list_email_attachments or save_email_attachment. Do NOT use when the real goal is writing responses (email-drafting), diagnosing slow accounts (apple-mail-operator), bulk deleting mail (email-archive-cleanup), or designing folder hierarchies (mailbox-taxonomy).
 ---
 
 # Email Attachments
 
-Attachment-focused traversal with deliberate **filesystem hygiene**. Never save into sensitive system paths — the MCP blocks known dangerous destinations; still confirm user intention.
+Attachment-focused traversal with deliberate **filesystem hygiene**. Never save into sensitive system paths; the MCP blocks known dangerous destinations; still confirm user intention.
 
 ## When To Use This Skill
 
@@ -80,9 +80,9 @@ Recommend virus scanning posture for unsolicited archives; never auto-enable mac
 |-------|----------|
 | Ambiguous filenames | Prefer exact match substrings surfaced by `list_email_attachments` |
 | Password-protected zips | Note inability to introspect payload |
-| Extremely large corp attachments | Mention Mail may choke — consider chunked manual download |
+| Extremely large corp attachments | Mention Mail may choke; consider chunked manual download |
 
 ## Related Skills
 
-- **`email-drafting`** — cite attachment paths when emailing summaries.
-- **`apple-mail-operator`** — if attachment listing times out due to account scope mishaps.
+- **`email-drafting`**: cite attachment paths when emailing summaries.
+- **`apple-mail-operator`**: if attachment listing times out due to account scope mishaps.

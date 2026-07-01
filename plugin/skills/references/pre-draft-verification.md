@@ -10,7 +10,7 @@ Before `reply_to_email`, verify the user has not already replied:
 
 1. **Discovery:** `get_needs_response(check_already_replied=True, include_already_replied=False)` or `search_emails` / `list_inbox_emails` with `exclude_replied=True`.
 2. **Thread check:** `get_email_thread(message_id=...)` then compare thread senders to `list_account_addresses(account=...)`. If any message was sent by the user, **abort** unless they explicitly asked to redraft.
-3. **Override:** only when the user says "include already-replied" or "redraft" — set `include_already_replied=True` or `exclude_replied=False`.
+3. **Override:** only when the user says "include already-replied" or "redraft"; set `include_already_replied=True` or `exclude_replied=False`.
 
 ## Reply workflow (ID-first)
 

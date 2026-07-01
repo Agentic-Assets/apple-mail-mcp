@@ -15,7 +15,7 @@ Run this **after implementation is done** and before calling the branch finished
 
 ## Recommended skills for the change being finalized
 
-Pick by what the diff actually touched — don't run all of them. Each is
+Pick by what the diff actually touched; don't run all of them. Each is
 either a Skill (run inline) or an Agent (delegate via Task). The dev-mode
 hook in `.claude/hooks/dev_mode_reminder.sh` reflects the same map.
 
@@ -29,7 +29,7 @@ hook in `.claude/hooks/dev_mode_reminder.sh` reflects the same map.
 | `asyncio` fan-out, `asyncio.run()`-in-loop bugs | `async-python-patterns` skill |
 | Pre-ship review pass | `reviewing-code` + `code-review` skills; `python-anti-patterns` as checklist |
 | Confirming a change actually works in the running app | `verify` + `run` skills |
-| Plugin manifest / marketplace / MCPB drift | `plugin-dev:plugin-validator` agent (REQUIRED — step 1 below) |
+| Plugin manifest / marketplace / MCPB drift | `plugin-dev:plugin-validator` agent (REQUIRED; step 1 below) |
 | `plugin/skills/*/SKILL.md` wording or triggers | `plugin-dev:skill-reviewer` agent |
 
 ## Out of scope
@@ -44,17 +44,17 @@ Copy and track:
 
 ```
 Finalize progress:
-- [ ] 1. plugin-validator — run and fix all reported issues
+- [ ] 1. plugin-validator: run and fix all reported issues
 - [ ] 2. Scope the diff (what changed, why)
 - [ ] 3. Code + tests verified
-- [ ] 4. code-simplifier — pass over the diff (REQUIRED for any non-trivial change)
+- [ ] 4. code-simplifier: pass over the diff (REQUIRED for any non-trivial change)
 - [ ] 5. Docs, CLAUDE.md, skills, manifests synced (remaining drift)
-- [ ] 5b. tasks/ hygiene — if planning artifacts moved or a workstream shipped: follow `tasks/CLAUDE.md` § Agent requirements; update `todo.md` + `INDEX.md`; run `python3 tools/validators/validate_tasks_layout.py`
+- [ ] 5b. tasks/ hygiene: if planning artifacts moved or a workstream shipped: follow `tasks/CLAUDE.md` § Agent requirements; update `todo.md` + `INDEX.md`; run `python3 tools/validators/validate_tasks_layout.py`
 - [ ] 6. skill-reviewer (if plugin/skills touched)
-- [ ] 7. Rebuild release artifacts — `bash tools/gates/dev-check.sh release` (rebuilds **all three** artifacts: `apple-mail-plugin.zip` + `apple-mail.plugin` + `apple-mail-mcp-v{VERSION}.mcpb`, runs full validators including byte-parity check, runs mcpb unpack smoke). NEVER skip this step.
+- [ ] 7. Rebuild release artifacts: `bash tools/gates/dev-check.sh release` (rebuilds **all three** artifacts: `apple-mail-plugin.zip` + `apple-mail.plugin` + `apple-mail-mcp-v{VERSION}.mcpb`, runs full validators including byte-parity check, runs mcpb unpack smoke). NEVER skip this step.
 - [ ] 8. Final review checklist
 - [ ] 9. Commit (default: yes, after release tier is green)
-- [ ] 10. Push (default: yes, to current branch — open PR if branch is protected)
+- [ ] 10. Push (default: yes, to current branch; open PR if branch is protected)
 ```
 
 ### 1. plugin-validator first (required)
@@ -104,13 +104,13 @@ All must pass before updating any remaining doc claims.
 
 Delegate to the **`code-simplifier:code-simplifier`** agent (Task
 `subagent_type="code-simplifier:code-simplifier"`). This is non-optional
-for any change beyond a one-line bugfix — root `CLAUDE.md` § Agent
+for any change beyond a one-line bugfix; root `CLAUDE.md` § Agent
 orchestration mandates it as part of every "ready to ship" pass.
 
 Scope the agent to the **recently-modified files** in the diff (it
 defaults to recent changes; pass explicit paths when the diff is large):
 
-- Behavior must be preserved — pytest after the simplifier pass must
+- Behavior must be preserved; pytest after the simplifier pass must
   match the pytest results from step 3.
 - The simplifier collapses duplication, drops dead branches, tightens
   names; it does NOT redesign abstractions.
@@ -132,7 +132,7 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 | Plugin wiring / flags | `plugin/docs/CLAUDE.md`, `plugin/apple_mail_mcp/CLAUDE.md`, `README.md` Configuration |
 | Agent workflows | `plugin/skills/*/SKILL.md`, `plugin/skills/CLAUDE.md`, `docs/CLAUDE.md` skill map |
 | Planning / task artifacts | `tasks/todo.md`, `tasks/INDEX.md`, `tasks/active/` (see `tasks/CLAUDE.md` § Agent requirements) |
-| Test count | Root `CLAUDE.md`, `README.md`, any doc citing test totals — use `pytest tests/ -q` result from step 3 |
+| Test count | Root `CLAUDE.md`, `README.md`, any doc citing test totals; use `pytest tests/ -q` result from step 3 |
 | Module line budget | After intentional splits: `python3 tools/validators/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json`; do not refresh merely to allow growth |
 | Tool count | Five version files only on release; always sync **claims**: `find plugin/apple_mail_mcp/tools -name '*.py' | xargs grep -h '^@mcp.tool' | wc -l` (recursive) vs `plugin.json`, marketplace, MCPB `tools[]` |
 
@@ -153,7 +153,7 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 
 If step 5 edited any `plugin/skills/*/SKILL.md`, delegate to `plugin-dev:skill-reviewer` and apply wording fixes.
 
-### 7. Rebuild release artifacts (required — never skip)
+### 7. Rebuild release artifacts (required; never skip)
 
 **Three artifacts must regenerate together** from current sources before commit. All three ship with the repo, and drift between any of them has caused real installer failures.
 
@@ -173,10 +173,10 @@ That tier runs `validate_manifests` + `pytest` + the wrapper-surface check, then
 2. Rebuild `apple-mail-plugin.zip` with the README exclusion list (`venv`, `__pycache__`, `*.pyc`, `.DS_Store`, `CLAUDE.md`, `.env*`, logs, temp/backup files).
 3. Copy the zip bytes to `apple-mail.plugin` so the Cowork artifact stays byte-identical to the marketplace zip.
 4. Rebuild `apple-mail-mcp-v{VERSION}.mcpb` via `apple-mail-mcpb/build-mcpb.sh` (which prefers official `mcpb pack`).
-5. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/gates/validate_manifests.sh` — fails if any of the three artifacts is missing, stale older `.mcpb` bundles remain, or the `.plugin` bytes diverge from the `.zip`.
+5. Re-run `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/gates/validate_manifests.sh`; fails if any of the three artifacts is missing, stale older `.mcpb` bundles remain, or the `.plugin` bytes diverge from the `.zip`.
 6. Run `mcpb unpack` + `mcpb validate` as a final structural smoke (if `mcpb` CLI present).
 
-If any step fails, fix the underlying issue — do not commit stale artifacts. **Never delete `apple-mail.plugin` or build it manually** — it must come from the build script's byte-copy, not a hand-zip, or the parity check rejects it.
+If any step fails, fix the underlying issue; do not commit stale artifacts. **Never delete `apple-mail.plugin` or build it manually**; it must come from the build script's byte-copy, not a hand-zip, or the parity check rejects it.
 
 ### 8. Final review checklist
 
@@ -194,7 +194,7 @@ If any step fails, fix the underlying issue — do not commit stale artifacts. *
 - [ ] No secrets or local paths committed
 - [ ] Unrelated dirty files left unstaged
 
-### 9. Commit and push (default: yes — close the loop yourself)
+### 9. Commit and push (default: yes; close the loop yourself)
 
 Once steps 1-8 are green, **commit and push without waiting to be asked**. The user's standing preference is that finalize closes its own loop. Pause and ask only when there is genuine ambiguity (unrelated WIP in the tree, secrets in staged paths, partial implementation, or a force-push would be required).
 
@@ -215,11 +215,11 @@ EOF
 git push -u origin HEAD
 ```
 
-If `HEAD` is on a protected branch (e.g. `main` with branch-protection rules), switch to a feature branch and open a PR with `gh pr create` instead — same default-to-action principle.
+If `HEAD` is on a protected branch (e.g. `main` with branch-protection rules), switch to a feature branch and open a PR with `gh pr create` instead; same default-to-action principle.
 
 ## Release note
 
-If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/gates/dev-check.sh release` (which rebuilds all three artifacts — `apple-mail-plugin.zip`, `apple-mail.plugin`, and the `.mcpb` — and runs the structural mcpb-unpack smoke plus the byte-parity check between the zip and `.plugin`).
+If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/gates/dev-check.sh release` (which rebuilds all three artifacts (`apple-mail-plugin.zip`, `apple-mail.plugin`, and the `.mcpb`) and runs the structural mcpb-unpack smoke plus the byte-parity check between the zip and `.plugin`).
 
 ## Additional resources
 

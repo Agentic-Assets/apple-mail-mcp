@@ -537,7 +537,7 @@ For short-term projects (2-4 weeks):
 
 ```
 # Create temporary folder in Mail app
-# Use during project — file by id as you process
+# Use during project, file by id as you process
 preview = list_inbox_emails(max_emails=25, include_content=False, output_format="json")
 move_email(message_ids=[e["message_id"] for e in preview["emails"]], to_mailbox="Temp/ProjectName", max_moves=25)
 

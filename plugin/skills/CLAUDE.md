@@ -1,6 +1,6 @@
-# plugin/skills/ — Agent skills directory
+# plugin/skills/: Agent skills directory
 
-Skills are the **primary entry point** for email workflows in Claude Code. They teach the model when and how to call MCP tools — they do not implement tool logic.
+Skills are the **primary entry point** for email workflows in Claude Code. They teach the model when and how to call MCP tools; they do not implement tool logic.
 
 **Agent contract (read first):** [`references/agent-id-first-workflow.md`](references/agent-id-first-workflow.md)
 
@@ -24,7 +24,7 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `email-style-profile/` | Learn writing voice from Sent mail + `USER_EMAIL_PREFERENCES` |
 | `email-attachments/` | List + save attachments safely |
 
-**Shared references:** Canonical sources live in [`references/`](references/) at this directory level (maintainer edit + `python3 tools/validators/sync_skill_references.py` to copy into each skill's `references/`). Packaged skills must only link in-skill paths like `references/large-inbox-rules.md`, never `../references/...` — enforced by `tests/infra/test_packaged_skill_paths.py`.
+**Shared references:** Canonical sources live in [`references/`](references/) at this directory level (maintainer edit + `python3 tools/validators/sync_skill_references.py` to copy into each skill's `references/`). Packaged skills must only link in-skill paths like `references/large-inbox-rules.md`, never `../references/...`; enforced by `tests/infra/test_packaged_skill_paths.py`.
 
 | Canonical file | Synced into |
 |----------------|-------------|
@@ -32,12 +32,12 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `references/pre-draft-verification.md` | operator, triage, management, email-drafting |
 | `references/agent-id-first-workflow.md` | maintainer index only (not copied; link from this CLAUDE.md) |
 
-Already-replied safeguard — canonical rules in [`references/pre-draft-verification.md`](references/pre-draft-verification.md); honored by:
+Already-replied safeguard: canonical rules in [`references/pre-draft-verification.md`](references/pre-draft-verification.md); honored by:
 
-- `email-drafting/` — full compose workflow and native reply defaults.
-- `inbox-triage/` — default `include_already_replied=False`; pass `exclude_replied=True` on list/search.
-- `email-management/` — cross-references pre-draft verification before replies in program workflows.
-- `apple-mail-operator/` — hands off to `email-drafting` when navigation leads to a reply.
+- `email-drafting/`: full compose workflow and native reply defaults.
+- `inbox-triage/`: default `include_already_replied=False`; pass `exclude_replied=True` on list/search.
+- `email-management/`: cross-references pre-draft verification before replies in program workflows.
+- `apple-mail-operator/`: hands off to `email-drafting` when navigation leads to a reply.
 
 ## Sibling routing cheat sheet
 
@@ -70,6 +70,6 @@ Run **`plugin-dev:skill-reviewer`** on the description and body when available. 
 
 ## Related folders
 
-- **`../../docs/CLAUDE-conventions.md`** — Deep skill-authoring and tool rules
-- **`../apple_mail_mcp/tools/`** — MCP tools referenced by skills
-- **`../.claude-plugin/plugin.json`** — Plugin manifest; skills auto-discovered from this tree
+- **`../../docs/CLAUDE-conventions.md`**: Deep skill-authoring and tool rules
+- **`../apple_mail_mcp/tools/`**: MCP tools referenced by skills
+- **`../.claude-plugin/plugin.json`**: Plugin manifest; skills auto-discovered from this tree

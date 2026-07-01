@@ -13,7 +13,7 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 ### When to reach for `full_inbox_export`
 
-`full_inbox_export` is the only tool that walks the entire inbox. Use it as the evidence step for annual cleanups, full audits, or pre-migration snapshots — pair it with `export_emails` for the on-disk artifact before any irreversible `manage_trash(action="delete_permanent")`. It is slow (minutes on a 24k inbox); for staged campaigns, keep using bounded `search_emails` + `message_ids=[...]` flows instead.
+`full_inbox_export` is the only tool that walks the entire inbox. Use it as the evidence step for annual cleanups, full audits, or pre-migration snapshots; pair it with `export_emails` for the on-disk artifact before any irreversible `manage_trash(action="delete_permanent")`. It is slow (minutes on a 24k inbox); for staged campaigns, keep using bounded `search_emails` + `message_ids=[...]` flows instead.
 
 ## ID-first flow (mandatory for bulk moves, status, and trash)
 
@@ -21,10 +21,10 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 On a 24k inbox, filter-based mutations re-pay the scan cost for every batch and often time out. Always:
 
-1. **List or search (bounded)** — `search_emails(sender_exact="...", subject_keyword="...", recent_days=30, limit=50)`, `search_emails(sender_domain="...", recent_days=30, limit=50)`, or `list_inbox_emails(...)`; inspect sample subjects.
-2. **Collect `message_id`s** — extract ids from the JSON/text result.
-3. **Simulate** — `move_email(dry_run=True, message_ids=[ids], to_mailbox="...", max_moves=50)` (or `manage_trash(dry_run=True, message_ids=[ids], ...)`).
-4. **Execute** — `move_email(dry_run=False, message_ids=[ids], ...)` after the operator confirms counts.
+1. **List or search (bounded)**: `search_emails(sender_exact="...", subject_keyword="...", recent_days=30, limit=50)`, `search_emails(sender_domain="...", recent_days=30, limit=50)`, or `list_inbox_emails(...)`; inspect sample subjects.
+2. **Collect `message_id`s**: extract ids from the JSON/text result.
+3. **Simulate**: `move_email(dry_run=True, message_ids=[ids], to_mailbox="...", max_moves=50)` (or `manage_trash(dry_run=True, message_ids=[ids], ...)`).
+4. **Execute**: `move_email(dry_run=False, message_ids=[ids], ...)` after the operator confirms counts.
 
 Repeat in batches until stop conditions. Re-run a narrower search between batches if the cohort is still large.
 
@@ -43,7 +43,7 @@ Use only when the user has explicitly approved a bulk campaign and ID collection
 
 Sequence:
 
-1. `search_emails(..., limit≤50)` preview — escalate only after inspecting sample subjects.
+1. `search_emails(..., limit≤50)` preview; escalate only after inspecting sample subjects.
 2. Optional analytics: `get_statistics(scope="sender_stats", sender="...")` or `scope="mailbox_breakdown"` for volume proof.
 3. When deletion risk looms: `export_emails(...)` snapshots before **`manage_trash`**.
 
@@ -86,7 +86,7 @@ Finish with **`get_statistics(scope="account_overview")`** or **`get_inbox_overv
 | Accidental unread wipe | Separate pass for unread-only subsets |
 | Cross-account fallout | Iterate per account instead of omnibus `all_accounts=True` mutations |
 
-Permanent deletes invoke irreversible **`manage_trash(action="delete_permanent")`** — escalate only with evidence export + checklist.
+Permanent deletes invoke irreversible **`manage_trash(action="delete_permanent")`**; escalate only with evidence export + checklist.
 
 ## Sibling Routing
 
