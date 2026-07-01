@@ -15,7 +15,7 @@ import shutil
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_DIR = ROOT / "plugin" / "skills" / "references"
 SKILLS_ROOT = ROOT / "plugin" / "skills"
 
@@ -60,7 +60,7 @@ def sync_references(*, check_only: bool) -> list[str]:
                 rel = dst.relative_to(ROOT)
                 errors.append(
                     f"{rel}: out of sync with {src.relative_to(ROOT)} "
-                    "(run: python3 tools/sync_skill_references.py)"
+                    "(run: python3 tools/validators/sync_skill_references.py)"
                 )
                 continue
             ref_dir.mkdir(parents=True, exist_ok=True)

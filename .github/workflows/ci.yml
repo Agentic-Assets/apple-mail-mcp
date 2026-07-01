@@ -28,13 +28,13 @@ jobs:
         continue-on-error: true
 
       - name: Validate manifests
-        run: bash tools/validate_manifests.sh
+        run: bash tools/gates/validate_manifests.sh
 
       - name: Validate tasks layout
-        run: python tools/validate_tasks_layout.py
+        run: python tools/validators/validate_tasks_layout.py
 
       - name: Module line budget (600 LOC warn)
-        run: python tools/check_module_line_budget.py
+        run: python tools/validators/check_module_line_budget.py
 
       - name: Run tests
         run: pytest tests/ -q -rw

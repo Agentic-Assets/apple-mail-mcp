@@ -17,9 +17,9 @@ def _check_module_line_budget(errors: list[str]) -> int:
         )
         return 0
 
-    tools_dir = common.ROOT / "tools"
-    if str(tools_dir) not in sys.path:
-        sys.path.insert(0, str(tools_dir))
+    validators_dir = common.ROOT / "tools" / "validators"
+    if str(validators_dir) not in sys.path:
+        sys.path.insert(0, str(validators_dir))
 
     from check_module_line_budget import (  # noqa: PLC0415
         MODULE_LINE_BUDGET,

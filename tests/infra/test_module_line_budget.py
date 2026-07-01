@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools.check_module_line_budget import (  # noqa: E402
+from tools.validators.check_module_line_budget import (  # noqa: E402
     MODULE_LINE_BUDGET,
     REFRESH_BASELINE_CMD,
     check_regression,

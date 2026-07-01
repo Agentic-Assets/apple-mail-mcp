@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Git pre-commit hook — manifest drift + mocked pytest (+ wrapper when tool surface staged).
 # Also runs ruff on staged Python files (fast, no full lint tier overhead).
-# Install once per clone: bash tools/install-git-hooks.sh
+# Install once per clone: bash tools/gates/install-git-hooks.sh
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -17,4 +17,4 @@ if [[ -n "$STAGED_PY" ]] && [[ -x "$RUFF" ]]; then
   echo "$STAGED_PY" | xargs "$RUFF" check || echo "warning: ruff reported errors in staged files (non-blocking baseline)"
 fi
 
-bash tools/dev-check.sh default
+bash tools/gates/dev-check.sh default

@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools.compare_perf_results import compare_payloads, load_payload, main
+from tools.probes.compare_perf_results import compare_payloads, load_payload, main
 
 
 def _payload(*cases: dict, ok: bool = True) -> dict:

@@ -43,7 +43,7 @@ Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/v
 ## When to change what
 
 - **Manifest edits** (`plugin.json`, marketplace, mcpb, Codex `.mcp.json`): bump version in all versioned files (see root `CLAUDE.md`); keep `.agents/plugins/marketplace.json` pointed at `./plugin` and `plugin/.mcp.json` draft-safe unless intentionally changing send semantics; run **`plugin-dev:plugin-validator`** before merge when available.
-- **Launcher / deps**: edit `start_mcp.sh`, `requirements.txt`, or `pyproject.toml`; keep plugin and PyPI dependencies/packages aligned (`mcp-ui-server`, `plugin/ui`); test fresh venv by removing `plugin/venv/`; run `bash tools/dev-check.sh release`.
+- **Launcher / deps**: edit `start_mcp.sh`, `requirements.txt`, or `pyproject.toml`; keep plugin and PyPI dependencies/packages aligned (`mcp-ui-server`, `plugin/ui`); test fresh venv by removing `plugin/venv/`; run `bash tools/gates/dev-check.sh release`.
 - **New MCP tools**: implement under `apple_mail_mcp/tools/` and register in `apple_mail_mcp/__init__.py` — not in this wrapper layer.
 - **New user entry points**: add skills under `skills/` only. Do not restore `commands/`; release validation fails if the retired legacy command directory reappears.
 - **Venvs**: `plugin/venv/` = user install (gitignored); `../../.venv/` = dev pytest/editable install.

@@ -2,7 +2,7 @@
 # Phase 1 CI guardrails: version sync, tool count claims, mcpb tool name parity.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 ERRORS=()
@@ -197,9 +197,9 @@ then
 fi
 
 # --- 4. Distribution artifact freshness ---
-# Keep the Bash CI entry aligned with tools/validate_manifests.py, which also
+# Keep the Bash CI entry aligned with tools/validators/validate_manifests.py, which also
 # checks local plugin/MCPB archives when they exist.
-if ! PY_VALIDATION_OUTPUT="$(python3 tools/validate_manifests.py 2>&1)"; then
+if ! PY_VALIDATION_OUTPUT="$(python3 tools/validators/validate_manifests.py 2>&1)"; then
   printf '%s\n' "$PY_VALIDATION_OUTPUT" >&2
   err "Python manifest/artifact validation failed (see stderr above)"
 fi

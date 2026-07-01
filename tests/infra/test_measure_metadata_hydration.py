@@ -9,7 +9,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools import measure_metadata_hydration as measurement
+from tools.probes import measure_metadata_hydration as measurement
 
 
 class MetadataHydrationMeasurementTests(unittest.TestCase):

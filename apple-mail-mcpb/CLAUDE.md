@@ -3,7 +3,7 @@
 Build files for the **`.mcpb`** distributable. Same Python server as [`plugin/`](../plugin/) — copied at build, not a separate codebase.
 
 > **One of three artifacts.** See root [`CLAUDE.md`](../CLAUDE.md) § Distribution channels for the full map:
-> `.mcpb` here ships the Claude Desktop chat extension; `apple-mail-plugin.zip` is the Claude Code marketplace zip; `apple-mail.plugin` is the byte-identical Cowork upload artifact. All three rebuild from `tools/build-artifacts.sh` in one shot.
+> `.mcpb` here ships the Claude Desktop chat extension; `apple-mail-plugin.zip` is the Claude Code marketplace zip; `apple-mail.plugin` is the byte-identical Cowork upload artifact. All three rebuild from `tools/gates/build-artifacts.sh` in one shot.
 
 | File | Role |
 |------|------|
@@ -11,18 +11,18 @@ Build files for the **`.mcpb`** distributable. Same Python server as [`plugin/`]
 | `build-mcpb.sh` | Stage `plugin/` → zip `../apple-mail-mcp-v{VERSION}.mcpb` |
 
 ```bash
-bash tools/dev-check.sh release
+bash tools/gates/dev-check.sh release
 ```
 
 Use `cd apple-mail-mcpb && ./build-mcpb.sh` only for bundle-only debugging; the release gate rebuilds both distributables and runs the validator/test/smoke stack.
 
 Copies `apple_mail_mcp.py`, `start_mcp.sh`, `requirements.txt`, `apple_mail_mcp/`, mirrored `plugin/skills` → **`skills/`**, and `ui/` in build output. No venv in bundle — user machine creates it via `start_mcp.sh`. Keep embedded README Python 3.10+ claim in sync.
 
-**Build must use `mcpb pack`** when available (official CLI, `npm install -g @anthropic-ai/mcpb`). Raw `zip -r .` emits zero-byte directory entries that `mcpb unpack` and Claude Desktop's installer treat as files — install fails with `ENOENT: no such file or directory, open '.../ui/'`. `build-mcpb.sh` prefers `mcpb pack` and falls back to `zip -X -D` only when the CLI is missing. `validate_manifests.py` enforces exact artifact membership plus the no-directory-entry rule on every commit.
+**Build must use `mcpb pack`** when available (official CLI, `npm install -g @anthropic-ai/mcpb`). Raw `zip -r .` emits zero-byte directory entries that `mcpb unpack` and Claude Desktop's installer treat as files — install fails with `ENOENT: no such file or directory, open '.../ui/'`. `build-mcpb.sh` prefers `mcpb pack` and falls back to `zip -X -D` only when the CLI is missing. `tools/validators/validate_manifests.py` (checks in `tools/manifest_checks/`) enforces exact artifact membership plus the no-directory-entry rule on every commit.
 
 ## tools[] must match code
 
-Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; description must claim correct count (**31**). Validated by [`tools/validate_manifests.sh`](../tools/validate_manifests.sh).
+Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; description must claim correct count (**31**). Count with `find plugin/apple_mail_mcp/tools -name '*.py' | xargs grep -h '^@mcp.tool' | wc -l` (recursive; package-nested tools count). Validated by [`tools/gates/validate_manifests.sh`](../tools/gates/validate_manifests.sh).
 
 ## vs plugin/ and Cowork
 

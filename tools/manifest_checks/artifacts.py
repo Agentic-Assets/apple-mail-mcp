@@ -139,7 +139,7 @@ def _check_plugin_file_parity(
         if require_present:
             errors.append(
                 "apple-mail.plugin: missing artifact; rebuild via "
-                "tools/build-artifacts.sh (Cowork upload needs the .plugin "
+                "tools/gates/build-artifacts.sh (Cowork upload needs the .plugin "
                 "extension alongside apple-mail-plugin.zip)"
             )
         return
@@ -149,14 +149,14 @@ def _check_plugin_file_parity(
     if not zip_path.exists():
         errors.append(
             "apple-mail.plugin: present but apple-mail-plugin.zip is missing; "
-            "both must ship together — rebuild via tools/build-artifacts.sh"
+            "both must ship together — rebuild via tools/gates/build-artifacts.sh"
         )
         return
 
     if zip_path.read_bytes() != plugin_path.read_bytes():
         errors.append(
             "apple-mail.plugin: bytes diverge from apple-mail-plugin.zip; "
-            "rebuild via tools/build-artifacts.sh (the .plugin file must be a "
+            "rebuild via tools/gates/build-artifacts.sh (the .plugin file must be a "
             "byte-identical copy of the .zip artifact)"
         )
 
@@ -252,7 +252,7 @@ def _check_no_stale_distribution_artifacts(expected_version: str, errors: list[s
     expected_name = f"apple-mail-mcp-v{expected_version}.mcpb"
     for path in sorted(common.ROOT.glob("apple-mail-mcp-v*.mcpb")):
         if path.name != expected_name:
-            errors.append(f"stale distribution artifact: {path.name}; remove or run tools/build-artifacts.sh")
+            errors.append(f"stale distribution artifact: {path.name}; remove or run tools/gates/build-artifacts.sh")
 
 
 def _check_artifact_freshness(

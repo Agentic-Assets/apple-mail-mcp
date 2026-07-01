@@ -27,7 +27,7 @@ A change here lands in all three. Treat tool source as a public API.
   before declaring done; mocked tests can pass while the AppleScript
   itself is broken at runtime.
 - **Before commits that touch `plugin/`, manifests, `pyproject.toml`,
-  or release artifacts:** `bash tools/dev-check.sh release` — rebuilds
+  or release artifacts:** `bash tools/gates/dev-check.sh release` — rebuilds
   both distributables, runs validator + pytest + module line budget + mcpb smoke.
 - **Module line budget:** `dev-check.sh`, CI, and `validate_manifests.py`
   warn on modules over 600 LOC and fail on baseline regression
@@ -45,7 +45,7 @@ A change here lands in all three. Treat tool source as a public API.
 - **`tasks/` layout (mandatory):** read `tasks/todo.md` then `tasks/CLAUDE.md`
   § Agent requirements. New planning artifacts go under `tasks/active/`,
   `tasks/reference/`, or `tasks/archive/` only — never loose `*.md` at
-  `tasks/` root. CI enforces via `tools/validate_tasks_layout.py`.
+  `tasks/` root. CI enforces via `tools/validators/validate_tasks_layout.py`.
 
 ### Quick-pick by change type
 

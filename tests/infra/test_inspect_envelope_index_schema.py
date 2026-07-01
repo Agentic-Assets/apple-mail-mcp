@@ -11,7 +11,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools import inspect_envelope_index_schema as inspector
+from tools.probes import inspect_envelope_index_schema as inspector
 
 
 def _create_dummy_index(path: Path) -> None:

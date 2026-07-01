@@ -11,12 +11,12 @@
 #   all      — default + wrapper check always
 #
 # Usage:
-#   bash tools/dev-check.sh
-#   bash tools/dev-check.sh lint
-#   bash tools/dev-check.sh surface
+#   bash tools/gates/dev-check.sh
+#   bash tools/gates/dev-check.sh lint
+#   bash tools/gates/dev-check.sh surface
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 PY="${ROOT}/.venv/bin/python"
@@ -33,22 +33,22 @@ if [[ ! -x "$PYTEST" ]]; then
 fi
 
 run_manifests() {
-  bash tools/validate_manifests.sh
+  bash tools/gates/validate_manifests.sh
 }
 
 run_module_line_budget() {
   echo "→ module line budget (600 LOC warn; regression enforced in pytest + validate_manifests)"
-  "$PY" tools/check_module_line_budget.py
+  "$PY" tools/validators/check_module_line_budget.py
 }
 
 run_skill_reference_sync() {
   echo "→ packaged skill reference sync (canonical plugin/skills/references → */references/)"
-  "$PY" tools/sync_skill_references.py --check
+  "$PY" tools/validators/sync_skill_references.py --check
 }
 
 run_tasks_layout() {
   echo "→ tasks/ layout (active/reference/archive buckets; enforced for agent handoffs)"
-  "$PY" tools/validate_tasks_layout.py
+  "$PY" tools/validators/validate_tasks_layout.py
 }
 
 run_pytest() {
@@ -56,7 +56,7 @@ run_pytest() {
 }
 
 run_wrapper() {
-  "$PY" tools/check_wrapper_surface.py
+  "$PY" tools/validators/check_wrapper_surface.py
 }
 
 # Single source of truth for the collected-test count: tools/expected_test_count.txt.
@@ -154,14 +154,14 @@ case "$TIER" in
     ;;
   release)
     run_lint
-    bash tools/build-artifacts.sh
+    bash tools/gates/build-artifacts.sh
     run_tasks_layout
     run_pytest
     run_test_count_check
     run_wrapper
     ;;
   *)
-    echo "Usage: bash tools/dev-check.sh [default|surface|manifest|lint|live|release|all]" >&2
+    echo "Usage: bash tools/gates/dev-check.sh [default|surface|manifest|lint|live|release|all]" >&2
     exit 2
     ;;
 esac

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 SMOKE_PYTHON="${APPLE_MAIL_MCP_SMOKE_PYTHON:-$ROOT/.venv/bin/python}"
@@ -36,7 +36,7 @@ fi
 TMP_HOME="$(mktemp -d)"
 trap 'rm -rf "$TMP_HOME"' EXIT
 
-"$SMOKE_PYTHON" tools/mcp_tool_smoke.py \
+"$SMOKE_PYTHON" tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
   --arg "$ROOT/plugin/start_mcp.sh" \
   --arg=--draft-safe \
@@ -53,7 +53,7 @@ codex plugin list --marketplace apple-mail-mcp | grep -F "apple-mail@apple-mail-
 SERVER_JSON="$TMP_HOME/apple-mail-mcp-server.json"
 codex mcp get apple-mail --json > "$SERVER_JSON"
 
-"$SMOKE_PYTHON" tools/mcp_tool_smoke.py \
+"$SMOKE_PYTHON" tools/probes/mcp_tool_smoke.py \
   --server-json "$SERVER_JSON" \
   --reject-literal '${CLAUDE_PLUGIN_ROOT}' \
   --expect-count 29 \

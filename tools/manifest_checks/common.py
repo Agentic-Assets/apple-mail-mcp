@@ -2,7 +2,7 @@
 """Shared constants and helpers for the manifest validation checks.
 
 This module is the single source of truth for the repository ``ROOT`` and the
-small utilities used by more than one check group. ``tools/validate_manifests.py``
+small utilities used by more than one check group. ``tools/validators/validate_manifests.py``
 forwards its historical ``ROOT`` attribute to ``common.ROOT`` so tests that
 monkeypatch ``validate_manifests.ROOT`` keep steering every check that reads
 ``common.ROOT`` at call time.

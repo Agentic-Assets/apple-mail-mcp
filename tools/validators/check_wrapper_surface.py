@@ -6,8 +6,8 @@ This script checks the *generated* `apple-mail` wrapper on PATH, which embeds
 tool schemas at generation time and can drift when new tools are added.
 
 Usage:
-  python3 tools/check_wrapper_surface.py
-  python3 tools/check_wrapper_surface.py --wrapper /path/to/apple-mail
+  python3 tools/validators/check_wrapper_surface.py
+  python3 tools/validators/check_wrapper_surface.py --wrapper /path/to/apple-mail
 
 Exit 0 when all critical commands are present; exit 1 otherwise.
 """
@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
             "/path/to/apple-mail-mcp/plugin/ ./plugin/\n"
             "  npx mcporter@0.11.3 generate-cli --from ./apple-mail-cli.cjs "
             "--bundle apple-mail-cli.cjs\n"
-            "  python3 /path/to/apple-mail-mcp/tools/patch_mcporter_wrapper.py "
+            "  python3 /path/to/apple-mail-mcp/tools/probes/patch_mcporter_wrapper.py "
             "./apple-mail-cli.cjs\n"
             "  ./install.sh",
             file=sys.stderr,

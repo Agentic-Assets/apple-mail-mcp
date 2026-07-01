@@ -24,7 +24,7 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `email-style-profile/` | Learn writing voice from Sent mail + `USER_EMAIL_PREFERENCES` |
 | `email-attachments/` | List + save attachments safely |
 
-**Shared references:** Canonical sources live in [`references/`](references/) at this directory level (maintainer edit + `python3 tools/sync_skill_references.py` to copy into each skill's `references/`). Packaged skills must only link in-skill paths like `references/large-inbox-rules.md`, never `../references/...` — enforced by `tests/test_packaged_skill_paths.py`.
+**Shared references:** Canonical sources live in [`references/`](references/) at this directory level (maintainer edit + `python3 tools/validators/sync_skill_references.py` to copy into each skill's `references/`). Packaged skills must only link in-skill paths like `references/large-inbox-rules.md`, never `../references/...` — enforced by `tests/infra/test_packaged_skill_paths.py`.
 
 | Canonical file | Synced into |
 |----------------|-------------|

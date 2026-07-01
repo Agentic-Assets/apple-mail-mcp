@@ -50,7 +50,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 ## Structured error codes (agent-facing)
 
-Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediation` fields. Tests in `test_phase_2_scan_hardening.py` and `test_mail_search_tools.py` lock the contracts.
+Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediation` fields. Tests in `tests/cross_cutting/test_phase_2_scan_hardening.py` and `tests/search/test_mail_search_tools.py` lock the contracts.
 
 | Code | When | Remediation hint |
 |------|------|------------------|
@@ -63,7 +63,7 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 
 ## Forbidden AppleScript patterns
 
-**Lint-enforced** by `tests/test_no_unbounded_whose.py` — these are the catalogued crash modes. Detail + safe alternatives: [`docs/CLAUDE-conventions.md § Forbidden AppleScript patterns`](../../../docs/CLAUDE-conventions.md#forbidden-applescript-patterns-lint-enforced).
+**Lint-enforced** by `tests/core/test_no_unbounded_whose.py` — these are the catalogued crash modes. Detail + safe alternatives: [`docs/CLAUDE-conventions.md § Forbidden AppleScript patterns`](../../../docs/CLAUDE-conventions.md#forbidden-applescript-patterns-lint-enforced).
 
 | Don't write | Failure mode | Write instead |
 |-------------|--------------|---------------|
@@ -74,7 +74,7 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 | `build_whose_id_list(ids)` with > 50 ids | Mail parser crash/hang; raises `WHOSE_ID_LIST_TOO_LARGE` | `iter_id_chunks(ids)` + loop |
 | Pipe-row emit without `sanitize_pipe_delimited_field` on user fields | Subject containing `&#124;&#124;&#124;` corrupts `message_id` → wrong-email delete | `core.sanitize_pipe_delimited_field("messageSubject")` etc. |
 
-When in doubt, copy the pattern from `search.py`'s per-message loop — it has been audited as Gmail-safe and Exchange-bounded.
+When in doubt, copy the pattern from `search/emails.py`'s per-message loop — it has been audited as Gmail-safe and Exchange-bounded.
 
 ## Account scoping
 
@@ -109,4 +109,4 @@ Every tool surface is now a split-by-domain package under the **600 LOC** budget
 
 ## Related
 
-`../core.py` (bridge), `../server.py` (mcp + annotations), `../../tests/` (mock `run_applescript`), `tasks/phase-3-annotation-matrix.md`.
+`../core/` (bridge package), `../server.py` (mcp + annotations), `../../tests/` (mock `run_applescript`), `tasks/phase-3-annotation-matrix.md`.

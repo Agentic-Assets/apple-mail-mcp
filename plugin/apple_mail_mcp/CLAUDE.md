@@ -45,6 +45,6 @@ All Mail.app I/O via `core.run_applescript()`. User strings through `core.escape
 
 [`tools/CLAUDE.md`](tools/CLAUDE.md) · [`docs/CLAUDE-conventions.md`](../../docs/CLAUDE-conventions.md) · [`plugin/skills/CLAUDE.md`](../skills/CLAUDE.md) (agent workflow skills) · root [`CLAUDE.md`](../../CLAUDE.md)
 
-- `../start_mcp.sh` — plugin launcher; `../../tests/` mocks `subprocess.run`; `../../tools/validate_manifests.py` — manifest parity · [`plugin/skills/CLAUDE.md`](../skills/CLAUDE.md) — which skills reference which tools
+- `../start_mcp.sh` — plugin launcher; `../../tests/` mocks `subprocess.run`; `../../tools/validators/validate_manifests.py` — manifest parity · [`plugin/skills/CLAUDE.md`](../skills/CLAUDE.md) — which skills reference which tools
 - Dependency/package changes must keep `../../pyproject.toml` and `../requirements.txt` aligned; `mcp-ui-server` and `plugin/ui` are required for the dashboard runtime.
 - `.venv/bin/pytest tests/` · `.venv/bin/apple-mail quick-check --account "…"` · `.venv/bin/python -m apple_mail_mcp --read-only`

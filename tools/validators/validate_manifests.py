@@ -3,9 +3,9 @@
 
 The individual checks live in the sibling ``manifest_checks`` package (split
 out so every module stays under the 600 LOC budget). This module wires them
-together in ``main`` — the entry point ``tools/validate_manifests.sh`` invokes
-as ``python3 tools/validate_manifests.py`` — and re-exports them so
-``tests/infra/test_validate_manifests.py`` can keep calling
+together in ``main`` — the entry point ``tools/gates/validate_manifests.sh``
+invokes as ``python3 tools/validators/validate_manifests.py`` — and re-exports
+them so ``tests/infra/test_validate_manifests.py`` can keep calling
 ``validate_manifests.<check>`` directly.
 
 ``ROOT`` is forwarded to ``manifest_checks.common.ROOT`` (every check reads
@@ -18,6 +18,14 @@ from __future__ import annotations
 import json
 import sys
 import types
+from pathlib import Path
+
+# Run as a script from tools/validators/, so put tools/ on sys.path for the
+# sibling manifest_checks package. (Tests import this module with
+# tools/validators/ on sys.path and also rely on this bootstrap.)
+_TOOLS_DIR = Path(__file__).resolve().parents[1]
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
 
 from manifest_checks import common
 from manifest_checks.artifacts import (

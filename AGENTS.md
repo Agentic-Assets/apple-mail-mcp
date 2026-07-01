@@ -33,7 +33,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 | Area | Read |
 |------|------|
 | Plugin wrapper, `start_mcp.sh`, manifests | [`plugin/docs/CLAUDE.md`](plugin/docs/CLAUDE.md) |
-| Package entry, `core.py`, `server.py`, CLI | [`plugin/apple_mail_mcp/CLAUDE.md`](plugin/apple_mail_mcp/CLAUDE.md) |
+| Package entry, `core/`, `server.py`, `cli/` | [`plugin/apple_mail_mcp/CLAUDE.md`](plugin/apple_mail_mcp/CLAUDE.md) |
 | Individual MCP tools | [`plugin/apple_mail_mcp/tools/CLAUDE.md`](plugin/apple_mail_mcp/tools/CLAUDE.md) |
 | Skills (9 workflow skills) | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) |
 | Tests & mocking AppleScript | [`tests/CLAUDE.md`](tests/CLAUDE.md) |
@@ -54,8 +54,8 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e . pytest
 .venv/bin/pytest tests/                    # full suite (count tracked in tools/expected_test_count.txt)
-python3 tools/check_module_line_budget.py  # 600 LOC warn report (also runs in dev-check + CI)
-bash tools/dev-check.sh                    # manifests + module budget + pytest + test-count gate
+python3 tools/validators/check_module_line_budget.py  # 600 LOC warn report (also runs in dev-check + CI)
+bash tools/gates/dev-check.sh                    # manifests + module budget + pytest + test-count gate
 .venv/bin/apple-mail quick-check --json    # live Mail smoke (~30s)
 .venv/bin/python plugin/apple_mail_mcp.py --read-only
 ```
@@ -69,7 +69,7 @@ bash tools/dev-check.sh                    # manifests + module budget + pytest 
 - `server.json` → top-level + `packages[0].version`
 - `apple-mail-mcpb/manifest.json` → `version`
 
-Sync tool-count claims in manifests with `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. Codex marketplace metadata lives in `.agents/plugins/marketplace.json` and points at `./plugin`; Codex MCP wiring lives in `plugin/.mcp.json`, should keep `--draft-safe`, and should launch via `cwd: "."` + `./start_mcp.sh` unless a fresh `bash tools/validate-codex-plugin.sh` runtime smoke proves a different Codex contract. Before shipping, run `bash tools/dev-check.sh release`; the gate enforces fatal `ruff check`, `ruff format --check`, and `mypy --strict` for `plugin/apple_mail_mcp/`, then exact plugin zip/MCPB payloads, byte parity between `apple-mail-plugin.zip` and `apple-mail.plugin`, package deps/packages, install contracts, source syntax, and artifact freshness. Do not add new lint/type tools without asking.
+Sync tool-count claims in manifests with `find plugin/apple_mail_mcp/tools -name '*.py' | xargs grep -h '^@mcp.tool' | wc -l` (recursive: `compose/` is a package). Codex marketplace metadata lives in `.agents/plugins/marketplace.json` and points at `./plugin`; Codex MCP wiring lives in `plugin/.mcp.json`, should keep `--draft-safe`, and should launch via `cwd: "."` + `./start_mcp.sh` unless a fresh `bash tools/gates/validate-codex-plugin.sh` runtime smoke proves a different Codex contract. Before shipping, run `bash tools/gates/dev-check.sh release`; the gate enforces fatal `ruff check`, `ruff format --check`, and `mypy --strict` for `plugin/apple_mail_mcp/`, then exact plugin zip/MCPB payloads, byte parity between `apple-mail-plugin.zip` and `apple-mail.plugin`, package deps/packages, install contracts, source syntax, and artifact freshness. Do not add new lint/type tools without asking.
 
 ## Related folders
 

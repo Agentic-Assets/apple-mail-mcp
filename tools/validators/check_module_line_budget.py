@@ -15,14 +15,14 @@ from pathlib import Path
 
 MODULE_LINE_BUDGET = 600
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (
     ROOT / "plugin" / "apple_mail_mcp",
     ROOT / "tools",
 )
 
 REFRESH_BASELINE_CMD = (
-    "python3 tools/check_module_line_budget.py --write-baseline "
+    "python3 tools/validators/check_module_line_budget.py --write-baseline "
     "tests/fixtures/module_line_budget/baseline.json"
 )
 

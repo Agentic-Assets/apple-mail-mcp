@@ -2,7 +2,7 @@
 
 Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for the current branch and next action.
 
-**Agents:** placement rules are mandatory — read [`CLAUDE.md`](CLAUDE.md) § Agent requirements before creating or moving files here. CI enforces layout via `tools/validate_tasks_layout.py`.
+**Agents:** placement rules are mandatory — read [`CLAUDE.md`](CLAUDE.md) § Agent requirements before creating or moving files here. CI enforces layout via `tools/validators/validate_tasks_layout.py`.
 
 ## Layout
 
@@ -21,7 +21,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 selector retirement, metadata-index spike, decision briefs | Planning / next major lane |
 | [`active/agent-guidance-audit/`](active/agent-guidance-audit/) | Skills, docs, and training-surface consistency audit | In progress |
 | [`active/draft-verification-simplification/`](active/draft-verification-simplification/) | Compose/manage_drafts decomposition recommendations | Open research |
-| [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate, module decomposition | Open; strict package gate green |
+| [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate; module packages shipped v3.9.1 | Open; module split done; perf/FTS lanes remain |
 
 ## Reference
 

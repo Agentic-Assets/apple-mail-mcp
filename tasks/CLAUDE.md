@@ -6,7 +6,7 @@ Cross-session planning artifacts. In-conversation work uses ephemeral task lists
 
 ## Agent requirements (mandatory)
 
-Every coding agent working in this repo **must** follow the `tasks/` layout. CI enforces it via `tools/validate_tasks_layout.py` and `tests/test_tasks_layout.py`.
+Every coding agent working in this repo **must** follow the `tasks/` layout. CI enforces it via `tools/validators/validate_tasks_layout.py` and `tests/infra/test_tasks_layout.py`.
 
 ### Read order
 
@@ -100,9 +100,9 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
 ## Maintenance
 
 - After `tools/*.py`: `.venv/bin/pytest tests/ -q` (count single-sourced in `tools/expected_test_count.txt`)
-- After manifests/package/artifact changes: `bash tools/dev-check.sh release` + `plugin-dev:plugin-validator` when available
+- After manifests/package/artifact changes: `bash tools/gates/dev-check.sh release` + `plugin-dev:plugin-validator` when available
 - After skills: `plugin-dev:skill-reviewer` when available (+ manifest validator if marketing copy changed)
-- **Module line budget:** `python3 tools/check_module_line_budget.py` (also in `dev-check.sh` + CI); refresh baseline only after intentional splits — [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md) § Module line budget
+- **Module line budget:** `python3 tools/validators/check_module_line_budget.py` (also in `dev-check.sh` + CI); refresh baseline only after intentional splits — [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md) § Module line budget
 - Live workflow: [`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)
 - Engineering rules: [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md)
 

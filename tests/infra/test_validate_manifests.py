@@ -1,4 +1,4 @@
-"""Tests for tools/validate_manifests.py (Phase 1 CI guardrails)."""
+"""Tests for tools/validators/validate_manifests.py (Phase 1 CI guardrails)."""
 
 import json
 import subprocess
@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tools" / "validators"))
 
 import validate_manifests
 
@@ -18,7 +18,7 @@ import validate_manifests
 class ValidateManifestsTests(unittest.TestCase):
     def test_validate_manifests_passes_on_current_repo(self):
         result = subprocess.run(
-            [sys.executable, str(ROOT / "tools/validate_manifests.py")],
+            [sys.executable, str(ROOT / "tools" / "validators" / "validate_manifests.py")],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -36,7 +36,7 @@ class ValidateManifestsTests(unittest.TestCase):
         warn_count = validate_manifests._check_module_line_budget(errors)
         self.assertEqual(errors, [])
         # The module-line-budget cleanup split the last oversized module
-        # (tools/validate_manifests.py) into the manifest_checks package, so no
+        # (tools/validators/validate_manifests.py) into the manifest_checks package, so no
         # module exceeds the 600 LOC budget; warn_count is now 0.
         self.assertEqual(warn_count, 0)
 
@@ -690,7 +690,7 @@ class ValidateManifestsTests(unittest.TestCase):
 
     def test_codex_install_smoke_uses_marketplace_then_plugin_id(self):
         """Keep the Codex install path executable and discoverable."""
-        script = (ROOT / "tools/validate-codex-plugin.sh").read_text(encoding="utf-8")
+        script = (ROOT / "tools" / "gates" / "validate-codex-plugin.sh").read_text(encoding="utf-8")
 
         self.assertIn('export CODEX_HOME="$TMP_HOME"', script)
         self.assertIn("codex plugin marketplace add .", script)
@@ -700,7 +700,7 @@ class ValidateManifestsTests(unittest.TestCase):
             script,
         )
         self.assertIn("codex mcp get apple-mail --json", script)
-        self.assertIn("tools/mcp_tool_smoke.py", script)
+        self.assertIn("tools/probes/mcp_tool_smoke.py", script)
         self.assertIn("--reject-literal '${CLAUDE_PLUGIN_ROOT}'", script)
         for tool in (
             "reply_to_email",
@@ -967,7 +967,7 @@ packages = ["plugin/apple_mail_mcp"]
         # extractor. Build script uses `zip -D` to suppress them.
         archive = ROOT / "apple-mail-plugin.zip"
         if not archive.exists():
-            self.skipTest("apple-mail-plugin.zip not built; run tools/build-artifacts.sh")
+            self.skipTest("apple-mail-plugin.zip not built; run tools/gates/build-artifacts.sh")
         import zipfile as _zf
 
         with _zf.ZipFile(archive) as zf:
@@ -978,7 +978,7 @@ packages = ["plugin/apple_mail_mcp"]
             msg=(
                 f"plugin zip must contain no bare directory entries "
                 f"(found {len(offenders)}: {offenders[:3]}); "
-                f"rebuild with tools/build-artifacts.sh (uses `zip -D`)"
+                f"rebuild with tools/gates/build-artifacts.sh (uses `zip -D`)"
             ),
         )
 
@@ -1037,7 +1037,7 @@ packages = ["plugin/apple_mail_mcp"]
         # "No manifest found in directory". Always zip from inside plugin/.
         archive = ROOT / "apple-mail-plugin.zip"
         if not archive.exists():
-            self.skipTest("apple-mail-plugin.zip not built; run tools/build-artifacts.sh")
+            self.skipTest("apple-mail-plugin.zip not built; run tools/gates/build-artifacts.sh")
         import zipfile as _zf
 
         with _zf.ZipFile(archive) as zf:
@@ -1047,7 +1047,7 @@ packages = ["plugin/apple_mail_mcp"]
             names,
             msg=(
                 "plugin.json must be at zip root for Cowork uploads. "
-                "Rebuild with tools/build-artifacts.sh (zips from inside plugin/)."
+                "Rebuild with tools/gates/build-artifacts.sh (zips from inside plugin/)."
             ),
         )
         nested = [n for n in names if n.startswith("plugin/")]
@@ -1137,13 +1137,13 @@ packages = ["plugin/apple_mail_mcp"]
         zip_path = ROOT / "apple-mail-plugin.zip"
         plugin_path = ROOT / "apple-mail.plugin"
         if not zip_path.exists() or not plugin_path.exists():
-            self.skipTest("Run tools/build-artifacts.sh to produce both artifacts")
+            self.skipTest("Run tools/gates/build-artifacts.sh to produce both artifacts")
         self.assertEqual(
             plugin_path.read_bytes(),
             zip_path.read_bytes(),
             msg=(
                 "apple-mail.plugin must be a byte-identical copy of "
-                "apple-mail-plugin.zip — rebuild with tools/build-artifacts.sh"
+                "apple-mail-plugin.zip — rebuild with tools/gates/build-artifacts.sh"
             ),
         )
 
@@ -1163,7 +1163,7 @@ packages = ["plugin/apple_mail_mcp"]
 
         self.assertEqual(len(errors), 1)
         self.assertIn("stale distribution artifact: apple-mail-mcp-v3.5.0.mcpb", errors[0])
-        self.assertIn("tools/build-artifacts.sh", errors[0])
+        self.assertIn("tools/gates/build-artifacts.sh", errors[0])
 
     def test_no_stale_distribution_artifacts_passes_when_only_current(self):
         with tempfile.TemporaryDirectory() as tmp:

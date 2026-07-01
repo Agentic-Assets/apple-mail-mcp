@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools.validate_tasks_layout import (  # noqa: E402
+from tools.validators.validate_tasks_layout import (  # noqa: E402
     ALLOWED_ROOT_DIRS,
     ALLOWED_ROOT_FILES,
     TASKS,
@@ -41,7 +41,7 @@ class TestTasksLayout(unittest.TestCase):
 
     def test_validate_script_cli_exit_zero(self) -> None:
         proc = subprocess.run(
-            [sys.executable, str(ROOT / "tools" / "validate_tasks_layout.py")],
+            [sys.executable, str(ROOT / "tools" / "validators" / "validate_tasks_layout.py")],
             cwd=ROOT,
             capture_output=True,
             text=True,

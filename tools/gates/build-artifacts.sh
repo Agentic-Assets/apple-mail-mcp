@@ -3,7 +3,7 @@
 # Idempotent and safe to re-run. Always invoked by `dev-check.sh release`.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 VERSION="$(python3 - <<'PY'
@@ -54,7 +54,7 @@ echo "→ Building ${MCPB_OUT} (Claude Desktop bundle)"
 bash apple-mail-mcpb/build-mcpb.sh >/dev/null
 
 echo "→ Verifying artifacts"
-APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/validate_manifests.sh
+APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1 bash tools/gates/validate_manifests.sh
 
 # Extra MCPB structural smoke: the manifest validator already checks for
 # directory entries, but a successful `mcpb unpack` proves Claude Desktop

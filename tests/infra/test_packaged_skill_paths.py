@@ -72,7 +72,7 @@ class PackagedSkillPathTests(unittest.TestCase):
 
     def test_synced_skill_references_match_canonical_sources(self):
         proc = subprocess.run(
-            ["python3", "tools/sync_skill_references.py", "--check"],
+            ["python3", "tools/validators/sync_skill_references.py", "--check"],
             cwd=ROOT,
             capture_output=True,
             text=True,

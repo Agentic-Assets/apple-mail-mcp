@@ -3,7 +3,7 @@
 # Safe to run after git pull. Restart Codex Desktop, Claude Code, and Cursor when done.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 VERSION="$(python3 -c "import json; print(json.load(open('plugin/.claude-plugin/plugin.json'))['version'])")"

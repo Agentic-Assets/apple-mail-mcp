@@ -7,14 +7,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_CHECK_WRAPPER_PATH = _REPO_ROOT / "tools" / "check_wrapper_surface.py"
+_CHECK_WRAPPER_PATH = _REPO_ROOT / "tools" / "validators" / "check_wrapper_surface.py"
 _spec = importlib.util.spec_from_file_location("check_wrapper_surface", _CHECK_WRAPPER_PATH)
 assert _spec and _spec.loader
 check_wrapper_surface = importlib.util.module_from_spec(_spec)
 sys.modules["check_wrapper_surface"] = check_wrapper_surface
 _spec.loader.exec_module(check_wrapper_surface)
 
-_PATCH_WRAPPER_PATH = _REPO_ROOT / "tools" / "patch_mcporter_wrapper.py"
+_PATCH_WRAPPER_PATH = _REPO_ROOT / "tools" / "probes" / "patch_mcporter_wrapper.py"
 _patch_spec = importlib.util.spec_from_file_location("patch_mcporter_wrapper", _PATCH_WRAPPER_PATH)
 assert _patch_spec and _patch_spec.loader
 patch_mcporter_wrapper = importlib.util.module_from_spec(_patch_spec)
