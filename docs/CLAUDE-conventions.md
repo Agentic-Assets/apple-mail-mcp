@@ -81,7 +81,7 @@ All bounded AppleScript slices read caps from [`constants.py`](../plugin/apple_m
 
 ### Forbidden AppleScript patterns (lint-enforced)
 
-The patterns below are catalogued failure modes from real production crashes. **Each is enforced by `tests/test_no_unbounded_whose.py` — adding one of them to tool source breaks CI.** Use the named safe alternative.
+The patterns below are catalogued failure modes from real production crashes. **Each is enforced by `tests/core/test_no_unbounded_whose.py` — adding one of them to tool source breaks CI.** Use the named safe alternative.
 
 | Forbidden | Why it fails | Use instead |
 |-----------|--------------|-------------|
@@ -94,7 +94,7 @@ The patterns below are catalogued failure modes from real production crashes. **
 | `do shell script "echo X \| tr '[:upper:]' '[:lower:]'"` per message. | Hundreds of subprocess spawns per scan; killed the 3.1.4 search path. | `ignoring case … end ignoring` AppleScript blocks. |
 | Tool kwarg `allow_full_scan`. | Retired in v3.2.0 in favor of structured `UNBOUNDED_SCAN_REQUIRED` errors with `remediation.fallback_tool = "full_inbox_export"`. | Refuse with a structured error and point at `full_inbox_export`. |
 
-The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules via source regex (with an empty `KNOWN_DANGEROUS_WHOSE` allowlist — add to it only with a tracking note and a follow-up PR planned). The builder-output contract `tests/test_bounded_scan_contract.py` asserts that the safe helpers emit the in-loop pattern, not the unsafe one. The Gmail-crash regression suite `tests/test_gmail_unread_crash_regression.py` simulates Mail's rejection to confirm the fix end-to-end.
+The lint test `tests/core/test_no_unbounded_whose.py` enforces the first four rules via source regex (with an empty `KNOWN_DANGEROUS_WHOSE` allowlist — add to it only with a tracking note and a follow-up PR planned). The builder-output contract `tests/core/test_bounded_scan_contract.py` asserts that the safe helpers emit the in-loop pattern, not the unsafe one. The Gmail-crash regression suite `tests/inbox/test_gmail_unread_crash_regression.py` simulates Mail's rejection to confirm the fix end-to-end.
 
 ### Account scoping
 
@@ -123,7 +123,7 @@ The lint test `tests/test_no_unbounded_whose.py` enforces the first four rules v
 
 ### Orphan watcher
 
-`__main__._start_orphan_watcher` works around [python-sdk#526](https://github.com/modelcontextprotocol/python-sdk/issues/526): when the MCP client exits without closing stdin, the server keeps polling Mail.app and silently relaunches Mail after the user quits it. The watcher captures the initial PPID and self-terminates with `os._exit(0)` when reparented. `get_ppid` and `exit_fn` are injectable for `tests/test_orphan_watcher.py` — keep those seams.
+`__main__._start_orphan_watcher` works around [python-sdk#526](https://github.com/modelcontextprotocol/python-sdk/issues/526): when the MCP client exits without closing stdin, the server keeps polling Mail.app and silently relaunches Mail after the user quits it. The watcher captures the initial PPID and self-terminates with `os._exit(0)` when reparented. `get_ppid` and `exit_fn` are injectable for `tests/core/test_orphan_watcher.py` — keep those seams.
 
 ### Read-only enforcement
 
@@ -170,13 +170,13 @@ Version is duplicated across **six** files — bump all together when releasing.
 | `server.json` | `version` and `packages[0].version` |
 | `apple-mail-mcpb/manifest.json` | `version` |
 
-Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marketplace manifests, and `apple-mail-mcpb/manifest.json` must match `grep -c "^@mcp.tool" plugin/apple_mail_mcp/tools/*.py`. The mcpb manifest also embeds the full `tools[]` array — both count and names must match code. Run [`tools/validate_manifests.py`](../tools/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove; run `bash tools/dev-check.sh release` before shipping manifest, package, or artifact changes.
+Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marketplace manifests, and `apple-mail-mcpb/manifest.json` must match a recursive count of `^@mcp.tool` in `plugin/apple_mail_mcp/tools/` (including package subfolders such as `compose/`). The mcpb manifest also embeds the full `tools[]` array — both count and names must match code. Run [`tools/validators/validate_manifests.py`](../tools/validators/validate_manifests.py) or `plugin-dev:plugin-validator` after add/remove; run `bash tools/gates/dev-check.sh release` before shipping manifest, package, or artifact changes.
 
 ---
 
 ## Distribution channels — four install surfaces, one source
 
-The repo ships from **one source tree** to **four install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/build-artifacts.sh`](../tools/build-artifacts.sh); Claude Code and Codex plugin installs share the checked-in `plugin/` runtime. The validator and CI tests enforce parity between them.
+The repo ships from **one source tree** to **four install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/gates/build-artifacts.sh`](../tools/gates/build-artifacts.sh); Claude Code and Codex plugin installs share the checked-in `plugin/` runtime. The validator and CI tests enforce parity between them.
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|
@@ -185,7 +185,7 @@ The repo ships from **one source tree** to **four install surfaces**. Claude Des
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
 | `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add Agentic-Assets/apple-mail-mcp` then `codex plugin add apple-mail@apple-mail-mcp`; local checkouts can use `codex plugin marketplace add .` |
 
-**`.zip` and `.plugin` must be byte-identical** — `tools/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/test_validate_manifests.py::test_plugin_file_parity_*`.
+**`.zip` and `.plugin` must be byte-identical** — `tools/gates/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validators/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/infra/test_validate_manifests.py::test_plugin_file_parity_*`.
 
 **Never** ship a release where any required artifact or manifest is missing or stale. Real installer failures we have hit and now guard against:
 
@@ -201,7 +201,7 @@ Claude Code rejects the install with *"conflicting manifests: both plugin.json a
 
 Rule for this repo: **all component declarations live in `plugin/.claude-plugin/plugin.json`** (today: only `mcpServers`). The marketplace entry is metadata-only (`name`, `displayName`, `description`, `version`, `author`, `source`, `keywords`, `strict: false`). Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them in marketplace.json. If a future change truly needs marketplace-side components, set `"strict": true` in the same edit.
 
-The guard lives in `tools/validate_manifests.py::_check_marketplace_contract`; regression tests `test_marketplace_contract_rejects_dual_component_declarations` / `..._allows_dual_components_when_strict_true` lock it in. Also see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json".
+The guard lives in `tools/validators/validate_manifests.py::_check_marketplace_contract`; regression tests `test_marketplace_contract_rejects_dual_component_declarations` / `..._allows_dual_components_when_strict_true` lock it in. Also see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json".
 
 ---
 
@@ -211,7 +211,7 @@ This repo **is** a Claude Code plugin. For plugin shell, MCP wiring, skills, age
 
 | Agent / skill | When |
 |---------------|------|
-| **`plugin-dev:plugin-validator`** | After any change to `plugin.json`, `marketplace.json`, `.mcp.json`, command/skill/agent frontmatter, or directory layout. Blocking before merge when available; otherwise run `bash tools/dev-check.sh release`. |
+| **`plugin-dev:plugin-validator`** | After any change to `plugin.json`, `marketplace.json`, `.mcp.json`, command/skill/agent frontmatter, or directory layout. Blocking before merge when available; otherwise run `bash tools/gates/dev-check.sh release`. |
 | **`plugin-dev:skill-reviewer`** | After creating or editing any skill under `plugin/skills/`. Focus on `description` / frontmatter — that drives triggering. |
 | **`plugin-dev:agent-creator`** | Adding a new agent. Don't hand-author frontmatter from memory. |
 | **`plugin-dev:*` skills** | Invoke the matching skill *before* designing (`mcp-integration`, `skill-development`, `command-development`, etc.). |
@@ -228,7 +228,7 @@ Every skill under `plugin/skills/` follows the same shape so siblings trigger cr
 - **`description`**: third-person, scenario-rich, ends with "Do NOT use for X (see \<sibling\>)". Include 4–6 quoted trigger phrases and name 3–5 central MCP tools.
 - **Body**: imperative/infinitive ("Start with `get_inbox_overview()`"). Addresses the executing model, not a human reader.
 - **`SKILL.md`**: 1,500–2,000 words. Detail → `references/`, code → `examples/`, scripts → `scripts/`. Link in "Additional Resources".
-- **Packaged skill paths:** Agents only see files inside each `plugin/skills/<name>/` directory. Do not link to `../references/` or other paths outside the skill folder. Canonical shared refs live in `plugin/skills/references/`; run `python3 tools/sync_skill_references.py` after edits to refresh per-skill `references/` copies. `tests/test_packaged_skill_paths.py` enforces both rules.
+- **Packaged skill paths:** Agents only see files inside each `plugin/skills/<name>/` directory. Do not link to `../references/` or other paths outside the skill folder. Canonical shared refs live in `plugin/skills/references/`; run `python3 tools/validators/sync_skill_references.py` after edits to refresh per-skill `references/` copies. `tests/infra/test_packaged_skill_paths.py` enforces both rules.
 - **Top of body**: (1) purpose, (2) when-to-use / when-NOT-to-use, (3) performance defaults, (4) sibling decision tree, (5) red-flag table for destructive ops.
 - **No persona openers** ("You are an expert…").
 - **Verify** with `plugin-dev:skill-reviewer` before merge when available. If unavailable, run manifest/release validation and note the missing expert pass. Template: `plugin/skills/email-management/SKILL.md`.
@@ -251,20 +251,20 @@ Entry points ship as skills only. Do not restore `plugin/commands/`; the old `/e
 
 **Routing cheat sheet:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). **Narrow skills** may stay shorter than the umbrella template if they include triggers, sibling matrix, performance notes, and destructive red lines. **Umbrella template:** `plugin/skills/email-management/SKILL.md` (also has `references/`, `examples/`, `templates/`).
 
-After adding or editing any skill: run **`plugin-dev:skill-reviewer`** when available. After manifest, package, artifact, or skill-count marketing copy changes: run **`plugin-dev:plugin-validator`** when available plus `bash tools/dev-check.sh release`.
+After adding or editing any skill: run **`plugin-dev:skill-reviewer`** when available. After manifest, package, artifact, or skill-count marketing copy changes: run **`plugin-dev:plugin-validator`** when available plus `bash tools/gates/dev-check.sh release`.
 
 ---
 
 ## Module line budget (600 LOC)
 
-Keep production modules focused and splittable. The repo enforces a **600 physical-line** soft target on `plugin/apple_mail_mcp/` and `tools/` (aligned with agent guidance and the `python-project-structure` skill's 300–500 line split heuristic).
+Keep production modules focused and splittable. The repo enforces a **600 physical-line** soft target on `plugin/apple_mail_mcp/` and `tools/` (test modules under `tests/` are not budgeted; aligned with agent guidance and the `python-project-structure` skill's 300–500 line split heuristic).
 
 ### Automated gates
 
 | Layer | Behavior |
 |-------|----------|
-| **`tools/check_module_line_budget.py`** | Warn-only CLI; lists modules over budget |
-| **`tests/test_module_line_budget.py`** | Pytest warning on oversize modules; **hard fail** on baseline regression |
+| **`tools/validators/check_module_line_budget.py`** | Warn-only CLI; lists modules over budget |
+| **`tests/infra/test_module_line_budget.py`** | Pytest warning on oversize production modules; **hard fail** on baseline regression |
 | **`validate_manifests.py`** | Same regression check during manifest validation; prints WARN lines |
 | **`dev-check.sh`** | Prints budget report before pytest (default, release, live, surface, all) |
 | **GitHub CI** | Dedicated step + pytest `-rw` (warnings visible in log) |
@@ -272,17 +272,17 @@ Keep production modules focused and splittable. The repo enforces a **600 physic
 
 ### Baseline fixture
 
-Known oversized modules are snapshotted in [`tests/fixtures/module_line_budget/baseline.json`](../tests/fixtures/module_line_budget/baseline.json). CI **fails** when a tracked file grows past its baseline count. Refresh only after an intentional split or measured shrink:
+[`tests/fixtures/module_line_budget/baseline.json`](../tests/fixtures/module_line_budget/baseline.json) maps tracked production module paths to their last-known line counts. After v3.9.1 decomposition the `modules` object is **empty** (no file exceeds 600 LOC). CI still **fails** when a tracked file grows past its baseline count, so any future oversize module must either be split first or refresh the baseline intentionally after a measured shrink:
 
 ```bash
-python3 tools/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json
+python3 tools/validators/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json
 ```
 
 Do not refresh the baseline merely to silence growth from new features; split helpers into focused modules first (`plugin/apple_mail_mcp/tools/CLAUDE.md` module map). Run **`code-simplifier:code-simplifier`** after splits.
 
-### Current debt (tool modules)
+### Status
 
-All six MCP tool modules exceed 600 LOC today (`compose.py` largest). The gate prevents further sprawl until decomposition work lands (see [`tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`](../tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md)).
+No production module in `plugin/apple_mail_mcp/` or `tools/` exceeds 600 LOC today. The warn report and regression gate still run on every CI pass to prevent sprawl. Historical decomposition context: [`tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md`](../tasks/active/v4-performance-consolidation-2026-05-27/learnings-and-parking-lot.md).
 
 Detail: [`tools/CLAUDE.md`](../tools/CLAUDE.md) § `check_module_line_budget.py` · [`tests/CLAUDE.md`](../tests/CLAUDE.md) § Module line budget.
 
@@ -290,7 +290,7 @@ Detail: [`tools/CLAUDE.md`](../tools/CLAUDE.md) § `check_module_line_budget.py`
 
 ## Platform constraints
 
-- **macOS only.** Tests mock `subprocess.run` — see `tests/test_modernization_3_1_5.py` and `tests/test_mail_search_tools.py` (patch with `side_effect` capturing script via `kwargs["input"]`).
+- **macOS only.** Tests mock `subprocess.run` — see `tests/cross_cutting/test_modernization_3_1_5.py` and `tests/search/test_mail_search_tools.py` (patch with `side_effect` capturing script via `kwargs["input"]`).
 - **Python 3.10+** per `pyproject.toml`. `start_mcp.sh` gates 3.10+ (prefers 3.12+); mcpb embedded README must stay in sync.
 - **Permissions**: Mail.app must be configured; Automation + Mail Data Access granted to the terminal/IDE. Surface clear errors; don't retry blindly.
 - **Async**: `asyncio.to_thread` for `run_applescript` in worker threads. Don't make `run_applescript` itself async.

@@ -79,7 +79,7 @@ codex mcp add apple-mail -- /bin/bash /path/to/apple-mail-mcp/plugin/start_mcp.s
 
 If `mcp__apple-mail__*` tools are absent after plugin install, treat that as an MCP registration failure. Do not create reply drafts with generic AppleScript, Mail UI scripting, shell `osascript`, or standalone compose fallbacks. Fix registration first, or use the MCP-only absolute-path fallback above, restart Codex, and confirm the Apple Mail tools are present before drafting.
 
-How to know it worked: `codex plugin list` showing `installed, enabled` is not enough. The pass condition is that the active Codex session exposes `mcp__apple-mail__*` tools and an MCP `list_tools` handshake includes `reply_to_email`. Maintainers can run `bash tools/validate-codex-plugin.sh` to check that install plus runtime path in a temporary `CODEX_HOME`.
+How to know it worked: `codex plugin list` showing `installed, enabled` is not enough. The pass condition is that the active Codex session exposes `mcp__apple-mail__*` tools and an MCP `list_tools` handshake includes `reply_to_email`. Maintainers can run `bash tools/gates/validate-codex-plugin.sh` to check that install plus runtime path in a temporary `CODEX_HOME`.
 
 Restart Codex Desktop or start a fresh Codex CLI session after installing.
 
@@ -121,7 +121,7 @@ smoke, run:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e . pytest
-.venv/bin/python tools/mcp_tool_smoke.py \
+.venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
   --arg ./start_mcp.sh \
   --arg=--draft-safe \
@@ -153,7 +153,7 @@ and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
 replace the path below if the details output shows a different install path:
 
 ```bash
-.venv/bin/python tools/mcp_tool_smoke.py \
+.venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
   --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
   --arg=--draft-safe \
@@ -177,7 +177,7 @@ Cowork uses Anthropic's **remote marketplace backend** (`remoteMarketplaceClient
 
 **Workaround — upload the `.plugin` file directly (recommended for Cowork):**
 
-1. Build the artifacts: `bash tools/build-artifacts.sh` — produces `apple-mail.plugin`, `apple-mail-plugin.zip`, and `apple-mail-mcp-v{VERSION}.mcpb` at the repo root.
+1. Build the artifacts: `bash tools/gates/build-artifacts.sh` — produces `apple-mail.plugin`, `apple-mail-plugin.zip`, and `apple-mail-mcp-v{VERSION}.mcpb` at the repo root.
 2. Cowork → **Customize** → **Add plugin** → **Upload plugin**.
 3. Select `apple-mail.plugin` and enable **Apple Mail**.
 
@@ -185,7 +185,7 @@ Cowork uses Anthropic's **remote marketplace backend** (`remoteMarketplaceClient
 
 ```bash
 cd /path/to/apple-mail-mcp
-bash tools/build-artifacts.sh   # produces apple-mail.plugin, apple-mail-plugin.zip, and .mcpb
+bash tools/gates/build-artifacts.sh   # produces apple-mail.plugin, apple-mail-plugin.zip, and .mcpb
 ```
 
 If you must build the zip by hand, zip from **inside** `plugin/` so `.claude-plugin/plugin.json` sits at the zip root — Cowork rejects uploads where it is nested under `plugin/`:
@@ -272,7 +272,7 @@ claude mcp add apple-mail -- mcp-apple-mail
 
 For Claude Desktop chat (outside of Cowork mode):
 
-1. Download `apple-mail-mcp-v{VERSION}.mcpb` from [Releases](https://github.com/Agentic-Assets/apple-mail-mcp/releases) or build locally with `bash tools/build-artifacts.sh`.
+1. Download `apple-mail-mcp-v{VERSION}.mcpb` from [Releases](https://github.com/Agentic-Assets/apple-mail-mcp/releases) or build locally with `bash tools/gates/build-artifacts.sh`.
 2. In Claude Desktop, open Settings → **Extensions** (or **Developer → MCP Servers → Install from file** depending on app version), pick **Add Custom Plugin / Install from file**, and select the `.mcpb`.
 3. Grant the Automation + Mail Data Access prompts macOS surfaces on first run.
 4. Restart Claude Desktop so the extension registers across chat and Cowork sessions. Cowork projects may need to enable the extension explicitly in the project's plugin settings.
@@ -625,8 +625,8 @@ apple-mail-mcp/
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]" pytest
-bash tools/dev-check.sh          # manifests, 600 LOC module budget report, pytest
-bash tools/dev-check.sh release  # before plugin/manifest/package changes
+bash tools/gates/dev-check.sh          # manifests, 600 LOC module budget report, pytest
+bash tools/gates/dev-check.sh release  # before plugin/manifest/package changes
 ```
 
 The **module line budget** warns when `plugin/apple_mail_mcp/` or `tools/` Python files exceed **600 lines**, and CI fails if a tracked large file grows further. See [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) § Module line budget.

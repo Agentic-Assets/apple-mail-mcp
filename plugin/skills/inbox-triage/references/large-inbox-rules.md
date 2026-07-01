@@ -1,6 +1,6 @@
 # Large-inbox pre-flight (canonical)
 
-Canonical source: `plugin/skills/references/large-inbox-rules.md`. After edits, run `python3 tools/sync_skill_references.py` to refresh per-skill copies under `*/references/`.
+Canonical source: `plugin/skills/references/large-inbox-rules.md`. After edits, run `python3 tools/validators/sync_skill_references.py` to refresh per-skill copies under `*/references/`.
 
 Apple Mail's AppleScript bridge slows non-linearly on large mailboxes (24k+ is common). Before running any discovery or bulk tool:
 

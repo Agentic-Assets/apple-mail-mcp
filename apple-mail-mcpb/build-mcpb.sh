@@ -174,9 +174,16 @@ find "${BUILD_DIR}" -type d -name ".git" -exec rm -rf {} + 2>/dev/null || true
 
 # Prefer the official `mcpb pack` CLI — it produces a bundle layout Claude Desktop accepts.
 # Fall back to `zip` only when mcpb isn't installed (developer-local fallback).
+#
+# Always remove any existing bundle first, for BOTH packers. `zip` UPDATES an
+# archive in place: it adds/replaces named entries but never deletes entries
+# absent from the input. A stale bundle would therefore retain files that were
+# since renamed or removed (e.g. a module → package split leaves the old flat
+# `cli.py` / `tools/compose.py` behind), and `validate_manifests` would reject
+# the bundle for unexpected members.
+rm -f "${OUTPUT_FILE}"
 if command -v mcpb >/dev/null 2>&1; then
     echo -e "  Using ${GREEN}mcpb pack${NC} (official CLI) for bundle creation"
-    rm -f "${OUTPUT_FILE}"
     mcpb pack "${BUILD_DIR}" "${OUTPUT_FILE}"
 else
     echo -e "  ${YELLOW}⚠${NC} mcpb CLI not found — falling back to raw zip (install with: npm install -g @anthropic-ai/mcpb)"

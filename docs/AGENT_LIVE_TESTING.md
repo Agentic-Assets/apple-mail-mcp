@@ -201,7 +201,7 @@ Known wrapper checks to keep separate from manifest validation:
 **Wrapper command-surface check** (repo script; skips if no wrapper on PATH):
 
 ```bash
-python3 tools/check_wrapper_surface.py
+python3 tools/validators/check_wrapper_surface.py
 ```
 
 **Regenerate wrapper** after adding MCP tools (mcporter embeds schemas at generation time):
@@ -211,9 +211,9 @@ APPLE_MAIL_CLI_HOME="${APPLE_MAIL_CLI_HOME:-$HOME/.local/share/apple-mail-cli}"
 rsync -a --delete --exclude venv /path/to/apple-mail-mcp/plugin/ "$APPLE_MAIL_CLI_HOME/plugin/"
 cd "$APPLE_MAIL_CLI_HOME"
 npx mcporter@0.11.3 generate-cli --from ./apple-mail-cli.cjs --bundle apple-mail-cli.cjs
-python3 /path/to/apple-mail-mcp/tools/patch_mcporter_wrapper.py ./apple-mail-cli.cjs
+python3 /path/to/apple-mail-mcp/tools/probes/patch_mcporter_wrapper.py ./apple-mail-cli.cjs
 ./install.sh
-python3 /path/to/apple-mail-mcp/tools/check_wrapper_surface.py
+python3 /path/to/apple-mail-mcp/tools/validators/check_wrapper_surface.py
 ```
 
 `patch_mcporter_wrapper.py` is required with mcporter 0.11.3 because the
@@ -252,7 +252,7 @@ not touch Mail.app; the only live work is the two explicit `perf-test` captures.
 ```bash
 .venv/bin/apple-mail perf-test --account "$DEFAULT_MAIL_ACCOUNT" --profile production --json > /tmp/apple-mail-baseline.json
 .venv/bin/apple-mail perf-test --account "$DEFAULT_MAIL_ACCOUNT" --profile production --json > /tmp/apple-mail-current.json
-.venv/bin/python tools/compare_perf_results.py /tmp/apple-mail-baseline.json /tmp/apple-mail-current.json --max-regression-pct 0 --json
+.venv/bin/python tools/probes/compare_perf_results.py /tmp/apple-mail-baseline.json /tmp/apple-mail-current.json --max-regression-pct 0 --json
 ```
 
 For routine local iteration, use a small positive budget such as
@@ -297,8 +297,8 @@ Output is redacted by default: counts and char lengths only; account names, subj
 CI runs mocked pytest + manifest validation + **module line budget** (600 LOC warn, baseline regression fail):
 
 ```bash
-bash tools/validate_manifests.sh
-python3 tools/check_module_line_budget.py
+bash tools/gates/validate_manifests.sh
+python3 tools/validators/check_module_line_budget.py
 .venv/bin/pytest tests/ -q -rw
 ```
 
@@ -307,15 +307,15 @@ Detail: [`CLAUDE-conventions.md`](CLAUDE-conventions.md) § Module line budget.
 Optional local hook (manifest drift + pytest; wrapper check when staged MCP tool files change):
 
 ```bash
-bash tools/install-git-hooks.sh   # once per clone
-bash tools/dev-check.sh             # manual equivalent
-bash tools/dev-check.sh surface     # always include wrapper check
+bash tools/gates/install-git-hooks.sh   # once per clone
+bash tools/gates/dev-check.sh             # manual equivalent
+bash tools/gates/dev-check.sh surface     # always include wrapper check
 ```
 
 Release packaging gate before commit/PR when `plugin/`, manifests, `pyproject.toml`, `requirements.txt`, zip, or MCPB surfaces changed:
 
 ```bash
-bash tools/dev-check.sh release
+bash tools/gates/dev-check.sh release
 ```
 
 Live Mail verification is manual on macOS with Mail.app running.
@@ -366,4 +366,4 @@ The Claude Code plugin bundles **nine** workflow skills under `plugin/skills/`. 
 
 Full skill map: [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). User install copy: [`README`](../README.md) § Claude Code Skills.
 
-When editing skills, run **`plugin-dev:skill-reviewer`**. When editing manifests, package/dependency files, release artifacts, or bundled skill marketing copy, run **`bash tools/dev-check.sh release`** and **`plugin-dev:plugin-validator`**. Use **`bash tools/validate_manifests.sh`** for quick inner-loop checks.
+When editing skills, run **`plugin-dev:skill-reviewer`**. When editing manifests, package/dependency files, release artifacts, or bundled skill marketing copy, run **`bash tools/gates/dev-check.sh release`** and **`plugin-dev:plugin-validator`**. Use **`bash tools/gates/validate_manifests.sh`** for quick inner-loop checks.

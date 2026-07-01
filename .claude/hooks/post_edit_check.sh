@@ -89,7 +89,7 @@ esac
 # 3. Manifest drift check
 case "$FILE" in
     plugin/apple_mail_mcp/tools/*.py|plugin/.claude-plugin/plugin.json|.claude-plugin/marketplace.json|server.json|pyproject.toml|apple-mail-mcpb/manifest.json)
-        OUT="$(bash tools/validate_manifests.sh 2>&1)"
+        OUT="$(bash tools/gates/validate_manifests.sh 2>&1)"
         RC=$?
         if [ "$RC" -ne 0 ]; then
             TRIMMED="$(printf '%s\n' "$OUT" | tail -30)"

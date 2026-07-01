@@ -1,6 +1,6 @@
 # Pre-draft verification (canonical)
 
-Canonical source: `plugin/skills/references/pre-draft-verification.md`. After edits, run `python3 tools/sync_skill_references.py` to refresh per-skill copies under `*/references/`.
+Canonical source: `plugin/skills/references/pre-draft-verification.md`. After edits, run `python3 tools/validators/sync_skill_references.py` to refresh per-skill copies under `*/references/`.
 
 Load **`email-drafting`** for compose tool selection, native reply defaults, and post-draft checks. This reference is the single source for **already-replied** and **pre-draft thread** rules.
 

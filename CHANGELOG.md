@@ -3,6 +3,25 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
+## 3.9.1 - 2026-06-30
+
+Internal module-line-budget cleanup. No behavior change, no tool-surface change
+(still 31 tools); all checks and live behavior preserved.
+
+### Changed
+
+- **Oversized modules split into packages to satisfy the 600 LOC budget.** The
+  plugin runtime modules (`cli.py`, `core.py`, and the `tools/` handlers
+  `analytics`, `compose`, `inbox`, `manage`, `search`, `smart_inbox`) and the
+  dev-infra validator `tools/validate_manifests.py` are now packages of
+  cohesive submodules. `validate_manifests.py` stays the entry point invoked by
+  `tools/validate_manifests.sh`; its checks moved to `tools/manifest_checks/`
+  and are re-exported so the test suite and CI call sites are unchanged. The
+  module-line-budget baseline (`tests/fixtures/module_line_budget/baseline.json`)
+  is now empty.
+- **Test suite reorganized into per-area subfolders** (`tests/<area>/`) with the
+  collected-test count tracked in `tools/expected_test_count.txt`.
+
 ## 3.9.0 - 2026-06-30
 
 Native-only reply drafting enforced. The windowless `native_format=False` path

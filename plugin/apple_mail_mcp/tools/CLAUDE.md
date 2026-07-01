@@ -1,16 +1,38 @@
 # tools/ — MCP tool registrations
-All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six modules (side-effect registration). **31 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools/*.py | wc -l`.
+All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six tool surfaces — the `inbox/`, `search/`, `compose/`, `manage/`, `analytics/`, and `smart_inbox/` packages — for side-effect registration. **31 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools | wc -l` (recursive: every surface is a package).
 
 ## Module map
 
 | Module | # | Purpose / tools |
 |--------|---|-----------------|
-| `inbox.py` | 6 | Listing & overview: `list_inbox_emails`, `get_mailbox_unread_counts`, `list_accounts`, `list_account_addresses`, `list_mailboxes`, `get_inbox_overview` |
-| `search.py` | 4 | Find & fetch: `search_emails`, `get_email_by_id`, `get_email_by_ids`, `get_email_thread` |
-| `compose.py` | 7 | Send & drafts: `create_rich_email_draft`, `compose_email`, `reply_to_email`, `forward_email`, `manage_drafts`, `verify_draft`, `verify_drafts` |
-| `manage.py` | 6 | Move/status/trash/sync: `move_email`, `save_email_attachment`, `update_email_status`, `manage_trash`, `create_mailbox`, `synchronize_account` |
-| `analytics.py` | 5 | Stats & export: `list_email_attachments`, `get_statistics`, `export_emails` by exact ids or mailbox cap, `inbox_dashboard`, `full_inbox_export` |
-| `smart_inbox.py` | 3 | Triage heuristics: `get_awaiting_reply`, `get_needs_response`, `get_top_senders` |
+| `inbox/list_emails.py` | 1 | Listing: `list_inbox_emails` (async per-account dispatch; `parsing.py`/`replied.py`/`list_scripts.py` leaves) |
+| `inbox/unread_counts.py` | 1 | Unread totals: `get_mailbox_unread_counts` |
+| `inbox/accounts.py` | 2 | Account enumeration: `list_accounts`, `list_account_addresses` |
+| `inbox/mailboxes.py` | 1 | Folder listing: `list_mailboxes` |
+| `inbox/overview.py` | 1 | Overview: `get_inbox_overview` |
+| `search/emails.py` | 1 | Find: `search_emails` (windowing, replied-detection) |
+| `search/by_id.py` | 2 | Exact-id fetch: `get_email_by_id`, `get_email_by_ids` |
+| `search/thread.py` | 1 | Thread reconstruction: `get_email_thread` |
+| `compose/send.py` | 1 | Standalone send/draft: `compose_email` |
+| `compose/reply.py` | 1 | Reply (native window default): `reply_to_email` |
+| `compose/forward.py` | 1 | Forward draft: `forward_email` |
+| `compose/manage.py` | 1 | Draft listing/management: `manage_drafts` |
+| `compose/rich_draft.py` | 1 | Rich standalone draft: `create_rich_email_draft` |
+| `compose/verify_tools.py` | 2 | Exact-id draft verification: `verify_draft`, `verify_drafts` |
+| `manage/move.py` | 1 | Move: `move_email` (id-direct + filter-scan; `_move_email_by_message_ids` helper) |
+| `manage/attachments.py` | 1 | Attachment save: `save_email_attachment` (size/disk probes) |
+| `manage/status.py` | 1 | Read/flag status: `update_email_status` |
+| `manage/trash.py` | 1 | Trash ops: `manage_trash` (move_to_trash/delete_permanent/empty_trash) |
+| `manage/mailbox.py` | 1 | Folder creation: `create_mailbox` (nested paths) |
+| `manage/sync.py` | 1 | IMAP sync: `synchronize_account` (`helpers.py` is a shared leaf) |
+| `analytics/attachments.py` | 1 | Attachment listing: `list_email_attachments` (`statistics_parsing.py` is a pure leaf) |
+| `analytics/statistics.py` | 1 | Stats: `get_statistics` (account_overview/sender_stats/mailbox_breakdown) |
+| `analytics/export.py` | 1 | Export: `export_emails` by exact ids or mailbox cap |
+| `analytics/full_export.py` | 1 | Metadata walk: `full_inbox_export` |
+| `analytics/dashboard.py` | 1 | Dashboard: `inbox_dashboard` + recent-email helpers |
+| `smart_inbox/awaiting_reply.py` | 1 | Follow-up tracking: `get_awaiting_reply` (sent-vs-inbox Message-ID cross-reference; `helpers.py` shares `_normalize_message_id`) |
+| `smart_inbox/needs_response.py` | 1 | Actionable detection: `get_needs_response` (newsletter/automated filtering, replied-detection join) |
+| `smart_inbox/top_senders.py` | 1 | Sender analytics: `get_top_senders` (bounded newest-first Counter aggregation, domain grouping) |
 
 ## Add a tool
 
@@ -28,7 +50,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 ## Structured error codes (agent-facing)
 
-Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediation` fields. Tests in `test_phase_2_scan_hardening.py` and `test_mail_search_tools.py` lock the contracts.
+Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediation` fields. Tests in `tests/cross_cutting/test_phase_2_scan_hardening.py` and `tests/search/test_mail_search_tools.py` lock the contracts.
 
 | Code | When | Remediation hint |
 |------|------|------------------|
@@ -41,7 +63,7 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 
 ## Forbidden AppleScript patterns
 
-**Lint-enforced** by `tests/test_no_unbounded_whose.py` — these are the catalogued crash modes. Detail + safe alternatives: [`docs/CLAUDE-conventions.md § Forbidden AppleScript patterns`](../../../docs/CLAUDE-conventions.md#forbidden-applescript-patterns-lint-enforced).
+**Lint-enforced** by `tests/core/test_no_unbounded_whose.py` — these are the catalogued crash modes. Detail + safe alternatives: [`docs/CLAUDE-conventions.md § Forbidden AppleScript patterns`](../../../docs/CLAUDE-conventions.md#forbidden-applescript-patterns-lint-enforced).
 
 | Don't write | Failure mode | Write instead |
 |-------------|--------------|---------------|
@@ -52,7 +74,7 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 | `build_whose_id_list(ids)` with > 50 ids | Mail parser crash/hang; raises `WHOSE_ID_LIST_TOO_LARGE` | `iter_id_chunks(ids)` + loop |
 | Pipe-row emit without `sanitize_pipe_delimited_field` on user fields | Subject containing `&#124;&#124;&#124;` corrupts `message_id` → wrong-email delete | `core.sanitize_pipe_delimited_field("messageSubject")` etc. |
 
-When in doubt, copy the pattern from `search.py`'s per-message loop — it has been audited as Gmail-safe and Exchange-bounded.
+When in doubt, copy the pattern from `search/emails.py`'s per-message loop — it has been audited as Gmail-safe and Exchange-bounded.
 
 ## Account scoping
 
@@ -68,7 +90,7 @@ Normalized dict JSON: `get_statistics`, `get_inbox_overview`, `list_inbox_emails
 
 Workflow skills under [`../../skills/`](../../skills/) document **when** to call each tool (triage vs archive vs compose). After adding/removing tools, update relevant `plugin/skills/*/SKILL.md` frontmatter tool lists and run **`plugin-dev:skill-reviewer`**.
 
-## Compose defaults (`compose.py`)
+## Compose defaults (`compose/` package)
 
 | Tool | Default | Notes |
 |------|---------|-------|
@@ -83,8 +105,8 @@ Do not match outgoing rich drafts by subject — `_save_new_compose_window_as_dr
 
 ## Module size
 
-All six tool modules currently exceed the **600 LOC** budget (`compose.py` largest). CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer splitting by tool domain (reply, forward, verification, rich draft) into focused files rather than extending monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
+Every tool surface is now a split-by-domain package under the **600 LOC** budget; the `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` packages are the worked examples (search: `emails.py`, `by_id.py`, `thread.py`, plus `records.py`/`script.py`/`dispatch.py` leaves; inbox: `list_emails.py`, `unread_counts.py`, `accounts.py`, `mailboxes.py`, `overview.py`, plus `parsing.py`/`replied.py`/`list_scripts.py` leaves; manage: `move.py`, `attachments.py`, `status.py`, `trash.py`, `mailbox.py`, `sync.py`, plus the shared `helpers.py` leaf; analytics: `attachments.py`, `statistics.py`, `export.py`, `full_export.py`, `dashboard.py`, plus the pure `statistics_parsing.py` leaf; smart_inbox: `awaiting_reply.py`, `needs_response.py`, `top_senders.py`, plus the pure `helpers.py` leaf), each file under budget, linked through the package `__init__.py` facade. CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer the same domain split over reviving single-file monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
 
 ## Related
 
-`../core.py` (bridge), `../server.py` (mcp + annotations), `../../tests/` (mock `run_applescript`), `tasks/phase-3-annotation-matrix.md`.
+`../core/` (bridge package), `../server.py` (mcp + annotations), `../../tests/` (mock `run_applescript`), `tasks/phase-3-annotation-matrix.md`.

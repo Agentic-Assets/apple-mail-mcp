@@ -1,0 +1,20 @@
+"""Compose-specific constants and caps shared across the compose helpers.
+
+Leaf module so ``compose.py`` and its pure helper siblings import these without
+forming an import cycle. Caps keep deriving from ``constants.SCAN_BOUNDS`` so a
+single edit retunes every tool; tests assert the literal ``"items 1 thru 100"`` /
+``"messages 1 thru 100"`` slices, so changing a cap value here requires
+coordinated updates in ``tests/test_phase_2_scan_hardening.py``.
+"""
+
+from apple_mail_mcp.constants import SCAN_BOUNDS
+
+DRAFT_LIST_CAP = SCAN_BOUNDS["DRAFT_LOOKUP"]
+MESSAGE_LOOKUP_CAP = SCAN_BOUNDS["MESSAGE_LOOKUP"]
+_MESSAGE_ID_REQUIRED_ERROR = (
+    "Error: message_id is required (discover via search_emails(...) or list_inbox_emails(...), then pass message_id)"
+)
+# Maximum number of Mail compose windows that may be open simultaneously when
+# mode="open" is used. Each call in mode="open" leaves a window open; at high
+# counts NSWindowServer OOMs. Agents doing bulk drafting must use mode="draft".
+MAX_OPEN_COMPOSE_WINDOWS = 5
