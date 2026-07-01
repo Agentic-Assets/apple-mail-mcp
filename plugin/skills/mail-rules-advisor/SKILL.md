@@ -1,6 +1,6 @@
 ---
 name: mail-rules-advisor
-description: This skill should be used when the user asks to "suggest Gmail-style filters", "build Mail rules text", "separate newsletters", "route invoices", or tame noisy domains by automation — without expecting MCP automation. Uses get_top_senders, search_emails, get_statistics(scope="sender_stats"), list_mailboxes, and optionally export_emails for offline evidence. Ends with prose rule specs only; Mail rules/VIP lists must be created manually in Mail.app UI. Do NOT use for drafting mail (email-drafting), taxonomy-only planning without evidence (narrow use with mailbox-taxonomy), or destructive cleanup (email-archive-cleanup).
+description: This skill should be used when the user asks to "suggest Gmail-style filters", "build Mail rules text", "separate newsletters", "route invoices", or tame noisy domains by automation, without expecting MCP automation. Uses get_top_senders, search_emails, get_statistics(scope="sender_stats"), list_mailboxes, and optionally export_emails for offline evidence. Ends with prose rule specs only; Mail rules/VIP lists must be created manually in Mail.app UI. Do NOT use for drafting mail (email-drafting), taxonomy-only planning without evidence (narrow use with mailbox-taxonomy), or destructive cleanup (email-archive-cleanup).
 ---
 
 # Mail Rules Advisor (Read-Only Evidence)
@@ -15,7 +15,7 @@ Produce **implementable**, human-applied Mail rules derived from MCP analytics. 
 get_top_senders(limit=30, days_back=30, group_by_domain=true)
 ```
 
-Focus on recurring automated domains versus human counterparts. See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical bounded-scan rules — `get_top_senders(days_back=0)` returns `UNBOUNDED_SCAN_REQUIRED`; start at `days_back=14` and only escalate to `full_inbox_export` after the user confirms.
+Focus on recurring automated domains versus human counterparts. See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical bounded-scan rules; `get_top_senders(days_back=0)` returns `UNBOUNDED_SCAN_REQUIRED`; start at `days_back=14` and only escalate to `full_inbox_export` after the user confirms.
 
 ### 2. Drill Candidates
 
@@ -38,7 +38,7 @@ Deliver tables like:
 |-----------|-------|-----------|---------|-------------|
 | `Finance Invoices Auto-File` | account X | Sender domain `@vendor.com` + subject tokens `INV` | Move to `Finance/AP Inbox`, skip notification | Medium |
 
-Specify whether Apple Mail **Rules**, **VIP**, Smart Mailboxes — each still manual wiring.
+Specify whether Apple Mail **Rules**, **VIP**, Smart Mailboxes; each still manual wiring.
 
 ### 5. Tie To Operational Follow-Up
 
@@ -46,7 +46,7 @@ Recommend pairing with **`email-archive-cleanup`** for historical remediation **
 
 ### Optional Offline Bundle
 
-Offer `export_emails(max_emails=1000)` for analysts who spreadsheet outside MCP — confirm disk path hygiene first.
+Offer `export_emails(max_emails=1000)` for analysts who spreadsheet outside MCP; confirm disk path hygiene first.
 
 ## Guardrails
 
@@ -58,5 +58,5 @@ Offer `export_emails(max_emails=1000)` for analysts who spreadsheet outside MCP 
 
 ## Related Skills
 
-- **`mailbox-taxonomy`** — aligns folder namespaces with rule targets.
-- **`email-archive-cleanup`** — backfills backlog once interception works.
+- **`mailbox-taxonomy`**: aligns folder namespaces with rule targets.
+- **`email-archive-cleanup`**: backfills backlog once interception works.

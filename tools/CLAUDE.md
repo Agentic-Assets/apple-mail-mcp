@@ -45,6 +45,34 @@ python3 tools/validators/validate_tasks_layout.py
 
 Runs in `bash tools/gates/dev-check.sh` (default and release tiers).
 
+## validate_repo_root
+
+| Script | Role |
+|--------|------|
+| `validators/validate_repo_root.py` | Enforces a tight allowlist at the repository root; covered by `tests/infra/test_repo_root.py` |
+
+Ephemeral reports, dated handoffs, and scratch artifacts belong under `docs/`, `tasks/active/`, `tasks/reference/`, or `tasks/archive/`, not loose at the repo root. The gate fails when unexpected non-hidden files or directories appear at top level. Allowed root files: navigation manifests (`AGENTS.md`, `CLAUDE.md`, `README.md`, etc.), `pyproject.toml`, `server.json`, `skills-lock.json`, and versioned release artifacts (`apple-mail-mcp-v{semver}.mcpb`, `apple-mail-plugin.zip`, `apple-mail.plugin`). Allowed top-level dirs: `apple-mail-mcpb`, `archive`, `docs`, `plugin`, `tasks`, `tests`, `tools`. Hidden dirs `.agents`, `.claude`, `.claude-plugin`, `.codex`, `.cursor`, `.github`, `.git` are allowed; other dotfiles and dotdirs (`.venv`, `.pytest_cache`, etc.) are ignored.
+
+```bash
+python3 tools/validators/validate_repo_root.py
+```
+
+Runs in `bash tools/gates/dev-check.sh` (default and release tiers).
+
+## validate_repo_root
+
+| Script | Role |
+|--------|------|
+| `validators/validate_repo_root.py` | Enforces a tight allowlist at the repository root; covered by `tests/infra/test_repo_root.py` |
+
+Ephemeral live-test reports, dated handoffs, and scratch artifacts must live under `docs/`, `tasks/active/`, `tasks/reference/`, or `tasks/archive/`, not loose at the repo root. Allowed root files: navigation markdown (`AGENTS.md`, `CHANGELOG.md`, `CLAUDE.md`, `LICENSE`, `README.md`), `pyproject.toml`, `server.json`, `skills-lock.json`, and current release artifacts (`apple-mail-plugin.zip`, `apple-mail.plugin`, `apple-mail-mcp-v{version}.mcpb`).
+
+```bash
+python3 tools/validators/validate_repo_root.py
+```
+
+Runs in `bash tools/gates/dev-check.sh` (default and release tiers).
+
 ## validate_manifests
 
 | Script | Role |
@@ -158,7 +186,7 @@ Tiered local gate (no live Mail except `live` tier). Requires root `.venv/`.
 
 | Tier | Runs |
 |------|------|
-| `default` | `validate_manifests.sh` + `validate_tasks_layout.py` + module line budget report + `pytest` + `run_test_count_check`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
+| `default` | `validate_manifests.sh` + `validate_tasks_layout.py` + `validate_repo_root.py` + module line budget report + `pytest` + `run_test_count_check`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
 | `lint` | Fatal package quality gate: `ruff check plugin/apple_mail_mcp/`, `ruff format --check plugin/apple_mail_mcp/`, and `mypy --strict plugin/apple_mail_mcp/` |
 | `surface` | default + wrapper check always |
 | `manifest` | manifests only |

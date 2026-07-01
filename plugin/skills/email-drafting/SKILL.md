@@ -16,10 +16,10 @@ Compose-first workflows against Apple Mail. Default plugin installs run **`--dra
 Canonical rules: [`pre-draft-verification.md`](references/pre-draft-verification.md). Summary:
 
 1. Fetch the conversation: `get_email_thread(message_id=...)`. If no id is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id`.
-2. Cross-check senders in the thread against `list_account_addresses(account=...)`. If any message in the thread was sent by one of the user's own addresses, **abort the draft** and report which message already replied (date, subject snippet) — unless the user explicitly said "redraft" or "include already-replied".
+2. Cross-check senders in the thread against `list_account_addresses(account=...)`. If any message in the thread was sent by one of the user's own addresses, **abort the draft** and report which message already replied (date, subject snippet), unless the user explicitly said "redraft" or "include already-replied".
 3. Only after the thread shows no user-sent message do you proceed to `reply_to_email(message_id=...)`.
 
-Never use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer an existing message. They create standalone new messages, so the original chain is not included. If a standalone draft has a `Re:` / `Fwd:` subject or quoted-thread body, the tool returns an error unless `standalone_confirmed=True`; use that override only for a genuinely new message whose subject happens to look threaded.
+Never use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer an existing message. They create standalone new messages, so the original chain is not included. If a standalone draft has a `Re:` / `Fwd:` subject or quoted-thread body, the tool returns an error unless `standalone_confirmed=True`; use that override only for a truly new message whose subject happens to look threaded.
 
 ## When To Use This Skill
 
@@ -43,11 +43,11 @@ Never use standalone draft creators (`compose_email`, `create_rich_email_draft`,
 
 Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `forward_email`, `create_rich_email_draft`, or `manage_drafts(action="send")`:
 
-1. **Recipients** — explicit `to`, `cc`, `bcc`. Confirm spelling and that no replies stay private.
-2. **Subject line** — exact text. For replies/forwards, confirm the inherited subject if Mail will prepend `Re:` / `Fwd:`.
-3. **Mode** — `draft` (quiet save, default) vs `open` (saved + window stays open for review) vs `send` (blocked under `--draft-safe`). `mode="send"` requires explicit user confirmation and a non-draft-safe configuration.
-4. **Signature intent** — `include_signature=True` applies `DEFAULT_MAIL_SIGNATURE` if set; when unset, Mail may still apply the account's normal default signature. Pass `signature_name` to override, `include_signature=False` to suppress plugin-applied signatures. For replies, disabling signatures cannot skip body insertion above the quoted original. `create_rich_email_draft` does not accept signature params — switch to a plain compose tool when a named signature is required.
-5. **Source message id** (replies/forwards only) — pass the `message_id` returned by search/list. If no id is known yet, run bounded `search_emails` or `list_inbox_emails` first; never pass `subject_keyword` to `reply_to_email` or `forward_email`.
+1. **Recipients**: explicit `to`, `cc`, `bcc`. Confirm spelling and that no replies stay private.
+2. **Subject line**: exact text. For replies/forwards, confirm the inherited subject if Mail will prepend `Re:` / `Fwd:`.
+3. **Mode**: `draft` (quiet save, default) vs `open` (saved + window stays open for review) vs `send` (blocked under `--draft-safe`). `mode="send"` requires explicit user confirmation and a non-draft-safe configuration.
+4. **Signature intent**: `include_signature=True` applies `DEFAULT_MAIL_SIGNATURE` if set; when unset, Mail may still apply the account's normal default signature. Pass `signature_name` to override, `include_signature=False` to suppress plugin-applied signatures. For replies, disabling signatures cannot skip body insertion above the quoted original. `create_rich_email_draft` does not accept signature params; switch to a plain compose tool when a named signature is required.
+5. **Source message id** (replies/forwards only): pass the `message_id` returned by search/list. If no id is known yet, run bounded `search_emails` or `list_inbox_emails` first; never pass `subject_keyword` to `reply_to_email` or `forward_email`.
 6. **Standalone-confirmed override:** `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` refuse `Re:`/`Fwd:` subjects or bodies containing quoted-thread markers and return a structured error. If the user explicitly wants a fresh standalone message that happens to look threaded (e.g. a new "Re: weekly review" note unrelated to any prior thread), pass `standalone_confirmed=True` (CLI: `--standalone-confirmed`); never use this override to substitute for `reply_to_email` / `forward_email`.
 
 **Large-inbox caveat:** the pre-draft `get_email_thread` verification can stall on long threads in a 24k mailbox. If no `message_id` is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id` (`get_email_thread(message_id=...)` or `get_email_by_id(message_id=...)`).
@@ -79,7 +79,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 
 ### Draft-Safe And Read-Only Modes Reminder
 
-- **`--draft-safe`** (default plugin install): `compose_email`, `reply_to_email`, and `forward_email` stay on quiet `mode="draft"` unless the user explicitly requests `mode="open"`; `mode="send"` and `manage_drafts(action="send")` return structured errors — treat send requests as drafting tasks until configuration changes.
+- **`--draft-safe`** (default plugin install): `compose_email`, `reply_to_email`, and `forward_email` stay on quiet `mode="draft"` unless the user explicitly requests `mode="open"`; `mode="send"` and `manage_drafts(action="send")` return structured errors; treat send requests as drafting tasks until configuration changes.
 - **`--read-only`**: Unregisters `compose_email`, `reply_to_email`, and `forward_email`; also enables draft-safe send blocking for `manage_drafts(action="send")`. `create_rich_email_draft` and `manage_drafts` remain for draft workflows where permitted.
 
 ## Rich Draft Guidance
@@ -95,7 +95,7 @@ Summarize artifacts for the operator:
 3. For replies, whether `reply_body` was verified above the quoted original.
 4. Next actions (edit, attachments, approvals).
 
-To verify a freshly-created draft, do **not** use `search_emails` — it runs a
+To verify a freshly-created draft, do **not** use `search_emails`; it runs a
 date-filtered scan that is slow on large accounts and silently drops brand-new
 drafts (an unsent `outgoing message` has a null received date). Instead use the
 exact Drafts verification: `verify_draft(draft_id="...", expected_body_contains="...")` or `verify_drafts(draft_ids=[...])`
@@ -126,6 +126,6 @@ standalone message.
 
 ## Related Skills
 
-- **`email-style-profile`** — learn voice from Sent mail samples.
-- **`email-attachments`** — after drafting, optionally attach binaries with validated filesystem paths (`compose_*` attachments parameters).
-- **`apple-mail-operator`** — if tools error on account scope or timeouts, fix infra before rewriting prose.
+- **`email-style-profile`**: learn voice from Sent mail samples.
+- **`email-attachments`**: after drafting, optionally attach binaries with validated filesystem paths (`compose_*` attachments parameters).
+- **`apple-mail-operator`**: if tools error on account scope or timeouts, fix infra before rewriting prose.

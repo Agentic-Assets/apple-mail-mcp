@@ -1,6 +1,6 @@
 # Email Management Skill (plugin bundle)
 
-Part of the **Apple Mail Claude Code plugin** skill suite. This directory is the **umbrella** skill for sustained Inbox Zero habits and cross-cutting workflows. Narrower siblings handle specialized intents — see `plugin/skills/CLAUDE.md` in the repo for the full routing map (maintainer doc; not bundled in the plugin skill folder).
+Part of the **Apple Mail Claude Code plugin** skill suite. This directory is the **umbrella** skill for sustained Inbox Zero habits and cross-cutting workflows. Narrower siblings handle specialized intents; see `plugin/skills/CLAUDE.md` in the repo for the full routing map (maintainer doc; not bundled in the plugin skill folder).
 
 ## What this skill is
 
@@ -18,7 +18,7 @@ plugin/skills/email-management/
 └── templates/               # search patterns, common workflow snippets
 ```
 
-## Install (Claude Code plugin — recommended)
+## Install (Claude Code plugin, recommended)
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp
@@ -43,7 +43,7 @@ for d in apple-mail-operator inbox-triage email-management mailbox-taxonomy \
 done
 ```
 
-Claude Desktop `.mcpb` bundles mirror `skills/` inside the archive — see `apple-mail-mcpb/CLAUDE.md` in the repo (maintainer doc).
+Claude Desktop `.mcpb` bundles mirror `skills/` inside the archive; see `apple-mail-mcpb/CLAUDE.md` in the repo (maintainer doc).
 
 ## When to use this skill vs siblings
 
@@ -62,10 +62,10 @@ Details live in each skill’s `SKILL.md` frontmatter (`description` triggers) a
 
 ## Learning path
 
-1. Read `SKILL.md` — purpose, decision tree, safety caps
-2. `examples/inbox-zero-workflow.md` — full methodology
-3. `references/bulk-cleanup.md` — before any large move/trash
-4. `references/analytics.md` — when using `get_statistics` / `get_top_senders`
+1. Read `SKILL.md`: purpose, decision tree, safety caps
+2. `examples/inbox-zero-workflow.md`: full methodology
+3. `references/bulk-cleanup.md`: before any large move/trash
+4. `references/analytics.md`: when using `get_statistics` / `get_top_senders`
 
 ## Requirements
 
@@ -75,8 +75,8 @@ Details live in each skill’s `SKILL.md` frontmatter (`description` triggers) a
 
 ## Authoring / contributing
 
-Follow `docs/CLAUDE-conventions.md` § Skill authoring (repo root). Run **`plugin-dev:skill-reviewer`** before merge. Do not add new slash commands — new workflows → new `plugin/skills/<name>/SKILL.md`.
+Follow `docs/CLAUDE-conventions.md` § Skill authoring (repo root). Run **`plugin-dev:skill-reviewer`** before merge. Do not add new slash commands; new workflows → new `plugin/skills/<name>/SKILL.md`.
 
 ## License
 
-MIT — same as Apple Mail MCP
+MIT; same as Apple Mail MCP

@@ -25,7 +25,7 @@ Raise these caps only after a confirming search shows the user exactly which mes
 
 1. **Identify candidates** with `search_emails()` or `list_inbox_emails()`, narrowed by sender, date range, mailbox, or read status.
 2. **Collect `message_id`s** from the preview (first ten subjects for human confirmation).
-3. **Dry-run by id** — `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` or `manage_trash(message_ids=[...], dry_run=True)`.
+3. **Dry-run by id**: `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` or `manage_trash(message_ids=[...], dry_run=True)`.
 4. **Move to Trash first** with `manage_trash(action="move_to_trash", message_ids=[...], dry_run=False)`. Reversible inside Apple Mail.
 5. **Verify** by listing Trash or re-searching the source window.
 6. **Permanent delete only when certain** with `manage_trash(action="delete_permanent", message_ids=[...])`.

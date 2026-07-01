@@ -17,6 +17,16 @@ for tool_name in "${REQUIRED_TOOLS[@]}"; do
   SMOKE_TOOL_ARGS+=(--required-tool "$tool_name")
 done
 
+# Derive the expected tool count from the @mcp.tool decorators so this gate
+# stays correct as tools are added, mirroring validate_manifests.sh. The
+# compose/ group is a package, so recurse instead of scanning one level.
+EXPECTED_TOOL_COUNT="$({ rg "^@mcp\.tool" -g '*.py' plugin/apple_mail_mcp/tools || true; } | wc -l | tr -d " ")"
+if [ -z "$EXPECTED_TOOL_COUNT" ] || [ "$EXPECTED_TOOL_COUNT" -eq 0 ]; then
+  echo "error: no @mcp.tool registrations found under plugin/apple_mail_mcp/tools/" >&2
+  exit 1
+fi
+SMOKE_TOOL_ARGS+=(--expect-count "$EXPECTED_TOOL_COUNT")
+
 if ! command -v codex >/dev/null 2>&1; then
   echo "codex CLI not on PATH; skipping Codex plugin install smoke"
   exit 0
@@ -41,7 +51,6 @@ trap 'rm -rf "$TMP_HOME"' EXIT
   --arg "$ROOT/plugin/start_mcp.sh" \
   --arg=--draft-safe \
   --cwd "$ROOT" \
-  --expect-count 29 \
   "${SMOKE_TOOL_ARGS[@]}"
 
 export CODEX_HOME="$TMP_HOME"
@@ -56,7 +65,6 @@ codex mcp get apple-mail --json > "$SERVER_JSON"
 "$SMOKE_PYTHON" tools/probes/mcp_tool_smoke.py \
   --server-json "$SERVER_JSON" \
   --reject-literal '${CLAUDE_PLUGIN_ROOT}' \
-  --expect-count 29 \
   "${SMOKE_TOOL_ARGS[@]}"
 
 echo "Codex plugin install + MCP runtime smoke OK"

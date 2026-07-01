@@ -51,6 +51,11 @@ run_tasks_layout() {
   "$PY" tools/validators/validate_tasks_layout.py
 }
 
+run_repo_root() {
+  echo "→ repo root hygiene (allowlisted navigation + release artifacts only)"
+  "$PY" tools/validators/validate_repo_root.py
+}
+
 run_pytest() {
   "$PYTEST" tests/ -q
 }
@@ -113,6 +118,7 @@ staged_touches_tool_surface() {
 run_default() {
   run_manifests
   run_tasks_layout
+  run_repo_root
   run_module_line_budget
   run_pytest
   run_test_count_check
@@ -156,6 +162,7 @@ case "$TIER" in
     run_lint
     bash tools/gates/build-artifacts.sh
     run_tasks_layout
+    run_repo_root
     run_pytest
     run_test_count_check
     run_wrapper

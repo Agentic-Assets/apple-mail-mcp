@@ -702,6 +702,11 @@ class ValidateManifestsTests(unittest.TestCase):
         self.assertIn("codex mcp get apple-mail --json", script)
         self.assertIn("tools/probes/mcp_tool_smoke.py", script)
         self.assertIn("--reject-literal '${CLAUDE_PLUGIN_ROOT}'", script)
+        # The expected tool count must be derived from @mcp.tool decorators,
+        # not hardcoded, so this gate stays correct as tools are added.
+        self.assertIn('EXPECTED_TOOL_COUNT=', script)
+        self.assertIn('--expect-count "$EXPECTED_TOOL_COUNT"', script)
+        self.assertNotRegex(script, r"--expect-count\s+[0-9]+")
         for tool in (
             "reply_to_email",
             "compose_email",

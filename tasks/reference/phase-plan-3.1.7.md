@@ -1,7 +1,7 @@
 # Phase Plan — 3.1.7
 
 **Branch:** `improve-speed-and-tools` · **Tests:** 249 *(baseline doc: 206)* · **Version:** 3.1.7
-**Baseline:** [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) · root [`LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md)  
+**Baseline:** [`live-test-baseline-2026-05-21.md`](live-test-baseline-2026-05-21.md) · [`LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../../docs/live-testing-reports/LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md)  
 **Backlog:** [`todo.md`](todo.md) · **Archive:** [`archive/2026-05-21/`](archive/2026-05-21/)
 
 ## Situation

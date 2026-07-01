@@ -9,7 +9,7 @@ The primary live validation account for this work is `TU - Cayman`, because it i
 ## Input Evidence
 
 - `/Users/cayman-mac-mini/.openclaw/tasks/caiyman-orchestrator-report-2026-05-22.md` was referenced as an example report from another workspace agent. In this checkout it is an OpenClaw workspace/orchestration report rather than a technical Apple Mail timeout report, so this branch treats it as context evidence and relies on repo-local findings for the concrete fixes.
-- Repo-local evidence came from `tasks/reference/live-test-baseline-2026-05-21.md`, `LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`, subagent scans, and live TU - Cayman perf runs.
+- Repo-local evidence came from `tasks/reference/live-test-baseline-2026-05-21.md`, `docs/live-testing-reports/LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`, subagent scans, and live TU - Cayman perf runs.
 
 ## Fix Themes
 

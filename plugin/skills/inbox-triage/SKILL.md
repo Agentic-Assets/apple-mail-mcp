@@ -1,15 +1,15 @@
 ---
 name: inbox-triage
-description: This skill should be used when the user asks to "check my email", "what came in today", "what needs my attention", "morning email scan", "triage my inbox", "anything urgent in my mail", or wants a fast 5–10 minute read-only pass over Apple Mail without full inbox-zero cleanup. Uses get_inbox_overview, get_needs_response, get_awaiting_reply, list_inbox_emails, and get_email_by_id. Do NOT use for deep folder reorganization (mailbox-taxonomy), bulk archive or delete campaigns (email-archive-cleanup), proposing Mail filter text (mail-rules-advisor), MCP setup (apple-mail-operator), or composing replies — use email-drafting after this scan.
+description: This skill should be used when the user asks to "check my email", "what came in today", "what needs my attention", "morning email scan", "triage my inbox", "anything urgent in my mail", or wants a fast 5–10 minute read-only pass over Apple Mail without full inbox-zero cleanup. Uses get_inbox_overview, get_needs_response, get_awaiting_reply, list_inbox_emails, and get_email_by_id. Do NOT use for deep folder reorganization (mailbox-taxonomy), bulk archive or delete campaigns (email-archive-cleanup), proposing Mail filter text (mail-rules-advisor), MCP setup (apple-mail-operator), or composing replies; use email-drafting after this scan.
 ---
 
 # Inbox Triage
 
-Fast, read-first email check for Apple Mail — what arrived, what needs a reply, what you're still waiting on. Target **5–10 minutes**, not inbox zero.
+Fast, read-first email check for Apple Mail: what arrived, what needs a reply, what you're still waiting on. Target **5–10 minutes**, not inbox zero.
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. Triage is read-only, so the bounded defaults below are usually enough — do not reach for `full_inbox_export` inside the daily loop.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. Triage is read-only, so the bounded defaults below are usually enough; do not reach for `full_inbox_export` inside the daily loop.
 
 ## Before drafting
 
@@ -97,20 +97,20 @@ Repo CLI equivalent: `apple-mail show --id 12345 --json`.
 
 Summarize in plain language:
 
-1. **Needs reply** — count + top 3 subjects
-2. **Waiting on others** — count + top 2 if any
-3. **Notable recent** — anything flagged/urgent from overview
-4. **Suggested next action** — read one message, reply, defer, or schedule full cleanup
+1. **Needs reply**: count + top 3 subjects
+2. **Waiting on others**: count + top 2 if any
+3. **Notable recent**: anything flagged/urgent from overview
+4. **Suggested next action**: read one message, reply, defer, or schedule full cleanup
 
 Do not bulk-move or trash during triage unless the user explicitly asks.
 
 ## Archive handoff (when the user asks mid-triage)
 
-Triage stays read-first, but a quick "archive these" request is common. Do not call `move_email(subject_keyword=...)` or `move_email(sender=...)` from triage — those return `TARGET_SELECTOR_DEPRECATED`.
+Triage stays read-first, but a quick "archive these" request is common. Do not call `move_email(subject_keyword=...)` or `move_email(sender=...)` from triage; those return `TARGET_SELECTOR_DEPRECATED`.
 
 1. Collect numeric `message_id`s from the triage pass you already ran (`list_inbox_emails`, `get_needs_response`, or `search_emails` JSON).
 2. Confirm the subject/sender list with the user.
-3. `move_email(dry_run=True, message_ids=[...], to_mailbox="Archive", max_moves=25)` — quote the count.
+3. `move_email(dry_run=True, message_ids=[...], to_mailbox="Archive", max_moves=25)`; quote the count.
 4. `move_email(dry_run=False, message_ids=[...], ...)` after confirmation.
 
 For larger cleanups, hand off to **`email-archive-cleanup`**.
@@ -118,15 +118,15 @@ For larger cleanups, hand off to **`email-archive-cleanup`**.
 ## Performance rules
 
 - Keep `days_back` small (2 for needs-response, 7 for awaiting-reply).
-- Avoid `get_statistics(account_overview)` in the daily loop — use weekly in `email-management`.
+- Avoid `get_statistics(account_overview)` in the daily loop; use weekly in `email-management`.
 - Avoid `all_accounts=True` unless the user has no default account and wants every account.
 - To scope a scan across a few folders, use `search_emails(mailboxes=["INBOX", "Sent", ...])` instead of whole-profile fan-out. This avoids the slow path on large Exchange/Gmail accounts.
 - Prefer `list_mailboxes(include_counts=false)` when listing folders.
 
 ## Related skills
 
-- **`email-management`** — sustained inbox-zero programs and cross-cutting habits  
-- **`mailbox-taxonomy`** / **`email-archive-cleanup`** / **`mail-rules-advisor`** — structure, execution, automation proposals  
-- **`email-drafting`** + **`email-style-profile`** — replies and voice alignment after triage identifies a message  
-- **`email-attachments`** — when the next action is extracting files, not reading queues  
-- **`apple-mail-operator`** — onboarding, account/mailbox introspection, troubleshooting
+- **`email-management`**: sustained inbox-zero programs and cross-cutting habits  
+- **`mailbox-taxonomy`** / **`email-archive-cleanup`** / **`mail-rules-advisor`**: structure, execution, automation proposals  
+- **`email-drafting`** + **`email-style-profile`**: replies and voice alignment after triage identifies a message  
+- **`email-attachments`**: when the next action is extracting files, not reading queues  
+- **`apple-mail-operator`**: onboarding, account/mailbox introspection, troubleshooting

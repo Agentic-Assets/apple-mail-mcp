@@ -1,11 +1,11 @@
 ---
 name: email-management
-description: This skill should be used when the user asks to "help me get to inbox zero", "build a repeatable triage program", "coordinate a multi-week cleanup across mailboxes", "set up sustained email habits", or "I'm drowning in email" and needs a multi-week umbrella program coordinating triage, taxonomy, cleanup, drafting, and analytics — not a single pass. Uses get_inbox_overview, search_emails, move_email, update_email_status, manage_trash, and get_statistics; routes single-purpose work to the narrow sibling skill instead. Do NOT use for tooling-only onboarding (see apple-mail-operator), a single 5–10 minute read-first scan (inbox-triage), a one-shot bulk move/archive/delete campaign (email-archive-cleanup), folder-architecture redesign without execution (mailbox-taxonomy), Mail filter prose only (mail-rules-advisor), or drafting voice capture (email-style-profile before email-drafting).
+description: This skill should be used when the user asks to "help me get to inbox zero", "build a repeatable triage program", "coordinate a multi-week cleanup across mailboxes", "set up sustained email habits", or "I'm drowning in email" and needs a multi-week umbrella program coordinating triage, taxonomy, cleanup, drafting, and analytics, not a single pass. Uses get_inbox_overview, search_emails, move_email, update_email_status, manage_trash, and get_statistics; routes single-purpose work to the narrow sibling skill instead. Do NOT use for tooling-only onboarding (see apple-mail-operator), a single 5–10 minute read-first scan (inbox-triage), a one-shot bulk move/archive/delete campaign (email-archive-cleanup), folder-architecture redesign without execution (mailbox-taxonomy), Mail filter prose only (mail-rules-advisor), or drafting voice capture (email-style-profile before email-drafting).
 ---
 
 # Email Management
 
-Sustained inbox organization for Apple Mail: repeatable processing habits plus Inbox Zero programs that combine reading, queues, guarded moves/trash, and analytics. Prefer narrow sibling skills (`mailbox-taxonomy`, `email-archive-cleanup`, `mail-rules-advisor`, `email-drafting`, `apple-mail-operator`) when the user intent is clearly one-shot or specialized — use this umbrella when they want coordinated multi-week cleanup or habitual discipline.
+Sustained inbox organization for Apple Mail: repeatable processing habits plus Inbox Zero programs that combine reading, queues, guarded moves/trash, and analytics. Prefer narrow sibling skills (`mailbox-taxonomy`, `email-archive-cleanup`, `mail-rules-advisor`, `email-drafting`, `apple-mail-operator`) when the user intent is clearly one-shot or specialized; use this umbrella when they want coordinated multi-week cleanup or habitual discipline.
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
@@ -13,7 +13,7 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 ### When to reach for `full_inbox_export`
 
-`full_inbox_export` is the only tool that walks the entire inbox. Reserve it for the rare full-inbox case — annual cleanup, complete audit, compliance archive, or pre-migration snapshot. It is slow (minutes on a 24k inbox); never use it inside a habitual triage loop. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
+`full_inbox_export` is the only tool that walks the entire inbox. Reserve it for the rare full-inbox case (annual cleanup, complete audit, compliance archive, or pre-migration snapshot). It is slow (minutes on a 24k inbox); never use it inside a habitual triage loop. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
 
 ## Before drafting
 
@@ -25,11 +25,11 @@ Use when the request is about reducing inbox volume through **habitual** process
 
 Do NOT use for:
 
-- Composing or replying to a specific message — route to **`email-drafting`** (`reply_to_email(message_id=...)` for thread replies).
-- A brief read-first scan — see **`inbox-triage`**.
-- Saving attachments — see **`email-attachments`**.
-- Pure Mail MCP setup / timeouts — see **`apple-mail-operator`**.
-- Designing folder ontology without agreeing execution path — **`mailbox-taxonomy`** (then **`email-archive-cleanup`** once moves ship).
+- Composing or replying to a specific message; route to **`email-drafting`** (`reply_to_email(message_id=...)` for thread replies).
+- A brief read-first scan; see **`inbox-triage`**.
+- Saving attachments; see **`email-attachments`**.
+- Pure Mail MCP setup / timeouts; see **`apple-mail-operator`**.
+- Designing folder ontology without agreeing execution path; **`mailbox-taxonomy`** (then **`email-archive-cleanup`** once moves ship).
 
 For finding a single specific email, call `search_emails()` directly without invoking this skill.
 
@@ -52,21 +52,21 @@ When in doubt, run a narrow query first and widen only if results are insufficie
 | "What came in today / needs reply NOW" | `inbox-triage` |
 | "Design folder layout / taxonomy brainstorm" | `mailbox-taxonomy` |
 | Staged archival / bulk deletes with dry runs | `email-archive-cleanup` |
-| Newsletter noise — propose Mail rules prose | `mail-rules-advisor` |
+| Newsletter noise; propose Mail rules prose | `mail-rules-advisor` |
 | Compose / drafts | `email-drafting` (+ `email-style-profile` beforehand) |
 | Attachments extraction | `email-attachments` |
 | Single lookup | Prefer `apple-mail-operator` cheat sheet vs loading this umbrella |
 
 **Templates are examples, not the skill contract.** Copy-paste workflows under `templates/` and `examples/` must follow `templates/search-patterns.md` (discovery → ids → action). When in doubt, route to the narrow sibling skill above.
 
-## Destructive Operations — Safety Caps
+## Destructive Operations: Safety Caps
 
 The MCP server enforces conservative defaults. Confirm with the user before raising any cap.
 
 | Operation | Default cap | When to confirm with user |
 |-----------|-------------|---------------------------|
 | `manage_trash(action="move_to_trash")` | 5 messages | Any time `max_deletes` exceeds 20 |
-| `manage_trash(action="delete_permanent")` | 5 messages | Always — this is irreversible |
+| `manage_trash(action="delete_permanent")` | 5 messages | Always; this is irreversible |
 | `manage_trash(action="empty_trash")` | hard confirm via `confirm_empty=True` | Always |
 | `move_email` | 50 messages | Any bulk move (`max_moves` > 10); use explicit `max_moves=1` for single-message filing |
 | `update_email_status` | 10 messages | Any bulk update (`max_updates` > 50) |
@@ -89,7 +89,7 @@ Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 min
 
 1. Get overview: `get_inbox_overview()` to see unread counts, recent messages, and suggested actions.
 2. Surface priorities: `get_needs_response(days_back=2, max_results=20, output_format="json")` for likely replies. Use each row's numeric `message_id` for downstream reads, replies, moves, and status updates; keep `internet_message_id` only for replied-header correlation. Optionally use `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
-3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(message_id=...)` for full content — do not re-search by subject.
+3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(message_id=...)` for full content; do not re-search by subject.
 4. Decide per message using the four-option rule: respond, defer, file, or delete.
    - For responses, defer to **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail.
    - To defer, flag with `update_email_status(action="flag", message_ids=["..."])`.
@@ -110,9 +110,9 @@ Goal: keep folder structure healthy and archive aging messages.
 
 1. Review structure: `list_mailboxes(include_counts=True)`.
 2. Identify clutter: mailboxes with more than 1,000 messages or with a high unread ratio.
-3. Analyze patterns: `get_statistics(scope="account_overview")` plus `get_top_senders()`. For per-folder volume, prefer `list_mailboxes(include_counts=True)`; when calling `get_statistics(scope="mailbox_breakdown")`, pass explicit `mailbox=` — omitting it scopes to the default Inbox in code. Full guidance lives in `references/analytics.md`.
+3. Analyze patterns: `get_statistics(scope="account_overview")` plus `get_top_senders()`. For per-folder volume, prefer `list_mailboxes(include_counts=True)`; when calling `get_statistics(scope="mailbox_breakdown")`, pass explicit `mailbox=`; omitting it scopes to the default Inbox in code. Full guidance lives in `references/analytics.md`.
 4. Adjust folders: collaborate with **`mailbox-taxonomy`** for naming; create net-new folders with `create_mailbox` after explicit confirmation (rename/delete heavy work still occurs in Mail UI when needed).
-5. Bulk-organize by sender or date (ID-first — see **`email-archive-cleanup`**):
+5. Bulk-organize by sender or date (ID-first; see **`email-archive-cleanup`**):
    - Prefer `search_emails(sender_exact="person@example.com", recent_days=30)` or `search_emails(sender_domain="example.com", recent_days=30)` when the exact sender/domain is known; use fuzzy `sender="..."` only for discovery when the address is uncertain.
    - `search_emails(sender_exact="...", recent_days=30)` → collect `message_id`s → `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` → execute.
    - Action tools do not target by `sender=`; collect ids with `search_emails(sender_exact="...", ...)` or `search_emails(sender_domain="...", ...)`, then call `move_email(message_ids=[...])`.
@@ -126,13 +126,13 @@ Goal: drain the inbox by processing every message exactly once.
 
 1. Survey: `get_inbox_overview()` and `get_statistics(scope="account_overview")` to size the problem.
 2. Process top-down with the five-D framework on each message:
-   - Delete: spam, expired notifications — `manage_trash(action="move_to_trash", message_ids=[...])`.
-   - Delegate: forward — use **`email-drafting`** (`forward_email` tool) after user confirms recipients.
+   - Delete: spam, expired notifications; `manage_trash(action="move_to_trash", message_ids=[...])`.
+   - Delegate: forward; use **`email-drafting`** (`forward_email` tool) after user confirms recipients.
    - Defer: flag and move to a "Follow Up" mailbox.
-   - Do: respond now if under two minutes — use **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail. Never auto-send under `--draft-safe`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
+   - Do: respond now if under two minutes; use **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail. Never auto-send under `--draft-safe`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
    - File: `move_email(message_ids=[...], to_mailbox="...")` for reference material.
 3. Keep folders sparing: an "Action Required", "Waiting For", and "Reference" trio handles most cases.
-4. Maintain daily — Inbox Zero is a habit, not a one-time event.
+4. Maintain daily; Inbox Zero is a habit, not a one-time event.
 
 Mindset:
 
@@ -172,7 +172,7 @@ Mindset:
 3. Adopt the Daily Triage workflow above for 15 to 30 minutes per day.
 4. Unsubscribe from non-essential senders identified in step 2.
 5. Build the minimum folder structure ("Action Required", "Waiting For", "Reference", "Archive").
-6. Aim for sustainable progress — do not attempt a one-shot cleanup of a 10,000-message backlog.
+6. Aim for sustainable progress; do not attempt a one-shot cleanup of a 10,000-message backlog.
 
 ### "I can't find an important email"
 
@@ -210,9 +210,9 @@ Mindset:
 
 ### Reference Files
 
-- `references/analytics.md` — Email analytics, statistics scopes, and using `get_top_senders` for noise diagnosis.
-- `references/bulk-cleanup.md` — Safe bulk cleanup operations with confirmation patterns.
-- `references/thread-management.md` — Working with reconstructed email threads.
+- `references/analytics.md`: Email analytics, statistics scopes, and using `get_top_senders` for noise diagnosis.
+- `references/bulk-cleanup.md`: Safe bulk cleanup operations with confirmation patterns.
+- `references/thread-management.md`: Working with reconstructed email threads.
 
 ### Examples
 

@@ -37,18 +37,18 @@ For every email in your inbox, choose ONE action:
 ### 3. Respond (or Reply)
 **When**: You can respond in under 2 minutes
 **Tools**:
-- Quick reply: `get_email_thread(message_id="...")` then `reply_to_email(reply_body="...", message_id="...")` — default `native_format=True`; load **`email-drafting`** for Accessibility / `REPLY_WINDOW_FOCUS_FAILED`
+- Quick reply: `get_email_thread(message_id="...")` then `reply_to_email(reply_body="...", message_id="...")`; default `native_format=True`; load **`email-drafting`** for Accessibility / `REPLY_WINDOW_FOCUS_FAILED`
 - Reply to all: same pattern with `reply_to_all=True`
 **Examples**:
 - Quick confirmations ("Yes, I'll be there")
-- Simple answers to straightforward questions
+- Simple answers to simple questions
 - Acknowledgments ("Got it, thanks!")
 
 **The 2-Minute Rule**: If a reply takes less than 2 minutes, do it immediately. If it takes longer, move to Defer.
 
 ### 4. Defer (or Draft)
 **When**: Email needs a thoughtful response but isn't urgent
-**Tool**: `get_email_thread(message_id="...")` to verify no sent reply, then `reply_to_email(message_id="...", mode="draft", reply_body="[your draft]")` — load **`email-drafting`** for native reply defaults (`native_format=True`, Accessibility, `REPLY_WINDOW_FOCUS_FAILED`)
+**Tool**: `get_email_thread(message_id="...")` to verify no sent reply, then `reply_to_email(message_id="...", mode="draft", reply_body="[your draft]")`; load **`email-drafting`** for native reply defaults (`native_format=True`, Accessibility, `REPLY_WINDOW_FOCUS_FAILED`)
 **Examples**:
 - Complex questions requiring research
 - Emotional emails needing careful wording
@@ -273,8 +273,8 @@ Track these to measure success:
 |--------|---------|
 | Get overview | `get_inbox_overview()` |
 | Check urgent | `search_emails(subject_keyword="urgent")` |
-| Quick reply | `get_email_thread(message_id="...")` then `reply_to_email(reply_body="...", message_id="...")` — load **`email-drafting`** for native reply |
-| Create draft (in-thread defer) | `reply_to_email(message_id="...", mode="draft", reply_body="...")` — load **`email-drafting`** for native reply defaults |
+| Quick reply | `get_email_thread(message_id="...")` then `reply_to_email(reply_body="...", message_id="...")`; load **`email-drafting`** for native reply |
+| Create draft (in-thread defer) | `reply_to_email(message_id="...", mode="draft", reply_body="...")`; load **`email-drafting`** for native reply defaults |
 | Move to trash | `manage_trash(action="move_to_trash", message_ids=[...])` |
 | Archive | `move_email(message_ids=[...], to_mailbox="Archive")` |
 | Flag for later | `update_email_status(action="flag", message_ids=[...])` |
