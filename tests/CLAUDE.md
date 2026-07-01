@@ -37,7 +37,7 @@ Autouse fixture `_pass_through_known_test_accounts` patches `validate_account_na
 - **`analytics/`**: `test_get_statistics_json`, `test_analytics_resource_safety`, `test_full_inbox_export`, `test_dashboard_id_first`
 - **`smart_inbox/`**: `test_smart_inbox_json`, `test_smart_inbox_top_senders_domain`, `test_contracts_smart_inbox`
 - **`core/`**: `test_bulk_helpers`, `test_core_validators`, `test_core_fetch_replied_ids`, `test_core_helpers_characterization`, `test_bounded_scan_contract`, `test_no_unbounded_whose`, `test_applescript_snippets`, `test_read_only_registry`, `test_orphan_watcher`, `test_metadata_index_contract`
-- **`infra/`**: `test_validate_manifests`, `test_module_line_budget`, `test_tasks_layout`, `test_wrapper_surface`, `test_compare_perf_results`, `test_perf_budget`, `test_packaged_skill_paths`, `test_inspect_envelope_index_schema`, `test_measure_metadata_hydration`
+- **`infra/`**: `test_validate_manifests`, `test_module_line_budget`, `test_tasks_layout`, `test_repo_root`, `test_wrapper_surface`, `test_compare_perf_results`, `test_perf_budget`, `test_packaged_skill_paths`, `test_inspect_envelope_index_schema`, `test_measure_metadata_hydration`
 - **`cross_cutting/`**: `test_phase_a_fixes`, `test_phase_2_scan_hardening`, `test_tier1_hardening_regression`, `test_tier3_hardening`, `test_modernization_3_1_5`, `test_scalability_24k`, `test_replied_detection`, `test_applescript_script_idioms`, `test_applescript_builders_compile`, `test_id_first_guidance`
 - **`property/`** (property-based): `test_escape_applescript_properties`, `test_validate_account_name_properties`
 

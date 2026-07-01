@@ -22,7 +22,7 @@ export DEFAULT_MAIL_ACCOUNT="cayman@agenticassets.ai"
 | `pytest tests/ -q` | **206 passed**, 27 subtests *(276 tests as of the 3.1.8 robustness pass)* |
 | `tools/validate_manifests.py` | OK (version=3.1.5, tools=27) |
 
-Latest safe wrapper/CLI sweep: root [`LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md).
+Latest safe wrapper/CLI sweep: [`LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md`](../../docs/live-testing-reports/LIVE_MCP_CLI_TESTING_REPORT_2026-05-21.md).
 
 ## Core path — PASS on both accounts
 

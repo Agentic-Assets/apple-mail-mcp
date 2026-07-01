@@ -34,7 +34,7 @@ Marketplace and package manifests are already covered by the existing validator:
 - `.claude-plugin/marketplace.json:17`
 - `apple-mail-mcpb/manifest.json:5`
 
-There are historical or report-like docs with old or conditional counts that should not be touched by this validator. Examples include `docs/findings-allow-full-scan-audit-2026-06-09.md:235` and `LIVE_FIELD_REPORT_2026-06-04.md:183`.
+There are historical or report-like docs with old or conditional counts that should not be touched by this validator. Examples include `docs/findings-allow-full-scan-audit-2026-06-09.md:235` and `docs/live-testing-reports/LIVE_FIELD_REPORT_2026-06-04.md:183`.
 
 ## Placement
 

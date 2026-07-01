@@ -289,7 +289,7 @@ Files mentioning `reply_to_email` **without** `native_format` / Accessibility / 
 |------|---------------|------|
 | `tasks/archive/2026-05/scalability-24k-hardening-2026-05-22.md` | `move_email(sender=...)` co-filter advice | Pre-3.7; `sender=` now **C** |
 | `tasks/reference/id-first-refactor-spec.md` | **Corrected:** not reply `subject_keyword` fallback; stale **`get_email_thread` Path 2** subject fallback (still valid for read path) + filter-path matrix without `TARGET_SELECTOR_DEPRECATED` emphasis |
-| `LIVE_FIELD_REPORT_2026-06-04.md` | `search_emails` on Drafts for verify/find | Historical anti-pattern; operator now forbids |
+| `docs/live-testing-reports/LIVE_FIELD_REPORT_2026-06-04.md` | `search_emails` on Drafts for verify/find | Historical anti-pattern; operator now forbids |
 
 **Recommendation:** One-line stale banner on pre-3.7 task docs → `docs/CLAUDE-conventions.md` + this audit.
 
