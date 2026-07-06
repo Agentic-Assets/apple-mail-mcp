@@ -4,7 +4,7 @@
 
 **Branch:** `chore/module-line-budget-splits` (v3.9.1 pushed; commit `3d2c515`).
 
-**Shipped (v3.9.1):** Module line-budget splits. Flat `cli.py`, `core.py`, and six tool modules became packages with facade `__init__.py` re-exports; tests reorganized into `tests/<area>/` subfolders; recursive `@mcp.tool` count gate (31 tools preserved); `tools/manifest_checks/` package behind `validate_manifests.py`; 1016 tests; version 3.9.1 across all six version files; all three artifacts rebuilt and validated (`dev-check.sh release` green).
+**Shipped (v3.9.1):** Module line-budget splits. Flat `cli.py`, `core.py`, and six tool modules became packages with facade `__init__.py` re-exports; tests reorganized into `tests/<area>/` subfolders; recursive `@mcp.tool` count gate (31 tools preserved); `tools/manifest_checks/` package behind `validate_manifests.py`; 1021 tests (`tools/expected_test_count.txt` SSOT); version 3.9.1 across all six version files; all three artifacts rebuilt and validated (`bash tools/gates/dev-check.sh release` green).
 
 **Shipped (v3.8.0):** Native-format reply drafts. `reply_to_email` defaults to `native_format=True` (Mail native reply window + keystroke body; colored quote bar + account logo signature). Flatten path preserved as `native_format=False`. See CHANGELOG 3.8.0 and [`tasks/active/native-reply/`](active/native-reply/).
 
