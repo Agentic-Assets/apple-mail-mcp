@@ -1101,6 +1101,10 @@ class AnalyticsMessageIdPathTests(unittest.TestCase):
         self.assertIsNone(payload["items"][1]["size_bytes"])
         self.assertIn("id of aMessage as string", captured["script"])
         self.assertIn("attachmentIndex from 1 to attachmentCount", captured["script"])
+        result_count_init_pos = captured["script"].find("set resultCount to 0")
+        result_count_check_pos = captured["script"].find("if resultCount >=")
+        self.assertGreaterEqual(result_count_init_pos, 0)
+        self.assertGreater(result_count_check_pos, result_count_init_pos)
 
     def test_list_email_attachments_chunks_51_message_ids_json(self):
         captured: list[str] = []

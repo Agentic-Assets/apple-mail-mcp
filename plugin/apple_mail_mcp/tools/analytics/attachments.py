@@ -162,6 +162,7 @@ def list_email_attachments(
     {sanitize_script}
     tell application "Mail"
         set outputText to ""
+        set resultCount to 0
 
         try
             set targetAccount to account "{escaped_account}"
