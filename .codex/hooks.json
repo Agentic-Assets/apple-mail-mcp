@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/cayman-mac-mini/Documents/GitHub/apple-mail-mcp/.codex/hooks/post_edit_check.sh'",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/cayman-mac-mini/Documents/GitHub/apple-mail-mcp/.codex/hooks/dev_mode_reminder.sh'",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash '/Users/cayman-mac-mini/Documents/GitHub/apple-mail-mcp/.codex/hooks/session_context.sh'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/cayman-mac-mini/Documents/GitHub/apple-mail-mcp/.codex/hooks/wrap_up_reminder.sh'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
