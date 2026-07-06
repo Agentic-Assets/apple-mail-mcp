@@ -36,7 +36,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 ## Add a tool
 
-1. Pick module by domain; add `@mcp.tool(annotations=…)` using presets from `../server.py` (matrix: `tasks/phase-3-annotation-matrix.md`).
+1. Pick module by domain; add `@mcp.tool(annotations=…)` using presets from `../server.py` (matrix: [`tasks/reference/phase-3-annotation-matrix.md`](../../../tasks/reference/phase-3-annotation-matrix.md)).
 2. `@inject_preferences` on user-facing tools; user strings → `core.escape_applescript()`; fan-out → `async` + `asyncio.to_thread`.
 3. New file → import in `__init__.py`; update the root release version table files when releasing, plus `apple-mail-mcpb/manifest.json` `tools[]` and advertised tool count.
 
@@ -109,4 +109,4 @@ Every tool surface is now a split-by-domain package under the **600 LOC** budget
 
 ## Related
 
-`../core/` (bridge package), `../server.py` (mcp + annotations), `../../tests/` (mock `run_applescript`), `tasks/phase-3-annotation-matrix.md`.
+`../core/` (bridge package), `../server.py` (mcp + annotations), `../../tests/` (mock `run_applescript`), [`tasks/reference/phase-3-annotation-matrix.md`](../../../tasks/reference/phase-3-annotation-matrix.md).

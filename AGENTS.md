@@ -2,6 +2,21 @@
 
 Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
+## Distribution channels (four install surfaces from one source tree)
+
+A single `plugin/` runtime serves Claude Code and Codex plugin installs; `bash tools/gates/build-artifacts.sh` emits the Claude Desktop upload artifacts. Drift between manifests and artifacts has caused real installer failures; `tools/validators/validate_manifests.py` enforces parity and the release gate refuses to ship with any artifact missing or stale.
+
+| Surface | Install target | Format |
+|---------|----------------|--------|
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace (`claude plugin install`) | Plain zip, `.claude-plugin/plugin.json` at zip root |
+| `apple-mail.plugin` | Claude Desktop **Cowork → Customize → Add plugin → Upload plugin** | Byte-identical copy of the `.zip`, `.plugin` extension is what the Cowork UI accepts |
+| `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop chat extension via "Add Custom Plugin" / "Install from file" | DXT bundle (`mcpb pack`), `manifest.json` at zip root |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace (`codex plugin add`) | Repo marketplace points at shared `./plugin` runtime with `plugin/.mcp.json` |
+
+If you change distribution, version, or filenames: re-run `bash tools/gates/dev-check.sh release` and verify `tests/infra/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and CI tests treat that as a hard error.
+
+Full detail: [`CLAUDE.md`](CLAUDE.md) § Distribution channels · [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) § Distribution channels.
+
 ## Agent orchestration (required)
 
 When the host exposes this repo's subagent tools, use subagents for both **research and implementation**, not just exploration. Delegate real fixes, tests, docs, and live verification to subagents; the lead agent orchestrates and reviews. If the host, task owner, or safety lane forbids subagents, do the work directly and state that constraint in the handoff.

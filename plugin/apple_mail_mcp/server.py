@@ -39,7 +39,7 @@ class _AppleMailMCP(Protocol):
 # Initialize FastMCP server
 mcp = cast(_AppleMailMCP, FastMCP("Apple Mail MCP"))
 
-# Shared MCP tool annotations (see tasks/phase-3-annotation-matrix.md).
+# Shared MCP tool annotations (see tasks/reference/phase-3-annotation-matrix.md).
 READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=True,
     destructiveHint=False,

@@ -59,20 +59,6 @@ python3 tools/validators/validate_repo_root.py
 
 Runs in `bash tools/gates/dev-check.sh` (default and release tiers).
 
-## validate_repo_root
-
-| Script | Role |
-|--------|------|
-| `validators/validate_repo_root.py` | Enforces a tight allowlist at the repository root; covered by `tests/infra/test_repo_root.py` |
-
-Ephemeral live-test reports, dated handoffs, and scratch artifacts must live under `docs/`, `tasks/active/`, `tasks/reference/`, or `tasks/archive/`, not loose at the repo root. Allowed root files: navigation markdown (`AGENTS.md`, `CHANGELOG.md`, `CLAUDE.md`, `LICENSE`, `README.md`), `pyproject.toml`, `server.json`, `skills-lock.json`, and current release artifacts (`apple-mail-plugin.zip`, `apple-mail.plugin`, `apple-mail-mcp-v{version}.mcpb`).
-
-```bash
-python3 tools/validators/validate_repo_root.py
-```
-
-Runs in `bash tools/gates/dev-check.sh` (default and release tiers).
-
 ## validate_manifests
 
 | Script | Role |

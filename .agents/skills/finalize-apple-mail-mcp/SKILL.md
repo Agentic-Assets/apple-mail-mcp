@@ -35,7 +35,7 @@ hook in `.claude/hooks/dev_mode_reminder.sh` reflects the same map.
 ## Out of scope
 
 - New feature implementation
-- Version bump across five files unless user explicitly requests a release
+- Version bump across six files unless user explicitly requests a release
 - Force push or amending pushed commits
 
 ## Workflow
@@ -132,9 +132,9 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 | Plugin wiring / flags | `plugin/docs/CLAUDE.md`, `plugin/apple_mail_mcp/CLAUDE.md`, `README.md` Configuration |
 | Agent workflows | `plugin/skills/*/SKILL.md`, `plugin/skills/CLAUDE.md`, `docs/CLAUDE.md` skill map |
 | Planning / task artifacts | `tasks/todo.md`, `tasks/INDEX.md`, `tasks/active/` (see `tasks/CLAUDE.md` § Agent requirements) |
-| Test count | Root `CLAUDE.md`, `README.md`, any doc citing test totals; use `pytest tests/ -q` result from step 3 |
+| Test count | `tools/expected_test_count.txt` only (SSOT); after adding/removing tests run `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests` and update that file — dev-check fails on drift and prints the new number. Do not scatter counts in prose docs. |
 | Module line budget | After intentional splits: `python3 tools/validators/check_module_line_budget.py --write-baseline tests/fixtures/module_line_budget/baseline.json`; do not refresh merely to allow growth |
-| Tool count | Five version files only on release; always sync **claims**: `find plugin/apple_mail_mcp/tools -name '*.py' | xargs grep -h '^@mcp.tool' | wc -l` (recursive) vs `plugin.json`, marketplace, MCPB `tools[]` |
+| Tool count | Six version files only on release; always sync **claims**: `find plugin/apple_mail_mcp/tools -name '*.py' | xargs grep -h '^@mcp.tool' | wc -l` (recursive) vs `plugin.json`, marketplace, MCPB `tools[]` |
 
 **CLAUDE.md hubs to spot-check** (stale cross-links or wrong counts):
 
@@ -145,7 +145,7 @@ Update **only** what the code change still affects after step 1. Do not rewrite 
 
 **Manifest rules** (see `tools/CLAUDE.md`):
 
-- Versions: `pyproject.toml`, `plugin/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` `plugins[0].version`, `server.json`, `apple-mail-mcpb/manifest.json`
+- Versions: `pyproject.toml`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json` `plugins[0].version`, `server.json`, `apple-mail-mcpb/manifest.json`
 - Do **not** bump `metadata.version` in marketplace.json
 - MCPB `tools[]` names must match registered tool function names
 
@@ -219,7 +219,7 @@ If `HEAD` is on a protected branch (e.g. `main` with branch-protection rules), s
 
 ## Release note
 
-If shipping a version bump, bump all five version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/gates/dev-check.sh release` (which rebuilds all three artifacts (`apple-mail-plugin.zip`, `apple-mail.plugin`, and the `.mcpb`) and runs the structural mcpb-unpack smoke plus the byte-parity check between the zip and `.plugin`).
+If shipping a version bump, bump all six version files together (root `CLAUDE.md` § Version bump), re-run plugin-validator, then `bash tools/gates/dev-check.sh release` (which rebuilds all three artifacts (`apple-mail-plugin.zip`, `apple-mail.plugin`, and the `.mcpb`) and runs the structural mcpb-unpack smoke plus the byte-parity check between the zip and `.plugin`).
 
 ## Additional resources
 
