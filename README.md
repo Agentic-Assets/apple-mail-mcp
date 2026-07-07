@@ -48,28 +48,29 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 One install — MCP server (31 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
-claude plugin marketplace add Agentic-Assets/apple-mail-mcp
-claude plugin install apple-mail@apple-mail-mcp
+claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
+claude plugin marketplace update Agentic-Assets
+claude plugin install apple-mail@Agentic-Assets --scope user
 ```
+
+The GitHub-backed marketplace source lets Claude Code refresh the marketplace
+and keep auto-update tied to the repository.
 
 Then restart Claude Code.
 
 ### Codex Desktop / CLI Plugin
 
-Codex uses the repo marketplace at `.agents/plugins/marketplace.json`, which points at the shared `plugin/` runtime and `plugin/.codex-plugin/plugin.json`.
+Codex registers the GitHub marketplace repo, then reads `.agents/plugins/marketplace.json` inside that checkout. That manifest points at the shared `plugin/` runtime and `plugin/.codex-plugin/plugin.json`.
 
 ```bash
-codex plugin marketplace add Agentic-Assets/apple-mail-mcp
-codex plugin add apple-mail@apple-mail-mcp
+codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
+codex plugin add apple-mail@Agentic-Assets
 ```
 
-For a local checkout:
-
-```bash
-cd /path/to/apple-mail-mcp
-codex plugin marketplace add .
-codex plugin add apple-mail@apple-mail-mcp
-```
+The checked-in marketplace still points at `./plugin` inside the GitHub repo,
+but the installed marketplace source is the Git remote, not your local clone.
+That gives the CLIs a refreshable source and, where the client supports it,
+keeps marketplace auto-update tied to GitHub.
 
 MCP-only fallback, still draft-safe:
 
@@ -87,7 +88,7 @@ Restart Codex Desktop or start a fresh Codex CLI session after installing.
 
 Use this when another computer has an older Apple Mail plugin install, stale
 marketplace cache, or you want to prove both Codex and Claude Code are using the
-same current checkout.
+same current GitHub-backed marketplace source.
 
 1. Get the current code:
 
@@ -96,13 +97,14 @@ cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp
 git switch main && git pull --ff-only
 ```
 
-2. Refresh Codex from the local checkout:
+2. Refresh Codex from the GitHub marketplace source:
 
 ```bash
 codex plugin remove apple-mail@apple-mail-mcp || true
 codex plugin marketplace remove apple-mail-mcp || true
-codex plugin marketplace add ./
-codex plugin add apple-mail@apple-mail-mcp
+codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
+codex plugin remove apple-mail@Agentic-Assets || true
+codex plugin add apple-mail@Agentic-Assets
 codex mcp get apple-mail --json
 ```
 
@@ -134,30 +136,33 @@ python3 -m venv .venv
   --required-tool get_inbox_overview
 ```
 
-3. Refresh Claude Code from the local checkout:
+3. Refresh Claude Code from the GitHub marketplace source:
 
 ```bash
 claude plugin uninstall apple-mail@apple-mail-mcp --scope user --keep-data -y || true
 claude plugin marketplace remove apple-mail-mcp || true
-claude plugin marketplace add ./ --scope user
-claude plugin install apple-mail@apple-mail-mcp --scope user
-claude plugin details apple-mail@apple-mail-mcp
+claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
+claude plugin marketplace update Agentic-Assets
+claude plugin install apple-mail@Agentic-Assets --scope user
+claude plugin details apple-mail@Agentic-Assets
 ```
 
 Prefer `--scope user` for personal machine setup. Project-scope marketplace
 entries can write an absolute local path into `.claude/settings.json`, which is
 usually not what you want to commit.
 
-`claude plugin details apple-mail@apple-mail-mcp` should report version `3.7.1`
+`claude plugin details apple-mail@Agentic-Assets` should report version `3.9.1`
 and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
-replace the path below if the details output shows a different install path:
+replace `VERSION` or the path below if the details output shows a different
+install path:
 
 ```bash
+VERSION=3.9.1
 .venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
-  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1/start_mcp.sh" \
+  --arg "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION/start_mcp.sh" \
   --arg=--draft-safe \
-  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/3.7.1" \
+  --cwd "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION" \
   --expect-count 31 \
   --required-tool reply_to_email \
   --required-tool compose_email \

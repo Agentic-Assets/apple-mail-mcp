@@ -25,6 +25,8 @@ MARKETPLACE_COMPONENT_FIELDS = ("commands", "agents", "skills", "hooks", "mcpSer
 CODEX_MARKETPLACE_LABEL = ".agents/plugins/marketplace.json"
 CODEX_MANIFEST_LABEL = "plugin/.codex-plugin/plugin.json"
 CODEX_MCP_LABEL = "plugin/.mcp.json"
+AGENTIC_ASSETS_MARKETPLACE_NAME = "Agentic-Assets"
+AGENTIC_ASSETS_MARKETPLACE_DISPLAY_NAME = "Agentic Assets"
 CODEX_REQUIRED_FIELDS = (
     "name",
     "version",

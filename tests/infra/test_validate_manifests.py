@@ -416,6 +416,7 @@ class ValidateManifestsTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
+                ".claude-plugin/marketplace.json name: got 'None', expected 'Agentic-Assets'",
                 "marketplace.json plugins[0].source: path must start with ./ (got plugin)",
                 "marketplace.json plugins[0].name: got 'wrong-name', expected plugin.json name 'missing'",
                 "marketplace.json plugins[0].version: got '2.0.0', expected '1.0.0'",
@@ -596,8 +597,8 @@ class ValidateManifestsTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
-                ".agents/plugins/marketplace.json name: got 'wrong-marketplace', expected 'apple-mail-mcp'",
-                ".agents/plugins/marketplace.json interface.displayName: got 'Wrong', expected 'Apple Mail MCP'",
+                ".agents/plugins/marketplace.json name: got 'wrong-marketplace', expected 'Agentic-Assets'",
+                ".agents/plugins/marketplace.json interface.displayName: got 'Wrong', expected 'Agentic Assets'",
                 ".agents/plugins/marketplace.json plugins[0].name: got 'wrong-plugin', expected 'apple-mail'",
                 ".agents/plugins/marketplace.json plugins[0].source: expected {'source': 'local', 'path': './plugin'}",
                 ".agents/plugins/marketplace.json plugins[0].policy.installation: got 'BLOCKED', expected 'AVAILABLE'",
@@ -624,8 +625,8 @@ class ValidateManifestsTests(unittest.TestCase):
             self._write_codex_plugin_fixture(
                 root,
                 marketplace={
-                    "name": "apple-mail-mcp",
-                    "interface": {"displayName": "Apple Mail MCP"},
+                    "name": "Agentic-Assets",
+                    "interface": {"displayName": "Agentic Assets"},
                     "plugins": [
                         {
                             "name": "apple-mail",
@@ -692,8 +693,8 @@ class ValidateManifestsTests(unittest.TestCase):
             self._write_codex_plugin_fixture(
                 root,
                 marketplace={
-                    "name": "apple-mail-mcp",
-                    "interface": {"displayName": "Apple Mail MCP"},
+                    "name": "Agentic-Assets",
+                    "interface": {"displayName": "Agentic Assets"},
                     "plugins": [
                         {
                             "name": "apple-mail",
@@ -749,10 +750,15 @@ class ValidateManifestsTests(unittest.TestCase):
         script = (ROOT / "tools" / "gates" / "validate-codex-plugin.sh").read_text(encoding="utf-8")
 
         self.assertIn('export CODEX_HOME="$TMP_HOME"', script)
-        self.assertIn("codex plugin marketplace add .", script)
-        self.assertIn("codex plugin add apple-mail@apple-mail-mcp", script)
         self.assertIn(
-            'codex plugin list --marketplace apple-mail-mcp | grep -F "apple-mail@apple-mail-mcp"',
+            'CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-https://github.com/Agentic-Assets/apple-mail-mcp.git}"',
+            script,
+        )
+        self.assertIn('codex plugin marketplace add "$CODEX_MARKETPLACE_SOURCE"', script)
+        self.assertIn('CODEX_PLUGIN_SELECTOR="apple-mail@${CODEX_MARKETPLACE_NAME}"', script)
+        self.assertIn('codex plugin add "$CODEX_PLUGIN_SELECTOR"', script)
+        self.assertIn(
+            'codex plugin list --marketplace Agentic-Assets | grep -F "apple-mail@Agentic-Assets"',
             script,
         )
         self.assertIn("codex mcp get apple-mail --json", script)
