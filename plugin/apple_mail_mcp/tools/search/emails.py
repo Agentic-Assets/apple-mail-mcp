@@ -14,7 +14,7 @@ from typing import Any
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.core import inject_preferences, list_mail_account_names, normalize_search_terms
+from apple_mail_mcp.core import AppleScriptTimeout, inject_preferences, list_mail_account_names, normalize_search_terms
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import search
 from apple_mail_mcp.tools.search.dispatch import _search_mail_records, fetch_replied_ids
@@ -192,6 +192,11 @@ async def search_emails(
         validation_timeout = 30 if timeout is None else min(timeout, 30)
         account_err = search.validate_account_name(account, timeout=validation_timeout)
         if account_err:
+            available_accounts: list[str] = []
+            try:
+                available_accounts = list_mail_account_names(timeout=validation_timeout)
+            except AppleScriptTimeout:
+                available_accounts = []
             if output_format == "json":
                 return json.dumps(
                     {
@@ -199,7 +204,7 @@ async def search_emails(
                         "total": 0,
                         "error": "account_not_found",
                         "account": account,
-                        "available_accounts": list_mail_account_names(timeout=validation_timeout),
+                        "available_accounts": available_accounts,
                     },
                     indent=2,
                 )

@@ -1090,6 +1090,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertFalse(payload["sent"])
         self.assertEqual(payload["subject"], "Re: Test")
         self.assertEqual(payload["draft_id"], "84053")
+        self.assertEqual(payload["captured_draft_id"], "84053")
+        self.assertEqual(payload["draft_id_source"], "mail_returned")
         self.assertEqual(payload["verified_draft_id"], "84053")
         self.assertEqual(payload["verification_status"], "found")
         self.assertTrue(payload["exact_id_verified"])
@@ -1331,6 +1333,34 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         )
         self.assertEqual(payload["signature_status"], "missing")
         self.assertFalse(payload["sent"])
+
+    def test_reply_draft_success_json_promotes_verified_fallback_id(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id=None)
+            if 'set targetDraftIdText to ""' in script:
+                return "FOUND|116814|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="116800",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["draft_id"], "116814")
+        self.assertIsNone(payload["captured_draft_id"])
+        self.assertEqual(payload["draft_id_source"], "verification_fallback")
+        self.assertEqual(payload["verified_draft_id"], "116814")
+        self.assertEqual(payload["verification_status"], "found")
+        self.assertFalse(payload["exact_id_verified"])
+        self.assertTrue(payload["body_present"])
 
     def test_reply_draft_success_text_warns_when_fallback_verified_different_draft(self):
         def fake_run(script, timeout=120):
@@ -2160,7 +2190,15 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         # switch off native formatting.
         def fake_run(script, timeout=120):
             if "reply foundMessage" in script:
-                return "GUARD_ABORT: could not focus reply window (mailFront=Inbox seFront=Inbox)"
+                return "\n".join(
+                    [
+                        "GUARD_ABORT",
+                        "Subject: Re: Test",
+                        "Detail: could not focus reply window (mailFront=Inbox seFront=Inbox)",
+                    ]
+                )
+            if 'set targetDraftIdText to ""' in script:
+                return "NOT_FOUND"
             return "ok"
 
         with patch(
@@ -2178,7 +2216,40 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["code"], "REPLY_WINDOW_FOCUS_FAILED")
         self.assertIn("Do not switch off native formatting", payload["remediation"]["alternative"])
         self.assertNotIn("native_format=False", payload["remediation"]["alternative"])
+        self.assertEqual(payload["remediation"]["draft_artifact_status"], "not_found")
+        self.assertIsNone(payload["remediation"]["suspected_draft_id"])
         self.assertIn("GUARD_ABORT", payload["remediation"]["detail"])
+
+    def test_native_reply_guard_abort_reports_suspected_artifact_id(self):
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return "\n".join(
+                    [
+                        "GUARD_ABORT",
+                        "Subject: Re: Test",
+                        "Detail: could not focus reply window (mailFront=Inbox seFront=Inbox)",
+                    ]
+                )
+            if 'set targetDraftIdText to ""' in script:
+                return "BODY_MISSING|116814"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["error"])
+        self.assertEqual(payload["code"], "REPLY_WINDOW_FOCUS_FAILED")
+        self.assertEqual(payload["remediation"]["draft_artifact_status"], "body_missing")
+        self.assertEqual(payload["remediation"]["suspected_draft_id"], "116814")
+        self.assertIn("manage_drafts(action='delete', draft_id=...)", payload["remediation"]["cleanup"])
 
     def test_windowless_fallback_disabled_without_ack(self):
         # native_format=False is gated: without allow_windowless_fallback=True the tool
@@ -2221,7 +2292,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         verifier_script = captured[0]
         self.assertIn("on stripLineBreaks(theText)", verifier_script)
-        self.assertIn("set bodyOffset to my textOffset(flatContent, my stripLineBreaks(replyBodyNeedle))", verifier_script)
+        self.assertIn(
+            "set bodyOffset to my textOffset(flatContent, my stripLineBreaks(replyBodyNeedle))", verifier_script
+        )
 
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):
         captured = []
