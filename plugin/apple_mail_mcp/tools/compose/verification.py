@@ -132,11 +132,20 @@ def _reply_success_payload(
 ) -> dict[str, Any]:
     """Return the machine-readable success contract for verified reply drafts."""
     verified_id = verification.matched_artifact_id or draft_id
+    response_draft_id = draft_id or verified_id
+    if draft_id:
+        draft_id_source = "mail_returned"
+    elif verified_id:
+        draft_id_source = "verification_fallback"
+    else:
+        draft_id_source = "unavailable"
     return {
         "mode": mode,
         "sent": False,
         "subject": reply_subject or "",
-        "draft_id": draft_id,
+        "draft_id": response_draft_id,
+        "captured_draft_id": draft_id,
+        "draft_id_source": draft_id_source,
         "verified_draft_id": verified_id,
         "verification_status": verification.status,
         "exact_id_verified": _reply_exact_id_verified(verification, draft_id),
