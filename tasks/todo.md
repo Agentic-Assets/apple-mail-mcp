@@ -2,7 +2,13 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; CI enforces).
 
-**Branch:** `chore/module-line-budget-splits` (v3.9.1 pushed; commit `3d2c515`).
+**Current branch:** `codex/verify-plugin-marketplace-parity` (release validation green; draft PR pending).
+
+**Current workstream:** [`tasks/active/manifest-release-hardening/`](active/manifest-release-hardening/) captures the 2026-07-07 public version-surface hardening and release artifact parity pass.
+
+**Next action:** review and merge the PR after the required Cayman approval phrase. After merge, refresh this pointer to the next active workstream.
+
+**Previous branch:** `chore/module-line-budget-splits` (v3.9.1 pushed; commit `3d2c515`).
 
 **Shipped (v3.9.1):** Module line-budget splits. Flat `cli.py`, `core.py`, and six tool modules became packages with facade `__init__.py` re-exports; tests reorganized into `tests/<area>/` subfolders; recursive `@mcp.tool` count gate (31 tools preserved); `tools/manifest_checks/` package behind `validate_manifests.py`; 1021 tests (`tools/expected_test_count.txt` SSOT); version 3.9.1 across all six version files; all three artifacts rebuilt and validated (`bash tools/gates/dev-check.sh release` green).
 
