@@ -21,6 +21,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 selector retirement, metadata-index spike, decision briefs | Planning / next major lane |
 | [`active/agent-guidance-audit/`](active/agent-guidance-audit/) | Skills, docs, and training-surface consistency audit | In progress |
 | [`active/draft-verification-simplification/`](active/draft-verification-simplification/) | Compose/manage_drafts decomposition recommendations | Open research |
+| [`active/manifest-release-hardening/`](active/manifest-release-hardening/) | Version-surface and artifact-parity release hardening | PR pending |
 | [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate; module packages shipped v3.9.1 | Open; module split done; perf/FTS lanes remain |
 
 ## Reference

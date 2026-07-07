@@ -31,6 +31,62 @@ class ValidateManifestsTests(unittest.TestCase):
         self.assertIn("validate_manifests: OK", result.stdout)
         self.assertIn("module_budget_warn=", result.stdout)
 
+    def test_public_version_checks_cover_all_release_surfaces(self):
+        checks = [
+            (path.relative_to(validate_manifests.ROOT).as_posix(), field, label)
+            for path, field, label in validate_manifests._public_version_checks()
+        ]
+
+        self.assertEqual(
+            checks,
+            [
+                ("plugin/.claude-plugin/plugin.json", "version", "Claude plugin manifest"),
+                ("plugin/.codex-plugin/plugin.json", "version", "Codex plugin manifest"),
+                (".claude-plugin/marketplace.json", "plugins[0].version", "Claude marketplace plugin"),
+                ("server.json", "version", "MCP server metadata"),
+                ("server.json", "packages[0].version", "MCP server package"),
+                ("apple-mail-mcpb/manifest.json", "version", "MCPB manifest"),
+            ],
+        )
+
+    def test_public_version_checks_reject_codex_plugin_version_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "plugin/.claude-plugin").mkdir(parents=True)
+            (root / "plugin/.codex-plugin").mkdir(parents=True)
+            (root / ".claude-plugin").mkdir()
+            (root / "apple-mail-mcpb").mkdir()
+            (root / "plugin/.claude-plugin/plugin.json").write_text(
+                json.dumps({"version": "3.9.1"}),
+                encoding="utf-8",
+            )
+            (root / "plugin/.codex-plugin/plugin.json").write_text(
+                json.dumps({"version": "0.0.0"}),
+                encoding="utf-8",
+            )
+            (root / ".claude-plugin/marketplace.json").write_text(
+                json.dumps({"plugins": [{"version": "3.9.1"}]}),
+                encoding="utf-8",
+            )
+            (root / "server.json").write_text(
+                json.dumps({"version": "3.9.1", "packages": [{"version": "3.9.1"}]}),
+                encoding="utf-8",
+            )
+            (root / "apple-mail-mcpb/manifest.json").write_text(
+                json.dumps({"version": "3.9.1"}),
+                encoding="utf-8",
+            )
+
+            errors: list[str] = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_public_versions("3.9.1", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(errors, ["Codex plugin manifest: got '0.0.0', expected '3.9.1'"])
+
     def test_module_line_budget_passes_on_current_repo(self):
         errors: list[str] = []
         warn_count = validate_manifests._check_module_line_budget(errors)
@@ -704,7 +760,7 @@ class ValidateManifestsTests(unittest.TestCase):
         self.assertIn("--reject-literal '${CLAUDE_PLUGIN_ROOT}'", script)
         # The expected tool count must be derived from @mcp.tool decorators,
         # not hardcoded, so this gate stays correct as tools are added.
-        self.assertIn('EXPECTED_TOOL_COUNT=', script)
+        self.assertIn("EXPECTED_TOOL_COUNT=", script)
         self.assertIn('--expect-count "$EXPECTED_TOOL_COUNT"', script)
         self.assertNotRegex(script, r"--expect-count\s+[0-9]+")
         for tool in (

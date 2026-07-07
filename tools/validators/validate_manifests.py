@@ -57,6 +57,8 @@ from manifest_checks.tool_count import (
 )
 from manifest_checks.version import _read_project_name, _read_project_version
 
+VersionCheck = tuple[Path, str, str]
+
 # Re-exported check surface. Names live in ``manifest_checks.*``; they are
 # imported above purely so ``validate_manifests.<name>`` resolves for the test
 # suite and ``main`` below. Listing them keeps the re-exports explicit.
@@ -77,12 +79,14 @@ __all__ = [
     "_check_plugin_file_parity",
     "_check_plugin_manifest_contract",
     "_check_python_package_contract",
+    "_check_public_versions",
     "_check_server_json_contract",
     "_check_source_syntax",
     "_check_tool_count_claim",
     "_compare_zip_members",
     "_env_truthy",
     "_extract_registered_tool_names",
+    "_public_version_checks",
     "_json_field",
     "_read_project_name",
     "_read_project_version",
@@ -109,22 +113,37 @@ class _RootForwardingModule(types.ModuleType):
 sys.modules[__name__].__class__ = _RootForwardingModule
 
 
+def _public_version_checks() -> list[VersionCheck]:
+    """Every public plugin, marketplace, package, and bundle version surface.
+
+    PyPI metadata in ``pyproject.toml`` is the source of truth. Everything in
+    this list is a published install or discovery surface that must exactly
+    match it. Keep this list broad and explicit so Claude, Codex, MCPB, and
+    MCP registry releases cannot drift independently.
+    """
+    return [
+        (common.ROOT / "plugin/.claude-plugin/plugin.json", "version", "Claude plugin manifest"),
+        (common.ROOT / "plugin/.codex-plugin/plugin.json", "version", "Codex plugin manifest"),
+        (common.ROOT / ".claude-plugin/marketplace.json", "plugins[0].version", "Claude marketplace plugin"),
+        (common.ROOT / "server.json", "version", "MCP server metadata"),
+        (common.ROOT / "server.json", "packages[0].version", "MCP server package"),
+        (common.ROOT / "apple-mail-mcpb/manifest.json", "version", "MCPB manifest"),
+    ]
+
+
+def _check_public_versions(expected_version: str, errors: list[str]) -> None:
+    for path, field, label in _public_version_checks():
+        actual = _json_field(path, field)
+        if actual != expected_version:
+            errors.append(f"{label}: got '{actual}', expected '{expected_version}'")
+
+
 def main() -> None:
     errors: list[str] = []
     expected_version = _read_project_version()
     project_name = _read_project_name()
 
-    version_checks = [
-        (common.ROOT / "plugin/.claude-plugin/plugin.json", "version", "plugin.json"),
-        (common.ROOT / ".claude-plugin/marketplace.json", "plugins[0].version", "marketplace.json"),
-        (common.ROOT / "server.json", "version", "server.json"),
-        (common.ROOT / "server.json", "packages[0].version", "server.json packages[0]"),
-        (common.ROOT / "apple-mail-mcpb/manifest.json", "version", "mcpb manifest.json"),
-    ]
-    for path, field, label in version_checks:
-        actual = _json_field(path, field)
-        if actual != expected_version:
-            errors.append(f"{label}: got '{actual}', expected '{expected_version}'")
+    _check_public_versions(expected_version, errors)
 
     code_names = _extract_registered_tool_names()
     actual_count = len(code_names)
