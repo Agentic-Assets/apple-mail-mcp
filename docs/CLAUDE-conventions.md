@@ -180,7 +180,7 @@ The repo ships from **one source tree** to **four install surfaces**. Claude Des
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|
-| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin install apple-mail@Agentic-Assets` (uses `.claude-plugin/marketplace.json`) |
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update Agentic-Assets`, then `claude plugin install apple-mail@Agentic-Assets --scope user` (uses `.claude-plugin/marketplace.json`) |
 | `apple-mail.plugin` | Claude Desktop **Cowork** | Customize → Add plugin → **Upload plugin**. The Cowork UI accepts the `.plugin` extension; without it the upload silently fails. |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
 | `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@Agentic-Assets`; local checkouts are maintainer/offline only |

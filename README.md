@@ -90,6 +90,21 @@ Use this when another computer has an older Apple Mail plugin install, stale
 marketplace cache, or you want to prove both Codex and Claude Code are using the
 same current GitHub-backed marketplace source.
 
+On a machine with this repo checked out, the maintained one-shot refresh is:
+
+```bash
+bash tools/gates/refresh-local-plugins.sh
+```
+
+That script migrates legacy `apple-mail@apple-mail-mcp` / `apple-mail-mcp`
+marketplace registrations to `apple-mail@Agentic-Assets`, prunes stale cache
+dirs, and prints installed versions. Restart Codex Desktop, Claude Code, and
+Cursor when it finishes.
+
+Manual steps below mirror the same migration. Lines that reference
+`apple-mail@apple-mail-mcp` or `marketplace remove apple-mail-mcp` are
+**legacy cleanup only** for upgrades from the old marketplace slug.
+
 1. Get the current code:
 
 ```bash

@@ -59,6 +59,6 @@ CI never touches Mail.app. Manifest validation, **module line budget** report, a
 
 ## Related
 
-- User-facing install: root [`README.md`](../README.md)
+- User-facing install: root [`README.md`](../README.md) (marketplace slug `Agentic-Assets`, plugin `apple-mail@Agentic-Assets`)
 - Cross-session backlog: [`tasks/todo.md`](../tasks/todo.md)
 - Active robustness goal: [`tasks/reference/apple-mail-plugin-robustness-goal-2026-05-22.md`](../tasks/reference/apple-mail-plugin-robustness-goal-2026-05-22.md) · historical phase sequencing: [`tasks/reference/phase-plan-3.1.7.md`](../tasks/reference/phase-plan-3.1.7.md) · live baseline: [`tasks/reference/live-test-baseline-2026-05-21.md`](../tasks/reference/live-test-baseline-2026-05-21.md)

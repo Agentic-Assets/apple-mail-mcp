@@ -28,6 +28,13 @@ claude plugin install apple-mail@Agentic-Assets --scope user
 
 All nine skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
 
+## Install (Codex Desktop / CLI plugin)
+
+```bash
+codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
+codex plugin add apple-mail@Agentic-Assets
+```
+
 ## Install (standalone copy)
 
 From a repo checkout, copy one skill or the full set:
