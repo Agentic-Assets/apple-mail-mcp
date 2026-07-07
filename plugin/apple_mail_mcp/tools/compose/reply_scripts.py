@@ -372,7 +372,7 @@ try
                 end try
                 {cleanup_script}
             end tell
-            return "GUARD_ABORT: could not focus reply window (mailFront=" & guardMail & " seFront=" & guardSE & ")"
+            return "GUARD_ABORT" & return & "Subject: " & replySubject & return & "Detail: could not focus reply window (mailFront=" & guardMail & " seFront=" & guardSE & ")"
         end if
         set quotedNeedle to "wrote:"
     end if

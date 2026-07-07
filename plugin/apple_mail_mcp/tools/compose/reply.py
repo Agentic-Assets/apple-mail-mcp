@@ -339,12 +339,28 @@ def reply_to_email(
             compose.run_applescript(script) if timeout is None else compose.run_applescript(script, timeout=timeout)
         )
         if result.startswith("GUARD_ABORT"):
+            guard_reply_subject = _extract_output_field(result, "Subject") or ""
+            guard_verification = _verify_saved_reply_draft(
+                account,
+                guard_reply_subject,
+                reply_body,
+                draft_id=None,
+                quoted_needle="wrote:",
+                signature_requested=None,
+                timeout=timeout,
+            )
+            suspected_artifact_id = (
+                guard_verification.matched_artifact_id
+                or guard_verification.body_missing_artifact_id
+                or guard_verification.error_artifact_id
+            )
+            artifact_status = guard_verification.status
             return serialize_tool_error(
                 ToolError(
                     code="REPLY_WINDOW_FOCUS_FAILED",
                     message=(
                         "Native reply could not bring the reply window into focus to type the "
-                        "body, so no draft was saved and no email was sent."
+                        "body, so the intended reply body was not safely saved and no email was sent."
                     ),
                     remediation={
                         "preferred": (
@@ -352,9 +368,15 @@ def reply_to_email(
                             "into the reply window and need it to hold focus for a moment."
                         ),
                         "alternative": (
-                            "Do not switch off native formatting. No draft was saved, so retry "
-                            "with native_format=True (the default) once Mail can take focus. If "
-                            "focus still cannot be acquired, stop and report the blocker."
+                            "Do not switch off native formatting. Retry with native_format=True "
+                            "(the default) once Mail can take focus. If focus still cannot be "
+                            "acquired, stop and report the blocker."
+                        ),
+                        "draft_artifact_status": artifact_status,
+                        "suspected_draft_id": suspected_artifact_id,
+                        "cleanup": (
+                            "If suspected_draft_id is present, inspect or delete that exact Drafts "
+                            "artifact with verify_draft or manage_drafts(action='delete', draft_id=...)."
                         ),
                         "detail": result,
                     },
