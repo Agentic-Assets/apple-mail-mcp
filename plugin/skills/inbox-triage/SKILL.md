@@ -13,7 +13,7 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). **Newest rece
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. Triage is read-only, so the bounded defaults below are usually enough; do not reach for `full_inbox_export` inside the daily loop.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large **Exchange** profiles also read [`exchange-account-patterns.md`](references/exchange-account-patterns.md) (unreliable subject search, weak `get_needs_response`, incomplete threads). Triage is read-only, so the bounded defaults below are usually enough; do not reach for `full_inbox_export` inside the daily loop.
 
 ## Before drafting
 
@@ -57,11 +57,15 @@ Note unread totals and the **newest** subjects. Do not open every message yet.
 
 ### 2. Newest inbox slice (first batch)
 
+Prefer ids from JSON search:
+
 ```
-list_inbox_emails(max_emails=5, include_content=false, output_format="json", exclude_replied=True, flag_replied=True)
+search_emails(limit=5, recent_days=3, output_format="json", sort="date_desc")
 ```
 
-Process this batch (read → thread-check → draft or no-action) before pulling more. Raise to `max_emails=8` only if the first batch is clear and the user wants to continue.
+Use `list_inbox_emails(max_emails=5, include_content=false, output_format="json")` only for a quick subject skim. If rows lack `message_id`, re-resolve each human item with `search_emails(sender=..., limit=10, output_format="json")` before thread-check or archive.
+
+Process this batch (read → thread-check → draft or no-action) before pulling more. Raise to `max_emails=8` / `limit=8` only if the first batch is clear and the user wants to continue.
 
 ### 3. Needs your reply (only after step 2, or when user asks)
 
@@ -95,7 +99,11 @@ Repo CLI equivalent: `apple-mail show --id 12345 --json`.
 
 ### 6. Next batch (only after current batch is done)
 
-Pull the next 3 to 5 older messages with another bounded `list_inbox_emails` pass or `search_emails(limit=5, recent_days=3..7)` only when the user wants to continue.
+Pull the next 3 to 5 older messages with `search_emails(limit=5, offset=<previous+5>, recent_days=7, output_format="json")`. Re-pull `offset=0` after an archive wave because offsets shift.
+
+### 7. Research paper mail (after human read)
+
+When mail assigns R&R workstreams, co-author specs, or paper PDF briefs, see [`research-project-tracking.md`](references/research-project-tracking.md): create/update the Research-team project issue and attach saved briefs. Email acknowledgment and tracker work are separate steps.
 
 ## Output format for the user
 

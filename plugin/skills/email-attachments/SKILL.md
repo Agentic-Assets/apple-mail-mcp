@@ -74,6 +74,8 @@ When batch exports help, optionally layer **`export_emails(message_ids=[...])`**
 
 Recommend virus scanning posture for unsolicited archives; never auto-enable macros/ZIPs.
 
+When attachments are **paper briefs** (R&R specs, reviewer packets), save under `$HOME`, then attach to the operator's research project issue per [`research-project-tracking.md`](references/research-project-tracking.md).
+
 ## Pitfalls Table
 
 | Issue | Guidance |

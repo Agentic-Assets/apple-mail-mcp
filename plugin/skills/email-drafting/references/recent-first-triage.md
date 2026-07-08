@@ -15,8 +15,8 @@ When the user asks to **check mail**, **triage**, or **draft replies**, work the
 
 | Tool | Default | Avoid on first pass |
 |------|---------|---------------------|
-| `list_inbox_emails` | `max_emails=5` (raise to 8 only if needed) | `max_emails=25` or larger |
-| `search_emails` | `limit=5`, `recent_days=2` to `7` | `limit=30+`, `date_from` weeks/months ago, domain-wide sweeps |
+| `list_inbox_emails` | `max_emails=5` for subject skim only (raise to 8 only if needed) | Using list rows for archive/reply without `message_id`; `max_emails=25` or larger |
+| `search_emails` | `limit=5`, `offset` for older batches, `recent_days=2` to `7`, `output_format="json"` | `limit=30+`, `date_from` weeks/months ago, domain-wide sweeps; trusting subject-only search on large Exchange without sender fallback |
 | `get_needs_response` | `days_back=3`, `max_results=5` first | `days_back=30` as the opening move |
 | `get_email_thread` | anchor on current `message_id`; small `recent_days` | 30 to 60 day subject-only scans to "find work" |
 
@@ -37,8 +37,13 @@ For each message, in **recency order**:
 - Do **not** treat **unread** alone as "needs reply" when the message is weeks old and newer human mail is still in queue.
 - Do **not** fan out `get_needs_response(days_back=30)` plus `list_inbox_emails(max_emails=25)` plus wide `search_emails` in parallel on the first pass.
 
+## Offset pagination and archive waves
+
+`search_emails(offset=N)` shifts after you archive or move messages above the window. After each archive batch, re-pull `offset=0` or act only on `message_id`s you already collected.
+
 ## Handoffs
 
-- **Read-only scan:** `inbox-triage` (this reference + `large-inbox-rules.md`).
+- **Read-only scan:** `inbox-triage` (this reference + `large-inbox-rules.md` + `exchange-account-patterns.md`).
 - **Reply after one message is chosen:** `email-drafting` + `pre-draft-verification.md`.
 - **Navigation / tool choice:** `apple-mail-operator`.
+- **Paper/R&R mail with attachments:** `research-project-tracking.md` after triage identifies actionable research work.
