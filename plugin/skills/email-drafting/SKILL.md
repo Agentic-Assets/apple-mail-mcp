@@ -7,6 +7,10 @@ description: This skill should be used when the user asks to "draft an email", "
 
 Compose-first workflows against Apple Mail. Default plugin installs run **`--draft-safe`**: compose tools default to quiet `mode="draft"` (no leftover compose windows), and `mode="send"` returns a structured error until the server is reconfigured. When send is allowed, still confirm intent with the user before calling `mode="send"` or `manage_drafts(action="send")`.
 
+## Recent-first drafting (required when batching replies)
+
+See [`recent-first-triage.md`](references/recent-first-triage.md). When the user asks to draft responses to recent mail, work **newest inbound first** in batches of **3 to 5**. Draft and verify **one thread at a time** before moving to the next message. Do not batch-draft month-old threads discovered by wide `date_from` or `sender_domain` sweeps while newer inbox mail is still unreviewed.
+
 ## Native drafting only (binding rule)
 
 **Always use the native drafting method for replies. Never use the windowless fallback.** `reply_to_email` defaults to `native_format=True`, and that is the only method to use. It composes in Mail's native reply window so drafts keep the colored quote bar and the account's default logo signature, which is the formatting the user requires. The windowless `native_format=False` path is gated: it returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed, and agents must never pass that flag. If a native reply fails with `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible and not being clicked; do not switch off native formatting. If focus still cannot be acquired, stop and report the blocker. This rule applies to every reply, every account, every pass, with no exceptions.

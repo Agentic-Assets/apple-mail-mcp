@@ -7,6 +7,10 @@ description: This skill should be used when the user asks "how does this Mail MC
 
 Operational guide for using the Apple Mail MCP safely and quickly. Focus on bootstrap, selecting the correct tool per intent, avoiding slow cross-account scans, and understanding draft-safe versus send-capable setups.
 
+## Recent-first navigation (required when triaging or drafting)
+
+See [`recent-first-triage.md`](references/recent-first-triage.md). When finding mail to act on, start with the **newest** messages (`list_inbox_emails(max_emails=5)` or tight `search_emails(limit=5, recent_days=2..7)`). Do not open with month-old `date_from` sweeps while fresher inbox mail is unreviewed.
+
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
 See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist.
@@ -49,15 +53,16 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 | See configured accounts | `list_accounts()` |
 | See outbound identities | `list_account_addresses(account="...")` |
 | Snapshot unread + recent hints | `get_inbox_overview()`; start compact `output_format`, avoid heavy dashboards during debugging |
-| Page recent inbox bodies | `list_inbox_emails(max_emails=..., include_content=false|true)` |
-| Locate a needle | Narrow `search_emails(...)` (`recent_days=2` unless user insists on widening) → `get_email_by_id(message_id=...)` |
+| Page recent inbox bodies | `list_inbox_emails(max_emails=5..8)` for triage; widen only after the batch is processed |
+| Locate a needle | Narrow `search_emails(limit=5, recent_days=2..7)` → `get_email_by_id(message_id=...)` |
 | Conversation context | `get_email_thread(...)` instead of chained subject guesses |
 | Mailbox map | `list_mailboxes(include_counts=true)` |
 | Idle mail fetch | `synchronize_account(account="...", confirm_sync=True)` only after the user accepts that Mail may download a large backlog |
 
 ## Performance Rules
 
-- Run **narrow** queries first (`recent_days` small, explicit `account=`, `include_content=false`, tight `limit`).
+- **Recent-first:** newest received mail first; batches of 3 to 5; see [`recent-first-triage.md`](references/recent-first-triage.md).
+- Run **narrow** queries first (`recent_days` small, explicit `account=`, `include_content=false`, tight `limit` ≤ 5 on first pass).
 - Reserve `all_accounts=True` / cross-account scans for explicit user requests; large Exchange profiles may time out; partial JSON with `errors` is expected behavior.
 - Prefer `search_emails(mailboxes=["INBOX", "Sent", ...])` to scan a few named folders over whole-profile fan-out on large Exchange/Gmail accounts. It returns a structured per-folder error for any missing or slow mailbox instead of failing the call.
 - After `list_inbox_emails` or `search_emails` returns `message_id`, always drill with `get_email_by_id` rather than fuzzy re-search. `get_email_by_id` is also where per-message recipients (`to`/`cc`/`bcc`) and thread headers (`in_reply_to`/`references`) now come from; bulk `search_emails` no longer returns them.

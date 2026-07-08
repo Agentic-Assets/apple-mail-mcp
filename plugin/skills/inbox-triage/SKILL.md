@@ -1,11 +1,15 @@
 ---
 name: inbox-triage
-description: This skill should be used when the user asks to "check my email", "what came in today", "what needs my attention", "morning email scan", "triage my inbox", "anything urgent in my mail", or wants a fast 5–10 minute read-only pass over Apple Mail without full inbox-zero cleanup. Uses get_inbox_overview, get_needs_response, get_awaiting_reply, list_inbox_emails, and get_email_by_id. Do NOT use for deep folder reorganization (mailbox-taxonomy), bulk archive or delete campaigns (email-archive-cleanup), proposing Mail filter text (mail-rules-advisor), MCP setup (apple-mail-operator), or composing replies; use email-drafting after this scan.
+description: This skill should be used when the user asks to "check my email", "what came in today", "what needs my attention", "morning email scan", "triage my inbox", "draft responses to recent email", "anything urgent in my mail", or wants a fast read-only pass over Apple Mail without full inbox-zero cleanup. Uses get_inbox_overview, get_needs_response, get_awaiting_reply, list_inbox_emails, and get_email_by_id. Work newest mail first in batches of 3 to 5 (see recent-first-triage.md). Do NOT use for deep folder reorganization (mailbox-taxonomy), bulk archive or delete campaigns (email-archive-cleanup), proposing Mail filter text (mail-rules-advisor), MCP setup (apple-mail-operator), or composing replies; use email-drafting after this scan.
 ---
 
 # Inbox Triage
 
 Fast, read-first email check for Apple Mail: what arrived, what needs a reply, what you're still waiting on. Target **5–10 minutes**, not inbox zero.
+
+## Recent-first, small-batch (required)
+
+See [`recent-first-triage.md`](references/recent-first-triage.md). **Newest received mail first.** Process **3 to 5 messages per batch**, one thread at a time, before widening the window or pulling older mail. Do not open with wide `date_from` sweeps or `list_inbox_emails(max_emails=25)` while fresher inbox items are still unreviewed.
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
@@ -36,7 +40,7 @@ For agent testing, run the MCP server with **`--draft-safe`** so send tools stay
 
 ## Daily loop (5–10 min)
 
-Run on the **configured default account** unless the user names another.
+Run on the **configured default account** unless the user names another. Work **newest to oldest** in batches of **3 to 5** messages.
 
 ### 1. Snapshot (30–60s)
 
@@ -49,37 +53,31 @@ get_inbox_overview(
 )
 ```
 
-Note unread totals and recent subjects. Do not open every message yet.
+Note unread totals and the **newest** subjects. Do not open every message yet.
 
-### 2. Needs your reply (1–3 min)
+### 2. Newest inbox slice (first batch)
 
 ```
-get_needs_response(days_back=2, max_results=20, check_already_replied=True, include_already_replied=False, output_format="json")
+list_inbox_emails(max_emails=5, include_content=false, output_format="json", exclude_replied=True, flag_replied=True)
 ```
 
-In JSON rows, `message_id` is the numeric Apple Mail id for follow-up tool calls (`get_email_by_id`, `get_email_thread`, `reply_to_email`, `move_email`). `internet_message_id` is the RFC Message-ID header used for replied-header correlation only; do not pass it to tools that expect a numeric Mail id. `include_already_replied=False` (default) filters already-replied rows when `check_already_replied=True`; enable Sent-header matching only when duplicate-reply protection matters (slower on large Exchange inboxes).
+Process this batch (read → thread-check → draft or no-action) before pulling more. Raise to `max_emails=8` only if the first batch is clear and the user wants to continue.
 
-Subject-only detection is the default (fast). Use `scan_body=True` only when the user asks to hunt question marks in bodies.
+### 3. Needs your reply (only after step 2, or when user asks)
 
-Present as a short prioritized list: subject, sender, age, priority hint.
+```
+get_needs_response(days_back=3, max_results=5, check_already_replied=True, include_already_replied=False, output_format="json")
+```
 
-### 3. Waiting on others (optional, ~1 min)
+Widen to `days_back=7` or `max_results=10` only if step 2 found nothing human-actionable. Do **not** start with `days_back=30`.
+
+### 4. Waiting on others (optional, ~1 min)
 
 ```
 get_awaiting_reply(days_back=7, max_results=5)
 ```
 
 Use when the user cares about follow-ups they already sent.
-
-### 4. Scan recent inbox (1–2 min)
-
-```
-list_inbox_emails(max_emails=25, include_content=false, output_format="json", exclude_replied=True, flag_replied=True)
-```
-
-When the scan is feeding a drafting candidate list, keep `exclude_replied=True` so the agent does not propose replies to messages already answered. `flag_replied=True` prefixes any retained items with `[REPLIED]` in text output and adds `already_replied` to JSON.
-
-Skim subjects. Flag obvious P0 keywords (urgent, deadline, outage) with `search_emails(..., exclude_replied=True)` only if overview/needs-response missed them.
 
 ### 5. Drill-down by exact id (when needed)
 
@@ -89,9 +87,15 @@ After search or list returns a `message_id`, fetch the full message without re-s
 get_email_by_id(message_id="12345", include_content=true, output_format="json")
 ```
 
+In JSON rows, `message_id` is the numeric Apple Mail id for follow-up tool calls (`get_email_by_id`, `get_email_thread`, `reply_to_email`, `move_email`). `internet_message_id` is the RFC Message-ID header used for replied-header correlation only; do not pass it to tools that expect a numeric Mail id.
+
 Repo CLI equivalent: `apple-mail show --id 12345 --json`.
 
-**To draft:** load **`email-drafting`** (not this skill). Pass the `message_id` from triage into `reply_to_email(message_id=..., reply_body=..., mode="draft")`; default `native_format=True` needs Mail focus + Accessibility (see `email-drafting` for `REPLY_WINDOW_FOCUS_FAILED` recovery).
+**To draft:** load **`email-drafting`** (not this skill). Draft **one thread at a time**: pass the `message_id` from triage into `reply_to_email(message_id=..., reply_body=..., mode="draft")`; default `native_format=True` needs Mail focus + Accessibility (see `email-drafting` for `REPLY_WINDOW_FOCUS_FAILED` recovery). Finish verify for that draft before starting the next message in the batch.
+
+### 6. Next batch (only after current batch is done)
+
+Pull the next 3 to 5 older messages with another bounded `list_inbox_emails` pass or `search_emails(limit=5, recent_days=3..7)` only when the user wants to continue.
 
 ## Output format for the user
 
@@ -117,10 +121,11 @@ For larger cleanups, hand off to **`email-archive-cleanup`**.
 
 ## Performance rules
 
-- Keep `days_back` small (2 for needs-response, 7 for awaiting-reply).
+- **Recent-first:** newest mail first; batches of 3 to 5; see [`recent-first-triage.md`](references/recent-first-triage.md).
+- Keep `days_back` small (`3` for needs-response on first pass, `7` for awaiting-reply).
 - Avoid `get_statistics(account_overview)` in the daily loop; use weekly in `email-management`.
 - Avoid `all_accounts=True` unless the user has no default account and wants every account.
-- To scope a scan across a few folders, use `search_emails(mailboxes=["INBOX", "Sent", ...])` instead of whole-profile fan-out. This avoids the slow path on large Exchange/Gmail accounts.
+- To scope a scan across a few folders, use `search_emails(mailboxes=["INBOX", "Sent", ...], limit=5)` instead of whole-profile fan-out. This avoids the slow path on large Exchange/Gmail accounts.
 - Prefer `list_mailboxes(include_counts=false)` when listing folders.
 
 ## Related skills

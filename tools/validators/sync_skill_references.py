@@ -21,10 +21,10 @@ SKILLS_ROOT = ROOT / "plugin" / "skills"
 
 # skill directory name -> filenames under plugin/skills/references/
 SYNC_MAP: dict[str, list[str]] = {
-    "apple-mail-operator": ["large-inbox-rules.md", "pre-draft-verification.md"],
-    "inbox-triage": ["large-inbox-rules.md", "pre-draft-verification.md"],
-    "email-management": ["large-inbox-rules.md", "pre-draft-verification.md"],
-    "email-drafting": ["pre-draft-verification.md"],
+    "apple-mail-operator": ["large-inbox-rules.md", "pre-draft-verification.md", "recent-first-triage.md"],
+    "inbox-triage": ["large-inbox-rules.md", "pre-draft-verification.md", "recent-first-triage.md"],
+    "email-management": ["large-inbox-rules.md", "pre-draft-verification.md", "recent-first-triage.md"],
+    "email-drafting": ["pre-draft-verification.md", "recent-first-triage.md"],
     "email-archive-cleanup": ["large-inbox-rules.md"],
     "email-style-profile": ["large-inbox-rules.md"],
     "email-attachments": ["large-inbox-rules.md"],

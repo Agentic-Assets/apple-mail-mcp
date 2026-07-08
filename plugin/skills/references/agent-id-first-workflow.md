@@ -4,10 +4,10 @@ One-page contract for coding agents. Full policy: `docs/CLAUDE-conventions.md`. 
 
 ## Default mutation path
 
-1. **Discover**: `search_emails` or `list_inbox_emails` (bounded `recent_days`, explicit `account`, tight `limit`).
-2. **Collect ids**: `message_id` / `message_ids` from JSON (`search_emails` → `"items"`; `list_inbox_emails` → `"emails"`).
-3. **Preview**: `dry_run=True` on moves, trash, status updates when supported.
-4. **Act**: pass exact ids only; never `subject_keyword`, `sender`, or `draft_subject` on action tools.
+1. **Discover (newest first, small batch):** `list_inbox_emails(max_emails=5)` or `search_emails(limit=5, recent_days=2..7)`; see `plugin/skills/references/recent-first-triage.md`.
+2. **Collect ids:** `message_id` / `message_ids` from JSON (`search_emails` → `"items"`; `list_inbox_emails` → `"emails"`).
+3. **Preview:** `dry_run=True` on moves, trash, status updates when supported.
+4. **Act:** pass exact ids only; never `subject_keyword`, `sender`, or `draft_subject` on action tools.
 
 ## Tool routing
 

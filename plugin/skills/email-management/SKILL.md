@@ -7,6 +7,10 @@ description: This skill should be used when the user asks to "help me get to inb
 
 Sustained inbox organization for Apple Mail: repeatable processing habits plus Inbox Zero programs that combine reading, queues, guarded moves/trash, and analytics. Prefer narrow sibling skills (`mailbox-taxonomy`, `email-archive-cleanup`, `mail-rules-advisor`, `email-drafting`, `apple-mail-operator`) when the user intent is clearly one-shot or specialized; use this umbrella when they want coordinated multi-week cleanup or habitual discipline.
 
+## Recent-first processing (required for reply queues)
+
+See [`recent-first-triage.md`](references/recent-first-triage.md). Even in multi-week programs, **daily action** starts from the newest human mail in small batches (3 to 5). Widen `recent_days` or pull older threads only after the current recent window is cleared or the user names a specific older item.
+
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
 See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist.
@@ -38,7 +42,7 @@ For finding a single specific email, call `search_emails()` directly without inv
 Internalize these before constructing any tool call. The defaults exist to keep AppleScript queries fast on large Exchange inboxes.
 
 - `search_emails` defaults to the last 48 hours on the configured default account. Pass `recent_days=7` or `recent_days=30` to widen. `recent_days=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; if you really need every message, call `full_inbox_export` (slow; documented cost). Otherwise pass a bounded `recent_days`.
-- `list_inbox_emails` defaults to the 50 most-recent emails. `max_emails=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; use a bounded `max_emails` or `full_inbox_export` for the rare full walk.
+- `list_inbox_emails` defaults to the 50 most-recent emails. For **triage and drafting**, pass `max_emails=5` (up to 8) per batch; see [`recent-first-triage.md`](references/recent-first-triage.md). `max_emails=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; use a bounded `max_emails` or `full_inbox_export` for the rare full walk.
 - Cross-account scans cost time on large Exchange inboxes. Pass `all_accounts=True` only when truly needed; otherwise let the `DEFAULT_MAIL_ACCOUNT` environment variable keep things scoped.
 
 When in doubt, run a narrow query first and widen only if results are insufficient.
