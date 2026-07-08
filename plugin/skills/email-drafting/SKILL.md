@@ -13,7 +13,7 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). When the user
 
 ## Native drafting only (binding rule)
 
-**Always use the native drafting method for replies. Never use the windowless fallback.** `reply_to_email` defaults to `native_format=True`, and that is the only method to use. It composes in Mail's native reply window so drafts keep the colored quote bar and the account's default logo signature, which is the formatting the user requires. The windowless `native_format=False` path is gated: it returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed, and agents must never pass that flag. If a native reply fails with `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible and not being clicked; do not switch off native formatting. If focus still cannot be acquired, stop and report the blocker. This rule applies to every reply, every account, every pass, with no exceptions.
+**Always use the native drafting method for replies. Never use the windowless fallback.** `reply_to_email` defaults to `native_format=True`, and that is the only method to use. It composes in Mail's native reply window so drafts keep the colored quote bar and the account's default logo signature, which is the formatting the user requires. The windowless `native_format=False` path is gated: it returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed, and agents must never pass that flag. If a native reply fails with `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible and not being clicked; do not switch off native formatting. **Scheduled intake batches:** if focus still cannot be acquired on one message, log `draft_deferred`, continue other courtesy drafts, and report the blocker. **Interactive sessions:** stop and report the blocker. Never use `native_format=false` in either case.
 
 ## Pre-draft verification (required before replying)
 
@@ -58,7 +58,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 
 `mode="open"` saves first then leaves the compose window open, so closing it should not trigger Mail's Save/Don't Save prompt.
 
-**Native reply focus:** the default native path (`native_format=True`) is the only supported reply path for normal agent use. It types `reply_body` into Mail's reply window, so Mail must be able to take focus and the host process needs Accessibility permission. If `reply_to_email` returns `REPLY_WINDOW_FOCUS_FAILED`, no draft was saved and nothing was sent: retry with Mail visible and not being clicked. Do not switch to `native_format=False` (it is gated and returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed; the windowless path is for deliberate headless/CI runs only and agents must never set `allow_windowless_fallback=True`). If focus still cannot be acquired, stop and report the blocker.
+**Native reply focus:** the default native path (`native_format=True`) is the only supported reply path for normal agent use. It types `reply_body` into Mail's reply window, so Mail must be able to take focus and the host process needs Accessibility permission. If `reply_to_email` returns `REPLY_WINDOW_FOCUS_FAILED`, no draft was saved and nothing was sent: retry with Mail visible and not being clicked. Do not switch to `native_format=False`. **Scheduled intake:** log `draft_deferred` and continue other drafts. **Interactive:** stop and report the blocker.
 
 ## Tool Selection Pattern
 

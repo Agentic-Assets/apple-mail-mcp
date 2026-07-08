@@ -26,7 +26,7 @@ For each message, in **recency order**:
 
 1. Read by exact id: `get_email_by_id(message_id=...)` or from the bounded list row.
 2. Thread-check across Inbox, Sent, and Drafts: `get_email_thread(message_id=...)`.
-3. If the user already replied after the latest inbound, mark **no-action** and continue.
+3. If the operator already replied in Sent **after the latest inbound**, mark **no-action** and continue. A co-founder or teammate reply to an external contact does not close the thread for the operator on Tier-1 partner relationships.
 4. If a reply is needed, draft **that one thread** with `reply_to_email(message_id=..., mode="draft")`, verify, then move to the next message.
 5. Pull the next batch of 3 to 5 older messages only after the current batch is complete.
 
