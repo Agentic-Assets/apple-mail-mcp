@@ -39,6 +39,19 @@ An MCP server that gives AI assistants full access to Apple Mail -- read, search
 | [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) | Claude Code marketplace manifest |
 | [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) | Codex Desktop/CLI marketplace manifest |
 
+## Linear
+
+Track bugs and feature work in the [Apple Mail MCP](https://linear.app/agenticassets/project/apple-mail-mcp) project on the Agentic Assets team.
+
+| Field | Value |
+|-------|-------|
+| Team | Agentic Assets (`AGENTIC`) |
+| Team ID | `da8832b3-3dde-416f-be01-98c76a5806c7` |
+| Project | Apple Mail MCP |
+| Project ID | `bce30dc3-76fc-4745-b466-5f258c7f78e7` |
+
+**Local development only.** This repo drives Mail.app through AppleScript on the host Mac. Mocked tests are not enough for tool changes: live verification needs a machine with Apple Mail configured (for example the `mac-mini-apple-mail-mcp` Cursor worker). Do not use cloud agents or remote sandboxes for implementation work here; file Linear issues with the `Agentic-Assets/apple-mail-mcp` repo label.
+
 ## Quick Install
 
 **Prerequisites:** macOS with Apple Mail configured, Python 3.10+
