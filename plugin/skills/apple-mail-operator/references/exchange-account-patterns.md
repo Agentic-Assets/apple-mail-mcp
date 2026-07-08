@@ -1,0 +1,88 @@
+# Large-account discovery patterns (canonical)
+
+Canonical source for Exchange- and Gmail-scale mailboxes where subject search, thread tools, and heuristic queues are unreliable. After edits, run `python3 tools/validators/sync_skill_references.py` to refresh per-skill copies.
+
+## Discovery: prefer `search_emails` JSON over list-only snapshots
+
+For **actions** (archive, reply, attachment save), always obtain a numeric `message_id` before calling mutation tools.
+
+| Tool | Good for | Weak for |
+|------|----------|----------|
+| `search_emails(..., output_format="json")` | Stable `message_id` in `"items"`, offset pagination, sender filters | Broad subject-only queries on some Exchange profiles |
+| `list_inbox_emails(..., output_format="json")` | Fast newest-first skim of subjects | **May omit `message_id` in JSON** depending on plugin version; do not archive or reply from list rows alone |
+| `get_inbox_overview(compact)` | Unread totals and subject preview | No ids for bulk actions |
+
+**Reliable discovery loop on large Exchange accounts:**
+
+1. `search_emails(account=..., recent_days=3..7, limit=5, offset=N, output_format="json", sort="date_desc")`
+2. If subject search returns empty but overview/list shows the message, retry with `sender="Display Name"` and raise `limit` (e.g. 5 → 10).
+3. `get_email_by_id(message_id=...)` for body and attachment metadata.
+
+## `get_needs_response` is a weak signal
+
+Treat `get_needs_response` as a **hint**, not a work queue. On noisy inboxes it often ranks newsletters, marketing, and noreply digests alongside human mail.
+
+- Default: `days_back=3`, `max_results=5`, and cross-check each candidate with `get_email_by_id`.
+- Do **not** draft from this list without thread verification.
+- Prefer the newest bounded `search_emails` or `list_inbox_emails` slice before widening `days_back`.
+
+## `get_email_thread` is best-effort
+
+Thread tools can return **incomplete** results on Exchange:
+
+- Replies missing from the thread view while present in Sent.
+- `0` hits for known subjects (`T240029`, `Research Assistantship`, etc.).
+- Subject-keyword threading diverges from header-based threading.
+
+**Mitigation:**
+
+1. Anchor on `message_id` when the schema supports it.
+2. Independently search Sent: `search_emails(mailbox="Sent", sender=<user address>, recent_days=14, subject_keyword=...)`.
+3. Check Drafts with `get_email_thread(mailbox="Drafts", ...)` or `manage_drafts(action="list")`.
+4. If thread and Sent disagree, trust **Sent date order** over an empty thread view.
+
+## Offset pagination drifts after archives
+
+`search_emails(offset=N)` is a **snapshot**, not a stable cursor. Archiving or moving messages above the window shifts which messages appear at each offset.
+
+After each archive wave:
+
+- Re-pull `offset=0` for the next newest batch, **or**
+- Keep an explicit list of `message_id`s collected before mutating.
+
+## Action types: email reply vs portal vs infra
+
+Classify before drafting:
+
+| Pattern | Typical action |
+|---------|----------------|
+| DocuSign / publisher royalty / tax forms | **Portal only** (complete in vendor UI); usually no email reply |
+| Hosting data-deletion / billing warnings | **Operator decision**; keep visible until resolved |
+| Blocked CI/deploy notifications | **Engineering follow-up**; do not auto-archive without subject skim |
+| Financial statements (retirement, bank) | **Review**; do not bulk-archive with marketing |
+| Co-author tasking with PDF brief | **Research tracker** + read attachment (see `research-project-tracking.md`) |
+
+## Subagent fan-out (recommended at scale)
+
+When triaging many messages:
+
+| Parent agent | Subagents (parallel) |
+|--------------|----------------------|
+| `move_email` / `reply_to_email` (one draft at a time) | Classification, thread checks, CRM/context lookup, attachment inventory |
+| Archive batches by exact `message_id` | Research whether thread is already answered in Sent |
+
+Subagents should be **read-only** for mail mutations. When subagents disagree (e.g. FYI vs needs reply), the parent reads the primary message and Sent/Drafts before acting.
+
+## Verification gaps
+
+If `verify_draft` / `verify_drafts` are not registered in the client:
+
+- Confirm drafts via bounded `manage_drafts(action="list")` or Drafts thread lookup anchored on `message_id` when available.
+- Inspect body above quoted original in Mail before send; Drafts preview snippets may show signature blocks first.
+
+## Archive hygiene
+
+1. Collect ids from the triage pass; do not pass `subject_keyword` to `move_email` (`TARGET_SELECTOR_DEPRECATED` on v3.x).
+2. `move_email(dry_run=True, message_ids=[...], to_mailbox="Archive")`.
+3. Execute after quoting subjects/senders to the operator.
+4. Do not archive human university mail, co-author threads with open work, financial/security notices, or messages with unreviewed drafts.

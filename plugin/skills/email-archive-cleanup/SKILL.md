@@ -26,7 +26,7 @@ On a 24k inbox, filter-based mutations re-pay the scan cost for every batch and 
 3. **Simulate**: `move_email(dry_run=True, message_ids=[ids], to_mailbox="...", max_moves=50)` (or `manage_trash(dry_run=True, message_ids=[ids], ...)`).
 4. **Execute**: `move_email(dry_run=False, message_ids=[ids], ...)` after the operator confirms counts.
 
-Repeat in batches until stop conditions. Re-run a narrower search between batches if the cohort is still large.
+Repeat in batches until stop conditions. Re-run `search_emails(offset=0)` after each archive wave because offsets shift on active inboxes (`exchange-account-patterns.md`).
 
 ### `allow_filter_scan=True` (rare escape hatch only)
 
