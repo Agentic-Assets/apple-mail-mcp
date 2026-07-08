@@ -994,12 +994,17 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertNotIn("set composedReplyContent", script)
         self.assertNotIn("set quotedOriginalText", script)
         # Empty System Events title is tolerated (AX quirk for compose windows);
-        # a different non-empty title aborts before typing. Subject cores are compared
-        # so Mail-normalized double-Re: titles are not false focus failures.
+        # a different non-empty title aborts before typing. Subject cores are used
+        # only to adopt Mail's normalized live title; keystroke still requires exact
+        # title equality against the adopted replySubject.
         self.assertIn("on stripReplySubjectPrefixes(rawSubject)", script)
-        self.assertIn("on replyWindowTitlesMatch(windowTitle, expectedSubject)", script)
-        self.assertIn('set seOk to (guardSE is "" or guardSE is "(unset)")', script)
+        self.assertIn("on subjectCoresMatch(leftSubject, rightSubject)", script)
+        self.assertIn(
+            'set seOk to (guardSE is replySubject or guardSE is "" or guardSE is "(unset)")',
+            script,
+        )
         self.assertIn("set replySubject to mailWindowTitle", script)
+        self.assertIn("set mailOk to (guardMail is replySubject)", script)
         # Native default never pins the account alias (that drops the logo signature).
         self.assertNotIn("set sender of replyMessage", script)
         self.assertNotIn("make new outgoing message", script)
@@ -2326,11 +2331,14 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn("set derivedReplySubject to sourceSubject", script)
+        self.assertIn("if my subjectCoresMatch(mailWindowTitle, derivedReplySubject) then", script)
         self.assertIn("set replySubject to mailWindowTitle", script)
         self.assertIn("on stripReplySubjectPrefixes(rawSubject)", script)
         self.assertIn('if t starts with "re:" then', script)
         self.assertIn('if t starts with "fwd:" then', script)
-        self.assertIn("set mailOk to my replyWindowTitlesMatch(guardMail, replySubject)", script)
+        # Keystroke boundary stays exact-title; core match is adoption-only.
+        self.assertIn("set mailOk to (guardMail is replySubject)", script)
+        self.assertNotIn("set mailOk to my replyWindowTitlesMatch", script)
         self.assertIn('set abortCode to "GUARD_ABORT_SUBJECT"', script)
         self.assertIn(
             "close (every window whose name is derivedReplySubject) saving no",

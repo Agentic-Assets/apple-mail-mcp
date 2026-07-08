@@ -279,11 +279,6 @@ on subjectCoresMatch(leftSubject, rightSubject)
     end ignoring
 end subjectCoresMatch
 
-on replyWindowTitlesMatch(windowTitle, expectedSubject)
-    if windowTitle is expectedSubject then return true
-    return my subjectCoresMatch(windowTitle, expectedSubject)
-end replyWindowTitlesMatch
-
 on looksLikeReplyWindowTitle(windowTitle)
     set t to my stripLeadingSpaces(windowTitle)
     if t is "" then return false
@@ -332,13 +327,14 @@ def _build_reply_native_window_applescript(
 
     UI scripting is isolated to the focus guard + keystroke and is unavoidable
     here: the native rich format cannot be expressed through the Mail dictionary.
-    After ``reply``, the guard adopts Mail's live front-window title (Mail
-    normalizes Re:/Fwd: prefixes) and compares subject cores so double-``Re:``
-    sources are not false focus failures. An empty System Events title is
-    tolerated (AX quirk); a different non-empty SE title that fails the core
-    match aborts without typing. Requires Accessibility permission for the host
-    process; callers that cannot grant it must stop and report the blocker; the
-    ``native_format=False`` path is gated behind ``allow_windowless_fallback``.
+    After ``reply``, the guard may adopt Mail's live front-window title when its
+    subject core matches the derived reply subject (Mail normalizes duplicate
+    Re:/Fwd: prefixes). The keystroke itself still requires exact title equality
+    against that adopted ``replySubject``. An empty System Events title is
+    tolerated (AX quirk); a different non-empty SE title aborts without typing.
+    Requires Accessibility permission for the host process; callers that cannot
+    grant it must stop and report the blocker; the ``native_format=False`` path
+    is gated behind ``allow_windowless_fallback``.
     """
     extra_output_lines = _reply_extra_output_lines(
         safe_cc=safe_cc,
@@ -389,12 +385,16 @@ try
         activate
         delay 0.4
 
-        -- Prefer Mail's live compose-window title. Mail collapses duplicate Re:/Fwd:
-        -- prefixes, so the derived source subject can disagree with the window name.
+        -- Prefer Mail's live compose-window title when it is the same reply thread.
+        -- Mail collapses duplicate Re:/Fwd: prefixes, so the derived source subject
+        -- can disagree with the window name; adopt the live title only after a
+        -- subject-core match so an unrelated open compose window is never adopted.
         try
             set mailWindowTitle to name of front window as string
             if mailWindowTitle is not "" then
-                set replySubject to mailWindowTitle
+                if my subjectCoresMatch(mailWindowTitle, derivedReplySubject) then
+                    set replySubject to mailWindowTitle
+                end if
             end if
         end try
 
@@ -411,10 +411,10 @@ try
     end tell
 
     -- Insert the reply body with a TYPED keystroke. Guard: Mail's dictionary front
-    -- window must be the reply (exact title or same subject core after Re:/Fwd:
-    -- normalization); an empty System Events title is tolerated (AX quirk); a
-    -- different non-empty SE title that fails the core match aborts. Retry to ride
-    -- out transient focus.
+    -- window must exactly equal the adopted replySubject (live title after core-
+    -- matched adoption, else derived). An empty System Events title is tolerated
+    -- (AX quirk); a different non-empty SE title aborts. Subject-core matching is
+    -- only used to adopt Mail's normalized title, never as the keystroke boundary.
     if replyBodyText is not "" then
         repeat with guardAttempt from 1 to 4
             set guardMail to "(unset)"
@@ -445,24 +445,16 @@ try
                 try
                     set guardMail to name of front window
                 end try
-                -- Keep replySubject aligned with the live compose title once focused.
+                -- Late adoption: if focus landed on Mail's normalized reply title,
+                -- adopt it before the exact-title keystroke check.
                 if guardMail is not "(unset)" and guardMail is not "" then
-                    if my replyWindowTitlesMatch(guardMail, derivedReplySubject) then
+                    if my subjectCoresMatch(guardMail, derivedReplySubject) then
                         set replySubject to guardMail
                     end if
                 end if
             end tell
-            set mailOk to my replyWindowTitlesMatch(guardMail, replySubject)
-            if mailOk is false then
-                set mailOk to my replyWindowTitlesMatch(guardMail, derivedReplySubject)
-            end if
-            set seOk to (guardSE is "" or guardSE is "(unset)")
-            if seOk is false then
-                set seOk to my replyWindowTitlesMatch(guardSE, replySubject)
-            end if
-            if seOk is false then
-                set seOk to my replyWindowTitlesMatch(guardSE, derivedReplySubject)
-            end if
+            set mailOk to (guardMail is replySubject)
+            set seOk to (guardSE is replySubject or guardSE is "" or guardSE is "(unset)")
             if mailOk and seOk then
                 tell application "System Events"
                     tell process "Mail"
