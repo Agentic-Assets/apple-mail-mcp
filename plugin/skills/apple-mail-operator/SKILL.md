@@ -13,7 +13,7 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). When finding 
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large **Exchange** accounts, also read [`exchange-account-patterns.md`](references/exchange-account-patterns.md).
 
 ### When to reach for `full_inbox_export`
 
@@ -53,9 +53,9 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 | See configured accounts | `list_accounts()` |
 | See outbound identities | `list_account_addresses(account="...")` |
 | Snapshot unread + recent hints | `get_inbox_overview()`; start compact `output_format`, avoid heavy dashboards during debugging |
-| Page recent inbox bodies | `list_inbox_emails(max_emails=5..8)` for triage; widen only after the batch is processed |
-| Locate a needle | Narrow `search_emails(limit=5, recent_days=2..7)` → `get_email_by_id(message_id=...)` |
-| Conversation context | `get_email_thread(...)` instead of chained subject guesses |
+| Page recent inbox bodies | `search_emails(limit=5..8, output_format="json")` for ids; `list_inbox_emails(max_emails=5..8)` for subject skim only |
+| Locate a needle | Narrow `search_emails(limit=5, recent_days=2..7)` → if empty on Exchange, retry `sender="..."` with higher `limit` → `get_email_by_id(message_id=...)` |
+| Conversation context | `get_email_thread(message_id=...)` when supported; **also** search Sent independently if thread looks incomplete (see `exchange-account-patterns.md`) |
 | Mailbox map | `list_mailboxes(include_counts=true)` |
 | Idle mail fetch | `synchronize_account(account="...", confirm_sync=True)` only after the user accepts that Mail may download a large backlog |
 
@@ -65,7 +65,8 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 - Run **narrow** queries first (`recent_days` small, explicit `account=`, `include_content=false`, tight `limit` ≤ 5 on first pass).
 - Reserve `all_accounts=True` / cross-account scans for explicit user requests; large Exchange profiles may time out; partial JSON with `errors` is expected behavior.
 - Prefer `search_emails(mailboxes=["INBOX", "Sent", ...])` to scan a few named folders over whole-profile fan-out on large Exchange/Gmail accounts. It returns a structured per-folder error for any missing or slow mailbox instead of failing the call.
-- After `list_inbox_emails` or `search_emails` returns `message_id`, always drill with `get_email_by_id` rather than fuzzy re-search. `get_email_by_id` is also where per-message recipients (`to`/`cc`/`bcc`) and thread headers (`in_reply_to`/`references`) now come from; bulk `search_emails` no longer returns them.
+- After `list_inbox_emails` or `search_emails` returns `message_id`, always drill with `get_email_by_id` rather than fuzzy re-search. If list rows lack `message_id`, resolve with `search_emails` before acting.
+- On Exchange, **subject-only** `search_emails` may return empty while the message is visible in overview; use sender search or offset pagination (`exchange-account-patterns.md`).
 - **Never verify drafts with `search_emails`.** Drafts are unsent `outgoing message` objects with a null received date, so the date-filtered search is both slow and silently drops them. For troubleshooting, use `verify_draft(draft_id=...)` or `verify_drafts(draft_ids=[...])` for exact readiness checks, `manage_drafts(action="list", subject_contains="...")` for bounded newest-first discovery, `manage_drafts(action="find", in_reply_to="...")` for bounded header lookup, or `get_email_by_id(message_id=..., mailbox="Drafts")` for exact raw message fetches. Route draft lifecycle actions through `email-drafting`. `reply_to_email` verifies its own saved artifact before success: exact Drafts id first, bounded newest-Drafts fallback, and `reply_body` above the quoted original.
 
 ## Operator Safety Patterns

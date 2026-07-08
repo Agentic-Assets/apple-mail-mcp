@@ -13,7 +13,7 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). Even in multi
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large Exchange profiles, also [`exchange-account-patterns.md`](references/exchange-account-patterns.md).
 
 ### When to reach for `full_inbox_export`
 
@@ -22,6 +22,8 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 ## Before drafting
 
 Umbrella programs may end in replies. Load **`email-drafting`** and follow [`pre-draft-verification.md`](references/pre-draft-verification.md) before any `reply_to_email` call.
+
+Paper/R&R mail with author briefs: after triage, follow [`research-project-tracking.md`](references/research-project-tracking.md) so empirical work lands in the Research issue tracker, not only in mail drafts.
 
 ## When To Use This Skill
 
