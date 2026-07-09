@@ -221,8 +221,75 @@ def _native_reply_post_action(mode: str) -> str:
         "        delay 1.0\n"
         "        try\n"
         "            close (every window whose name is replySubject) saving no\n"
+        "        end try\n"
+        "        try\n"
+        "            if derivedReplySubject is not replySubject then "
+        "close (every window whose name is derivedReplySubject) saving no\n"
         "        end try"
     )
+
+
+def _native_reply_subject_helpers_applescript() -> str:
+    """AppleScript handlers that collapse leading Re:/Fwd: prefixes for guard compares.
+
+    Mail normalizes compose-window titles (e.g. ``RE:  Re: Foo`` → ``Re: Foo``).
+    Exact string equality against the raw source subject is a false focus failure;
+    compare subject cores instead, and prefer Mail's live front-window title.
+    """
+    return """
+on stripLeadingSpaces(rawText)
+    set t to rawText as string
+    repeat while t starts with " "
+        if (length of t) is 1 then return ""
+        set t to text 2 thru -1 of t
+    end repeat
+    return t
+end stripLeadingSpaces
+
+on stripReplySubjectPrefixes(rawSubject)
+    set t to my stripLeadingSpaces(rawSubject)
+    repeat 10 times
+        if t is "" then exit repeat
+        set prefixLen to 0
+        ignoring case
+            if t starts with "re:" then
+                set prefixLen to 3
+            else if t starts with "fwd:" then
+                set prefixLen to 4
+            else if t starts with "fw:" then
+                set prefixLen to 3
+            end if
+        end ignoring
+        if prefixLen is 0 then exit repeat
+        if (length of t) is less than or equal to prefixLen then
+            set t to ""
+            exit repeat
+        end if
+        set t to my stripLeadingSpaces(text (prefixLen + 1) thru -1 of t)
+    end repeat
+    return t
+end stripReplySubjectPrefixes
+
+on subjectCoresMatch(leftSubject, rightSubject)
+    set leftCore to my stripReplySubjectPrefixes(leftSubject)
+    set rightCore to my stripReplySubjectPrefixes(rightSubject)
+    if leftCore is "" or rightCore is "" then return false
+    ignoring case
+        return (leftCore is rightCore)
+    end ignoring
+end subjectCoresMatch
+
+on looksLikeReplyWindowTitle(windowTitle)
+    set t to my stripLeadingSpaces(windowTitle)
+    if t is "" then return false
+    ignoring case
+        if t starts with "re:" then return true
+        if t starts with "fwd:" then return true
+        if t starts with "fw:" then return true
+    end ignoring
+    return false
+end looksLikeReplyWindowTitle
+"""
 
 
 def _build_reply_native_window_applescript(
@@ -260,12 +327,14 @@ def _build_reply_native_window_applescript(
 
     UI scripting is isolated to the focus guard + keystroke and is unavoidable
     here: the native rich format cannot be expressed through the Mail dictionary.
-    The guard treats Mail's dictionary front-window name as authoritative and
-    tolerates an empty System Events title (an AX quirk for compose windows); a
-    different non-empty SE title aborts without typing so a partial/wrong-thread
-    draft is never saved. Requires Accessibility permission for the host process;
-    callers that cannot grant it must stop and report the blocker; the
-    ``native_format=False`` path is gated behind ``allow_windowless_fallback``.
+    After ``reply``, the guard may adopt Mail's live front-window title when its
+    subject core matches the derived reply subject (Mail normalizes duplicate
+    Re:/Fwd: prefixes). The keystroke itself still requires exact title equality
+    against that adopted ``replySubject``. An empty System Events title is
+    tolerated (AX quirk); a different non-empty SE title aborts without typing.
+    Requires Accessibility permission for the host process; callers that cannot
+    grant it must stop and report the blocker; the ``native_format=False`` path
+    is gated behind ``allow_windowless_fallback``.
     """
     extra_output_lines = _reply_extra_output_lines(
         safe_cc=safe_cc,
@@ -276,8 +345,11 @@ def _build_reply_native_window_applescript(
         has_attachments=has_attachments,
     )
     post_action = _native_reply_post_action(mode)
+    subject_helpers = _native_reply_subject_helpers_applescript()
     return f'''
+{subject_helpers}
 set bodyTempPath to "{body_temp_path}"
+set derivedReplySubject to ""
 set replySubject to ""
 set replyMessage to missing value
 set quotedNeedle to ""
@@ -298,10 +370,11 @@ try
 
         set sourceSubject to subject of foundMessage as string
         if sourceSubject starts with "Re:" or sourceSubject starts with "RE:" or sourceSubject starts with "re:" then
-            set replySubject to sourceSubject
+            set derivedReplySubject to sourceSubject
         else
-            set replySubject to "Re: " & sourceSubject
+            set derivedReplySubject to "Re: " & sourceSubject
         end if
+        set replySubject to derivedReplySubject
         set replyBodyText to do shell script "cat " & quoted form of bodyTempPath
 
         -- Native Mail reply: Mail builds its own rich quoted thread and inserts the
@@ -311,6 +384,28 @@ try
         delay 1.2
         activate
         delay 0.4
+
+        -- Prefer Mail's own outgoing reply subject when it is the same reply thread.
+        -- Mail collapses duplicate Re:/Fwd: prefixes, so the derived source subject
+        -- can disagree with the compose title; adopt normalized titles only after a
+        -- subject-core match so an unrelated open compose window is never adopted.
+        try
+            set replyMessageSubject to subject of replyMessage as string
+            if replyMessageSubject is not "" then
+                if my subjectCoresMatch(replyMessageSubject, derivedReplySubject) then
+                    set replySubject to replyMessageSubject
+                end if
+            end if
+        end try
+        -- Prefer Mail's live compose-window title when it is the same reply thread.
+        try
+            set mailWindowTitle to name of front window as string
+            if mailWindowTitle is not "" then
+                if my subjectCoresMatch(mailWindowTitle, derivedReplySubject) then
+                    set replySubject to mailWindowTitle
+                end if
+            end if
+        end try
 
         -- Best-effort identity tweaks on the already-good native window.
         try
@@ -325,8 +420,10 @@ try
     end tell
 
     -- Insert the reply body with a TYPED keystroke. Guard: Mail's dictionary front
-    -- window must be the reply; an empty System Events title is tolerated (AX quirk);
-    -- a different non-empty SE title aborts. Retry to ride out transient focus.
+    -- window must exactly equal the adopted replySubject (live title after core-
+    -- matched adoption, else derived). An empty System Events title is tolerated
+    -- (AX quirk); a different non-empty SE title aborts. Subject-core matching is
+    -- only used to adopt Mail's normalized title, never as the keystroke boundary.
     if replyBodyText is not "" then
         repeat with guardAttempt from 1 to 4
             set guardMail to "(unset)"
@@ -342,6 +439,11 @@ try
                     try
                         perform action "AXRaise" of (first window whose name is replySubject)
                     end try
+                    try
+                        if derivedReplySubject is not replySubject then
+                            perform action "AXRaise" of (first window whose name is derivedReplySubject)
+                        end if
+                    end try
                     delay 0.3
                     try
                         set guardSE to name of front window
@@ -352,8 +454,17 @@ try
                 try
                     set guardMail to name of front window
                 end try
+                -- Late adoption: if focus landed on Mail's normalized reply title,
+                -- adopt it before the exact-title keystroke check.
+                if guardMail is not "(unset)" and guardMail is not "" then
+                    if my subjectCoresMatch(guardMail, derivedReplySubject) then
+                        set replySubject to guardMail
+                    end if
+                end if
             end tell
-            if (guardMail is replySubject) and (guardSE is replySubject or guardSE is "" or guardSE is "(unset)") then
+            set mailOk to (guardMail is replySubject)
+            set seOk to (guardSE is replySubject or guardSE is "" or guardSE is "(unset)")
+            if mailOk and seOk then
                 tell application "System Events"
                     tell process "Mail"
                         keystroke replyBodyText
@@ -366,13 +477,28 @@ try
         end repeat
 
         if didType is false then
+            -- Distinguish true focus loss (Inbox / other app window) from a reply
+            -- window whose title still does not core-match the expected subject.
+            set abortCode to "GUARD_ABORT"
+            if guardMail is not "(unset)" and guardMail is not "" then
+                if (my subjectCoresMatch(guardMail, derivedReplySubject)) is false then
+                    if my looksLikeReplyWindowTitle(guardMail) then
+                        set abortCode to "GUARD_ABORT_SUBJECT"
+                    end if
+                end if
+            end if
             tell application "Mail"
                 try
                     close (every window whose name is replySubject) saving no
                 end try
+                try
+                    if derivedReplySubject is not replySubject then
+                        close (every window whose name is derivedReplySubject) saving no
+                    end if
+                end try
                 {cleanup_script}
             end tell
-            return "GUARD_ABORT" & return & "Subject: " & replySubject & return & "Detail: could not focus reply window (mailFront=" & guardMail & " seFront=" & guardSE & ")"
+            return abortCode & return & "Subject: " & replySubject & return & "DerivedSubject: " & derivedReplySubject & return & "Detail: could not focus reply window (mailFront=" & guardMail & " seFront=" & guardSE & ")"
         end if
         set quotedNeedle to "wrote:"
     end if
@@ -396,6 +522,13 @@ on error errMsg
     try
         tell application "Mail"
             close (every window whose name is replySubject) saving no
+        end tell
+    end try
+    try
+        tell application "Mail"
+            if derivedReplySubject is not "" and derivedReplySubject is not replySubject then
+                close (every window whose name is derivedReplySubject) saving no
+            end if
         end tell
     end try
     try

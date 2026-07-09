@@ -994,8 +994,17 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertNotIn("set composedReplyContent", script)
         self.assertNotIn("set quotedOriginalText", script)
         # Empty System Events title is tolerated (AX quirk for compose windows);
-        # a different non-empty title aborts before typing.
-        self.assertIn('guardSE is replySubject or guardSE is "" or guardSE is "(unset)"', script)
+        # a different non-empty title aborts before typing. Subject cores are used
+        # only to adopt Mail's normalized live title; keystroke still requires exact
+        # title equality against the adopted replySubject.
+        self.assertIn("on stripReplySubjectPrefixes(rawSubject)", script)
+        self.assertIn("on subjectCoresMatch(leftSubject, rightSubject)", script)
+        self.assertIn(
+            'set seOk to (guardSE is replySubject or guardSE is "" or guardSE is "(unset)")',
+            script,
+        )
+        self.assertIn("set replySubject to mailWindowTitle", script)
+        self.assertIn("set mailOk to (guardMail is replySubject)", script)
         # Native default never pins the account alias (that drops the logo signature).
         self.assertNotIn("set sender of replyMessage", script)
         self.assertNotIn("make new outgoing message", script)
@@ -2194,6 +2203,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                     [
                         "GUARD_ABORT",
                         "Subject: Re: Test",
+                        "DerivedSubject: Re: Test",
                         "Detail: could not focus reply window (mailFront=Inbox seFront=Inbox)",
                     ]
                 )
@@ -2227,6 +2237,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                     [
                         "GUARD_ABORT",
                         "Subject: Re: Test",
+                        "DerivedSubject: Re: Test",
                         "Detail: could not focus reply window (mailFront=Inbox seFront=Inbox)",
                     ]
                 )
@@ -2250,6 +2261,94 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["remediation"]["draft_artifact_status"], "body_missing")
         self.assertEqual(payload["remediation"]["suspected_draft_id"], "116814")
         self.assertIn("manage_drafts(action='delete', draft_id=...)", payload["remediation"]["cleanup"])
+
+    def test_native_reply_subject_guard_mismatch_returns_distinct_error(self):
+        # When Mail opens a reply-looking window whose title still fails the subject
+        # core match, map GUARD_ABORT_SUBJECT to REPLY_SUBJECT_GUARD_MISMATCH so
+        # callers can distinguish it from true focus loss.
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return "\n".join(
+                    [
+                        "GUARD_ABORT_SUBJECT",
+                        "Subject: Re: Placeholder: Equire CRE Demo",
+                        "DerivedSubject: RE:  Re: Placeholder: Equire CRE Demo",
+                        (
+                            "Detail: could not focus reply window "
+                            "(mailFront=Re: Other Thread seFront=Re: Other Thread)"
+                        ),
+                    ]
+                )
+            if 'set targetDraftIdText to ""' in script:
+                return "NOT_FOUND"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["error"])
+        self.assertEqual(payload["code"], "REPLY_SUBJECT_GUARD_MISMATCH")
+        self.assertEqual(
+            payload["remediation"]["expected_subject"],
+            "Re: Placeholder: Equire CRE Demo",
+        )
+        self.assertEqual(
+            payload["remediation"]["derived_subject"],
+            "RE:  Re: Placeholder: Equire CRE Demo",
+        )
+        self.assertIn("GUARD_ABORT_SUBJECT", payload["remediation"]["detail"])
+        self.assertIn("Do not switch off native formatting", payload["remediation"]["alternative"])
+
+    def test_native_reply_script_normalizes_double_re_subject_guard(self):
+        # AGENTIC-1014: Mail collapses "RE:  Re: Foo" to "Re: Foo" in the compose
+        # window title. The native script must adopt the live window title and
+        # compare subject cores so the keystroke guard does not false-fail.
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="119318",
+                reply_body="Thanks for the invite.",
+            )
+
+        script = _main_reply_script(captured)
+        self.assertIn("set derivedReplySubject to sourceSubject", script)
+        self.assertIn("set replyMessageSubject to subject of replyMessage as string", script)
+        self.assertIn("if my subjectCoresMatch(replyMessageSubject, derivedReplySubject) then", script)
+        self.assertIn("if my subjectCoresMatch(mailWindowTitle, derivedReplySubject) then", script)
+        self.assertIn("set replySubject to mailWindowTitle", script)
+        self.assertIn("on stripReplySubjectPrefixes(rawSubject)", script)
+        self.assertIn('if t starts with "re:" then', script)
+        self.assertIn('if t starts with "fwd:" then', script)
+        # Keystroke boundary stays exact-title; core match is adoption-only.
+        self.assertIn("set mailOk to (guardMail is replySubject)", script)
+        self.assertNotIn("set mailOk to my replyWindowTitlesMatch", script)
+        self.assertIn('set abortCode to "GUARD_ABORT_SUBJECT"', script)
+        self.assertIn(
+            "close (every window whose name is derivedReplySubject) saving no",
+            script,
+        )
+        # Still never reassign content on the native path.
+        self.assertNotIn("set content of replyMessage", script)
+        self.assertIn("keystroke replyBodyText", script)
 
     def test_windowless_fallback_disabled_without_ack(self):
         # native_format=False is gated: without allow_windowless_fallback=True the tool

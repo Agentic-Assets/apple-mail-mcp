@@ -45,6 +45,9 @@ fi
 
 TMP_HOME="$(mktemp -d)"
 trap 'rm -rf "$TMP_HOME"' EXIT
+CODEX_MARKETPLACE_NAME="Agentic-Assets"
+CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-https://github.com/Agentic-Assets/apple-mail-mcp.git}"
+CODEX_PLUGIN_SELECTOR="apple-mail@${CODEX_MARKETPLACE_NAME}"
 
 "$SMOKE_PYTHON" tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
@@ -55,9 +58,9 @@ trap 'rm -rf "$TMP_HOME"' EXIT
 
 export CODEX_HOME="$TMP_HOME"
 
-codex plugin marketplace add .
-codex plugin add apple-mail@apple-mail-mcp
-codex plugin list --marketplace apple-mail-mcp | grep -F "apple-mail@apple-mail-mcp" >/dev/null
+codex plugin marketplace add "$CODEX_MARKETPLACE_SOURCE"
+codex plugin add "$CODEX_PLUGIN_SELECTOR"
+codex plugin list --marketplace Agentic-Assets | grep -F "apple-mail@Agentic-Assets" >/dev/null
 
 SERVER_JSON="$TMP_HOME/apple-mail-mcp-server.json"
 codex mcp get apple-mail --json > "$SERVER_JSON"

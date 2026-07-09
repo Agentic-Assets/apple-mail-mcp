@@ -14,6 +14,7 @@ Exit 0 when compliant; exit 1 and print violations to stderr otherwise.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +46,16 @@ STALE_FLAT_PATH_RE = re.compile(
 )
 
 
+def _is_git_ignored(path: Path) -> bool:
+    relative = path.relative_to(ROOT)
+    proc = subprocess.run(
+        ["git", "check-ignore", "-q", "--", str(relative)],
+        cwd=ROOT,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -56,6 +67,8 @@ def validate_tasks_layout() -> list[str]:
         return [f"missing tasks directory: {TASKS}"]
 
     for child in TASKS.iterdir():
+        if _is_git_ignored(child):
+            continue
         name = child.name
         if child.is_file():
             if name.endswith(".md") and name not in ALLOWED_ROOT_FILES:

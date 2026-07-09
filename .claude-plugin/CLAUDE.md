@@ -1,6 +1,9 @@
 # .claude-plugin/ — marketplace manifest
 
 Top-level **Claude Code marketplace** registration → [`plugin/`](../plugin/) via `"source": "./plugin"`.
+That source is relative inside the GitHub marketplace checkout. User install
+docs must register `Agentic-Assets/apple-mail-mcp`, not a local checkout path,
+so Claude can keep the marketplace tied to its GitHub source.
 
 Codex Desktop/CLI uses a separate marketplace file at [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json) plus [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json). Keep Claude and Codex plugin identities aligned, but do not add Codex fields to this Claude marketplace manifest.
 
@@ -32,12 +35,13 @@ The check lives in `tools/manifest_checks/install_contracts.py::_check_marketpla
 
 ```bash
 # From GitHub (users)
-claude plugin marketplace add Agentic-Assets/apple-mail-mcp
-claude plugin install apple-mail@apple-mail-mcp
+claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
+claude plugin marketplace update Agentic-Assets
+claude plugin install apple-mail@Agentic-Assets --scope user
 
-# From repo checkout (dev)
+# From repo checkout (maintainer/offline)
 claude plugin marketplace add .
-claude plugin install apple-mail@apple-mail-mcp
+claude plugin install apple-mail@Agentic-Assets
 ```
 
 Installs the MCP server (31 tools, **`--draft-safe`** by default) plus **nine** auto-discovered workflow skills under `plugin/skills/` — see [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md).
@@ -45,11 +49,11 @@ Installs the MCP server (31 tools, **`--draft-safe`** by default) plus **nine** 
 Codex users install through the sibling Codex marketplace:
 
 ```bash
-codex plugin marketplace add Agentic-Assets/apple-mail-mcp
-codex plugin add apple-mail@apple-mail-mcp
+codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
+codex plugin add apple-mail@Agentic-Assets
 ```
 
-For a local checkout, use `codex plugin marketplace add .` before the same `codex plugin add apple-mail@apple-mail-mcp` command.
+For a local checkout, use `codex plugin marketplace add .` before the same `codex plugin add apple-mail@Agentic-Assets` command.
 
 After edits: `plugin-dev:plugin-validator` when available + `tools/gates/validate_manifests.sh` (+ `plugin-dev:skill-reviewer` when skills change).
 

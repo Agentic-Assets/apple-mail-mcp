@@ -8,10 +8,10 @@ A single `plugin/` runtime serves Claude Code and Codex plugin installs; `bash t
 
 | Surface | Install target | Format |
 |---------|----------------|--------|
-| `apple-mail-plugin.zip` | Claude Code plugin marketplace (`claude plugin install`) | Plain zip, `.claude-plugin/plugin.json` at zip root |
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace (`claude plugin install apple-mail@Agentic-Assets`) | Plain zip, `.claude-plugin/plugin.json` at zip root; register `Agentic-Assets/apple-mail-mcp` marketplace first |
 | `apple-mail.plugin` | Claude Desktop **Cowork → Customize → Add plugin → Upload plugin** | Byte-identical copy of the `.zip`, `.plugin` extension is what the Cowork UI accepts |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop chat extension via "Add Custom Plugin" / "Install from file" | DXT bundle (`mcpb pack`), `manifest.json` at zip root |
-| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace (`codex plugin add`) | Repo marketplace points at shared `./plugin` runtime with `plugin/.mcp.json` |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace (`codex plugin add apple-mail@Agentic-Assets`) | GitHub marketplace checkout points at shared `./plugin` runtime with `plugin/.mcp.json` |
 
 If you change distribution, version, or filenames: re-run `bash tools/gates/dev-check.sh release` and verify `tests/infra/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and CI tests treat that as a hard error.
 

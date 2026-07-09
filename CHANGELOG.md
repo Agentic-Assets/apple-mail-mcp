@@ -3,6 +3,17 @@
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 
+## Unreleased
+
+### Changed
+
+- **Claude Code and Codex marketplace registry** — Marketplace key renamed from
+  `apple-mail-mcp` to `Agentic-Assets`; plugin selector is now
+  `apple-mail@Agentic-Assets`. User installs register the GitHub-backed
+  marketplace (`Agentic-Assets/apple-mail-mcp` or the `.git` URL for Codex)
+  instead of a local checkout path. Validators, refresh scripts, and install
+  docs updated; legacy uninstall commands remain in README for migration.
+
 ## 3.9.1 - 2026-06-30
 
 Internal module-line-budget cleanup. No behavior change, no tool-surface change
