@@ -188,6 +188,17 @@ apple-mail -o json full-inbox-export --raw '{
   "batch_size":250,
   "output_format":"json"
 }'
+
+# Correspondent history export, including received and Sent-side messages.
+apple-mail -o json export-emails --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "scope":"correspondent",
+  "email_address":"person@example.com",
+  "include_sent":true,
+  "date_from":"2026-07-01",
+  "max_emails":10,
+  "format":"txt"
+}'
 ```
 
 Known wrapper checks to keep separate from manifest validation:

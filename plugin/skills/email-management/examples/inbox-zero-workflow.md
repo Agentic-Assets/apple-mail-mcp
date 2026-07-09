@@ -171,7 +171,7 @@ Inbox (empty)
 ### "I'm afraid to delete emails"
 **Solution**:
 1. Remember: Delete isn't permanent immediately (goes to Trash)
-2. Export important mailboxes first: `export_emails(scope="entire_mailbox", mailbox="Important")`
+2. Export important mailboxes first: `export_emails(scope="entire_mailbox", mailbox="Important", max_emails=100)`
 3. Archive instead of delete if uncertain
 4. Trust that you can search for 99% of emails you might need
 

@@ -55,8 +55,10 @@ from apple_mail_mcp.tools.analytics.dashboard import (
 from apple_mail_mcp.tools.analytics.export import (
     _EXPORT_ENTIRE_MAILBOX_DEFAULT,
     _EXPORT_ENTIRE_MAILBOX_WARN_THRESHOLD,
-    _build_exact_message_export_script,
     export_emails,
+)
+from apple_mail_mcp.tools.analytics.export_helpers import (
+    build_exact_message_export_script as _build_exact_message_export_script,
 )
 from apple_mail_mcp.tools.analytics.full_export import (
     _FULL_EXPORT_ALLOWED_FIELDS,

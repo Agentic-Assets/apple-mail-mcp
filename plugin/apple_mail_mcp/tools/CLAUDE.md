@@ -27,7 +27,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | `manage/sync.py` | 1 | IMAP sync: `synchronize_account` (`helpers.py` is a shared leaf) |
 | `analytics/attachments.py` | 1 | Attachment listing: `list_email_attachments` (`statistics_parsing.py` is a pure leaf) |
 | `analytics/statistics.py` | 1 | Stats: `get_statistics` (account_overview/sender_stats/mailbox_breakdown) |
-| `analytics/export.py` | 1 | Export: `export_emails` by exact ids or mailbox cap |
+| `analytics/export.py` | 1 | Export: `export_emails` by exact ids, bounded filters, correspondent/thread scopes, or mailbox pages |
 | `analytics/full_export.py` | 1 | Metadata walk: `full_inbox_export` |
 | `analytics/dashboard.py` | 1 | Dashboard: `inbox_dashboard` + recent-email helpers |
 | `smart_inbox/awaiting_reply.py` | 1 | Follow-up tracking: `get_awaiting_reply` (sent-vs-inbox Message-ID cross-reference; `helpers.py` shares `_normalize_message_id`) |
@@ -105,7 +105,7 @@ Do not match outgoing rich drafts by subject — `_save_new_compose_window_as_dr
 
 ## Module size
 
-Every tool surface is now a split-by-domain package under the **600 LOC** budget; the `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` packages are the worked examples (search: `emails.py`, `by_id.py`, `thread.py`, plus `records.py`/`script.py`/`dispatch.py` leaves; inbox: `list_emails.py`, `unread_counts.py`, `accounts.py`, `mailboxes.py`, `overview.py`, plus `parsing.py`/`replied.py`/`list_scripts.py` leaves; manage: `move.py`, `attachments.py`, `status.py`, `trash.py`, `mailbox.py`, `sync.py`, plus the shared `helpers.py` leaf; analytics: `attachments.py`, `statistics.py`, `export.py`, `full_export.py`, `dashboard.py`, plus the pure `statistics_parsing.py` leaf; smart_inbox: `awaiting_reply.py`, `needs_response.py`, `top_senders.py`, plus the pure `helpers.py` leaf), each file under budget, linked through the package `__init__.py` facade. CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer the same domain split over reviving single-file monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
+Every tool surface is now a split-by-domain package under the **600 LOC** budget; the `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` packages are the worked examples (search: `emails.py`, `by_id.py`, `thread.py`, plus `records.py`/`script.py`/`dispatch.py` leaves; inbox: `list_emails.py`, `unread_counts.py`, `accounts.py`, `mailboxes.py`, `overview.py`, plus `parsing.py`/`replied.py`/`list_scripts.py` leaves; manage: `move.py`, `attachments.py`, `status.py`, `trash.py`, `mailbox.py`, `sync.py`, plus the shared `helpers.py` leaf; analytics: `attachments.py`, `statistics.py`, `export.py`, `export_helpers.py`, `full_export.py`, `dashboard.py`, plus the pure `statistics_parsing.py` leaf; smart_inbox: `awaiting_reply.py`, `needs_response.py`, `top_senders.py`, plus the pure `helpers.py` leaf), each file under budget, linked through the package `__init__.py` facade. CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer the same domain split over reviving single-file monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
 
 ## Related
 

@@ -13,7 +13,7 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 ### When to reach for `full_inbox_export`
 
-`full_inbox_export` is the only tool that walks the entire inbox. Use it as the evidence step for annual cleanups, full audits, or pre-migration snapshots; pair it with `export_emails` for the on-disk artifact before any irreversible `manage_trash(action="delete_permanent")`. It is slow (minutes on a 24k inbox); for staged campaigns, keep using bounded `search_emails` + `message_ids=[...]` flows instead.
+`full_inbox_export` is the only tool that walks the entire inbox. Use it as the evidence step for annual cleanups, full audits, or pre-migration snapshots; pair it with bounded `export_emails` scopes for the on-disk artifact before any irreversible `manage_trash(action="delete_permanent")`. It is slow (minutes on a 24k inbox); for staged campaigns, keep using bounded `search_emails` + `message_ids=[...]`, `export_emails(scope="filtered", ...)`, or `export_emails(scope="correspondent", email_address=..., include_sent=True, ...)` flows instead.
 
 ## ID-first flow (mandatory for bulk moves, status, and trash)
 
