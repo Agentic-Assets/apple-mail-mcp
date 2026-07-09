@@ -75,6 +75,12 @@ bash tools/gates/dev-check.sh                    # manifests + module budget + p
 
 ## Version bump (release together)
 
+Every non-docs-only change that ships through a PR must bump the public version.
+Do not leave behavior, manifest, skill, tool, or artifact changes under
+`Unreleased` when opening a release PR. `bash tools/gates/dev-check.sh release`
+fails unless `CHANGELOG.md` has a `## {version} - YYYY-MM-DD` heading matching
+`pyproject.toml` and no release bullets remain under `Unreleased`.
+
 - `pyproject.toml` → `[project].version`
 - `plugin/.claude-plugin/plugin.json` → `version`
 - `plugin/.codex-plugin/plugin.json` → `version`

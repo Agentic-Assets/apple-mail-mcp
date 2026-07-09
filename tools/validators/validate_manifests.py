@@ -55,7 +55,11 @@ from manifest_checks.tool_count import (
     _check_active_doc_tool_count_claims,
     _extract_registered_tool_names,
 )
-from manifest_checks.version import _read_project_name, _read_project_version
+from manifest_checks.version import (
+    _check_changelog_release_version,
+    _read_project_name,
+    _read_project_version,
+)
 
 VersionCheck = tuple[Path, str, str]
 
@@ -69,6 +73,7 @@ __all__ = [
     "main",
     "_check_active_doc_tool_count_claims",
     "_check_artifact_freshness",
+    "_check_changelog_release_version",
     "_check_codex_plugin_contract",
     "_check_developer_only_skills_not_packaged",
     "_check_marketplace_contract",
@@ -144,6 +149,7 @@ def main() -> None:
     project_name = _read_project_name()
 
     _check_public_versions(expected_version, errors)
+    _check_changelog_release_version(expected_version, errors)
 
     code_names = _extract_registered_tool_names()
     actual_count = len(code_names)
