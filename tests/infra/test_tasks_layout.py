@@ -14,6 +14,7 @@ from tools.validators.validate_tasks_layout import (  # noqa: E402
     ALLOWED_ROOT_DIRS,
     ALLOWED_ROOT_FILES,
     TASKS,
+    _is_git_ignored,
     validate_tasks_layout,
 )
 
@@ -26,9 +27,19 @@ class TestTasksLayout(unittest.TestCase):
         root_md = {
             p.name
             for p in TASKS.iterdir()
-            if p.is_file() and p.suffix == ".md"
+            if p.is_file() and p.suffix == ".md" and not _is_git_ignored(p)
         }
         self.assertEqual(root_md, set(ALLOWED_ROOT_FILES))
+
+    def test_ignored_local_task_artifacts_do_not_fail_layout(self) -> None:
+        ignored = TASKS / ".validator-local-scratch.tmp"
+        ignored.write_text("local scratch\n", encoding="utf-8")
+        try:
+            self.assertTrue(_is_git_ignored(ignored))
+            errors = validate_tasks_layout()
+            self.assertEqual(errors, [], "\n".join(errors))
+        finally:
+            ignored.unlink(missing_ok=True)
 
     def test_required_subdirectories_exist(self) -> None:
         for name in ALLOWED_ROOT_DIRS:

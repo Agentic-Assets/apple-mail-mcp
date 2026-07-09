@@ -42,7 +42,8 @@ apple-mail.plugin
 *.textClipping
 
 # Archive
-archive/
+archive/*
+!archive/.gitkeep
 
 # Logs
 *.log
