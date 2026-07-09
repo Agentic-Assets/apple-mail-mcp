@@ -5,6 +5,8 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.9.2 - 2026-07-09
+
 ### Changed
 
 - **`export_emails` bounded scopes** now support sender/date filtered export,

@@ -87,6 +87,63 @@ class ValidateManifestsTests(unittest.TestCase):
 
         self.assertEqual(errors, ["Codex plugin manifest: got '0.0.0', expected '3.9.1'"])
 
+    def test_changelog_release_version_requires_matching_latest_release_heading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CHANGELOG.md").write_text(
+                "# Changelog\n\n## Unreleased\n\n## 3.9.1 - 2026-06-30\n\n### Changed\n\n- Old release.\n",
+                encoding="utf-8",
+            )
+
+            errors: list[str] = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_changelog_release_version("3.9.2", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(
+            errors,
+            ["CHANGELOG.md: latest release heading '3.9.1' must match pyproject.toml version '3.9.2'"],
+        )
+
+    def test_changelog_release_version_rejects_unreleased_bullets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CHANGELOG.md").write_text(
+                "\n".join(
+                    [
+                        "# Changelog",
+                        "",
+                        "## Unreleased",
+                        "",
+                        "### Changed",
+                        "",
+                        "- New behavior not released yet.",
+                        "",
+                        "## 3.9.2 - 2026-07-09",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            errors: list[str] = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_changelog_release_version("3.9.2", errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertEqual(
+            errors,
+            [
+                "CHANGELOG.md: Unreleased contains release notes; move them under "
+                "## 3.9.2 - YYYY-MM-DD before running the release gate"
+            ],
+        )
+
     def test_module_line_budget_passes_on_current_repo(self):
         errors: list[str] = []
         warn_count = validate_manifests._check_module_line_budget(errors)
