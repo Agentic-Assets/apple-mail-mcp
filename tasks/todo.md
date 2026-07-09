@@ -2,11 +2,11 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; CI enforces).
 
-**Current branch:** `codex/verify-plugin-marketplace-parity` (release validation green; draft PR pending).
+**Current branch:** `codex/agentic-assets-marketplace-install` (marketplace rename to `Agentic-Assets`; doc sync in progress).
 
-**Current workstream:** [`tasks/active/manifest-release-hardening/`](active/manifest-release-hardening/) captures the 2026-07-07 public version-surface hardening and release artifact parity pass.
+**Current workstream:** [`tasks/active/manifest-release-hardening/`](active/manifest-release-hardening/) captures the 2026-07-07 public version-surface hardening and release artifact parity pass, plus the Agentic Assets marketplace install rename on this branch.
 
-**Next action:** review and merge the PR after the required Cayman approval phrase. After merge, refresh this pointer to the next active workstream.
+**Next action:** run `bash tools/gates/dev-check.sh`, then open or update PR for merge after Cayman approval.
 
 **Previous branch:** `chore/module-line-budget-splits` (v3.9.1 pushed; commit `3d2c515`).
 

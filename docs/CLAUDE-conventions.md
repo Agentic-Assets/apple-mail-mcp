@@ -180,10 +180,10 @@ The repo ships from **one source tree** to **four install surfaces**. Claude Des
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|
-| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin install apple-mail@apple-mail-mcp` (uses `.claude-plugin/marketplace.json`) |
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update Agentic-Assets`, then `claude plugin install apple-mail@Agentic-Assets --scope user` (uses `.claude-plugin/marketplace.json`) |
 | `apple-mail.plugin` | Claude Desktop **Cowork** | Customize → Add plugin → **Upload plugin**. The Cowork UI accepts the `.plugin` extension; without it the upload silently fails. |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
-| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add Agentic-Assets/apple-mail-mcp` then `codex plugin add apple-mail@apple-mail-mcp`; local checkouts can use `codex plugin marketplace add .` |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@Agentic-Assets`; local checkouts are maintainer/offline only |
 
 **`.zip` and `.plugin` must be byte-identical** — `tools/gates/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validators/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/infra/test_validate_manifests.py::test_plugin_file_parity_*`.
 

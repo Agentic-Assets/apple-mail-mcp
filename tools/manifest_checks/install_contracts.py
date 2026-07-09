@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from manifest_checks import common
-from manifest_checks.common import MARKETPLACE_COMPONENT_FIELDS
+from manifest_checks.common import AGENTIC_ASSETS_MARKETPLACE_NAME, MARKETPLACE_COMPONENT_FIELDS
 
 
 def _check_mcp_launcher_contract(
@@ -163,6 +163,11 @@ def _check_mcpb_runtime_contract(mcpb: dict, errors: list[str]) -> None:
 def _check_marketplace_contract(expected_version: str, errors: list[str]) -> None:
     """Ensure marketplace source and skill pointers resolve to the plugin."""
     market = json.loads((common.ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+    if market.get("name") != AGENTIC_ASSETS_MARKETPLACE_NAME:
+        errors.append(
+            ".claude-plugin/marketplace.json name: got "
+            f"'{market.get('name')}', expected '{AGENTIC_ASSETS_MARKETPLACE_NAME}'"
+        )
     plugins = market.get("plugins") or []
     if not plugins:
         errors.append("marketplace.json: missing plugins[0]")

@@ -7,6 +7,8 @@ from pathlib import Path
 
 from manifest_checks import common
 from manifest_checks.common import (
+    AGENTIC_ASSETS_MARKETPLACE_DISPLAY_NAME,
+    AGENTIC_ASSETS_MARKETPLACE_NAME,
     CODEX_MANIFEST_LABEL,
     CODEX_MARKETPLACE_LABEL,
     CODEX_MCP_LABEL,
@@ -85,17 +87,22 @@ def _check_codex_plugin_contract(
     market_label = CODEX_MARKETPLACE_LABEL
     market = _read_json_contract(common.ROOT / market_label, market_label, errors)
     if market is not None:
-        if market.get("name") != "apple-mail-mcp":
-            _append_mismatch(errors, f"{market_label} name", market.get("name"), "apple-mail-mcp")
+        if market.get("name") != AGENTIC_ASSETS_MARKETPLACE_NAME:
+            _append_mismatch(
+                errors,
+                f"{market_label} name",
+                market.get("name"),
+                AGENTIC_ASSETS_MARKETPLACE_NAME,
+            )
         interface = market.get("interface") or {}
         if not isinstance(interface, dict):
             errors.append(f"{market_label} interface: expected object")
-        elif interface.get("displayName") != "Apple Mail MCP":
+        elif interface.get("displayName") != AGENTIC_ASSETS_MARKETPLACE_DISPLAY_NAME:
             _append_mismatch(
                 errors,
                 f"{market_label} interface.displayName",
                 interface.get("displayName"),
-                "Apple Mail MCP",
+                AGENTIC_ASSETS_MARKETPLACE_DISPLAY_NAME,
             )
 
         plugins = market.get("plugins") or []
