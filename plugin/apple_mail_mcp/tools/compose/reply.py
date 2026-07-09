@@ -340,9 +340,10 @@ def reply_to_email(
         )
         if result.startswith("GUARD_ABORT"):
             guard_reply_subject = _extract_output_field(result, "Subject") or ""
+            derived_reply_subject = _extract_output_field(result, "DerivedSubject") or ""
             guard_verification = _verify_saved_reply_draft(
                 account,
-                guard_reply_subject,
+                guard_reply_subject or derived_reply_subject,
                 reply_body,
                 draft_id=None,
                 quoted_needle="wrote:",
@@ -355,6 +356,39 @@ def reply_to_email(
                 or guard_verification.error_artifact_id
             )
             artifact_status = guard_verification.status
+            subject_mismatch = result.startswith("GUARD_ABORT_SUBJECT")
+            if subject_mismatch:
+                return serialize_tool_error(
+                    ToolError(
+                        code="REPLY_SUBJECT_GUARD_MISMATCH",
+                        message=(
+                            "Native reply opened a compose window, but the window title did not "
+                            "match the expected reply subject after Mail subject normalization, "
+                            "so the body was not typed and no email was sent."
+                        ),
+                        remediation={
+                            "preferred": (
+                                "Retry once with Mail visible. If this persists, report the "
+                                "Subject / DerivedSubject / mailFront values from detail; Mail "
+                                "may have normalized the subject differently than expected."
+                            ),
+                            "alternative": (
+                                "Do not switch off native formatting. Inspect or delete any "
+                                "empty compose window left open, then retry native_format=True."
+                            ),
+                            "expected_subject": guard_reply_subject or derived_reply_subject,
+                            "derived_subject": derived_reply_subject or None,
+                            "draft_artifact_status": artifact_status,
+                            "suspected_draft_id": suspected_artifact_id,
+                            "cleanup": (
+                                "If suspected_draft_id is present, inspect or delete that exact "
+                                "Drafts artifact with verify_draft or "
+                                "manage_drafts(action='delete', draft_id=...)."
+                            ),
+                            "detail": result,
+                        },
+                    )
+                )
             return serialize_tool_error(
                 ToolError(
                     code="REPLY_WINDOW_FOCUS_FAILED",
