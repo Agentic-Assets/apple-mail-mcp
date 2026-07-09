@@ -37,7 +37,21 @@ class _AppleMailMCP(Protocol):
 
 
 # Initialize FastMCP server
-mcp = cast(_AppleMailMCP, FastMCP("Apple Mail MCP"))
+mcp = cast(
+    _AppleMailMCP,
+    FastMCP(
+        "Apple Mail MCP",
+        instructions=(
+            "Mail.app automation is single-threaded. This server serializes every "
+            "AppleScript call behind a lock, so invoking multiple Apple Mail tools "
+            "at once does not run them in parallel; the calls queue and can time "
+            "out waiting their turn. Call one Apple Mail tool at a time and wait "
+            "for its result before issuing the next. On large Exchange or Gmail "
+            "mailboxes, prefer small bounded calls (low max_emails, small "
+            "recent_days, offset paging) over large ones."
+        ),
+    ),
+)
 
 # Shared MCP tool annotations (see tasks/reference/phase-3-annotation-matrix.md).
 READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(

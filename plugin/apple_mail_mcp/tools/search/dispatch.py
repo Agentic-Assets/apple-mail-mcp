@@ -120,11 +120,13 @@ async def _search_mail_records(
 ) -> "tuple[list[dict[str, Any]], list[str], list[dict[str, str]], bool]":
     """Return (records, error_account_names, error_details, body_search_capped) from Apple Mail.
 
-    When account is None, dispatches one AppleScript per account in parallel
-    via ``asyncio.to_thread`` so wall time is bounded by the slowest single
-    account rather than the sum. A per-account ``AppleScriptTimeout`` becomes
-    an entry in the returned errors list — the call still returns whatever
-    other accounts produced.
+    When account is None, dispatches one AppleScript per account sequentially
+    (each call still runs off the event loop via ``asyncio.to_thread``, since
+    Mail.app AppleScript is now serialized behind a single-flight lock and
+    concurrent dispatch only adds thread churn), so wall time is the sum
+    across accounts rather than the slowest single account. A per-account
+    ``AppleScriptTimeout`` becomes an entry in the returned errors list — the
+    call still returns whatever other accounts produced.
 
     ``body_search_capped`` is True when the body-search auto-cap (100 messages)
     fired because no explicit ``date_from`` was passed.

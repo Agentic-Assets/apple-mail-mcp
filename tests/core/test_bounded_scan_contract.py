@@ -6,8 +6,9 @@
 These tests exercise the contract end-to-end:
 
 * ``bounded_inbox_scan`` stamps tokens and rejects unbounded calls with a
-  structured ``UNBOUNDED_SCAN_REQUIRED`` error that names
-  ``full_inbox_export`` as the audited fallback.
+  structured ``UNBOUNDED_SCAN_REQUIRED`` error whose remediation carries an
+  actionable bounded ``preferred`` fix and never points at the disabled
+  ``full_inbox_export`` tool.
 * The AppleScript helpers (``build_bounded_message_scan``,
   ``build_whose_id_list``, ``compute_scan_upper_bound``) emit the safe
   ``messages 1 thru N`` pattern and never the dangerous ``every message
@@ -89,19 +90,22 @@ class BoundedInboxScanTests(unittest.TestCase):
         err = ctx.exception
         self.assertEqual(err.code, "UNBOUNDED_SCAN_REQUIRED")
         self.assertIsNotNone(err.remediation)
-        self.assertEqual(err.remediation["fallback_tool"], "full_inbox_export")
+        self.assertNotIn("full_inbox_export", str(err.remediation))
+        self.assertTrue(err.remediation.get("preferred"))
 
     def test_bounded_inbox_scan_rejects_over_max_recent_days(self):
         with self.assertRaises(ToolError) as ctx:
             bounded_inbox_scan(mailbox="INBOX", recent_days=MAX_SCAN_DAYS + 1)
         self.assertEqual(ctx.exception.code, "UNBOUNDED_SCAN_REQUIRED")
-        self.assertEqual(ctx.exception.remediation["fallback_tool"], "full_inbox_export")
+        self.assertNotIn("full_inbox_export", str(ctx.exception.remediation))
+        self.assertTrue(ctx.exception.remediation.get("preferred"))
 
     def test_bounded_inbox_scan_rejects_over_max_limit(self):
         with self.assertRaises(ToolError) as ctx:
             bounded_inbox_scan(mailbox="INBOX", limit=MAX_SCAN_LIMIT + 1)
         self.assertEqual(ctx.exception.code, "UNBOUNDED_SCAN_REQUIRED")
-        self.assertEqual(ctx.exception.remediation["fallback_tool"], "full_inbox_export")
+        self.assertNotIn("full_inbox_export", str(ctx.exception.remediation))
+        self.assertTrue(ctx.exception.remediation.get("preferred"))
 
     def test_bounded_inbox_scan_rejects_blank_mailbox(self):
         with self.assertRaises(ToolError) as ctx:
@@ -155,19 +159,20 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "INVALID_SCAN_WINDOW")
 
     def test_compute_scan_upper_bound_caps_at_window_cap(self):
-        # Anything that scales beyond the default 500-message ceiling
-        # must clamp to the window cap.
-        self.assertEqual(compute_scan_upper_bound(365), 250)
-        self.assertEqual(compute_scan_upper_bound(1000), 250)
+        # Anything that scales beyond the default 50-message window cap
+        # must clamp to the window cap (AGENTIC-988 hard-ceiling retune).
+        self.assertEqual(compute_scan_upper_bound(365), 50)
+        self.assertEqual(compute_scan_upper_bound(1000), 50)
 
     def test_compute_scan_upper_bound_uses_base_cap_for_tiny_windows(self):
-        self.assertEqual(compute_scan_upper_bound(0), 100)
-        self.assertEqual(compute_scan_upper_bound(0.5), 112)
+        self.assertEqual(compute_scan_upper_bound(0), 40)
+        self.assertEqual(compute_scan_upper_bound(0.5), 41)
 
     def test_compute_scan_upper_bound_respects_custom_caps(self):
         result = compute_scan_upper_bound(7, base_cap=100, window_cap=300)
-        # base_cap + (7 * 25) = 275 (below custom window cap).
-        self.assertEqual(result, 275)
+        # base_cap + (7 * 3) = 121 (days_scale not overridden, so it picks up
+        # the new SEARCH_DAYS_SCALE default of 3; below custom window cap).
+        self.assertEqual(result, 121)
 
     def test_build_whose_id_list_format(self):
         self.assertEqual(
@@ -279,8 +284,11 @@ def test_each_retired_tool_returns_structured_unbounded_error(label, module_path
     )
     assert payload.get("error") is True, f"{label} returned {payload!r}; expected error=True flag."
     remediation = payload.get("remediation") or {}
-    assert remediation.get("fallback_tool") == "full_inbox_export", (
-        f"{label} remediation must name full_inbox_export as the audited fallback. Got: {remediation!r}"
+    assert "full_inbox_export" not in str(remediation), (
+        f"{label} remediation must NOT point at the disabled full_inbox_export tool. Got: {remediation!r}"
+    )
+    assert remediation.get("preferred"), (
+        f"{label} remediation must carry an actionable bounded `preferred` fix. Got: {remediation!r}"
     )
 
 
@@ -299,7 +307,8 @@ def test_get_email_thread_returns_structured_unbounded_error():
     assert payload.get("code") == "UNBOUNDED_SCAN_REQUIRED"
     assert payload.get("error") is True
     remediation = payload.get("remediation") or {}
-    assert remediation.get("fallback_tool") == "full_inbox_export"
+    assert "full_inbox_export" not in str(remediation)
+    assert remediation.get("preferred")
 
 
 # ---------------------------------------------------------------------------

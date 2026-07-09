@@ -334,11 +334,11 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `get_inbox_overview` | Dashboard with unread counts, folders, and recent emails |
-| `list_inbox_emails` | List emails (defaults to 50 most recent). Async parallel per-account dispatch |
+| `list_inbox_emails` | List emails (defaults to 50 most recent). Multi-account calls dispatch sequentially, one account at a time (Mail calls are serialized); scans at most 50 messages per call |
 | `get_mailbox_unread_counts` | Unread counts per mailbox or per-account summary |
 | `list_accounts` | List all configured Mail accounts |
 | `list_account_addresses` | List sender aliases configured for a Mail account |
-| `search_emails` | Unified search — subject, sender, body, dates, attachments. Defaults to last 48h and the default account |
+| `search_emails` | Unified search: subject, sender, body, dates, attachments. Defaults to last 48h and the default account; scans at most 50 messages per call |
 | `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results |
 | `get_email_by_ids` | Fetch multiple exact emails by reviewed Apple Mail message ids, chunked internally |
 | `get_email_thread` | Conversation thread view across Inbox + Sent; prefer `message_id` from search/list results |
@@ -360,8 +360,8 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `reply_to_email` | Native Mail reply or reply-all draft. Default `native_format=True` is the only supported path: it composes in Mail's reply window (keeps the rich quote bar + logo signature) and types `reply_body` above the quote, which needs window focus + Accessibility permission, else returns `REPLY_WINDOW_FOCUS_FAILED` (no draft saved). `native_format=False` returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed (deliberate headless/CI only, never set by agents). Verifies exact Drafts id first with bounded fallback; returns verification status, verified draft id, attachment status, and signature status for draft/open modes |
 | `forward_email` | Forward by `message_id` (required — discover via `search_emails` or `list_inbox_emails`). `subject_keyword` is schema-compat only and returns `TARGET_SELECTOR_DEPRECATED`. Optional message, CC/BCC; default saves to Drafts |
 | `manage_drafts` | Create, list, send, open, and delete drafts; `action=list` returns Drafts ids; send/open/delete require exact `draft_id` (`draft_subject` is schema-compat only and returns `TARGET_SELECTOR_DEPRECATED`). Standalone `action=create` refuses reply-like drafts unless `standalone_confirmed=True` (`send` blocked in `--read-only` and `--draft-safe`) |
-| `verify_draft` | Verify one exact Drafts message id; returns JSON snapshot for recipients, body sentinel, attachments, signature state, quoted-original status, and thread headers |
-| `verify_drafts` | Verify multiple exact Drafts message ids and merge the per-draft JSON snapshots |
+| `verify_draft` | Verify one exact Drafts message id; returns JSON snapshot for recipients, body sentinel, attachments, signature state, quoted-original status, and thread headers. Pass `resolve_source=True` to map a reply draft back to its source Inbox message via a bounded `internet_message_id` lookup (adds a `source` block; widen `resolve_recent_days` from its 30-day default on a miss) |
+| `verify_drafts` | Verify multiple exact Drafts message ids and merge the per-draft JSON snapshots; accepts the same `resolve_source` / `resolve_recent_days` options as `verify_draft` |
 | `create_rich_email_draft` | Build a standalone multipart HTML `.eml` draft and save it to Drafts by default; refuses reply-like drafts unless `standalone_confirmed=True` |
 
 ### Attachments
@@ -380,10 +380,10 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Analytics & Export
 | Tool | Description |
 |------|-------------|
-| `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 75 messages, longer windows 20 × 250 |
-| `export_emails` | Export TXT/HTML by exact `message_ids`, single `message_id`, bounded sender/date filters, correspondent history, threads, or paged mailbox slices |
+| `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows fan across 10 mailboxes, longer windows across 20, each capped at 50 messages |
+| `export_emails` | Export TXT/HTML by exact `message_ids`, single `message_id`, bounded sender/date filters, correspondent history, threads, or paged mailbox slices. Hard-capped at 50 emails per call (`max_emails` and `message_ids` length); page with `offset` or narrow with filters for more |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
-| `full_inbox_export` | Audited full-inbox walk; only tool that scans every message. Slow (minutes on 24K mailboxes). Named in `UNBOUNDED_SCAN_REQUIRED` remediation as the legitimate fallback. |
+| `full_inbox_export` | Disabled: returns a structured `UNBOUNDED_EXPORT_DISABLED` error instead of walking the mailbox. Stays registered for compatibility; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`) instead. |
 
 ## Configuration
 
@@ -494,10 +494,12 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 | Default | Tools | Override |
 |---------|-------|----------|
 | Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week); routine tools reject unbounded scans |
-| 50 emails max | `list_inbox_emails`, `list_email_attachments` | Pass `max_emails` / `max_results` |
+| 50 emails max | `list_email_attachments` | Pass `max_results` |
+| **50-message hard scan ceiling** | `search_emails`, `list_inbox_emails` | None: every call scans at most 50 messages regardless of `limit` / `max_emails` / `recent_days` / window. Page across multiple calls or narrow the window (`recent_days`, `date_from`) to see more |
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>` |
-| Unbounded scans refused | All routine scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is a separate audited export tool, not a normal search fallback |
+| **Mail calls serialized** | Every Apple Mail tool | None: all AppleScript/Mail calls run through one process-wide lock. Call one Apple Mail tool at a time and wait for its result; parallel or concurrent Mail tool calls queue behind each other and can time out. |
+| Unbounded scans refused | All routine scan/search tools (`recent_days=0` / `max_emails=0`) | Returns structured error `code: UNBOUNDED_SCAN_REQUIRED`; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`). `full_inbox_export` is disabled and is not a working fallback |
 | **ID-first mutations** | `move_email`, `update_email_status`, `manage_trash` | Pass `message_ids=[...]` from `search_emails`, `list_inbox_emails`, or `get_needs_response(output_format="json")` (fast, preferred). Date/bulk filter paths require `allow_filter_scan=True` or return `code: FILTER_SCAN_DISABLED`. `subject_keyword` and `sender` on action tools always return `TARGET_SELECTOR_DEPRECATED`, even with `allow_filter_scan=True`. |
 | **Gated filter scans** | `move_email`, `update_email_status`, `manage_trash` (date/bulk path only) | `allow_filter_scan=True` + `older_than_days` or `apply_to_all` (slow; timeout-prone on 24k+ inboxes). Subject/sender selectors never work on action tools. Filter paths still default to a 48h `recent_days` window. |
 | **Body scan gate** | `search_emails` | `body_text` requires `allow_body_scan=True` or returns `code: BODY_SCAN_DISABLED`. Prefer subject/sender/date filters; pair body scans with a tight date window. |
@@ -515,7 +517,7 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 | `move_email` | 50 | `max_moves` |
 | `update_email_status` | 10 | `max_updates` |
 | `manage_trash` | 5 | `max_deletes` |
-| `export_emails` | 25 for filtered/thread/correspondent, 100 for `entire_mailbox` | `max_emails` |
+| `export_emails` | 25 default for every scope, including `entire_mailbox`; hard-capped at 50 (both `max_emails` and `message_ids` list length are rejected above 50) | `max_emails` (up to 50); page with `offset` or narrow with filters for more |
 
 **Dry-run defaults:** `manage_trash` defaults to `dry_run=True` (safe preview — explicit override needed to act, especially for `action="delete_permanent"`). `move_email` and `update_email_status` default to `dry_run=False` (live) because their effects are reversible; pass `dry_run=True` to preview matches first.
 

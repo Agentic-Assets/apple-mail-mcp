@@ -52,7 +52,7 @@ async def search_emails(
     timeout: int | None = None,
     mailboxes: list[str] | None = None,
 ) -> str:
-    """Defaults to the last 48 hours and the configured default account. Pass `recent_days=7` for the past week; ``recent_days=0`` without ``date_from`` is rejected — use ``full_inbox_export`` for audited full-mailbox sweeps.
+    """Defaults to the last 48 hours and the configured default account. Pass `recent_days=7` for the past week; ``recent_days=0`` without ``date_from`` is rejected since full-mailbox scans are disabled.
 
     Unified search tool with JSON output, pagination, and real date filtering.
 
@@ -64,8 +64,9 @@ async def search_emails(
         - When `date_from` is None and `recent_days > 0`, an effective window
           of `now - recent_days` days is applied. Unbounded scans
           (``recent_days=0`` without ``date_from``) are refused with an
-          ``UNBOUNDED_SCAN_REQUIRED`` error — call ``full_inbox_export`` for
-          the audited escape hatch. An explicit ``date_from`` always wins.
+          ``UNBOUNDED_SCAN_REQUIRED`` error; full-mailbox scans are disabled,
+          so pass a bounded ``recent_days`` or ``date_from``. An explicit
+          ``date_from`` always wins.
         - When `account` is None and `all_accounts` is False, the tool falls
           back to the ``DEFAULT_MAIL_ACCOUNT`` env-configured account if one
           is set. Pass `all_accounts=True` to opt back into multi-account
@@ -118,14 +119,21 @@ async def search_emails(
             replied to (detected via Message-ID matching against Sent
             mailbox). Default False keeps backward-compatible behavior.
             When True, replied emails are removed before formatting, so
-            ``flag_replied`` has no visible effect.
+            ``flag_replied`` has no visible effect. Cost note: enabling
+            replied-detection adds a second AppleScript round-trip (a Sent
+            mailbox probe) and can roughly double worst-case wall time on
+            large or slow Exchange accounts. Leave False on first
+            exploratory calls.
         flag_replied: When True (opt-in; default False) AND
-            ``exclude_replied=False``, annotate already-replied emails —
+            ``exclude_replied=False``, annotate already-replied emails,
             text mode prefixes the subject with ``[REPLIED] `` and JSON
             mode adds an ``already_replied: true`` field. Default False
             keeps the per-call cost low (no extra Sent-mailbox AppleScript
             probe); set True for safer agent workflows. Only matters when
-            ``exclude_replied=False``.
+            ``exclude_replied=False``. Cost note: enabling replied-detection
+            adds a second AppleScript round-trip and can roughly double
+            worst-case wall time on large or slow Exchange accounts. Leave
+            False on first exploratory calls.
         timeout: Optional per-account AppleScript timeout in seconds. Defaults
             to 180s. Raise this for known-slow accounts (e.g. large Exchange
             inboxes) when the default times out.
@@ -170,11 +178,7 @@ async def search_emails(
             ),
             remediation={
                 "preferred": "Pass recent_days=7 or date_from='YYYY-MM-DD'",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {
-                    "account": account or "<your account>",
-                    "filter_subject": subject_keyword or (subject_keywords[0] if subject_keywords else None),
-                },
+                "note": "Full-mailbox scans are disabled; bound this call.",
             },
         )
         # Always emit the structured JSON envelope (with remediation) for

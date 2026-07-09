@@ -69,7 +69,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 | Share thread outward | `forward_email` | Default `mode="draft"`; pass `message_id=...` from search/list. **Discovery-only:** use `subject_keyword` on `search_emails` only, never on `forward_email` (`TARGET_SELECTOR_DEPRECATED`) |
 | Marketing / HTML layout | `create_rich_email_draft` | Standalone only; produces multipart `.eml`, saves to Drafts by default; use `review_in_mail=True` for saved-open review; no Mail signature params. Use plain compose tools when a named signature is required |
 | Low-level draft listing / CRUD | `manage_drafts` | Standalone `action="create"` only; respect cap defaults; never batch-delete without confirming folder scope. `action="list"` returns each draft's Id, To, and a body snippet (triage without re-fetching), reads **newest drafts first**, accepts `limit=...`, and accepts `subject_contains="..."` (case-insensitive "find the draft I just made"). `action="find"` locates reply drafts by bounded In-Reply-To / References header scan. For `send`, `open`, or `delete`, prefer exact `draft_id` from the list output over `draft_subject` |
-| Exact draft readiness check | `verify_draft` / `verify_drafts` | Read-only JSON snapshot for one or more Drafts ids: recipients, body sentinel, attachments, signature state, quoted original, and thread headers |
+| Exact draft readiness check | `verify_draft` / `verify_drafts` | Read-only JSON snapshot for one or more Drafts ids: recipients, body sentinel, attachments, signature state, quoted original, and thread headers. Pass `resolve_source=True` to also resolve the draft's `In-Reply-To` header back to the source Inbox message's `message_id`, subject, and sender (bounded, see "Missed-replies queue" below); defaults to `False` (no behavior change) |
 | Remove orphaned blank drafts | `manage_drafts(action="cleanup_empty")` | Deletes drafts with blank subject AND empty body; `dry_run=True` by default (preview first), capped by `max_deletes` (default 20). Confirm the preview count with the user before `dry_run=False` |
 
 ## Safety And Compliance
@@ -127,6 +127,16 @@ For machine-readable reply draft metadata, call `reply_to_email(..., output_form
 `body_html` on `reply_to_email` is accepted for compatibility but ignored; use
 `create_rich_email_draft` / `compose_email` only for rich HTML on a confirmed
 standalone message.
+
+## Missed-replies queue (bounded, no Inbox-wide search)
+
+Use this workflow to find drafts that answer a message but were never sent, without an unbounded Inbox scan. It is a three-call, bounded path:
+
+1. `manage_drafts(action="list", limit=25)`: a bounded, Drafts-only slice (newest first). Read each returned draft's `Id` (its `draft_id`) and body snippet to shortlist candidates; do not scan beyond `limit`.
+2. `verify_draft(draft_id=..., resolve_source=True)`: an exact-id snapshot for one shortlisted draft. It returns the usual recipients, body preview, attachments, signature state, and `threading.in_reply_to`, plus a new `source` object when `resolve_source=True`. `source` resolves the draft's `In-Reply-To` header back to the SOURCE Inbox message via one bounded `search_emails(internet_message_id=...)` call under the hood, so you get the original message's numeric `message_id`, `subject`, and `sender` in the same call, instead of a second manual lookup. `resolve_source` defaults to `False`, so existing callers see no behavior change unless they opt in.
+3. If `source.resolved` is `false`, do not assume the source does not exist. Check `source.reason`: `no_in_reply_to_header` means this draft is not a reply (nothing to resolve); `not_found_in_window` means the source is likely older than the default 30-day lookback. Either widen the window a little (`resolve_recent_days=90`, still bounded, still a single search call, never unbounded) or fall back to `manage_drafts(action="find", in_reply_to=<threading.in_reply_to>)`, which scans the bounded Drafts window by header instead of the Inbox.
+
+**Never call `search_emails` directly to "find the original message" for a draft.** `resolve_source=True` already does that lookup the bounded way (`account` set, `mailbox="INBOX"`, capped `recent_days`, `max_results=1`); a manual `search_emails` call without `account` plus a bounded `recent_days` risks an unbounded, slow scan on large mailboxes and duplicates work `verify_draft` already did. Call Mail tools one at a time in this sequence; the server serializes Mail access, so do not fan out `manage_drafts` / `verify_draft` calls concurrently.
 
 ## Related Skills
 

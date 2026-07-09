@@ -179,7 +179,12 @@ apple-mail -o json inbox-dashboard --raw '{
   "output_format":"json"
 }'
 
-# Full inbox metadata export (expensive — bounded by max_emails).
+# full_inbox_export is disabled: expect an immediate structured
+# UNBOUNDED_EXPORT_DISABLED refusal (no AppleScript runs; max_emails/batch_size
+# are accepted for schema compatibility but ignored). Useful for confirming the
+# refusal contract, not for exporting anything. For a real metadata/export
+# pass, page with export_emails(scope="entire_mailbox", max_emails<=50, offset=N)
+# or list_inbox_emails(max_emails<=50) instead.
 apple-mail -o json full-inbox-export --raw '{
   "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
   "mailbox":"INBOX",

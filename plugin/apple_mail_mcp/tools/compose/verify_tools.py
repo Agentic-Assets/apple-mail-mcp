@@ -1,5 +1,6 @@
 """``verify_draft`` / ``verify_drafts`` read-only tools for confirming saved draft contents."""
 
+import asyncio
 import json
 from typing import Any
 
@@ -22,10 +23,56 @@ from apple_mail_mcp.tools.compose.helpers import (
     _resolve_account,
 )
 from apple_mail_mcp.tools.draft_verification import (
+    _build_source_resolution,
     _build_verify_draft_payload,
     _parse_expected_attachments,
     _split_csv_addresses,
 )
+from apple_mail_mcp.tools.search.emails import search_emails
+
+
+def _resolve_source_message(
+    *,
+    account: str,
+    in_reply_to: str,
+    resolve_recent_days: float,
+    timeout: int | None,
+) -> dict[str, Any]:
+    """Resolve a draft's In-Reply-To header to the source Inbox message.
+
+    Reuses the existing bounded ``search_emails`` path (no new AppleScript):
+    a single ``internet_message_id`` lookup capped to ``max_results=1``
+    within ``recent_days=resolve_recent_days``. Because ``search_emails`` is
+    itself hard-bounded to a small per-call scan, this is best-effort — a
+    genuine source message outside that window is honestly reported as
+    ``not_found_in_window`` rather than fabricated. Never loops or expands
+    the window automatically; callers that need a wider search should retry
+    with a larger ``resolve_recent_days`` explicitly.
+    """
+    if not in_reply_to.strip():
+        return _build_source_resolution(in_reply_to, resolve_recent_days, None)
+
+    matched_record: dict[str, Any] | None = None
+    try:
+        raw = asyncio.run(
+            search_emails(
+                account=account,
+                mailbox="INBOX",
+                internet_message_id=in_reply_to,
+                recent_days=resolve_recent_days,
+                output_format="json",
+                max_results=1,
+                timeout=timeout,
+            )
+        )
+        parsed: dict[str, Any] = json.loads(raw)
+        items = parsed.get("items") or []
+        if items:
+            matched_record = items[0]
+    except Exception:  # noqa: BLE001 - resolve_source is best-effort; never fail verify_draft's primary payload
+        matched_record = None
+
+    return _build_source_resolution(in_reply_to, resolve_recent_days, matched_record)
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -40,6 +87,8 @@ def verify_draft(
     expected_attachments: str | list[str] | None = None,
     expected_signature: bool | None = None,
     require_quoted_original: bool | None = None,
+    resolve_source: bool = False,
+    resolve_recent_days: float = 30.0,
     timeout: int | None = None,
 ) -> str:
     """
@@ -49,6 +98,21 @@ def verify_draft(
     subject, body preview, attachment names and sizes, threading headers, quoted
     original detection, and optional expectation checks for agent-safe draft
     readiness decisions.
+
+    Args:
+        resolve_source: When True and the draft has a non-empty In-Reply-To
+            header, resolve that header back to the SOURCE Inbox message's
+            numeric id, subject, sender, and received date via one bounded
+            ``search_emails(internet_message_id=...)`` call (no new
+            AppleScript). Adds a ``source`` key to the JSON payload. Default
+            False preserves the exact prior output (no ``source`` key at all).
+        resolve_recent_days: Search window (days) used for ``resolve_source``
+            resolution. Best-effort only: this does not loop or expand the
+            window automatically, so a source older than this window is
+            honestly reported as ``source.resolved=false,
+            reason="not_found_in_window"`` rather than fabricated. Widen this
+            value or fall back to ``manage_drafts(action="find", ...)`` when
+            that happens. Ignored when ``resolve_source`` is False.
     """
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
@@ -182,6 +246,16 @@ def verify_draft(
         expected_attachment_names=expected_attachment_names,
         expected_signature=expected_signature,
         require_quoted_original=require_quoted_original,
+        source=(
+            _resolve_source_message(
+                account=account,
+                in_reply_to=parts[6],
+                resolve_recent_days=resolve_recent_days,
+                timeout=timeout,
+            )
+            if resolve_source
+            else None
+        ),
     )
     return json.dumps(payload)
 
@@ -198,6 +272,8 @@ def verify_drafts(
     expected_attachments: str | list[str] | None = None,
     expected_signature: bool | None = None,
     require_quoted_original: bool | None = None,
+    resolve_source: bool = False,
+    resolve_recent_days: float = 30.0,
     timeout: int | None = None,
 ) -> str:
     """
@@ -205,7 +281,11 @@ def verify_drafts(
 
     This batches calls to the exact Drafts verifier without using subject or
     keyword lookup. The per-draft payload is the same JSON object returned by
-    ``verify_draft``.
+    ``verify_draft``, including the optional ``source`` key when
+    ``resolve_source=True`` (see ``verify_draft`` for the resolution
+    semantics and the honest ``not_found_in_window`` / ``no_in_reply_to_header``
+    reasons). Default ``resolve_source=False`` preserves the exact prior
+    per-draft payload shape (no ``source`` key at all).
     """
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:
@@ -231,6 +311,8 @@ def verify_drafts(
                 expected_attachments=expected_attachments,
                 expected_signature=expected_signature,
                 require_quoted_original=require_quoted_original,
+                resolve_source=resolve_source,
+                resolve_recent_days=resolve_recent_days,
                 timeout=timeout,
             )
             try:

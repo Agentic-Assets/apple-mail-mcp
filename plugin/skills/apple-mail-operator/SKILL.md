@@ -15,9 +15,9 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). When finding 
 
 See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large **Exchange** accounts, also read [`exchange-account-patterns.md`](references/exchange-account-patterns.md).
 
-### When to reach for `full_inbox_export`
+### `full_inbox_export` is disabled
 
-`full_inbox_export` is the only tool that walks the entire inbox. Use it for the rare full-inbox case (annual cleanup, full audit, compliance archive), and warn the user it is slow (minutes on a 24k inbox). For routine discovery, always pass a bounded `recent_days` / `max_emails` instead.
+`full_inbox_export` returns a structured `UNBOUNDED_EXPORT_DISABLED` error and runs no AppleScript; it is never a usable full-inbox walk. For the rare full-inbox case (annual cleanup, full audit, compliance archive), page bounded calls instead: `export_emails(scope="entire_mailbox", mailbox=..., max_emails=50, offset=N)` advancing `offset` by 50 each call, or repeated `list_inbox_emails(max_emails=50)` / `search_emails(recent_days=..., limit=50, offset=N)` slices. For routine discovery, always pass a bounded `recent_days` / `max_emails` instead.
 
 ## Before drafting
 

@@ -5,6 +5,52 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.9.3 - 2026-07-09
+
+Safe-by-design bounded mail access. Every scan, search, and export is now hard
+capped so a single tool call can never trigger a Mail.app cold-cache read storm
+or 98% CPU spin on a large Exchange or Gmail inbox (tool count unchanged at 31).
+
+### Changed
+
+- **Hard scan ceilings on `search_emails` and `list_inbox_emails`.** A single
+  call now scans at most 50 messages regardless of `limit`, `recent_days`, or
+  window size. The underlying `SCAN_BOUNDS` were lowered across the board
+  (base, window, per-day scaling, and body-search auto caps) so large inboxes
+  no longer force thousands of uncached message reads per call.
+- **`get_statistics` per-mailbox reads are hard capped** at the same 50 message
+  ceiling for both short and long windows. Longer windows fan across more
+  mailboxes instead of reading deeper into any one of them.
+- **`export_emails` is bounded and cannot exceed 50 emails per call.** Requests
+  above the cap (via `max_emails` or an over-long `message_ids` list) are
+  rejected before Mail.app runs. `entire_mailbox` exports a paged slice
+  (default 25) rather than listing the whole mailbox.
+- **`full_inbox_export` is disabled.** It now returns a structured
+  `UNBOUNDED_EXPORT_DISABLED` error that redirects to the bounded
+  `export_emails`, `list_inbox_emails`, and `search_emails` tools. The tool
+  stays registered so existing configs keep loading.
+- **AppleScript calls are serialized through one process-wide lock.** Parallel
+  (concurrent) Mail tool calls now queue instead of contending for Mail.app,
+  and internal fan-out that previously issued parallel Mail queries runs
+  sequentially. Server instructions and the bundled large-inbox skill rules
+  advise agents to call one Mail tool at a time.
+- **Missed-replies workflow on `verify_draft` and `verify_drafts`.** A new
+  opt-in `resolve_source` (with `resolve_recent_days`) maps a reply draft back
+  to its source inbox message through a bounded `internet_message_id` lookup and
+  returns a `source` block. Defaults preserve the prior output shape. New
+  bounded "missed-replies queue" guidance in the email-drafting skill.
+
+### Fixed
+
+- **Thread and correspondent exports no longer open the virtual "All Mail"
+  container** that Gmail accounts expose (it cannot be opened and caused export
+  failures). They now scan real mailboxes (`INBOX` plus Sent variants).
+- **`single_email` export creates its destination directory** before writing.
+- **Draft age now reads `date received`** (always populated) instead of
+  `date sent` (unset for never-sent drafts, which previously showed as unset).
+- **`get_statistics` window cap inversion** where a longer window could apply a
+  smaller per-mailbox cap than a shorter one.
+
 ## 3.9.2 - 2026-07-09
 
 ### Changed

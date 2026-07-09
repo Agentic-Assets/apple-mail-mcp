@@ -31,6 +31,9 @@ def _build_inbox_collection_block(max_emails: int, read_filter: str) -> str:
             max(max_emails * 10, SCAN_BOUNDS["INBOX_DEFAULT_CAP"] // 2),
             SCAN_BOUNDS["INBOX_MAX_CAP"],
         )
+        # Hard ceiling: never bind more than INBOX_HARD_CEILING messages via
+        # `messages 1 thru scan_cap`, regardless of how max_emails*10 scaled.
+        scan_cap = min(scan_cap, SCAN_BOUNDS["INBOX_HARD_CEILING"])
         return build_bounded_filtered_scan(
             mailbox_var="inboxMailbox",
             scan_cap=scan_cap,
@@ -38,7 +41,8 @@ def _build_inbox_collection_block(max_emails: int, read_filter: str) -> str:
             condition_expr=condition,
             output_var="inboxMessages",
         )
-    bounded = build_bounded_message_scan("inboxMailbox", max_emails)
+    scan_cap = min(max_emails, SCAN_BOUNDS["INBOX_HARD_CEILING"])
+    bounded = build_bounded_message_scan("inboxMailbox", scan_cap)
     return f"{bounded}\n            set inboxMessages to candidateMessages"
 
 

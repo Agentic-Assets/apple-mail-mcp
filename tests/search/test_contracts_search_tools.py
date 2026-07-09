@@ -349,7 +349,8 @@ class GetEmailThreadContractTests(unittest.TestCase):
         self.assertEqual(parsed["items"][0]["references"], "<root@example.com>")
 
     def test_unbounded_scan_json_contains_remediation(self):
-        """UNBOUNDED_SCAN_REQUIRED JSON must include remediation and fallback_tool."""
+        """UNBOUNDED_SCAN_REQUIRED JSON must include remediation with a bounded
+        `preferred` fix and no dead-end pointer at the disabled full_inbox_export tool."""
         result = search_tools.get_email_thread(
             account="Work",
             subject_keyword="test",
@@ -359,7 +360,8 @@ class GetEmailThreadContractTests(unittest.TestCase):
         self.assertIn("code", parsed)
         self.assertEqual(parsed["code"], "UNBOUNDED_SCAN_REQUIRED")
         self.assertIn("remediation", parsed)
-        self.assertIn("fallback_tool", parsed["remediation"])
+        self.assertNotIn("full_inbox_export", str(parsed["remediation"]))
+        self.assertTrue(parsed["remediation"].get("preferred"))
 
 
 if __name__ == "__main__":

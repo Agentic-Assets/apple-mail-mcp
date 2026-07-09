@@ -12,7 +12,7 @@ The anti-patterns below caused real production timeouts on a 24K-message Exchang
 
 ### ScanWindow capability token (v3.2.0)
 
-[`bounded_inbox_scan()`](../plugin/apple_mail_mcp/bounded_scan.py) is the **sole legitimate issuer** of `ScanWindow` capability tokens. Tools must never construct `ScanWindow` directly — call `bounded_inbox_scan()` or one of the safe builders (`build_bounded_message_scan`, `build_whose_id_list`). `AppleScriptBackend._check_window` rejects forged or out-of-policy windows with structured error `code: INVALID_SCAN_WINDOW`. This is what enforces the unbounded-scan refusal (`code: UNBOUNDED_SCAN_REQUIRED`) and the `full_inbox_export` audit boundary at the backend layer, not just inside tool wrappers. Contract suite: `test_bounded_scan_contract`, `test_no_unbounded_whose`, `test_full_inbox_export`.
+[`bounded_inbox_scan()`](../plugin/apple_mail_mcp/bounded_scan.py) is the **sole legitimate issuer** of `ScanWindow` capability tokens. Tools must never construct `ScanWindow` directly: call `bounded_inbox_scan()` or one of the safe builders (`build_bounded_message_scan`, `build_whose_id_list`). `AppleScriptBackend._check_window` rejects forged or out-of-policy windows with structured error `code: INVALID_SCAN_WINDOW`. This is what enforces the unbounded-scan refusal (`code: UNBOUNDED_SCAN_REQUIRED`) at the backend layer, not just inside tool wrappers. `full_inbox_export` itself is disabled (`code: UNBOUNDED_EXPORT_DISABLED`, no AppleScript runs); it is no longer a working escape hatch for unbounded scans. Contract suite: `test_bounded_scan_contract`, `test_no_unbounded_whose`, `test_full_inbox_export`.
 
 ### ID-first mutations and scan opt-in gates (v3.7.0)
 
@@ -59,22 +59,24 @@ All bounded AppleScript slices read caps from [`constants.py`](../plugin/apple_m
 
 | Key | Value | Used by |
 |-----|-------|---------|
-| `SEARCH_BASE_CAP` | 100 | `search_emails` floor via `compute_scan_upper_bound` |
-| `SEARCH_WINDOW_CAP` | 250 | `search_emails` ceiling; `get_statistics` long windows (20 mailboxes) |
-| `SEARCH_DAYS_SCALE` | 25 | Per-day scaling in `compute_scan_upper_bound` |
-| `BODY_SEARCH_AUTO_CAP` | 75 | `search_emails` body scans without explicit `date_from` |
-| `INBOX_DEFAULT_CAP` / `INBOX_MAX_CAP` | 100 / 500 | `list_inbox_emails` unread/read filter slice |
+| `SEARCH_BASE_CAP` | 40 | `search_emails` floor via `compute_scan_upper_bound` |
+| `SEARCH_WINDOW_CAP` | 50 | `search_emails` ceiling before the hard ceiling below |
+| `SEARCH_DAYS_SCALE` | 3 | Per-day scaling in `compute_scan_upper_bound` |
+| `BODY_SEARCH_AUTO_CAP` | 25 | `search_emails` body scans without explicit `date_from` |
+| `SEARCH_HARD_CEILING` | 50 | Hard ceiling (2026-07, AGENTIC-988): `search_emails` never binds more than this many messages per call, regardless of how the caps above scale |
+| `INBOX_DEFAULT_CAP` / `INBOX_MAX_CAP` | 100 / 50 | `list_inbox_emails` unread/read filter slice |
+| `INBOX_HARD_CEILING` | 50 | Hard ceiling (2026-07, AGENTIC-988): `list_inbox_emails` never binds more than this many messages per call, regardless of `max_emails`; also the per-mailbox cap for `get_statistics` |
 | `INBOX_SHORT` / `INBOX_LONG` | 25 / 75 | `smart_inbox` per-mailbox ceilings |
 | `TRASH_SCAN` | 100 | Trash listing branches |
 | `DRAFT_LOOKUP` / `MESSAGE_LOOKUP` | 75 | Compose draft/reply lookup tails |
 | `MAX_MAILBOXES_PER_SEARCH` | 20 | Multi-mailbox `search_emails` fan-out |
 | `MAX_MAILBOXES_PER_SEARCH_ALL` | 10 | `search_emails(mailbox="All")` cap |
 
-`get_statistics`: `days_back <= 7` → 10 mailboxes × `INBOX_LONG` (75); else 20 × `SEARCH_WINDOW_CAP` (250).
+`get_statistics`: `days_back <= 7` → 10 mailboxes; else 20 mailboxes. Both branches cap each mailbox read at `INBOX_HARD_CEILING` (50): longer windows fan across more mailboxes rather than reading deeper into each one.
 
 ### Performance defaults
 
-- **Recent-window default**: any tool that searches or lists takes `recent_days: float = 2.0` (48h). Tools must refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED` plus a `remediation.fallback_tool` field. The only tool that walks the entire inbox is `full_inbox_export` (slow; documented cost). Routine tests and skills must pass bounded `recent_days` / `max_emails`.
+- **Recent-window default**: any tool that searches or lists takes `recent_days: float = 2.0` (48h). Tools must refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED` plus a `remediation.fallback_tool` field. `full_inbox_export` is disabled (`code: UNBOUNDED_EXPORT_DISABLED`, no AppleScript runs) and is not a real fallback; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`) instead. Routine tests and skills must pass bounded `recent_days` / `max_emails`.
 - **AppleScript-side caps, not Python-side slicing.** Avoid broad `every message of mailbox whose …` scans on remote mailboxes; Mail may materialize/fetch before filtering. Prefer direct newest-first slices (`messages 1 thru N of mailbox`) and filter inside the bounded loop.
 - **`ignoring case … end ignoring`** for case-insensitive comparisons. Never call out to `do shell script "echo … | tr '[:upper:]' '[:lower:]'"` per message — the deprecated `LOWERCASE_HANDLER` was removed in 3.1.5 for that exact reason.
 - **Push date filters unconditionally** into the `whose` clause when the caller provides `date_from`/`date_to`. Don't gate them on the presence of other filters.
@@ -92,7 +94,7 @@ The patterns below are catalogued failure modes from real production crashes. **
 | `build_whose_id_list(ids)` with `len(ids) > MAX_WHOSE_IDS` (50). | Mail's AppleScript parser rejects or hangs on `id is X or id is Y or ...` predicates beyond ~200–500 OR-terms (varies by macOS); the helper raises `ToolError(code="WHOSE_ID_LIST_TOO_LARGE")` to prevent the crash. | `iter_id_chunks(ids)` plus a Python loop, one `osascript` call per chunk. |
 | Building a pipe-delimited row (`messageSubject & "&#124;&#124;&#124;" & messageSender & ...`) without first running `sanitize_pipe_delimited_field` on each user-controlled field. | A subject legitimately containing the pipe trio shifts every parser field right; the corrupted `message_id` slot can then be passed to `manage_trash(action="delete_permanent")` and **delete the wrong message** — silent data loss. | `core.sanitize_pipe_delimited_field("messageSubject")` (and `"messageSender"`) before the row emit. The Python-side parser additionally validates `message_id.isdigit()` as a belt-and-suspenders backstop. |
 | `do shell script "echo X \| tr '[:upper:]' '[:lower:]'"` per message. | Hundreds of subprocess spawns per scan; killed the 3.1.4 search path. | `ignoring case … end ignoring` AppleScript blocks. |
-| Tool kwarg `allow_full_scan`. | Retired in v3.2.0 in favor of structured `UNBOUNDED_SCAN_REQUIRED` errors with `remediation.fallback_tool = "full_inbox_export"`. | Refuse with a structured error and point at `full_inbox_export`. |
+| Tool kwarg `allow_full_scan`. | Retired in v3.2.0 in favor of structured `UNBOUNDED_SCAN_REQUIRED` errors. | Refuse with a structured error; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`). Do not point callers at `full_inbox_export`, which is disabled. |
 
 The lint test `tests/core/test_no_unbounded_whose.py` enforces the first four rules via source regex (with an empty `KNOWN_DANGEROUS_WHOSE` allowlist — add to it only with a tracking note and a follow-up PR planned). The builder-output contract `tests/core/test_bounded_scan_contract.py` asserts that the safe helpers emit the in-loop pattern, not the unsafe one. The Gmail-crash regression suite `tests/inbox/test_gmail_unread_crash_regression.py` simulates Mail's rejection to confirm the fix end-to-end.
 
@@ -103,9 +105,10 @@ The lint test `tests/core/test_no_unbounded_whose.py` enforces the first four ru
 
 ### Async + per-account isolation
 
-- Tools that fan out across accounts should be `async def` and dispatch each account via `asyncio.to_thread(run_applescript, …)` + `asyncio.gather(..., return_exceptions=True)`. Wall time ≈ slowest single account, not sum.
+- Tools that fan out across accounts should be `async def` and dispatch each account via `asyncio.to_thread(run_applescript, …)`, one account at a time, in a plain loop (not `asyncio.gather`). Mail's AppleScript bridge is serialized behind a single process-wide lock (`core/applescript.py`, `_MAIL_LOCK`), so concurrent dispatch only adds thread churn and does not run accounts in parallel. Wall time is the sum across accounts, not the slowest single account.
 - Pair with per-account `AppleScriptTimeout` catch; append failing accounts to an `errors: list[str]` field and include structured error details when a tool can distinguish timeout from another Mail/App failure. Partial results > total failure.
 - Single-account tools (`compose_email`, `move_email`, `manage_drafts`, `get_top_senders`, etc.) stay sync.
+- **Never issue parallel/concurrent Mail tool calls from an agent.** Every `osascript` invocation queues behind `_MAIL_LOCK` (up to 300s before raising `AppleScriptTimeout`); calling multiple Apple Mail tools at once does not speed anything up and can time out. Call one Mail tool at a time and wait for its result.
 
 ### Timeout exposure
 

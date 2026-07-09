@@ -3067,6 +3067,176 @@ class ManageDraftsListTests(unittest.TestCase):
         self.assertEqual(calls[50], "51")
         self.assertEqual(calls[100], "101")
 
+    def test_verify_draft_default_omits_source_key_and_never_calls_search(self):
+        def fake_run(script, timeout=120):
+            return "FOUND|||Subject|||to@example.com|||||||||Body|||<source@example.com>|||<source@example.com>|||false|||false|||"
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_tools.search_emails") as mock_search,
+        ):
+            result = compose_tools.verify_draft(account="Work", draft_id="84053")
+
+        payload = json.loads(result)
+        self.assertTrue(payload["found"])
+        self.assertNotIn("source", payload)
+        mock_search.assert_not_called()
+
+    def test_verify_drafts_default_omits_source_key_for_every_item(self):
+        def fake_verify(**kwargs):
+            return json.dumps({"draft_id": kwargs["draft_id"], "found": True, "warnings": []})
+
+        with patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify) as mock_verify:
+            result = compose_tools.verify_drafts(account="Work", draft_ids=["101"])
+
+        payload = json.loads(result)
+        self.assertNotIn("source", payload["items"][0])
+        called_kwargs = mock_verify.call_args.kwargs
+        self.assertIs(called_kwargs["resolve_source"], False)
+        self.assertEqual(called_kwargs["resolve_recent_days"], 30.0)
+
+    def test_verify_draft_resolve_source_true_attaches_resolved_source(self):
+        search_calls = []
+
+        async def fake_search_emails(**kwargs):
+            search_calls.append(kwargs)
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "message_id": "9001",
+                            "subject": "Original Question",
+                            "sender": "Ann <ann@example.com>",
+                            "received_date": "2026-07-01 10:00:00",
+                            "mailbox": "INBOX",
+                        }
+                    ],
+                    "returned": 1,
+                }
+            )
+
+        def fake_run(script, timeout=120):
+            return (
+                "FOUND|||Re: Original Question|||ann@example.com|||||||||"
+                "Reply body|||<source123@example.com>|||<source123@example.com>|||false|||false|||"
+            )
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_tools.search_emails", new=fake_search_emails),
+        ):
+            result = compose_tools.verify_draft(
+                account="Work",
+                draft_id="84053",
+                resolve_source=True,
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(
+            payload["source"],
+            {
+                "resolved": True,
+                "message_id": "9001",
+                "subject": "Original Question",
+                "sender": "Ann <ann@example.com>",
+                "mailbox": "INBOX",
+                "received_at": "2026-07-01 10:00:00",
+                "resolved_within_days": 30.0,
+            },
+        )
+        self.assertEqual(len(search_calls), 1)
+        self.assertEqual(search_calls[0]["account"], "Work")
+        self.assertEqual(search_calls[0]["mailbox"], "INBOX")
+        self.assertEqual(search_calls[0]["internet_message_id"], "<source123@example.com>")
+        self.assertEqual(search_calls[0]["recent_days"], 30.0)
+        self.assertEqual(search_calls[0]["output_format"], "json")
+        self.assertEqual(search_calls[0]["max_results"], 1)
+
+    def test_verify_draft_resolve_source_true_reports_not_found_in_window(self):
+        async def fake_search_emails(**kwargs):
+            return json.dumps({"items": [], "returned": 0})
+
+        def fake_run(script, timeout=120):
+            return (
+                "FOUND|||Re: Old Thread|||someone@example.com|||||||||"
+                "Reply|||<old-source@example.com>|||<old-source@example.com>|||false|||false|||"
+            )
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_tools.search_emails", new=fake_search_emails),
+        ):
+            result = compose_tools.verify_draft(
+                account="Work",
+                draft_id="84054",
+                resolve_source=True,
+                resolve_recent_days=10.0,
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(
+            payload["source"],
+            {"resolved": False, "reason": "not_found_in_window", "resolved_within_days": 10.0},
+        )
+
+    def test_verify_draft_resolve_source_true_with_no_header_never_calls_search(self):
+        def fake_run(script, timeout=120):
+            return "FOUND|||Standalone Draft|||someone@example.com|||||||||Body|||||||||false|||false|||"
+
+        with (
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+            patch("apple_mail_mcp.tools.compose.verify_tools.search_emails") as mock_search,
+        ):
+            result = compose_tools.verify_draft(
+                account="Work",
+                draft_id="84055",
+                resolve_source=True,
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["source"], {"resolved": False, "reason": "no_in_reply_to_header"})
+        mock_search.assert_not_called()
+
+    def test_verify_drafts_resolve_source_true_propagates_to_each_draft(self):
+        calls = []
+
+        def fake_verify(**kwargs):
+            calls.append(kwargs)
+            return json.dumps(
+                {
+                    "draft_id": kwargs["draft_id"],
+                    "found": True,
+                    "warnings": [],
+                    "source": {"resolved": False, "reason": "no_in_reply_to_header"},
+                }
+            )
+
+        with patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify):
+            result = compose_tools.verify_drafts(
+                account="Work",
+                draft_ids=["101", "202"],
+                resolve_source=True,
+                resolve_recent_days=5.0,
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(all(item["source"]["resolved"] is False for item in payload["items"]))
+        self.assertTrue(all(call["resolve_source"] is True for call in calls))
+        self.assertTrue(all(call["resolve_recent_days"] == 5.0 for call in calls))
+
+    def test_manage_drafts_list_script_reads_date_received_not_date_sent(self):
+        script = compose_tools._build_manage_drafts_list_script(
+            safe_account="Work",
+            list_limit=25,
+            hide_empty=False,
+            subject_contains=None,
+        )
+
+        self.assertIn("date received of aDraft", script)
+        self.assertIn('set draftDate to "(unknown)"', script)
+        self.assertNotIn("date sent of aDraft", script)
+        self.assertNotIn('set draftDate to "(unsent)"', script)
+
     def test_list_uses_newest_first_slice(self):
         captured = []
 

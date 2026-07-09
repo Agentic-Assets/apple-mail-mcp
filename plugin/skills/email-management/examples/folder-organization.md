@@ -364,7 +364,7 @@ get_statistics(scope="account_overview", days_back=90)
 
 # 4. Clean up old emails
 #    - Export important mailboxes
-export_emails(scope="entire_mailbox", mailbox="Important Project", max_emails=100)
+export_emails(scope="entire_mailbox", mailbox="Important Project", max_emails=50)  # 50 is the per-call cap; page with offset for more
 #    - Delete old emails from cluttered folders
 ```
 
@@ -383,7 +383,7 @@ list_mailboxes(include_counts=True)
 #    - Flatten deep hierarchies
 
 # 4. Export archives
-export_emails(scope="entire_mailbox", mailbox="Archive", max_emails=100, format="txt")
+export_emails(scope="entire_mailbox", mailbox="Archive", max_emails=50, format="txt")  # 50 is the per-call cap; page with offset for more
 ```
 
 ## Common Organization Challenges
@@ -541,8 +541,10 @@ For short-term projects (2-4 weeks):
 preview = list_inbox_emails(max_emails=25, include_content=False, output_format="json")
 move_email(message_ids=[e["message_id"] for e in preview["emails"]], to_mailbox="Temp/ProjectName", max_moves=25)
 
-# When project completes, bulk archive (ID-first)
-preview = search_emails(mailbox="Temp/ProjectName", limit=100)
+# When project completes, bulk archive (ID-first; search_emails scans at
+# most 50 messages per call regardless of limit, so page with offset if the
+# folder holds more)
+preview = search_emails(mailbox="Temp/ProjectName", limit=50)
 ids = [e["message_id"] for e in preview["items"]]
 move_email(dry_run=True, message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)
 move_email(message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)

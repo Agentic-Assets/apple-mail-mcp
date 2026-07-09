@@ -39,9 +39,9 @@ class InboxToolTests(unittest.TestCase):
 
         payload = json.loads(result)
         self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
-        self.assertEqual(
-            payload["remediation"]["fallback_tool"], "full_inbox_export"
-        )
+        rem = payload["remediation"]
+        self.assertNotIn("full_inbox_export", str(rem))
+        self.assertTrue(rem.get("preferred"))
         mock_run.assert_not_called()
 
     def test_json_list_inbox_can_include_content_preview(self):

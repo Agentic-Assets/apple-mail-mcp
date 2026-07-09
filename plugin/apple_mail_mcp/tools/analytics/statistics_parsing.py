@@ -185,12 +185,15 @@ def _statistics_json_error(
 def _statistics_scan_caps(days_back: int) -> tuple[int, int]:
     """Return (max_mailboxes, max_messages_per_mailbox) for overview/sender scans.
 
-    Short windows use ``INBOX_LONG`` per mailbox; longer windows use
-    ``SEARCH_WINDOW_CAP``.
+    Per-mailbox reads are hard-capped at ``INBOX_HARD_CEILING`` so a single
+    statistics call never reads more than that many messages from any one
+    mailbox on a large Exchange or Gmail account. Longer windows fan across
+    more mailboxes rather than reading deeper into each one.
     """
+    per_mailbox = SCAN_BOUNDS["INBOX_HARD_CEILING"]
     if days_back > 0 and days_back <= 7:
-        return 10, SCAN_BOUNDS["INBOX_LONG"]
-    return 20, SCAN_BOUNDS["SEARCH_WINDOW_CAP"]
+        return 10, per_mailbox
+    return 20, per_mailbox
 
 
 def _build_account_overview_report(raw_overview: str, escaped_account: str) -> str:
@@ -273,9 +276,7 @@ def _build_account_overview_report(raw_overview: str, escaped_account: str) -> s
     lines_out.append("\n")
     lines_out.append("📁 MAILBOX DISTRIBUTION\n")
     lines_out.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-    for i, (mbox, cnt) in enumerate(sorted(mailbox_totals.items(), key=lambda x: -x[1])):
-        if i >= 5:
-            break
+    for mbox, cnt in sorted(mailbox_totals.items(), key=lambda x: -x[1])[:5]:
         if total_emails > 0:
             pct = round(cnt / total_emails * 100)
             lines_out.append(f"{mbox}: {cnt} ({pct}%)\n")

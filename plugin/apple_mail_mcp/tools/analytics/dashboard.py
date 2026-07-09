@@ -138,7 +138,7 @@ async def _get_recent_emails_structured_async(
     include_preview: bool = False,
     timeout: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch recent emails per account in parallel."""
+    """Fetch recent emails per account sequentially, off the event loop."""
     if account:
         accounts = [account]
     else:
@@ -157,10 +157,9 @@ async def _get_recent_emails_structured_async(
         except AppleScriptTimeout:
             return []
 
-    batches = await asyncio.gather(*(run_one(a) for a in accounts))
     combined: list[dict[str, Any]] = []
-    for batch in batches:
-        combined.extend(batch)
+    for account_name in accounts:
+        combined.extend(await run_one(account_name))
     return combined[:max_total]
 
 
@@ -211,20 +210,22 @@ async def inbox_dashboard(
     per_call_timeout = timeout if timeout is not None else 60
     selected_account = account or _server.DEFAULT_MAIL_ACCOUNT
 
-    unread_task = asyncio.to_thread(
+    # Sequenced (not gathered): Mail AppleScript is serialized behind a
+    # single-flight lock, so running these two probes concurrently would
+    # only make them queue behind each other rather than overlap.
+    accounts_data = await asyncio.to_thread(
         get_mailbox_unread_counts,
         account=selected_account,
         summary_only=True,
         timeout=per_call_timeout,
     )
-    recent_task = analytics._get_recent_emails_structured_async(
+    recent_emails = await analytics._get_recent_emails_structured_async(
         account=selected_account,
         max_total=max_total,
         max_per_account=max_per_account,
         include_preview=include_preview,
         timeout=per_call_timeout,
     )
-    accounts_data, recent_emails = await asyncio.gather(unread_task, recent_task)
 
     if output_format == "json":
         return {

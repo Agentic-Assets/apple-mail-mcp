@@ -29,7 +29,7 @@ search_emails(subject_keyword="...", has_attachments=true, recent_days=7, limit=
 
 Use the subject search above only as a degraded discovery path after confirming no exact id is available. Review the results and collect `message_id` before listing or saving attachments.
 
-For genuine full-inbox attachment audits (rare), escalate to `full_inbox_export` instead of unbounded `recent_days`.
+For true full-inbox attachment audits (rare), page bounded `search_emails(has_attachments=True, recent_days=..., limit=50, offset=N)` calls instead of unbounded `recent_days`; `full_inbox_export` is disabled (`UNBOUNDED_EXPORT_DISABLED`) and is not an audit path.
 Widen timeframe only after checking performance.
 
 ### 2. Inspect Attachments Cheaply

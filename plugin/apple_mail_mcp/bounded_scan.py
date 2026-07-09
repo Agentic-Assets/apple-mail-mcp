@@ -52,11 +52,10 @@ MAX_WHOSE_IDS = 50
 _ISSUER = "core.bounded_inbox_scan"
 
 
-def _unbounded_remediation(mailbox: str) -> dict[str, Any]:
+def _unbounded_remediation() -> dict[str, Any]:
     return {
         "preferred": f"Pass recent_days=7 or limit={SCAN_BOUNDS['SEARCH_WINDOW_CAP']}",
-        "fallback_tool": "full_inbox_export",
-        "fallback_tool_args": {"mailbox": mailbox},
+        "note": "Full-mailbox scans are disabled; bound this call.",
     }
 
 
@@ -71,9 +70,9 @@ def bounded_inbox_scan(
 
     At least one of ``recent_days``, ``limit``, or ``since`` must be set
     AND fall inside its module-level cap. Otherwise ``ToolError`` is
-    raised with remediation pointing at ``full_inbox_export`` — the
-    explicit, audited escape hatch for callers that truly need an
-    unbounded pass.
+    raised with remediation describing how to bound the call (recent_days,
+    limit, or since); full-mailbox scans are disabled, so the caller must
+    narrow the request rather than fall back to an unbounded sweep.
     """
     if not mailbox or not str(mailbox).strip():
         raise ToolError(
@@ -88,7 +87,7 @@ def bounded_inbox_scan(
             raise ToolError(
                 code="UNBOUNDED_SCAN_REQUIRED",
                 message=(f"recent_days must be in (0, {MAX_SCAN_DAYS}]; got {recent_days!r}."),
-                remediation=_unbounded_remediation(mailbox),
+                remediation=_unbounded_remediation(),
             )
         bounded = True
 
@@ -97,7 +96,7 @@ def bounded_inbox_scan(
             raise ToolError(
                 code="UNBOUNDED_SCAN_REQUIRED",
                 message=(f"limit must be in (0, {MAX_SCAN_LIMIT}]; got {limit!r}."),
-                remediation=_unbounded_remediation(mailbox),
+                remediation=_unbounded_remediation(),
             )
         bounded = True
 
@@ -106,7 +105,7 @@ def bounded_inbox_scan(
             raise ToolError(
                 code="UNBOUNDED_SCAN_REQUIRED",
                 message=f"since must be a positive epoch timestamp; got {since!r}.",
-                remediation=_unbounded_remediation(mailbox),
+                remediation=_unbounded_remediation(),
             )
         bounded = True
 
@@ -114,7 +113,7 @@ def bounded_inbox_scan(
         raise ToolError(
             code="UNBOUNDED_SCAN_REQUIRED",
             message=("bounded_inbox_scan requires at least one of recent_days, limit, or since."),
-            remediation=_unbounded_remediation(mailbox),
+            remediation=_unbounded_remediation(),
         )
 
     return ScanWindow(

@@ -39,7 +39,7 @@ def _build_found_message_lookup(
     subject contains "..."`` across the whole remote mailbox before
     slicing, which times out on 24K+ inboxes. When ``recent_days <= 0``
     the helper returns a ``ToolError`` envelope steering callers toward
-    ``message_id`` or the explicit ``full_inbox_export`` escape hatch.
+    ``message_id`` or a bounded ``recent_days`` window.
     """
     if message_id:
         normalized = normalize_message_ids([message_id])
@@ -69,8 +69,7 @@ def _build_found_message_lookup(
             message=(f"{tool_name} refuses to scan without recent_days; pass recent_days=2 or message_id."),
             remediation={
                 "preferred": "Pass recent_days=2 (default) or message_id directly",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {"mailbox": mailbox_var},
+                "note": "Full-mailbox scans are disabled; bound this call.",
             },
         )
 

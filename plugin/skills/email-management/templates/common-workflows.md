@@ -144,13 +144,14 @@ search_emails(
 ### Find Emails by Date Range
 
 ```
-# Emails from last month
+# Emails from last month (search_emails scans at most 50 messages per call
+# regardless of max_results/limit; page with offset for the rest)
 search_emails(
     account="Work",
     date_from="2025-01-01",
     date_to="2025-01-31",
     mailboxes=["INBOX", "Sent", "Archive"],
-    max_results=100
+    max_results=50
 )
 
 # Recent emails with keyword
@@ -531,13 +532,15 @@ search_emails(
     max_results=50
 )
 
-# 2. Export important ones first (if needed)
+# 2. Export important ones first (if needed; max_emails is capped at 50 per
+#    call, page with offset for a mailbox with more than 50 messages)
 export_emails(
     account="Work",
     scope="entire_mailbox",
     mailbox="INBOX",
     save_directory="~/Documents/Email-Backup",
-    format="txt"
+    format="txt",
+    max_emails=50,
 )
 
 # 3. Move reviewed ids to archive or delete
@@ -561,12 +564,14 @@ search_emails(
     max_results=20
 )
 
-# 2. Export if anything important
+# 2. Export if anything important (max_emails is capped at 50 per call; page
+#    with offset for more than 50 messages)
 export_emails(
     account="Work",
     scope="entire_mailbox",
     mailbox="Trash",
-    save_directory="~/Desktop/Trash-Backup"
+    save_directory="~/Desktop/Trash-Backup",
+    max_emails=50,
 )
 
 # 3. Empty trash (CAREFUL - irreversible)
@@ -810,13 +815,14 @@ search_emails(
     max_results=20
 )
 
-# 2. Export a bounded mailbox page
+# 2. Export a bounded mailbox page (max_emails is capped at 50 per call;
+#    page with offset for a mailbox with more than 50 messages)
 export_emails(
     account="Work",
     scope="entire_mailbox",
     mailbox="Important Project",
     save_directory="~/Documents/Email-Backups/Important-Project",
-    max_emails=100,
+    max_emails=50,
     format="txt"
 )
 
@@ -960,7 +966,7 @@ update_email_status(action="flag", message_ids=["<id>"], mailbox="INBOX", max_up
 
 # Cleanup operations
 manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10)
-export_emails(scope="entire_mailbox", mailbox="...", max_emails=100, ...)
+export_emails(scope="entire_mailbox", mailbox="...", max_emails=50, offset=N, ...)  # 50 is the per-call cap; page with offset
 export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)
 ```
 

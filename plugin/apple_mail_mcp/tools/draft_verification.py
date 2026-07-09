@@ -46,6 +46,34 @@ def _normalize_attachment_rows(raw_rows: str) -> list[dict[str, Any]]:
     return attachments
 
 
+def _build_source_resolution(
+    in_reply_to: str,
+    resolve_recent_days: float,
+    matched_record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the ``verify_draft`` ``source`` payload from a bounded search match.
+
+    ``matched_record`` is the first ``search_emails`` JSON item resolved for
+    the draft's ``In-Reply-To`` header via a single bounded search (already
+    performed by the caller), or ``None`` when no match was found within the
+    resolution window. This helper never performs I/O; it only shapes the
+    tri-state result honestly (resolved / no header / not found in window).
+    """
+    if not in_reply_to.strip():
+        return {"resolved": False, "reason": "no_in_reply_to_header"}
+    if matched_record is None:
+        return {"resolved": False, "reason": "not_found_in_window", "resolved_within_days": resolve_recent_days}
+    return {
+        "resolved": True,
+        "message_id": matched_record.get("message_id"),
+        "subject": matched_record.get("subject"),
+        "sender": matched_record.get("sender"),
+        "mailbox": "INBOX",
+        "received_at": matched_record.get("received_date"),
+        "resolved_within_days": resolve_recent_days,
+    }
+
+
 def _build_verify_draft_payload(
     *,
     numeric_id: str,
@@ -66,6 +94,7 @@ def _build_verify_draft_payload(
     expected_attachment_names: list[str],
     expected_signature: bool | None,
     require_quoted_original: bool | None,
+    source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the public verify_draft JSON payload and expectation warnings."""
     attachments_found = _normalize_attachment_rows(attachment_rows)
@@ -116,7 +145,7 @@ def _build_verify_draft_payload(
     if require_quoted_original is False and quoted_original_detected:
         warnings.append("quoted_original_unexpected")
 
-    return {
+    payload: dict[str, Any] = {
         "draft_id": numeric_id,
         "found": True,
         "recipients": {"to": to_recips, "cc": cc_recips, "bcc": bcc_recips},
@@ -136,6 +165,9 @@ def _build_verify_draft_payload(
         },
         "quoted_original": {"detected": quoted_original_detected, "required": require_quoted_original},
         "threading": {"in_reply_to": in_reply_to, "references": references},
-        "checks": {"to_matches_expected": to_matches, "cc_matches_expected": cc_matches},
-        "warnings": warnings,
     }
+    if source is not None:
+        payload["source"] = source
+    payload["checks"] = {"to_matches_expected": to_matches, "cc_matches_expected": cc_matches}
+    payload["warnings"] = warnings
+    return payload
