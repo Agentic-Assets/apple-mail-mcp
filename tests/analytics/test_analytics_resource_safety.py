@@ -12,6 +12,7 @@ These tests:
    open is matched by a close on both the happy path AND the error path.
 """
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -234,6 +235,130 @@ class ExportEmailsDefaultsAndWarningTests(unittest.TestCase):
         """When a warning is emitted the actual export result is still present."""
         result, _script = self._export(max_emails=600)
         self.assertIn("✓ Mailbox exported successfully!", result)
+
+
+class ExportEmailsRoadmapTests(unittest.TestCase):
+    def test_invalid_pdf_format_fails_before_applescript(self):
+        with patch("apple_mail_mcp.tools.analytics.run_applescript") as mock_run:
+            result = analytics_tools.export_emails(
+                account="Work",
+                scope="entire_mailbox",
+                format="pdf",
+                save_directory=DESKTOP_PATH,
+            )
+
+        mock_run.assert_not_called()
+        self.assertEqual(result, "Error: Invalid format 'pdf'. Supported: txt, html")
+
+    def test_entire_mailbox_offset_and_date_window_are_bounded(self):
+        capture = _ScriptCapture(return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!")
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture):
+            analytics_tools.export_emails(
+                account="Work",
+                scope="entire_mailbox",
+                save_directory=DESKTOP_PATH,
+                max_emails=5,
+                offset=2,
+                date_from="2026-07-01",
+                date_to="2026-07-09",
+            )
+
+        script = capture.last_script
+        self.assertIn("messages 1 thru 7 of targetMailbox", script)
+        self.assertIn("if seenCount <= 2 then set shouldExport to false", script)
+        self.assertIn("if messageDate < fromDate then set shouldExport to false", script)
+        self.assertIn("if messageDate > toDate then set shouldExport to false", script)
+
+    def test_filtered_export_discovers_ids_then_exports_by_mailbox(self):
+        records = [
+            {"message_id": "101", "mailbox": "INBOX"},
+            {"message_id": "202", "mailbox": "Archive"},
+        ]
+        capture = _ScriptCapture(return_value="EXPORTING MESSAGES BY ID\n\nExported: 1")
+        with (
+            patch("apple_mail_mcp.tools.search._search_mail_records_sync", return_value=records) as mock_search,
+            patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture),
+        ):
+            result = analytics_tools.export_emails(
+                account="Work",
+                scope="filtered",
+                sender_exact="person@example.com",
+                save_directory=DESKTOP_PATH,
+                max_emails=2,
+            )
+
+        self.assertIn("FILTERED EXPORT", result)
+        mock_search.assert_called_once()
+        self.assertEqual(mock_search.call_args.kwargs["sender_exact"], "person@example.com")
+        self.assertEqual(len(capture.scripts), 2)
+        self.assertIn('mailbox "INBOX" of targetAccount', capture.scripts[0])
+        self.assertIn('mailbox "Archive" of targetAccount', capture.scripts[1])
+
+    def test_thread_export_uses_thread_ids_and_includes_sent_lookup(self):
+        payload = {
+            "items": [
+                {"message_id": "101", "mailbox": "INBOX"},
+                {"message_id": "202", "mailbox": "Sent"},
+            ]
+        }
+        capture = _ScriptCapture(return_value="EXPORTING MESSAGES BY ID\n\nExported: 1")
+        with (
+            patch("apple_mail_mcp.tools.search.get_email_thread", return_value=json.dumps(payload)) as mock_thread,
+            patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture),
+        ):
+            result = analytics_tools.export_emails(
+                account="Work",
+                scope="thread",
+                message_id="101",
+                save_directory=DESKTOP_PATH,
+                max_emails=10,
+            )
+
+        self.assertIn("THREAD EXPORT", result)
+        self.assertEqual(mock_thread.call_args.kwargs["mailboxes"], ["INBOX", "Sent"])
+        self.assertEqual(len(capture.scripts), 2)
+
+    def test_correspondent_export_matches_sender_recipients_and_sent(self):
+        capture = _ScriptCapture(return_value="EXPORTING CORRESPONDENT\n\nExported: 2")
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture):
+            result = analytics_tools.export_emails(
+                account="Work",
+                scope="correspondent",
+                email_address="person@example.com",
+                save_directory=DESKTOP_PATH,
+                max_emails=5,
+                offset=1,
+                date_from="2026-07-01",
+                include_sent=True,
+            )
+
+        self.assertIn("Exported: 2", result)
+        script = capture.last_script
+        self.assertIn("messageHasCorrespondent", script)
+        self.assertIn("sender of aMessage contains emailNeedle", script)
+        self.assertIn("recipients of aMessage", script)
+        self.assertIn("to recipients of aMessage", script)
+        self.assertIn("cc recipients of aMessage", script)
+        self.assertIn("bcc recipients of aMessage", script)
+        self.assertIn("set end of searchMailboxes to sentMailbox", script)
+        self.assertIn("correspondent_export", script)
+        self.assertIn("if matchedCount > 1 then", script)
+        self.assertIn("if totalExportCount >= 5 then exit repeat", script)
+
+    def test_correspondent_export_can_skip_sent_mailbox(self):
+        capture = _ScriptCapture(return_value="EXPORTING CORRESPONDENT\n\nExported: 1")
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture):
+            analytics_tools.export_emails(
+                account="Work",
+                scope="correspondent",
+                email_address="person@example.com",
+                save_directory=DESKTOP_PATH,
+                max_emails=5,
+                date_from="2026-07-01",
+                include_sent=False,
+            )
+
+        self.assertNotIn("set end of searchMailboxes to sentMailbox", capture.last_script)
 
 
 if __name__ == "__main__":

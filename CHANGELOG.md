@@ -7,6 +7,10 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ### Changed
 
+- **`export_emails` bounded scopes** now support sender/date filtered export,
+  correspondent history export that includes Sent by default, thread export by
+  `message_id`, and paged `entire_mailbox` slices. Unsupported formats such as
+  `pdf` now fail before Mail.app runs instead of reporting a zero-file success.
 - **Claude Code and Codex marketplace registry** — Marketplace key renamed from
   `apple-mail-mcp` to `Agentic-Assets`; plugin selector is now
   `apple-mail@Agentic-Assets`. User installs register the GitHub-backed

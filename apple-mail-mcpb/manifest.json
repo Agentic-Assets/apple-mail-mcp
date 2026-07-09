@@ -167,7 +167,7 @@
     },
     {
       "name": "export_emails",
-      "description": "Export emails to txt or html. Prefer exact message_ids for reviewed batches. single_email scope requires message_id (subject_keyword returns TARGET_SELECTOR_DEPRECATED). entire_mailbox exports up to max_emails messages from a mailbox."
+      "description": "Export emails to txt or html. Prefer exact message_ids for reviewed batches. single_email requires message_id; filtered, correspondent, and thread scopes discover bounded message ids first; correspondent includes Sent by default for back-and-forth history. entire_mailbox exports a bounded page from a mailbox. Unsupported formats, including pdf, fail before Mail.app runs."
     },
     {
       "name": "full_inbox_export",

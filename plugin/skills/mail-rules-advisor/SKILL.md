@@ -46,7 +46,7 @@ Recommend pairing with **`email-archive-cleanup`** for historical remediation **
 
 ### Optional Offline Bundle
 
-Offer `export_emails(max_emails=1000)` for analysts who spreadsheet outside MCP; confirm disk path hygiene first.
+Offer a bounded evidence export for analysts who spreadsheet outside MCP. Use `export_emails(scope="filtered", sender_domain="example.com", recent_days=30, max_emails=25)` for domain patterns, or `export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)` when the useful evidence is a two-way human thread. Confirm disk path hygiene first.
 
 ## Guardrails
 

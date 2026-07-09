@@ -381,7 +381,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows scan 10 mailboxes × 75 messages, longer windows 20 × 250 |
-| `export_emails` | Export exact `message_ids`, single emails by `message_id`, or full mailboxes to TXT/HTML (default cap 1000) |
+| `export_emails` | Export TXT/HTML by exact `message_ids`, single `message_id`, bounded sender/date filters, correspondent history, threads, or paged mailbox slices |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Audited full-inbox walk; only tool that scans every message. Slow (minutes on 24K mailboxes). Named in `UNBOUNDED_SCAN_REQUIRED` remediation as the legitimate fallback. |
 
@@ -515,7 +515,7 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 | `move_email` | 50 | `max_moves` |
 | `update_email_status` | 10 | `max_updates` |
 | `manage_trash` | 5 | `max_deletes` |
-| `export_emails` | 1000 | `max_emails` |
+| `export_emails` | 25 for filtered/thread/correspondent, 100 for `entire_mailbox` | `max_emails` |
 
 **Dry-run defaults:** `manage_trash` defaults to `dry_run=True` (safe preview — explicit override needed to act, especially for `action="delete_permanent"`). `move_email` and `update_email_status` default to `dry_run=False` (live) because their effects are reversible; pass `dry_run=True` to preview matches first.
 

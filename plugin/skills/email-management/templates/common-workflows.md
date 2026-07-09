@@ -810,12 +810,13 @@ search_emails(
     max_results=20
 )
 
-# 2. Export entire mailbox
+# 2. Export a bounded mailbox page
 export_emails(
     account="Work",
     scope="entire_mailbox",
     mailbox="Important Project",
     save_directory="~/Documents/Email-Backups/Important-Project",
+    max_emails=100,
     format="txt"
 )
 
@@ -857,6 +858,21 @@ export_emails(
     message_id=message_id,
     save_directory="~/Documents/Contracts",
     format="html"
+)
+```
+
+### Export Correspondent History
+
+```
+export_emails(
+    account="Work",
+    scope="correspondent",
+    email_address="person@example.com",
+    include_sent=True,
+    recent_days=30,
+    max_emails=25,
+    save_directory="~/Documents/Email-Backups/Correspondents/person-example",
+    format="txt"
 )
 ```
 
@@ -944,7 +960,8 @@ update_email_status(action="flag", message_ids=["<id>"], mailbox="INBOX", max_up
 
 # Cleanup operations
 manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10)
-export_emails(scope="entire_mailbox", mailbox="...", ...)
+export_emails(scope="entire_mailbox", mailbox="...", max_emails=100, ...)
+export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)
 ```
 
 ---

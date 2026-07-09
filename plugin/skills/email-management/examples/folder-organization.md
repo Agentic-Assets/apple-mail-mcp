@@ -364,7 +364,7 @@ get_statistics(scope="account_overview", days_back=90)
 
 # 4. Clean up old emails
 #    - Export important mailboxes
-export_emails(scope="entire_mailbox", mailbox="Important Project")
+export_emails(scope="entire_mailbox", mailbox="Important Project", max_emails=100)
 #    - Delete old emails from cluttered folders
 ```
 
@@ -383,7 +383,7 @@ list_mailboxes(include_counts=True)
 #    - Flatten deep hierarchies
 
 # 4. Export archives
-export_emails(scope="entire_mailbox", mailbox="Archive", format="txt")
+export_emails(scope="entire_mailbox", mailbox="Archive", max_emails=100, format="txt")
 ```
 
 ## Common Organization Challenges
