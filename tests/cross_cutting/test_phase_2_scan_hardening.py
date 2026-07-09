@@ -478,7 +478,7 @@ class HeavyScanGuardTests(unittest.TestCase):
                 days_back=2,
             )
 
-        self.assertIn("set mailboxUpperBound to 75", captured["script"])
+        self.assertIn("set mailboxUpperBound to 50", captured["script"])
         self.assertIn("1 thru 10", captured["script"])
         self.assertIn("messages 1 thru mailboxUpperBound of aMailbox", captured["script"])
         self.assertNotIn("every message of aMailbox whose date received", captured["script"])
@@ -950,7 +950,7 @@ class ManageTrashUnboundedScanGuardTests(unittest.TestCase):
         self.assertTrue(payload.get("error"))
         self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
         self.assertIn("recent_days=7", payload["remediation"]["preferred"])
-        self.assertEqual(payload["remediation"]["fallback_tool"], "full_inbox_export")
+        self.assertNotIn("full_inbox_export", str(payload["remediation"]))
 
     def test_manage_trash_delete_permanent_recent_days_zero_returns_error(self):
         """delete_permanent with recent_days=0, no older_than_days -> UNBOUNDED_SCAN_REQUIRED."""
@@ -1269,27 +1269,38 @@ class AnalyticsMessageIdPathTests(unittest.TestCase):
         self.assertIn("EXPORTING MESSAGES BY ID", result)
         self.assertIn("Ignored invalid message_ids: bad", result)
 
-    def test_export_emails_message_ids_chunk_120_ids(self):
-        captured: list[str] = []
-
-        def fake_run(script, timeout=120):
-            captured.append(script)
-            return "EXPORTING MESSAGES BY ID\n\nExported: 0"
-
+    def test_export_emails_message_ids_over_50_rejected_without_applescript(self):
+        """v3.9.3 bounded batches: >50 explicit ids refuse up front, no Mail work."""
         ids = [str(i) for i in range(1, 121)]
-        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+        with patch("apple_mail_mcp.tools.analytics.run_applescript") as mock_run:
             result = analytics_tools.export_emails(
                 account="Work",
                 message_ids=ids,
                 save_directory="~/Desktop",
             )
 
-        self.assertEqual(len(captured), 3)
+        mock_run.assert_not_called()
+        self.assertIn("message_ids is limited to 50", result)
+
+    def test_export_emails_message_ids_50_runs_single_bounded_call(self):
+        """The cap boundary (50 ids) runs as one bounded AppleScript call."""
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "EXPORTING MESSAGES BY ID\n\nExported: 0"
+
+        ids = [str(i) for i in range(1, 51)]
+        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
+            analytics_tools.export_emails(
+                account="Work",
+                message_ids=ids,
+                save_directory="~/Desktop",
+            )
+
+        self.assertEqual(len(captured), 1)
         self.assertIn("set requestedIds to {1, 2", captured[0])
         self.assertIn("50}", captured[0])
-        self.assertIn("set requestedIds to {51", captured[1])
-        self.assertIn("set requestedIds to {101", captured[2])
-        self.assertEqual(result.count("EXPORTING MESSAGES BY ID"), 3)
 
     def test_export_emails_message_ids_rejects_invalid_only_without_applescript(self):
         with patch("apple_mail_mcp.tools.analytics.run_applescript") as mock_run:

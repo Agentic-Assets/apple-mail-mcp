@@ -180,8 +180,8 @@ class ListEmailAttachmentsDictionaryTests(unittest.TestCase):
         self.assertNotIn("set attachmentSize to size of anAttachment", capture.last_script)
 
 
-class ExportEmailsDefaultsAndWarningTests(unittest.TestCase):
-    """Fix #4: entire_mailbox default max_emails=100; warn above 500."""
+class ExportEmailsBoundedDefaultsTests(unittest.TestCase):
+    """v3.9.3: entire_mailbox pages a bounded slice (default 25); hard cap at 50, no walk."""
 
     def _export(self, **kwargs):
         """Drive export_emails and return (result_text, captured_script)."""
@@ -198,43 +198,34 @@ class ExportEmailsDefaultsAndWarningTests(unittest.TestCase):
             result = analytics_tools.export_emails(**defaults)
         return result, capture.last_script
 
-    def test_entire_mailbox_default_max_emails_is_100(self):
-        """When max_emails is omitted, entire_mailbox scope uses 100."""
+    def test_entire_mailbox_default_page_is_25(self):
+        """When max_emails is omitted, entire_mailbox pages 25 (pageEnd = offset + 25)."""
         _result, script = self._export()
-        # The generated AppleScript must cap at 100
-        self.assertIn("1 thru 100", script)
-        self.assertNotIn("1 thru 1000", script)
+        self.assertIn("set pageEnd to 0 + 25", script)
 
-    def test_entire_mailbox_explicit_max_emails_respected(self):
-        """Explicit max_emails is passed through to the generated script."""
-        _result, script = self._export(max_emails=50)
-        self.assertIn("1 thru 50", script)
+    def test_entire_mailbox_never_binds_full_message_list(self):
+        """The bounded page slice must never materialize the whole mailbox."""
+        _result, script = self._export(max_emails=25)
+        self.assertIn("messages pageStart thru pageEnd of targetMailbox", script)
+        self.assertNotIn("set mailboxMessages to messages of targetMailbox", script)
 
-    def test_entire_mailbox_no_warning_at_default(self):
-        """Default export (max_emails=100) must not emit a performance warning."""
-        result, _script = self._export()
+    def test_max_emails_above_50_rejected_before_applescript(self):
+        """Hard cap: anything over 50 refuses up front, no Mail work."""
+        result, script = self._export(max_emails=51)
+        self.assertIn("must be between 1 and 50", result)
+        self.assertEqual(script, "")
+
+    def test_max_emails_50_is_accepted(self):
+        """The cap boundary (50) still runs and pages 50."""
+        result, script = self._export(max_emails=50)
+        self.assertIn("set pageEnd to 0 + 50", script)
+        self.assertNotIn("must be between 1 and 50", result)
+
+    def test_no_performance_warning_path_remains(self):
+        """The old 'warn above 500' path is gone; large values are rejected, not warned."""
+        result, _script = self._export(max_emails=100)
         self.assertNotIn("Performance warning", result)
-
-    def test_entire_mailbox_no_warning_at_500(self):
-        """max_emails=500 is at the threshold — no warning expected."""
-        result, _script = self._export(max_emails=500)
-        self.assertNotIn("Performance warning", result)
-
-    def test_entire_mailbox_warning_at_501(self):
-        """max_emails=501 exceeds the threshold — warning must be present."""
-        result, _script = self._export(max_emails=501)
-        self.assertIn("Performance warning", result)
-        self.assertIn("full_inbox_export", result)
-
-    def test_entire_mailbox_warning_at_1000(self):
-        """Legacy max_emails=1000 exceeds the threshold — warning must be present."""
-        result, _script = self._export(max_emails=1000)
-        self.assertIn("Performance warning", result)
-
-    def test_entire_mailbox_warning_preserves_export_result(self):
-        """When a warning is emitted the actual export result is still present."""
-        result, _script = self._export(max_emails=600)
-        self.assertIn("✓ Mailbox exported successfully!", result)
+        self.assertIn("must be between 1 and 50", result)
 
 
 class ExportEmailsRoadmapTests(unittest.TestCase):
@@ -264,8 +255,11 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
             )
 
         script = capture.last_script
-        self.assertIn("messages 1 thru 7 of targetMailbox", script)
-        self.assertIn("if seenCount <= 2 then set shouldExport to false", script)
+        # Bounded page slice: pageStart=offset+1, pageEnd=offset+max_emails; never the full list.
+        self.assertIn("set pageStart to 2 + 1", script)
+        self.assertIn("set pageEnd to 2 + 5", script)
+        self.assertIn("messages pageStart thru pageEnd of targetMailbox", script)
+        self.assertNotIn("set mailboxMessages to messages of targetMailbox", script)
         self.assertIn("if messageDate < fromDate then set shouldExport to false", script)
         self.assertIn("if messageDate > toDate then set shouldExport to false", script)
 
@@ -294,14 +288,16 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
         self.assertIn('mailbox "INBOX" of targetAccount', capture.scripts[0])
         self.assertIn('mailbox "Archive" of targetAccount', capture.scripts[1])
 
-    def test_thread_export_uses_thread_ids_and_includes_sent_lookup(self):
+    def test_thread_export_maps_ids_to_openable_mailboxes_not_all_mail(self):
+        # Gmail reports thread messages in the virtual "All Mail" container; the
+        # export must ignore that name and look ids up in INBOX + Sent instead.
         payload = {
             "items": [
-                {"message_id": "101", "mailbox": "INBOX"},
-                {"message_id": "202", "mailbox": "Sent"},
+                {"message_id": "101", "mailbox": "All Mail"},
+                {"message_id": "202", "mailbox": "All Mail"},
             ]
         }
-        capture = _ScriptCapture(return_value="EXPORTING MESSAGES BY ID\n\nExported: 1")
+        capture = _ScriptCapture(return_value="Exported: 2")
         with (
             patch("apple_mail_mcp.tools.search.get_email_thread", return_value=json.dumps(payload)) as mock_thread,
             patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=capture),
@@ -316,7 +312,13 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
 
         self.assertIn("THREAD EXPORT", result)
         self.assertEqual(mock_thread.call_args.kwargs["mailboxes"], ["INBOX", "Sent"])
-        self.assertEqual(len(capture.scripts), 2)
+        # <=50 ids => one bounded multi-mailbox script.
+        self.assertEqual(len(capture.scripts), 1)
+        script = capture.scripts[0]
+        self.assertIn('mailbox "INBOX" of targetAccount', script)
+        self.assertIn('mailbox "Sent Mail" of targetAccount', script)
+        self.assertNotIn("All Mail", script)
+        self.assertIn("whose id is requestedId", script)
 
     def test_correspondent_export_matches_sender_recipients_and_sent(self):
         capture = _ScriptCapture(return_value="EXPORTING CORRESPONDENT\n\nExported: 2")

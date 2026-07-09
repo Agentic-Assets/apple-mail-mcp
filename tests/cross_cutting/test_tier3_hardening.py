@@ -1,7 +1,7 @@
 """Tests for Tier 3 mechanical hardening fixes (fixes #8, #9, #10, #11, #12).
 
 Fix #8  — search_emails body-read cap: when body_text is set without an explicit
-           date_from, scan_cap is capped at 100 messages.
+           date_from, scan_cap is capped at BODY_SEARCH_AUTO_CAP messages (25).
 Fix #9  — search.py inner-AS timeout: _build_search_script templates the AppleScript
            ``with timeout of N seconds`` from the same timeout the outer run_applescript
            wrapper will use (inner = max(30, timeout - 10)).
@@ -55,28 +55,30 @@ class BodySearchCapTests(unittest.TestCase):
         defaults.update(kwargs)
         return search_tools._build_search_script(**defaults)[0]
 
-    def test_body_search_without_date_from_explicit_caps_at_75(self):
-        """Without explicit date_from, body_text triggers BODY_SEARCH_AUTO_CAP."""
+    def test_body_search_without_date_from_explicit_caps_at_25(self):
+        """Without explicit date_from, body_text triggers BODY_SEARCH_AUTO_CAP (25)."""
         script = self._build(body_text="needle", date_from_explicit=False)
-        self.assertIn("set scanUpperBound to 75", script)
+        self.assertIn("set scanUpperBound to 25", script)
 
     def test_body_search_with_date_from_explicit_no_cap(self):
         """When date_from_explicit=True the auto-cap is skipped; scan_cap stays at the
-        window-based value (e.g. 300 for recent_days=2.0)."""
+        window-based value (46 for recent_days=2.0: compute_scan_upper_bound(2.0) =
+        40 + 2*3 = 46, below the SEARCH_HARD_CEILING of 50)."""
         script = self._build(
             body_text="needle",
             date_from="2026-05-20",
             date_from_explicit=True,
         )
         # scan_cap should be window-based, not capped at BODY_SEARCH_AUTO_CAP
-        self.assertNotIn("set scanUpperBound to 75", script)
+        self.assertNotIn("set scanUpperBound to 25", script)
+        self.assertIn("set scanUpperBound to 46", script)
 
     def test_no_body_search_not_capped(self):
         """Without body_text, no auto-cap is applied (scan_cap stays window-based)."""
         script = self._build(body_text=None, sender="boss@example.com")
-        # scan_cap for 2-day window with sender filter = 150
-        self.assertIn("set scanUpperBound to 150", script)
-        self.assertNotIn("set scanUpperBound to 75", script)
+        # scan_cap for 2-day window with sender filter = compute_scan_upper_bound(2.0) = 46
+        self.assertIn("set scanUpperBound to 46", script)
+        self.assertNotIn("set scanUpperBound to 25", script)
 
     def test_body_search_capped_flag_returned_true_when_cap_fires(self):
         """_build_search_script returns body_search_capped=True when the cap fires."""

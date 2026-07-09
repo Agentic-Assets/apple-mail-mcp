@@ -252,10 +252,7 @@ def move_email(
             ),
             remediation={
                 "preferred": "Pass recent_days=7 or older_than_days=30 or message_ids=[...]",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {
-                    "account": account,
-                },
+                "note": "Full-mailbox scans are disabled; bound this call.",
             },
         )
         return serialize_tool_error(tool_error)

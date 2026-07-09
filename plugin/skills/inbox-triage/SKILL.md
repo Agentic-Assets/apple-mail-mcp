@@ -13,7 +13,7 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). **Newest rece
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
-See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large **Exchange** profiles also read [`exchange-account-patterns.md`](references/exchange-account-patterns.md) (unreliable subject search, weak `get_needs_response`, incomplete threads). Triage is read-only, so the bounded defaults below are usually enough; do not reach for `full_inbox_export` inside the daily loop.
+See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large **Exchange** profiles also read [`exchange-account-patterns.md`](references/exchange-account-patterns.md) (unreliable subject search, weak `get_needs_response`, incomplete threads). Triage is read-only, so the bounded defaults below are usually enough; `full_inbox_export` is disabled (`UNBOUNDED_EXPORT_DISABLED`) and is never part of the daily loop regardless.
 
 ## Before drafting
 

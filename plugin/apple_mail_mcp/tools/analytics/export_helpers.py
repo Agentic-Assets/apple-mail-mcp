@@ -49,6 +49,37 @@ def unbounded_export_error(account: str) -> str:
     )
 
 
+def _export_content_block(safe_format: str) -> str:
+    """AppleScript block formatting the txt/html export body.
+
+    Assumes ``messageSubject``, ``messageSender``, ``messageDate``, and
+    ``messageContent`` are already bound in the enclosing scope. Shared by
+    every per-message export builder to avoid repeating the format branch.
+    """
+    return f'''if "{safe_format}" is "txt" then
+                    set exportContent to "Subject: " & messageSubject & return
+                    set exportContent to exportContent & "From: " & messageSender & return
+                    set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
+                    set exportContent to exportContent & messageContent
+                else if "{safe_format}" is "html" then
+                    set exportContent to "<html><body>"
+                    set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
+                    set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
+                    set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
+                    set exportContent to exportContent & "<hr>" & messageContent
+                    set exportContent to exportContent & "</body></html>"
+                end if'''
+
+
+def _sanitize_delimiter_block(var_name: str) -> str:
+    """AppleScript block that replaces "/" with "-" in ``var_name`` in place."""
+    return f'''set AppleScript's text item delimiters to "/"
+                set {var_name}Parts to text items of {var_name}
+                set AppleScript's text item delimiters to "-"
+                set {var_name} to {var_name}Parts as string
+                set AppleScript's text item delimiters to ""'''
+
+
 def build_exact_message_export_script(
     *,
     safe_account: str,
@@ -95,29 +126,13 @@ def build_exact_message_export_script(
                                 set messageContent to content of foundMessage
 
                                 set safeSubject to messageSubject
-                                set AppleScript's text item delimiters to "/"
-                                set safeSubjectParts to text items of safeSubject
-                                set AppleScript's text item delimiters to "-"
-                                set safeSubject to safeSubjectParts as string
-                                set AppleScript's text item delimiters to ""
+                                {_sanitize_delimiter_block("safeSubject")}
 
                                 set exportCount to exportCount + 1
                                 set fileName to exportCount & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
                                 set filePath to exportDir & "/" & fileName
 
-                                if "{safe_format}" is "txt" then
-                                    set exportContent to "Subject: " & messageSubject & return
-                                    set exportContent to exportContent & "From: " & messageSender & return
-                                    set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
-                                    set exportContent to exportContent & messageContent
-                                else if "{safe_format}" is "html" then
-                                    set exportContent to "<html><body>"
-                                    set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
-                                    set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
-                                    set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
-                                    set exportContent to exportContent & "<hr>" & messageContent
-                                    set exportContent to exportContent & "</body></html>"
-                                end if
+                                {_export_content_block(safe_format)}
 
                                 set fileRef to open for access POSIX file filePath with write permission
                                 set eof of fileRef to 0
@@ -145,6 +160,255 @@ def build_exact_message_export_script(
                 return outputText
             end tell
             '''
+
+
+def build_entire_mailbox_export_script(
+    *,
+    safe_account: str,
+    safe_mailbox: str,
+    safe_format: str,
+    safe_save_dir: str,
+    max_emails: int,
+    offset: int,
+    date_setup: str,
+    date_filter: str,
+) -> str:
+    """Bounded ``messages pageStart thru pageEnd`` page-slice export.
+
+    Never binds the full ``messages of targetMailbox``. ``date_filter`` runs
+    WITHIN the page window, so out-of-range messages still count against
+    the page but are skipped from the on-disk export.
+    """
+    return f'''
+    tell application "Mail"
+        set outputText to "EXPORTING MAILBOX" & return & return
+        {date_setup}
+
+        try
+            set targetAccount to account "{safe_account}"
+            -- Try to get mailbox
+            try
+                set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
+            on error
+                if "{safe_mailbox}" is "INBOX" then
+                    set targetMailbox to mailbox "Inbox" of targetAccount
+                else
+                    error "Mailbox not found: {safe_mailbox}"
+                end if
+            end try
+
+            -- Bind only the requested page window; never the full message list.
+            set messageCount to count of messages of targetMailbox
+            set pageStart to {offset} + 1
+            set pageEnd to {offset} + {max_emails}
+            if pageEnd > messageCount then set pageEnd to messageCount
+            set exportCount to 0
+
+            -- Create export directory
+            set exportDir to "{safe_save_dir}/{safe_mailbox}_export"
+            do shell script "mkdir -p " & quoted form of exportDir
+
+            if pageStart <= messageCount and pageStart <= pageEnd then
+                set pageMessages to messages pageStart thru pageEnd of targetMailbox
+
+                repeat with aMessage in pageMessages
+                    try
+                        set messageDate to date received of aMessage
+                        set shouldExport to true
+                        {date_filter}
+                        if shouldExport then
+                            set messageSubject to subject of aMessage
+                            set messageSender to sender of aMessage
+                            set messageContent to content of aMessage
+
+                            -- Create safe filename with index
+                            set exportCount to exportCount + 1
+                            set fileName to exportCount & "_" & messageSubject & ".{safe_format}"
+
+                            -- Remove unsafe characters
+                            {_sanitize_delimiter_block("fileName")}
+
+                            set filePath to exportDir & "/" & fileName
+
+                            {_export_content_block(safe_format)}
+
+                            -- Write to file
+                            set fileRef to open for access POSIX file filePath with write permission
+                            set eof of fileRef to 0
+                            write exportContent to fileRef as «class utf8»
+                            close access fileRef
+                        end if
+
+                    on error
+                        -- Close file handle before continuing to avoid fd leak
+                        try
+                            close access fileRef
+                        end try
+                    end try
+                end repeat
+            end if
+
+            set outputText to outputText & "✓ Mailbox exported successfully!" & return & return
+            set outputText to outputText & "Mailbox: {safe_mailbox}" & return
+            set outputText to outputText & "Total emails in mailbox: " & messageCount & return
+            set outputText to outputText & "Offset: {offset}" & return
+            set outputText to outputText & "Exported: " & exportCount & return
+            set outputText to outputText & "(bounded page: offset={offset}, max_emails={max_emails})" & return
+            set outputText to outputText & "Location: " & exportDir & return
+
+        on error errMsg
+            return "Error: " & errMsg
+        end try
+
+        return outputText
+    end tell
+    '''
+
+
+def build_multi_mailbox_id_export_script(
+    *,
+    safe_account: str,
+    candidate_mailboxes: list[str],
+    safe_format: str,
+    safe_save_dir: str,
+    message_ids: list[str],
+) -> str:
+    """Export ids across a fixed candidate mailbox list; never opens "All Mail".
+
+    Tries each ``candidate_mailboxes`` name directly (``INBOX`` falls back to
+    ``Inbox``), keeps the ones that open, then id-looks-up each requested id
+    across them (first match wins) via the accepted ``whose id is`` pattern
+    (see ``search/by_id.py``). Gmail reports a thread message's container as
+    the virtual, unopenable "All Mail" mailbox, so this never trusts that name.
+    """
+    requested_ids = ", ".join(message_ids)
+    open_blocks: list[str] = []
+    for index, name in enumerate(candidate_mailboxes, start=1):
+        safe_name = escape_applescript(name)
+        var_name = f"mb{index}"
+        inbox_fallback = ""
+        if name.strip().upper() == "INBOX":
+            inbox_fallback = f'''
+                    if "{safe_name}" is "INBOX" then
+                        try
+                            set {var_name} to mailbox "Inbox" of targetAccount
+                            set end of openMailboxes to {var_name}
+                        end try
+                    end if'''
+        open_blocks.append(f'''
+                try
+                    set {var_name} to mailbox "{safe_name}" of targetAccount
+                    set end of openMailboxes to {var_name}
+                on error{inbox_fallback}
+                end try''')
+    open_section = "\n".join(open_blocks)
+
+    return f'''
+    tell application "Mail"
+        set outputText to "" & return
+        set requestedIds to {{{requested_ids}}}
+        set openMailboxes to {{}}
+        set exportCount to 0
+
+        try
+            set targetAccount to account "{safe_account}"
+            {open_section}
+
+            set exportDir to "{safe_save_dir}/thread_export"
+            do shell script "mkdir -p " & quoted form of exportDir
+
+            repeat with requestedId in requestedIds
+                set requestedIdText to requestedId as string
+                set foundMessage to missing value
+                repeat with mb in openMailboxes
+                    try
+                        set matchedMessages to (every message of mb whose id is requestedId)
+                        if (count of matchedMessages) > 0 then
+                            set foundMessage to item 1 of matchedMessages
+                            exit repeat
+                        end if
+                    end try
+                end repeat
+
+                if foundMessage is not missing value then
+                    try
+                        set messageSubject to subject of foundMessage
+                        set messageSender to sender of foundMessage
+                        set messageDate to date received of foundMessage
+                        set messageContent to content of foundMessage
+
+                        set safeSubject to messageSubject
+                        {_sanitize_delimiter_block("safeSubject")}
+
+                        set exportCount to exportCount + 1
+                        set fileName to exportCount & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
+                        set filePath to exportDir & "/" & fileName
+
+                        {_export_content_block(safe_format)}
+
+                        set fileRef to open for access POSIX file filePath with write permission
+                        set eof of fileRef to 0
+                        write exportContent to fileRef as «class utf8»
+                        close access fileRef
+
+                        set outputText to outputText & "✓ Exported message_id " & requestedIdText & ": " & messageSubject & return
+                    on error exportErr
+                        try
+                            close access fileRef
+                        end try
+                        set outputText to outputText & "Error exporting message_id " & requestedIdText & ": " & exportErr & return
+                    end try
+                else
+                    set outputText to outputText & "⚠ No email found for message_id " & requestedIdText & return
+                end if
+            end repeat
+
+            set outputText to outputText & return & "Exported: " & exportCount & return
+            set outputText to outputText & "Location: " & exportDir & return
+        on error errMsg
+            return "Error: " & errMsg
+        end try
+
+        return outputText
+    end tell
+    '''
+
+
+def run_multi_mailbox_id_export(
+    *,
+    account: str,
+    safe_account: str,
+    candidate_mailboxes: list[str],
+    safe_format: str,
+    safe_save_dir: str,
+    message_ids: list[str],
+    timeout: int | None,
+    runner: Callable[[str, int | None], str] = run_applescript,
+) -> str:
+    """Chunked wrapper around ``build_multi_mailbox_id_export_script``.
+
+    Mirrors :func:`run_message_id_export`, scanning a fixed candidate
+    mailbox list per id instead of a caller-supplied "All Mail" mailbox.
+    """
+    normalized_ids = normalize_message_ids(message_ids)
+    if not normalized_ids:
+        return "Error: message ids must contain one or more numeric Mail ids"
+
+    chunk_results: list[str] = []
+    for chunk in iter_id_chunks(normalized_ids):
+        script = build_multi_mailbox_id_export_script(
+            safe_account=safe_account,
+            candidate_mailboxes=candidate_mailboxes,
+            safe_format=safe_format,
+            safe_save_dir=safe_save_dir,
+            message_ids=chunk,
+        )
+        try:
+            chunk_results.append(runner(script, timeout if timeout is not None else 120))
+        except AppleScriptTimeout:
+            return f"Error: AppleScript timed out while exporting message_ids for '{account}'"
+
+    return "\n\n".join(chunk_results)
 
 
 def build_correspondent_export_script(
@@ -250,11 +514,7 @@ def build_correspondent_export_script(
                                     set mailboxExportCount to mailboxExportCount + 1
                                     set totalExportCount to totalExportCount + 1
                                     set fileName to totalExportCount & "_" & mailboxName & "_" & messageSubject & ".{safe_format}"
-                                    set AppleScript's text item delimiters to "/"
-                                    set fileNameParts to text items of fileName
-                                    set AppleScript's text item delimiters to "-"
-                                    set fileName to fileNameParts as string
-                                    set AppleScript's text item delimiters to ""
+                                    {_sanitize_delimiter_block("fileName")}
                                     set filePath to exportDir & "/" & fileName
 
                                     if "{safe_format}" is "txt" then

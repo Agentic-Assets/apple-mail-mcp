@@ -28,7 +28,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | `analytics/attachments.py` | 1 | Attachment listing: `list_email_attachments` (`statistics_parsing.py` is a pure leaf) |
 | `analytics/statistics.py` | 1 | Stats: `get_statistics` (account_overview/sender_stats/mailbox_breakdown) |
 | `analytics/export.py` | 1 | Export: `export_emails` by exact ids, bounded filters, correspondent/thread scopes, or mailbox pages |
-| `analytics/full_export.py` | 1 | Metadata walk: `full_inbox_export` |
+| `analytics/full_export.py` | 1 | Disabled refusal shim: `full_inbox_export` (returns `UNBOUNDED_EXPORT_DISABLED`, no AppleScript runs) |
 | `analytics/dashboard.py` | 1 | Dashboard: `inbox_dashboard` + recent-email helpers |
 | `smart_inbox/awaiting_reply.py` | 1 | Follow-up tracking: `get_awaiting_reply` (sent-vs-inbox Message-ID cross-reference; `helpers.py` shares `_normalize_message_id`) |
 | `smart_inbox/needs_response.py` | 1 | Actionable detection: `get_needs_response` (newsletter/automated filtering, replied-detection join) |
@@ -37,15 +37,16 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 ## Add a tool
 
 1. Pick module by domain; add `@mcp.tool(annotations=…)` using presets from `../server.py` (matrix: [`tasks/reference/phase-3-annotation-matrix.md`](../../../tasks/reference/phase-3-annotation-matrix.md)).
-2. `@inject_preferences` on user-facing tools; user strings → `core.escape_applescript()`; fan-out → `async` + `asyncio.to_thread`.
+2. `@inject_preferences` on user-facing tools; user strings → `core.escape_applescript()`; multi-account fan-out → `async` + `asyncio.to_thread`, dispatched sequentially (one account at a time), not via `asyncio.gather`, since Mail AppleScript is serialized behind a single-flight lock in `core/applescript.py`.
 3. New file → import in `__init__.py`; update the root release version table files when releasing, plus `apple-mail-mcpb/manifest.json` `tools[]` and advertised tool count.
 
 ## Performance (summary)
 
-- Default `recent_days=2.0` (48h). Tools refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED`. The only tool that walks the entire inbox is `full_inbox_export` (slow; documented cost). Prefer bounded newest-message slices (`messages 1 thru N`) over broad `whose` clauses on large remote mailboxes.
+- Default `recent_days=2.0` (48h). Tools refuse unbounded scans (`recent_days=0` / `max_emails=0`) with `code: UNBOUNDED_SCAN_REQUIRED`. `full_inbox_export` is disabled (`code: UNBOUNDED_EXPORT_DISABLED`, no AppleScript runs) and is not a working fallback; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`) instead. Prefer bounded newest-message slices (`messages 1 thru N`) over broad `whose` clauses on large remote mailboxes.
 - Pass `timeout` through to `run_applescript`; catch `AppleScriptTimeout` → structured error with account name.
 - **ID-first mutations (v3.7.0+):** `move_email`, `update_email_status`, and `manage_trash` prefer `message_ids` from a prior list/search. `subject_keyword` / `sender` on action tools return `TARGET_SELECTOR_DEPRECATED` before any scan (even with `allow_filter_scan=True`). Date/bulk filter paths require `allow_filter_scan=True` or return `FILTER_SCAN_DISABLED`. `search_emails` requires `allow_body_scan=True` when `body_text` is set or returns `BODY_SCAN_DISABLED`.
-- **Scan caps (v3.7.1):** bounded slices read `SCAN_BOUNDS` in `constants.py` (search ceiling 250, inbox max 500, `mailbox="All"` fan-out 10). See `docs/CLAUDE-conventions.md` § Centralized scan caps.
+- **Scan caps (2026-07, AGENTIC-988 hardening):** `SEARCH_HARD_CEILING` and `INBOX_HARD_CEILING` in `constants.py` `SCAN_BOUNDS` clamp `search_emails` and `list_inbox_emails` to at most **50 messages scanned per call**, regardless of `limit` / `max_emails` / `recent_days`; `get_statistics` per-mailbox reads share the same 50-message cap (fanning across 10 or 20 mailboxes instead); `mailbox="All"` fan-out stays capped at 10 accounts. See `docs/CLAUDE-conventions.md` § Centralized scan caps.
+- **Mail calls are serialized:** every `osascript` call goes through one process-wide lock in `core/applescript.py`. Concurrent/parallel Mail tool calls queue behind each other and can time out. Call one Mail tool at a time.
 - Mutations: `normalize_message_ids` / `message_ids` for targeted ops. Detail: `docs/CLAUDE-conventions.md`.
 
 ## Structured error codes (agent-facing)
@@ -56,7 +57,7 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 |------|------|------------------|
 | `FILTER_SCAN_DISABLED` | `move_email` / `update_email_status` / `manage_trash` called with filters but no `message_ids` and `allow_filter_scan=False` | Collect ids first; or `allow_filter_scan=True` for approved bulk |
 | `BODY_SCAN_DISABLED` | `search_emails(body_text=...)` without `allow_body_scan=True` | Narrow with subject/sender/date; or opt in with tight `date_from` |
-| `UNBOUNDED_SCAN_REQUIRED` | Routine scan with `recent_days=0` / `max_emails=0` | Pass bounded window or use `full_inbox_export` |
+| `UNBOUNDED_SCAN_REQUIRED` | Routine scan with `recent_days=0` / `max_emails=0` | Pass a bounded window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`); `full_inbox_export` is disabled and is not a valid remediation |
 | `INVALID_SCAN_WINDOW` | Forged or out-of-policy `ScanWindow` token | Call `bounded_inbox_scan()` only |
 | `WHOSE_ID_LIST_TOO_LARGE` | `message_ids` longer than `MAX_WHOSE_IDS` (50) | `iter_id_chunks` + one call per batch |
 | `UNSAFE_WHOSE_ON_LIST` | `build_bounded_message_scan(..., whose_condition=...)` | Use `build_bounded_filtered_scan` |
@@ -96,8 +97,8 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 |------|---------|-------|
 | `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True` |
 | `reply_to_email` | `mode="draft"` (via `send=False`), `native_format=True` | `native_format=True` is the only supported path: it opens Mail's reply window (rich quote bar + logo signature) and types `reply_body` above the quote, which needs window focus + **Accessibility permission** or returns `REPLY_WINDOW_FOCUS_FAILED` (no draft saved). `native_format=False` returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed (deliberate headless/CI only, never set by agents). Both verify exact Drafts id first with bounded fallback, expose `exact_id_verified` in JSON, and preserve known `draft_id` on verifier timeout/error |
-| `verify_draft` | read-only | Exact Drafts id snapshot for recipients, body, attachments, signatures, quoted original, and thread headers |
-| `verify_drafts` | read-only | Batch exact Drafts id snapshots with per-draft JSON payloads |
+| `verify_draft` | read-only | Exact Drafts id snapshot for recipients, body, attachments, signatures, quoted original, and thread headers. Optional `resolve_source=True` (`resolve_recent_days=30.0` default) maps the reply's `In-Reply-To` header back to its source Inbox message via one bounded `search_emails(internet_message_id=...)` call, adding a `source` block (`resolved`/`not_found_in_window`/`no_in_reply_to_header`) |
+| `verify_drafts` | read-only | Batch exact Drafts id snapshots with per-draft JSON payloads; accepts the same `resolve_source` / `resolve_recent_days` options as `verify_draft` |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
 | `create_rich_email_draft` | saves + closes | Standalone only; same reply-like guard; `review_in_mail=True` for saved-open review |
 

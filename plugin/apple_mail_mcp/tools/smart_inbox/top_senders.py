@@ -73,8 +73,8 @@ def get_top_senders(
             Falls back to ``DEFAULT_MAIL_ACCOUNT`` env-configured account when None.
         mailbox: Mailbox to analyse (default: "INBOX")
         days_back: How many days back to look (default: 30). ``0`` (all time)
-            is no longer accepted — pass ``days_back=7`` or ``30`` and route
-            unbounded sweeps through ``full_inbox_export``.
+            is no longer accepted; pass ``days_back=7`` or ``30``. Full-mailbox
+            scans are disabled, so narrow the window instead.
         top_n: Number of top senders to return (default: 10)
         group_by_domain: Group results by domain instead of individual sender (default: False)
         output_format: ``"text"`` (default, human-readable) or ``"json"``
@@ -99,11 +99,7 @@ def get_top_senders(
             message=("get_top_senders refuses to scan without days_back; pass days_back=7 or 30"),
             remediation={
                 "preferred": "Pass days_back=7 or 30",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {
-                    "account": account,
-                    "mailbox": mailbox,
-                },
+                "note": "Full-mailbox scans are disabled; bound this call.",
             },
         )
         if output_format == "json":
@@ -347,7 +343,7 @@ def get_top_senders(
     if mailbox_count > 0 and scan_cap < mailbox_count:
         lines.append(
             f"Note: analysed {total_analysed} of {mailbox_count} messages (capped at {scan_cap} — "
-            "increase days_back or use full_inbox_export for a complete count)"
+            "increase days_back (full-mailbox scans are disabled))"
         )
     lines.append(f"Unique senders: {unique_count}")
 

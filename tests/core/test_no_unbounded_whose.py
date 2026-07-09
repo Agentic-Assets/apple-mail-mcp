@@ -24,8 +24,10 @@ Key rules they enforce (per
 * ``every message of <mailbox>`` with no ``whose`` clause at all is a
   raw enumeration and is banned outright.
 * ``allow_full_scan`` was retired in v3.2.0 in favor of structured
-  ``UNBOUNDED_SCAN_REQUIRED`` errors that point at ``full_inbox_export``.
-  No tool may reintroduce the boolean kwarg.
+  ``UNBOUNDED_SCAN_REQUIRED`` errors whose remediation must NOT point at
+  ``full_inbox_export`` (that tool is disabled) and must instead carry an
+  actionable bounded ``preferred`` fix. No tool may reintroduce the boolean
+  kwarg.
 """
 
 from __future__ import annotations
@@ -264,7 +266,8 @@ class NoDangerousWhoseTests(unittest.TestCase):
             offenders,
             [],
             "`allow_full_scan` was retired in v3.2.0. Tools must raise "
-            "`UNBOUNDED_SCAN_REQUIRED` and point at `full_inbox_export`. "
+            "`UNBOUNDED_SCAN_REQUIRED` with a bounded `preferred` fix and must "
+            "NOT point at `full_inbox_export` (disabled). "
             "Offenders:\n  - " + "\n  - ".join(offenders),
         )
 

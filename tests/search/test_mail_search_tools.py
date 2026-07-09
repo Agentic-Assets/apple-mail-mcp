@@ -215,8 +215,10 @@ class SearchToolTests(unittest.TestCase):
 
         self.assertEqual(response["items"], [])
         # Narrow subject-only searches keep the scan to the requested page
-        # size so no-hit lookups on large Exchange inboxes stay fast.
-        self.assertIn("set scanUpperBound to 51", captured["script"])
+        # size so no-hit lookups on large Exchange inboxes stay fast. Needle
+        # fast path would use base_cap = limit+1+offset = 51, but the
+        # SEARCH_HARD_CEILING (50) clamp fires and wins (AGENTIC-988).
+        self.assertIn("set scanUpperBound to 50", captured["script"])
         self.assertIn("messages 1 thru scanUpperBound of currentMailbox", captured["script"])
         # The old, unfiltered enumeration must not appear.
         self.assertNotIn(
@@ -731,8 +733,9 @@ class SearchToolTests(unittest.TestCase):
 
     def test_search_emails_rejects_unbounded_scan(self):
         """Phase A: ``recent_days=0`` without ``date_from`` returns a
-        structured ``UNBOUNDED_SCAN_REQUIRED`` error pointing at
-        ``full_inbox_export`` (no more ``allow_full_scan`` opt-in)."""
+        structured ``UNBOUNDED_SCAN_REQUIRED`` error with a bounded
+        ``preferred`` fix and no dead-end pointer at the disabled
+        ``full_inbox_export`` tool (no more ``allow_full_scan`` opt-in)."""
         with patch("apple_mail_mcp.tools.search.run_applescript") as mock_run:
             result = _run(
                 search_tools.search_emails(
@@ -747,7 +750,8 @@ class SearchToolTests(unittest.TestCase):
         self.assertTrue(payload["error"])
         self.assertEqual(payload["code"], "UNBOUNDED_SCAN_REQUIRED")
         self.assertIn("recent_days", payload["message"])
-        self.assertEqual(payload["remediation"]["fallback_tool"], "full_inbox_export")
+        self.assertNotIn("full_inbox_export", str(payload["remediation"]))
+        self.assertTrue(payload["remediation"].get("preferred"))
         mock_run.assert_not_called()
 
     def test_search_emails_explicit_date_from_overrides_default_window(self):
@@ -1109,8 +1113,9 @@ class GetEmailThreadTests(unittest.TestCase):
         self.assertEqual(captured["timeout"], 120)
 
     def test_get_email_thread_recent_days_zero_rejected(self):
-        """Phase A: ``recent_days=0`` is refused. The structured error points
-        callers at ``full_inbox_export`` instead of an opt-in flag."""
+        """Phase A: ``recent_days=0`` is refused. The structured error carries
+        a bounded ``preferred`` fix instead of an opt-in flag, and must not
+        point callers at the disabled ``full_inbox_export`` tool."""
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -1134,10 +1139,9 @@ class GetEmailThreadTests(unittest.TestCase):
         self.assertIsInstance(parsed, dict)
         self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
         self.assertTrue(parsed.get("error"))
-        self.assertEqual(
-            parsed.get("remediation", {}).get("fallback_tool"),
-            "full_inbox_export",
-        )
+        remediation = parsed.get("remediation", {})
+        self.assertNotIn("full_inbox_export", str(remediation))
+        self.assertTrue(remediation.get("preferred"))
         self.assertNotIn("script", captured)
 
     def test_get_email_thread_no_bare_every_message_enumeration(self):

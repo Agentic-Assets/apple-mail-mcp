@@ -270,7 +270,7 @@ class WhoseAndCapTests(unittest.TestCase):
             analytics_tools.get_statistics(account="X", scope="account_overview", days_back=30)
         script = cap.last_script
         self.assertIn("1 thru 20", script)
-        self.assertIn("set mailboxUpperBound to 250", script)
+        self.assertIn("set mailboxUpperBound to 50", script)
 
     def test_analytics_get_statistics_short_window_uses_tighter_caps(self):
         cap = _ScriptCapture(return_value="ok")
@@ -278,7 +278,7 @@ class WhoseAndCapTests(unittest.TestCase):
             analytics_tools.get_statistics(account="X", scope="account_overview", days_back=2)
         script = cap.last_script
         self.assertIn("1 thru 10", script)
-        self.assertIn("set mailboxUpperBound to 75", script)
+        self.assertIn("set mailboxUpperBound to 50", script)
 
 
 class NoAccountErrorTests(unittest.TestCase):

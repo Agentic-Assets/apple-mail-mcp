@@ -420,10 +420,11 @@ async def get_inbox_overview(
     """
     Get a comprehensive overview of your email inbox status across all accounts.
 
-    Each account is queried in parallel via its own AppleScript call, so a
-    single slow account (e.g. a large Exchange inbox) no longer blocks the
-    overview — it appears as an entry in a `PARTIAL` line and the rest of
-    the data is returned anyway.
+    Each account is queried sequentially, one AppleScript call at a time
+    (Mail.app AppleScript is serialized behind a single-flight lock), so a
+    single slow account (e.g. a large Exchange inbox) does not corrupt the
+    rest of the overview. It appears as an entry in a `PARTIAL` line and the
+    rest of the data is returned anyway.
 
     Args:
         account: Optional account name to scope the overview to one account.
@@ -508,7 +509,7 @@ async def get_inbox_overview(
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
 
-    results = await asyncio.gather(*(run_one(a) for a in accounts_to_query))
+    results = [await run_one(a) for a in accounts_to_query]
 
     parsed: list[dict[str, Any]] = []
     errors: list[str] = []

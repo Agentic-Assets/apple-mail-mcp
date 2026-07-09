@@ -53,7 +53,9 @@ async def list_inbox_emails(
 
     List all emails from inbox across all accounts or a specific account.
 
-    If you need every message in the inbox, use ``full_inbox_export`` instead.
+    Full-mailbox scans are disabled; page through with ``max_emails`` and
+    ``offset``/repeated bounded calls instead of trying to fetch everything
+    at once.
 
     Smart defaults:
         - When `account` is None and `all_accounts` is False, the tool falls
@@ -61,14 +63,14 @@ async def list_inbox_emails(
           is set. Pass `all_accounts=True` to opt back into multi-account
           dispatch even when a default is configured.
         - `max_emails` defaults to 50. `max_emails=0` is rejected with
-          ``UNBOUNDED_SCAN_REQUIRED`` — unbounded inbox walks belong in
-          ``full_inbox_export``.
+          ``UNBOUNDED_SCAN_REQUIRED``; full-mailbox scans are disabled, so
+          bound the call with `max_emails` instead.
 
     Performance guidance:
         - On multi-account setups with a 10K+ Exchange/Gmail inbox, prefer
-          passing an explicit `account` plus a small `max_emails` (e.g. 20)
-          — multi-account calls now fan out in parallel, but the slowest
-          account still bounds the wall time.
+          passing an explicit `account` plus a small `max_emails` (e.g. 20).
+          Multi-account calls dispatch sequentially, one account at a time,
+          so wall time is the sum across accounts, not the slowest one.
         - Read-status filtering binds a bounded newest-first slice and
           applies the predicate in an AppleScript ``repeat`` loop (the
           ``build_bounded_filtered_scan`` helper). This is the only safe
@@ -194,13 +196,10 @@ async def list_inbox_emails(
     if max_emails <= 0:
         err = ToolError(
             code="UNBOUNDED_SCAN_REQUIRED",
-            message=("list_inbox_emails refuses to walk the full inbox; use full_inbox_export instead"),
+            message=("list_inbox_emails refuses to walk the full inbox; pass max_emails=50 or fewer"),
             remediation={
                 "preferred": "Pass max_emails=50 or 200",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {
-                    "account": account or "<your account>",
-                },
+                "note": "Full-mailbox scans are disabled; bound this call.",
             },
         )
         return json.dumps(err.to_dict(), indent=2)
@@ -325,7 +324,10 @@ async def _list_inbox_emails_text(
             )
         return header + clean + "\n" + footer_template.format(total=count)
 
-    # Multi-account: probe account list, then dispatch in parallel.
+    # Multi-account: probe account list, then dispatch sequentially (each
+    # call still off the event loop via asyncio.to_thread; Mail AppleScript
+    # is serialized behind a single-flight lock, so concurrent dispatch
+    # would only queue behind itself).
     try:
         accounts = await asyncio.to_thread(inbox._list_mail_accounts, timeout)
     except AppleScriptTimeout:
@@ -348,14 +350,12 @@ async def _list_inbox_emails_text(
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
 
-    results = await asyncio.gather(*(run_one(a) for a in accounts))
+    results = [await run_one(a) for a in accounts]
 
-    # Pre-fetch per-account replied sets in parallel when needed.
+    # Pre-fetch per-account replied sets sequentially when needed.
     replied_sets: dict[str, set[str]] = {}
     if include_message_id and (exclude_replied or flag_replied):
-        replied_results = await asyncio.gather(
-            *(asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts)
-        )
+        replied_results = [await asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts]
         replied_sets = dict(zip(accounts, replied_results, strict=True))
 
     pieces: list[str] = [header]
@@ -483,14 +483,12 @@ async def _list_inbox_emails_json(
         except AppleScriptTimeout:
             return acct, AppleScriptTimeout(acct)
 
-    results = await asyncio.gather(*(run_one(a) for a in accounts))
+    results = [await run_one(a) for a in accounts]
 
-    # Pre-fetch per-account replied sets in parallel when needed.
+    # Pre-fetch per-account replied sets sequentially when needed.
     replied_sets: dict[str, set[str]] = {}
     if include_message_id and (exclude_replied or flag_replied):
-        replied_results = await asyncio.gather(
-            *(asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts)
-        )
+        replied_results = [await asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts]
         replied_sets = dict(zip(accounts, replied_results, strict=True))
 
     combined: list[dict[str, Any]] = []

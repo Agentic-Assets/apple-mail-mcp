@@ -59,8 +59,8 @@ def get_statistics(
         sender: Specific sender for "sender_stats" scope
         mailbox: Specific mailbox for "mailbox_breakdown" scope
         days_back: Number of days to analyze (default: 30). ``0`` (all time)
-            is no longer accepted — pass ``days_back=7`` or ``30`` and route
-            unbounded sweeps through ``full_inbox_export``.
+            is no longer accepted; pass ``days_back=7`` or ``30``. Full-mailbox
+            scans are disabled, so narrow the window instead.
         output_format: ``text`` (default, human-readable) or ``json`` (structured dict).
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
 
@@ -79,11 +79,7 @@ def get_statistics(
                 message=("get_statistics refuses to scan without days_back; pass days_back=7 or 30"),
                 remediation={
                     "preferred": "Pass days_back=7 or 30",
-                    "fallback_tool": "full_inbox_export",
-                    "fallback_tool_args": {
-                        "account": account,
-                        "scope": scope,
-                    },
+                    "note": "Full-mailbox scans are disabled; bound this call.",
                 },
             ).to_dict(),
             indent=2,

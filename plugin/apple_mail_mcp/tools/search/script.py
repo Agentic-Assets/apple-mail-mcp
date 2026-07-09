@@ -111,6 +111,13 @@ def _build_search_script(
         scan_cap = min(scan_cap, BODY_SEARCH_AUTO_CAP)
         body_search_capped = True
 
+    # Hard ceiling: regardless of how base_cap/window_cap/body-cap computed
+    # above, never bind more than SEARCH_HARD_CEILING messages in a single
+    # `messages 1 thru scan_cap` slice. This is what actually bounds wall
+    # time on large cold-cache Exchange accounts — the scaled caps above can
+    # still produce values above this floor when offset/limit are large.
+    scan_cap = min(scan_cap, SCAN_BOUNDS["SEARCH_HARD_CEILING"])
+
     # Track whether the mailbox-count cap is active (mailbox="All" path).
     # The AppleScript guard caps at MAX_MAILBOXES_PER_SEARCH; we surface this
     # to callers via a warnings field so they know results may be incomplete on

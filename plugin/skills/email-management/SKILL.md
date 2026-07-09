@@ -15,9 +15,9 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). Even in multi
 
 See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large Exchange profiles, also [`exchange-account-patterns.md`](references/exchange-account-patterns.md).
 
-### When to reach for `full_inbox_export`
+### `full_inbox_export` is disabled
 
-`full_inbox_export` is the only tool that walks the entire inbox. Reserve it for the rare full-inbox case (annual cleanup, complete audit, compliance archive, or pre-migration snapshot). It is slow (minutes on a 24k inbox); never use it inside a habitual triage loop. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
+`full_inbox_export` returns a structured `UNBOUNDED_EXPORT_DISABLED` error and runs no AppleScript. For the rare full-inbox case (annual cleanup, complete audit, compliance archive, or pre-migration snapshot), page bounded `export_emails(scope="entire_mailbox", mailbox=..., max_emails=50, offset=N)` slices instead. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
 
 ## Before drafting
 
@@ -43,8 +43,8 @@ For finding a single specific email, call `search_emails()` directly without inv
 
 Internalize these before constructing any tool call. The defaults exist to keep AppleScript queries fast on large Exchange inboxes.
 
-- `search_emails` defaults to the last 48 hours on the configured default account. Pass `recent_days=7` or `recent_days=30` to widen. `recent_days=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; if you really need every message, call `full_inbox_export` (slow; documented cost). Otherwise pass a bounded `recent_days`.
-- `list_inbox_emails` defaults to the 50 most-recent emails. For **triage and drafting**, pass `max_emails=5` (up to 8) per batch; see [`recent-first-triage.md`](references/recent-first-triage.md). `max_emails=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; use a bounded `max_emails` or `full_inbox_export` for the rare full walk.
+- `search_emails` defaults to the last 48 hours on the configured default account and scans at most 50 messages per call regardless of `limit` or window size. Pass `recent_days=7` or `recent_days=30` to widen. `recent_days=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; for more than one call's worth, page with `offset` rather than reaching for `full_inbox_export`, which is disabled (`UNBOUNDED_EXPORT_DISABLED`).
+- `list_inbox_emails` defaults to the 50 most-recent emails, and 50 is also the hard per-call ceiling regardless of `max_emails`. For **triage and drafting**, pass `max_emails=5` (up to 8) per batch; see [`recent-first-triage.md`](references/recent-first-triage.md). `max_emails=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is disabled, so use a bounded `max_emails` and page with repeated calls for the rare full walk.
 - Cross-account scans cost time on large Exchange inboxes. Pass `all_accounts=True` only when truly needed; otherwise let the `DEFAULT_MAIL_ACCOUNT` environment variable keep things scoped.
 
 When in doubt, run a narrow query first and widen only if results are insufficient.
@@ -183,11 +183,11 @@ Mindset:
 ### "I can't find an important email"
 
 1. Start with `search_emails(subject_keyword="...")` on the default account and default 48-hour window.
-2. Widen the time window: add `recent_days=30`. If the tool returns `code: UNBOUNDED_SCAN_REQUIRED`, follow the `remediation.fallback_tool` field. Usually a wider `recent_days` covers it; only escalate to `full_inbox_export` after confirming with the user.
+2. Widen the time window: add `recent_days=30`. If the tool returns `code: UNBOUNDED_SCAN_REQUIRED`, follow the `remediation.fallback_tool` field. Usually a wider `recent_days` covers it; for older history, page with `offset` across bounded calls rather than reaching for `full_inbox_export`, which is disabled.
 3. Widen the scope: add `all_accounts=True` to search every configured account.
 4. Search the body: `search_emails(body_text="...", allow_body_scan=True, recent_days=30)` before asking to run a full scan.
 5. Filter by attachment if relevant: `search_emails(has_attachments=True, ...)`.
-6. Check Trash explicitly: `search_emails(mailbox="Trash", recent_days=30, ...)`. For a true full Trash walk, escalate to `full_inbox_export` (slow); never call it unprompted.
+6. Check Trash explicitly: `search_emails(mailbox="Trash", recent_days=30, ...)`. For a true full Trash walk, page bounded `search_emails(mailbox="Trash", limit=50, offset=N)` calls; `full_inbox_export` is disabled and never the tool for this.
 
 ### "I want to organize emails by project"
 
@@ -207,7 +207,7 @@ Mindset:
 ### "Too many emails from one sender"
 
 1. Confirm volume: `get_statistics(scope="sender_stats", sender="...")`.
-2. Find the messages: `search_emails(sender_exact="...", recent_days=30)` or `search_emails(sender_domain="...", recent_days=30)`. If the user wants every message from this sender across all time, call `full_inbox_export` (slow) rather than ratcheting `recent_days` indefinitely.
+2. Find the messages: `search_emails(sender_exact="...", recent_days=30)` or `search_emails(sender_domain="...", recent_days=30)`. If the user wants every message from this sender across all time, page with `offset` across bounded calls rather than ratcheting `recent_days` indefinitely; `full_inbox_export` is disabled and not an option.
 3. If unwanted, run the cleanup sequence from `references/bulk-cleanup.md`.
 4. If wanted but noisy, create a dedicated folder and bulk-move with `message_ids` from step 2 (`email-archive-cleanup` workflow).
 5. If the sender is a newsletter, surface it via `get_top_senders()` and unsubscribe in Apple Mail.

@@ -66,12 +66,12 @@ Classify before drafting:
 
 When triaging many messages:
 
-| Parent agent | Subagents (parallel) |
+| Parent agent | Subagents (Mail calls serialize) |
 |--------------|----------------------|
 | `move_email` / `reply_to_email` (one draft at a time) | Classification, thread checks, CRM/context lookup, attachment inventory |
 | Archive batches by exact `message_id` | Research whether thread is already answered in Sent |
 
-Subagents should be **read-only** for mail mutations. When subagents disagree (e.g. FYI vs needs reply), the parent reads the primary message and Sent/Drafts before acting.
+Subagents should be **read-only** for mail mutations, and Apple Mail tool calls still serialize. Parallelize only non-Mail work (classifying already-fetched content, CRM/context lookup). Any subagent that calls a Mail tool (thread checks, attachment inventory, Sent lookup) queues behind the single-flight lock, so run those one at a time: concurrent Mail calls give no wall-time benefit and risk timeouts. When subagents disagree (e.g. FYI vs needs reply), the parent reads the primary message and Sent/Drafts before acting.
 
 ## Verification gaps
 

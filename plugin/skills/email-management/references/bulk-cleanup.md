@@ -33,7 +33,7 @@ Raise these caps only after a confirming search shows the user exactly which mes
 
 ## Pre-Cleanup Backup
 
-Before deleting a large mailbox, export the relevant bounded slice: `export_emails(scope="entire_mailbox", mailbox="Archive/2023", max_emails=100, format="html")`. For a sender or person-specific cleanup, prefer `export_emails(scope="filtered", sender_domain="example.com", recent_days=30, max_emails=25)` or `export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)`. The user gets a local copy in case a permanent delete removes something important.
+Before deleting a large mailbox, export the relevant bounded slice: `export_emails(scope="entire_mailbox", mailbox="Archive/2023", max_emails=50, format="html")` (page with `offset` for more than one call's worth; `max_emails` is hard-capped at 50 per call). For a sender or person-specific cleanup, prefer `export_emails(scope="filtered", sender_domain="example.com", recent_days=30, max_emails=25)` or `export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)`. The user gets a local copy in case a permanent delete removes something important.
 
 ## Common Cleanup Patterns
 
@@ -56,7 +56,7 @@ move_email(message_ids=[...], to_mailbox="Archive/2025")
 
 ### Empty a defunct project folder
 
-1. `export_emails(scope="entire_mailbox", mailbox="Projects/OldProject", max_emails=100)` for the audit trail.
+1. `export_emails(scope="entire_mailbox", mailbox="Projects/OldProject", max_emails=50, offset=0)` for the audit trail (page with `offset` if the mailbox holds more than 50 messages; `max_emails` is capped at 50 per call).
 2. `list_inbox_emails` or `search_emails` in that mailbox → collect ids.
 3. `manage_trash(action="move_to_trash", message_ids=[...])` in batches of ≤50.
 4. Verify, then `manage_trash(action="empty_trash", confirm_empty=True)` if appropriate.

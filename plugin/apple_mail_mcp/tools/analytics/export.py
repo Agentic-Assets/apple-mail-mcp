@@ -16,8 +16,7 @@ from apple_mail_mcp.core import (
 )
 from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
 
-_EXPORT_ENTIRE_MAILBOX_DEFAULT = 100
-_EXPORT_ENTIRE_MAILBOX_WARN_THRESHOLD = 500
+_EXPORT_MAX_EMAILS_CAP = 50
 
 
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
@@ -44,17 +43,21 @@ def export_emails(
     timeout: int | None = None,
 ) -> str:
     """
-    Export emails to files for backup or analysis.
+    Export emails to files for backup or analysis, in small bounded batches.
 
-    For ``entire_mailbox`` exports, the AppleScript binds only the first
-    ``max_emails`` messages (``items 1 thru max_emails``) so the full message
-    list of a 24K-message Exchange mailbox is never materialized.
+    ``max_emails`` is hard-capped at 50 across every scope so a single call
+    can never trigger inbox-wide Mail.app work. For ``entire_mailbox``
+    exports, the AppleScript binds only the requested page window
+    (``messages pageStart thru pageEnd``, sized by ``offset``/``max_emails``)
+    so the full message list of a large Exchange/Gmail mailbox is never
+    materialized. Page with ``offset`` or narrow with filters to export more
+    than 50 messages.
 
     **Exchange / Gmail cold-cache warning:** ``entire_mailbox`` reads
     ``content of aMessage`` for every exported message. On an Exchange account
-    that has not recently synced, each body read can take 1–3 seconds — 100
-    emails is already 2–5 minutes of wall time. For larger metadata-only walks
-    use ``full_inbox_export`` instead, which skips body reads entirely.
+    that has not recently synced, each body read can take 1-3 seconds. For
+    larger metadata-only walks, page with ``offset``/``max_emails`` across
+    several bounded calls instead of one large sweep.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
@@ -70,11 +73,11 @@ def export_emails(
         mailbox: Mailbox to export from (default: "INBOX")
         save_directory: Directory to save exports (default: "~/Desktop")
         format: Export format: "txt", "html" (default: "txt")
-        max_emails: Maximum number of emails to export for entire_mailbox.
-            Defaults to 100 for entire_mailbox scope. Values above 500 are
-            accepted but will emit a performance warning — each message
-            requires a body read from Mail which is expensive on Exchange
-            cold-cache accounts. For large exports prefer ``full_inbox_export``.
+        max_emails: Maximum number of emails to export. Defaults to 25;
+            hard-capped at 50 for every scope (export runs in small bounded
+            batches by design). Page with ``offset`` or narrow with filters
+            to export more; full-mailbox scans are disabled, so large
+            metadata-only walks must page across several bounded calls.
         offset: Pagination offset for bounded filtered or entire_mailbox exports.
         sort: Export ordering. Use "newest_first" or "date_desc".
         sender_exact: Exact sender-address discovery filter for filtered scope.
@@ -94,9 +97,11 @@ def export_emails(
     from apple_mail_mcp.tools import analytics
     from apple_mail_mcp.tools.analytics.export_helpers import (
         build_correspondent_export_script,
+        build_entire_mailbox_export_script,
         message_ids_by_mailbox,
         normalize_export_format,
         run_message_id_export,
+        run_multi_mailbox_id_export,
         unbounded_export_error,
     )
 
@@ -113,6 +118,11 @@ def export_emails(
         return "Error: offset must be >= 0"
     if max_emails is not None and max_emails <= 0:
         return "Error: max_emails must be > 0"
+    if max_emails is not None and max_emails > _EXPORT_MAX_EMAILS_CAP:
+        return (
+            f"Error: max_emails must be between 1 and {_EXPORT_MAX_EMAILS_CAP}. Export runs in small "
+            "bounded batches; page with offset or narrow with filters to export more."
+        )
     if sort not in {"newest_first", "date_desc"}:
         return "Error: Invalid sort. Use: newest_first or date_desc"
 
@@ -125,21 +135,10 @@ def export_emails(
     if path_err:
         return path_err
 
-    # Apply scope-specific max_emails default and emit a performance warning
-    # when the caller requests an unusually large body-read export.
-    export_warning: str | None = None
-    if scope == "entire_mailbox":
-        if max_emails is None:
-            max_emails = _EXPORT_ENTIRE_MAILBOX_DEFAULT
-        elif max_emails > _EXPORT_ENTIRE_MAILBOX_WARN_THRESHOLD:
-            export_warning = (
-                f"⚠ Performance warning: max_emails={max_emails} will read the body of "
-                f"{max_emails} messages from Mail.app. On an Exchange or Gmail account "
-                "with a cold cache each body read can take 1–3 seconds, making this "
-                f"export potentially {max_emails * 2 // 60}–{max_emails * 3 // 60} minutes long. "
-                "For metadata-only walks over large mailboxes, use full_inbox_export instead."
-            )
-    elif max_emails is None:
+    # Every scope shares the same default and is hard-capped at
+    # _EXPORT_MAX_EMAILS_CAP (see validation above), so there is no longer a
+    # separate large-export performance-warning path.
+    if max_emails is None:
         max_emails = 25
 
     save_dir = str(Path(save_directory).expanduser().resolve())
@@ -151,6 +150,8 @@ def export_emails(
     safe_save_dir = escape_applescript(save_dir)
 
     if message_ids is not None:
+        if len(message_ids) > _EXPORT_MAX_EMAILS_CAP:
+            return f"Error: message_ids is limited to {_EXPORT_MAX_EMAILS_CAP} per call; split into smaller batches."
         return run_message_id_export(
             account=account,
             safe_account=safe_account,
@@ -237,6 +238,10 @@ def export_emails(
                         set exportContent to exportContent & "<hr>" & messageContent
                         set exportContent to exportContent & "</body></html>"
                     end if
+
+                    -- Ensure the flat save_directory exists (this scope writes
+                    -- directly into it, unlike other scopes' export subdirectory).
+                    do shell script "mkdir -p " & quoted form of "{safe_save_dir}"
 
                     -- Write to file
                     set fileRef to open for access POSIX file filePath with write permission
@@ -336,7 +341,7 @@ def export_emails(
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
             safe_mailbox=safe_mailbox,
-            scan_upper_bound=max(max_emails + offset, compute_scan_upper_bound(recent_days)),
+            scan_upper_bound=min(max(max_emails + offset, compute_scan_upper_bound(recent_days)), 250),
             max_emails=max_emails,
             offset=offset,
             include_sent=include_sent,
@@ -357,7 +362,7 @@ def export_emails(
         thread_mailboxes: list[str] | None = None
         if include_sent and mailbox.lower() != "all":
             thread_mailboxes = [mailbox]
-            if all(candidate.lower() != "sent" for candidate in thread_mailboxes):
+            if mailbox.lower() != "sent":
                 thread_mailboxes.append("Sent")
         thread_result = get_email_thread(
             account=account,
@@ -383,12 +388,33 @@ def export_emails(
             return "No emails found for thread export"
         thread_records = cast(list[dict[str, object]], records)
 
-        result = run_message_id_export(
+        # Gmail-backed accounts report each thread message's container as
+        # the virtual "All Mail" mailbox, which Mail.app cannot open
+        # directly and which must never be scanned (it is the entire
+        # remote store). Look ids up across a small, fixed set of
+        # openable, bounded mailboxes instead of trusting the reported
+        # mailbox name.
+        raw_thread_ids = [str(record.get("message_id", "")).strip() for record in thread_records]
+        seen_thread_ids: set[str] = set()
+        ordered_thread_ids: list[str] = []
+        for mid in normalize_message_ids(raw_thread_ids):
+            if mid not in seen_thread_ids:
+                seen_thread_ids.add(mid)
+                ordered_thread_ids.append(mid)
+        if not ordered_thread_ids:
+            return "No emails found for thread export"
+
+        candidate_mailboxes = ["INBOX"]
+        if include_sent:
+            candidate_mailboxes.extend(["Sent Mail", "Sent", "Sent Messages", "Sent Items"])
+
+        result = run_multi_mailbox_id_export(
             account=account,
             safe_account=safe_account,
+            candidate_mailboxes=candidate_mailboxes,
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
-            ids_by_mailbox=message_ids_by_mailbox(thread_records, default_mailbox=mailbox),
+            message_ids=ordered_thread_ids,
             timeout=timeout,
             runner=analytics.run_applescript,
         )
@@ -412,115 +438,16 @@ def export_emails(
             date_filter += """
                             if messageDate > toDate then set shouldExport to false
             """
-        scan_upper_bound = max_emails + offset
-        script = f'''
-        tell application "Mail"
-            set outputText to "EXPORTING MAILBOX" & return & return
-            {date_setup}
-
-            try
-                set targetAccount to account "{safe_account}"
-                -- Try to get mailbox
-                try
-                    set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
-                on error
-                    if "{safe_mailbox}" is "INBOX" then
-                        set targetMailbox to mailbox "Inbox" of targetAccount
-                    else
-                        error "Mailbox not found: {safe_mailbox}"
-                    end if
-                end try
-
-                -- Use Mail's count API for the headline total, then bind
-                -- only the requested page window to avoid materializing
-                -- the entire mailbox on large Exchange/Gmail accounts.
-                set messageCount to count of messages of targetMailbox
-                if messageCount > {scan_upper_bound} then
-                    set mailboxMessages to messages 1 thru {scan_upper_bound} of targetMailbox
-                else
-                    set mailboxMessages to messages of targetMailbox
-                end if
-                set exportCount to 0
-                set seenCount to 0
-
-                -- Create export directory
-                set exportDir to "{safe_save_dir}/{safe_mailbox}_export"
-                do shell script "mkdir -p " & quoted form of exportDir
-
-                repeat with aMessage in mailboxMessages
-                    if exportCount >= {max_emails} then exit repeat
-                    set seenCount to seenCount + 1
-
-                    try
-                        set messageDate to date received of aMessage
-                        set shouldExport to true
-                        if seenCount <= {offset} then set shouldExport to false
-                        {date_filter}
-                        if shouldExport then
-                            set messageSubject to subject of aMessage
-                            set messageSender to sender of aMessage
-                            set messageContent to content of aMessage
-
-                            -- Create safe filename with index
-                            set exportCount to exportCount + 1
-                            set fileName to exportCount & "_" & messageSubject & ".{safe_format}"
-
-                            -- Remove unsafe characters
-                            set AppleScript's text item delimiters to "/"
-                            set fileNameParts to text items of fileName
-                            set AppleScript's text item delimiters to "-"
-                            set fileName to fileNameParts as string
-                            set AppleScript's text item delimiters to ""
-
-                            set filePath to exportDir & "/" & fileName
-
-                            -- Prepare export content
-                            if "{safe_format}" is "txt" then
-                                set exportContent to "Subject: " & messageSubject & return
-                                set exportContent to exportContent & "From: " & messageSender & return
-                                set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
-                                set exportContent to exportContent & messageContent
-                            else if "{safe_format}" is "html" then
-                                set exportContent to "<html><body>"
-                                set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
-                                set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
-                                set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
-                                set exportContent to exportContent & "<hr>" & messageContent
-                                set exportContent to exportContent & "</body></html>"
-                            end if
-
-                            -- Write to file
-                            set fileRef to open for access POSIX file filePath with write permission
-                            set eof of fileRef to 0
-                            write exportContent to fileRef as «class utf8»
-                            close access fileRef
-                        end if
-
-                    on error
-                        -- Close file handle before continuing to avoid fd leak
-                        try
-                            close access fileRef
-                        end try
-                    end try
-                end repeat
-
-                set outputText to outputText & "✓ Mailbox exported successfully!" & return & return
-                set outputText to outputText & "Mailbox: {safe_mailbox}" & return
-                set outputText to outputText & "Total emails in mailbox: " & messageCount & return
-                set outputText to outputText & "Offset: {offset}" & return
-                set outputText to outputText & "Exported: " & exportCount & return
-                if exportCount < messageCount then
-                    set outputText to outputText & "(bounded page: offset={offset}, max_emails={max_emails})" & return
-                end if
-                set outputText to outputText & "Location: " & exportDir & return
-
-            on error errMsg
-                return "Error: " & errMsg
-            end try
-
-            return outputText
-        end tell
-        '''
+        script = build_entire_mailbox_export_script(
+            safe_account=safe_account,
+            safe_mailbox=safe_mailbox,
+            safe_format=safe_format,
+            safe_save_dir=safe_save_dir,
+            max_emails=max_emails,
+            offset=offset,
+            date_setup=date_setup,
+            date_filter=date_filter,
+        )
 
     else:
         return f"Error: Invalid scope '{scope}'. Use: single_email, filtered, correspondent, thread, entire_mailbox"
@@ -529,6 +456,4 @@ def export_emails(
         result = analytics.run_applescript(script, timeout=timeout if timeout is not None else 120)
     except AppleScriptTimeout:
         return f"Error: AppleScript timed out while exporting emails for '{account}'"
-    if export_warning:
-        return export_warning + "\n\n" + result
     return result

@@ -149,8 +149,9 @@ def get_email_thread(
       Get an email conversation thread - all messages with the same or similar subject.
 
       Defaults to the last 48 hours. Unbounded thread scans
-      (``recent_days=0``) are refused — use ``full_inbox_export`` for the
-      audited full-mailbox escape hatch. Subject matching is case-insensitive.
+      (``recent_days=0``) are refused; full-mailbox scans are disabled, so
+      pass a bounded ``recent_days`` window instead. Subject matching is
+      case-insensitive.
 
     Preferred: pass ``message_id`` from ``search_emails`` or ``list_inbox_emails``
     to fetch the anchor message by id and match related messages by
@@ -205,11 +206,7 @@ def get_email_thread(
             message=("get_email_thread refuses to scan without a date window; pass recent_days=7 or smaller"),
             remediation={
                 "preferred": "Pass recent_days=7",
-                "fallback_tool": "full_inbox_export",
-                "fallback_tool_args": {
-                    "account": account,
-                    "filter_subject": subject_keyword,
-                },
+                "note": "Full-mailbox scans are disabled; bound this call.",
             },
         )
         return serialize_tool_error(tool_error)

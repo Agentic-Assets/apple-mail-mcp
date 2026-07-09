@@ -76,9 +76,15 @@ def _build_manage_drafts_list_script(
                         if skipThisDraft then
                             -- filtered out by subject_contains
                         else
-                            set draftDate to "(unsent)"
+                            -- Drafts that have never been sent leave `date sent`
+                            -- unset, which previously fell back to the literal
+                            -- "(unsent)" string here. `date received` is always
+                            -- populated on Mail's message class (it is set when
+                            -- the draft is created/saved), so use that instead
+                            -- to report a real drafted/received date.
+                            set draftDate to "(unknown)"
                             try
-                                set draftDate to (date sent of aDraft) as string
+                                set draftDate to (date received of aDraft) as string
                             end try
 
                             -- Body snippet (first 140 chars, whitespace collapsed)

@@ -148,12 +148,12 @@ range_results = search_emails(
     mailboxes=["INBOX", "Archive"],
     date_from="2026-01-01",
     date_to="2026-01-31",
-    limit=100,
+    limit=50,
     output_format="json",
 )
 ```
 
-Date-only and status-only queries can still produce many candidates. Review result counts and ids before any mutation.
+Date-only and status-only queries can still produce many candidates. Every `search_emails` call scans at most 50 messages regardless of `limit`; page with `offset` for a wider date range. Review result counts and ids before any mutation.
 
 ## Attachment Discovery
 
@@ -249,18 +249,21 @@ Permanent delete and empty-trash operations need explicit confirmation and, for 
 
 ## Slow Or Broad Fallbacks
 
-Use `full_inbox_export` for audited full-mailbox work rather than trying to bypass bounded search rules.
+`full_inbox_export` is disabled (`UNBOUNDED_EXPORT_DISABLED`) and runs no AppleScript; it is not a bypass for bounded search rules. For audited full-mailbox work, page bounded calls instead: repeat `search_emails(..., limit=50, offset=N)` advancing `offset` by 50 each call, or take an export in bounded `export_emails` slices (`max_emails` is capped at 50 per call across every scope).
 
 ```python
-full_inbox_export(
+page = search_emails(
     account="Work",
-    max_emails=1000,
-    fields=["subject", "sender", "date", "message_id", "mailbox"],
-    output_format="ndjson",
+    mailbox="INBOX",
+    recent_days=90,
+    limit=50,
+    offset=0,
+    output_format="json",
 )
+# advance offset by len(page["items"]) (or 50) for the next page
 ```
 
-Treat exports and large scans as evidence-gathering steps. They do not authorize mutations by themselves.
+Treat exports and paged scans as evidence-gathering steps. They do not authorize mutations by themselves.
 
 ## Anti-Patterns
 

@@ -103,7 +103,8 @@ class StatisticsFullScanGateTests(unittest.TestCase):
         self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
         self.assertIn("days_back", parsed.get("message", ""))
         remediation = parsed.get("remediation") or {}
-        self.assertEqual(remediation.get("fallback_tool"), "full_inbox_export")
+        self.assertNotIn("full_inbox_export", str(remediation))
+        self.assertTrue(remediation.get("preferred"))
 
     def test_statistics_blocks_days_back_zero_json(self):
         result = analytics_tools.get_statistics(
@@ -143,7 +144,8 @@ class TopSendersFullScanGateTests(unittest.TestCase):
         self.assertTrue(parsed.get("error"))
         self.assertEqual(parsed.get("code"), "UNBOUNDED_SCAN_REQUIRED")
         remediation = parsed.get("remediation") or {}
-        self.assertEqual(remediation.get("fallback_tool"), "full_inbox_export")
+        self.assertNotIn("full_inbox_export", str(remediation))
+        self.assertTrue(remediation.get("preferred"))
 
     def test_top_senders_no_longer_accepts_allow_full_scan(self):
         # v3.1.11: allow_full_scan removed from the signature.
@@ -276,19 +278,23 @@ class ListInboxUnreadFilterBoundedTests(unittest.TestCase):
         self.assertNotIn("candidateMessages whose read status is false", script)
 
     def test_scan_cap_scales_with_max_emails(self):
-        # max_emails=50 → scan_cap = max(50*10, 100) = 500
+        # max_emails=50 → scan_cap = min(max(50*10, 50), INBOX_MAX_CAP=50) = 50,
+        # then hard-clamped to INBOX_HARD_CEILING (50) → 50.
         script = self._text_script(max_emails=50)
-        self.assertIn("messages 1 thru 500", script)
+        self.assertIn("messages 1 thru 50", script)
 
     def test_scan_cap_has_floor_of_50(self):
         # max_emails=5 → scan_cap = max(5*10, INBOX_DEFAULT_CAP//2) = 50
         script = self._text_script(max_emails=5)
         self.assertIn("messages 1 thru 50", script)
 
-    def test_scan_cap_ceiling_at_500(self):
-        # max_emails=500 → scan_cap = min(max(500*10, 50), INBOX_MAX_CAP) = 500
+    def test_scan_cap_ceiling_at_hard_ceiling(self):
+        # max_emails=500 → scan_cap = min(max(500*10, 50), INBOX_MAX_CAP=50) = 50,
+        # then hard-clamped to INBOX_HARD_CEILING (50) → 50. The 500-message
+        # cap this test used to lock in was retired by AGENTIC-988's
+        # hard-ceiling retune: no inbox scan may bind more than 50 messages.
         script = self._text_script(max_emails=500)
-        self.assertIn("messages 1 thru 500", script)
+        self.assertIn("messages 1 thru 50", script)
 
     def test_candidate_messages_variable_present(self):
         # The fix binds `candidateMessages` for the bounded slice and then
@@ -322,10 +328,10 @@ class SearchScanCapScalingTests(unittest.TestCase):
             recent_days=recent_days,
         )[0]
 
-    def test_default_recent_days_2_scales_to_150(self):
-        # bounded_scan.compute_scan_upper_bound(2.0) = 100 + 2*25 = 150.
+    def test_default_recent_days_2_scales_to_46(self):
+        # bounded_scan.compute_scan_upper_bound(2.0) = 40 + 2*3 = 46.
         script = self._script(recent_days=2.0)
-        self.assertIn("set scanUpperBound to 150", script)
+        self.assertIn("set scanUpperBound to 46", script)
 
     def test_recent_window_exits_before_subject_reads(self):
         # Large Exchange no-hit subject searches were slow because we read
@@ -376,15 +382,17 @@ class SearchScanCapScalingTests(unittest.TestCase):
         collection_block = script.split("set matchingCount to count of matchingMessages", 1)[0]
         self.assertNotIn("set messageDate to date received of aMessage", collection_block)
 
-    def test_recent_days_7_caps_at_250(self):
-        # compute_scan_upper_bound(7.0) = 100 + 175 = 275, clamped to 250.
+    def test_recent_days_7_caps_at_window_cap(self):
+        # compute_scan_upper_bound(7.0) = 40 + 21 = 61, clamped to
+        # SEARCH_WINDOW_CAP (50). scan_cap = max(21, 50) = 50, then the
+        # SEARCH_HARD_CEILING clamp (also 50) is a no-op.
         script = self._script(recent_days=7.0)
-        self.assertIn("set scanUpperBound to 250", script)
+        self.assertIn("set scanUpperBound to 50", script)
 
-    def test_recent_days_30_caps_at_250(self):
-        # recent_days=30 → 100 + 750, clamped to SEARCH_WINDOW_CAP (250).
+    def test_recent_days_30_caps_at_window_cap(self):
+        # recent_days=30 → 40 + 90 = 130, clamped to SEARCH_WINDOW_CAP (50).
         script = self._script(recent_days=30.0)
-        self.assertIn("set scanUpperBound to 250", script)
+        self.assertIn("set scanUpperBound to 50", script)
 
     def test_recent_days_zero_uses_floor(self):
         # recent_days=0 keeps base scan_cap = limit + 1 + offset = 21
@@ -392,10 +400,13 @@ class SearchScanCapScalingTests(unittest.TestCase):
         script = self._script(recent_days=0.0)
         self.assertIn("set scanUpperBound to 21", script)
 
-    def test_floor_dominates_when_limit_is_huge(self):
-        # limit=600 → base_cap=601 > compute(2.0)=150, scan_cap=601.
+    def test_hard_ceiling_dominates_when_limit_is_huge(self):
+        # limit=600 → base_cap=601 > compute(2.0)=46, so scan_cap would be
+        # 601 before the hard ceiling. AGENTIC-988's SEARCH_HARD_CEILING (50)
+        # clamp fires last and wins regardless of how large limit/offset
+        # push the scaled caps — this is the whole point of the hard ceiling.
         script = self._script(recent_days=2.0, limit=600)
-        self.assertIn("set scanUpperBound to 601", script)
+        self.assertIn("set scanUpperBound to 50", script)
 
 
 if __name__ == "__main__":
