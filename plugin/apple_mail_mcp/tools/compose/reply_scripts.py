@@ -385,10 +385,19 @@ try
         activate
         delay 0.4
 
-        -- Prefer Mail's live compose-window title when it is the same reply thread.
+        -- Prefer Mail's own outgoing reply subject when it is the same reply thread.
         -- Mail collapses duplicate Re:/Fwd: prefixes, so the derived source subject
-        -- can disagree with the window name; adopt the live title only after a
+        -- can disagree with the compose title; adopt normalized titles only after a
         -- subject-core match so an unrelated open compose window is never adopted.
+        try
+            set replyMessageSubject to subject of replyMessage as string
+            if replyMessageSubject is not "" then
+                if my subjectCoresMatch(replyMessageSubject, derivedReplySubject) then
+                    set replySubject to replyMessageSubject
+                end if
+            end if
+        end try
+        -- Prefer Mail's live compose-window title when it is the same reply thread.
         try
             set mailWindowTitle to name of front window as string
             if mailWindowTitle is not "" then

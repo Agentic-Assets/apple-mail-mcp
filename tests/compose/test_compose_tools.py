@@ -2331,6 +2331,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         script = _main_reply_script(captured)
         self.assertIn("set derivedReplySubject to sourceSubject", script)
+        self.assertIn("set replyMessageSubject to subject of replyMessage as string", script)
+        self.assertIn("if my subjectCoresMatch(replyMessageSubject, derivedReplySubject) then", script)
         self.assertIn("if my subjectCoresMatch(mailWindowTitle, derivedReplySubject) then", script)
         self.assertIn("set replySubject to mailWindowTitle", script)
         self.assertIn("on stripReplySubjectPrefixes(rawSubject)", script)
