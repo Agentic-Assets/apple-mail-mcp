@@ -221,6 +221,7 @@ def build_correspondent_export_script(
                 set exportDir to "{safe_save_dir}/correspondent_export"
                 do shell script "mkdir -p " & quoted form of exportDir
                 set totalExportCount to 0
+                set globalMatchedCount to 0
 
                 repeat with currentMailbox in searchMailboxes
                     if totalExportCount >= {max_emails} then exit repeat
@@ -231,7 +232,6 @@ def build_correspondent_export_script(
                     else
                         set mailboxMessages to messages of currentMailbox
                     end if
-                    set matchedCount to 0
                     set mailboxExportCount to 0
 
                     repeat with aMessage in mailboxMessages
@@ -241,8 +241,8 @@ def build_correspondent_export_script(
                             set shouldExport to my messageHasCorrespondent(aMessage, "{safe_email_address}")
                             {date_filter}
                             if shouldExport then
-                                set matchedCount to matchedCount + 1
-                                if matchedCount > {offset} then
+                                set globalMatchedCount to globalMatchedCount + 1
+                                if globalMatchedCount > {offset} then
                                     set messageSubject to subject of aMessage
                                     set messageSender to sender of aMessage
                                     set messageContent to content of aMessage

@@ -6,6 +6,7 @@ from typing import cast
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.backend.base import target_selector_deprecated_error
+from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     escape_applescript,
@@ -335,7 +336,7 @@ def export_emails(
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
             safe_mailbox=safe_mailbox,
-            scan_upper_bound=max_emails + offset,
+            scan_upper_bound=max(max_emails + offset, compute_scan_upper_bound(recent_days)),
             max_emails=max_emails,
             offset=offset,
             include_sent=include_sent,
@@ -376,6 +377,8 @@ def export_emails(
         except json.JSONDecodeError:
             return "Error: get_email_thread returned invalid JSON during thread export"
         records = thread_payload.get("items", [])
+        if offset > 0:
+            records = records[offset:]
         if not isinstance(records, list) or not records:
             return "No emails found for thread export"
         thread_records = cast(list[dict[str, object]], records)

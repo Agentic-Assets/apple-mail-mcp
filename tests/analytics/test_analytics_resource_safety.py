@@ -342,7 +342,7 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
         self.assertIn("bcc recipients of aMessage", script)
         self.assertIn("set end of searchMailboxes to sentMailbox", script)
         self.assertIn("correspondent_export", script)
-        self.assertIn("if matchedCount > 1 then", script)
+        self.assertIn("if globalMatchedCount > 1 then", script)
         self.assertIn("if totalExportCount >= 5 then exit repeat", script)
 
     def test_correspondent_export_can_skip_sent_mailbox(self):
