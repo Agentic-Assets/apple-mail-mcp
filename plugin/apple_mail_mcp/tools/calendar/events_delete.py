@@ -62,7 +62,7 @@ def delete_events(
     days_ahead: float = 90.0,
     span: str | None = None,
     dry_run: bool = True,
-    max_deletes: int = 20,
+    max_deletes: int = int(CALENDAR_BOUNDS["BULK_DELETE_DEFAULT_MAX"]),
     output_format: str = "json",
     timeout: int | None = None,
 ) -> str:
