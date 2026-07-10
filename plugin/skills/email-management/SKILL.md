@@ -124,6 +124,8 @@ Goal: keep folder structure healthy and archive aging messages.
    - Action tools do not target by `sender=`; collect ids with `search_emails(sender_exact="...", ...)` or `search_emails(sender_domain="...", ...)`, then call `move_email(message_ids=[...])`.
 6. Archive read mail older than 30 days into `Archive/<year>`.
 
+**Human-Sender Screen applies to every archive move in this workflow.** Before any id from steps 5 or 6 reaches `move_email(dry_run=True, ...)`, apply the Human-Sender Screen in `email-archive-cleanup`'s `SKILL.md` (section "Human-Sender Screen"); drop human-looking or ambiguous senders from the candidate list and archive only the confidently automated or promotional subset. This umbrella skill does not carry its own copy of the screen; all archive execution defers to `email-archive-cleanup` and inherits its screen, so the safety guarantee holds no matter which skill the user entered through.
+
 Detailed safe bulk operations are documented in `references/bulk-cleanup.md`.
 
 ## Workflow: Achieving Inbox Zero

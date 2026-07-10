@@ -5,6 +5,19 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.10.1 - 2026-07-10
+
+### Changed
+
+- **`email-archive-cleanup` skill: Human-Sender Screen.** The archiving skill now
+  applies a conservative human-sender filter at the dry-run/preview stage before
+  any message becomes an archive candidate. It never archives mail from a real
+  person the user corresponds with unless it is confidently spam; archiving is
+  reserved for promotional and marketing mail, newsletters, automated updates and
+  notifications, receipts, order/shipping/calendar/system notices, and obvious
+  spam. When the sender's nature is uncertain, the safe default is to leave the
+  message visible in the inbox rather than archive it.
+
 ## 3.10.0 - 2026-07-10
 
 Apple Calendar tool surface: 10 new MCP tools (41 total), 2 new workflow skills
