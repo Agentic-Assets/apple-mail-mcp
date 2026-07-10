@@ -39,9 +39,9 @@ def get_statistics(
     Get comprehensive email statistics and analytics.
 
     For ``account_overview`` and ``sender_stats``, scans a bounded slice of
-    mailboxes and newest messages (``days_back <= 7``: 10 mailboxes × 75
-    messages; longer windows: 20 × 250) so AppleScript wall time stays
-    predictable on Exchange / Gmail accounts with deep history.
+    mailboxes and newest messages (``days_back <= 7``: 10 mailboxes; longer
+    windows: 20 mailboxes; each capped at 50 messages) so AppleScript wall
+    time stays predictable on Exchange / Gmail accounts with deep history.
     ``mailbox_breakdown`` is bounded by Mail.app's own count APIs and is not
     capped.
 

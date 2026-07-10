@@ -28,8 +28,8 @@ Encode durable preferences inside **`USER_EMAIL_PREFERENCES`** so every preferen
 
 | Step | Tool call |
 |------|-----------|
-| Pull recent Sends | `search_emails(mailbox="Sent", include_content=true, recent_days=30, limit=15)`; on large mailboxes, follow this ladder: try `recent_days=7` first; if timeouts, drop to `3`; if still slow, anchor on a specific `message_id` from a known recent Send. If the user insists on the full Sent corpus, page bounded `search_emails(mailbox="Sent", limit=50, offset=N)` calls (or `export_emails(scope="entire_mailbox", mailbox="Sent", max_emails=50, offset=N)`) rather than ratcheting `recent_days`; `full_inbox_export` is disabled (`UNBOUNDED_EXPORT_DISABLED`) and never a shortcut; never pass `recent_days=0` |
-| Deepen hallmark threads | `get_email_by_id(message_id="...")` or `get_email_thread(message_id="...")`; if no id yet, run bounded `search_emails` or `list_inbox_emails` first and pass the returned `message_id` |
+| Pull recent Sends | `search_emails(mailbox="Sent", include_content=true, recent_days=7, limit=15)`; on large mailboxes, follow this ladder: try `recent_days=7` first; if timeouts, drop to `3`; if still slow, anchor on a specific `message_id` from a known recent Send. If the user insists on the full Sent corpus, page bounded `search_emails(mailbox="Sent", limit=50, offset=N)` calls (or `export_emails(scope="entire_mailbox", mailbox="Sent", max_emails=50, offset=N)`) rather than ratcheting `recent_days`; `full_inbox_export` is disabled (`UNBOUNDED_EXPORT_DISABLED`) and never a shortcut; never pass `recent_days=0` |
+| Deepen hallmark threads | `get_email_by_id(account=..., message_id="...")` or `get_email_thread(account=..., message_id="...")`; if no id yet, run bounded `search_emails` or `list_inbox_emails` first and pass the returned `message_id` |
 | Check alternate aliases | Cross-check `list_account_addresses` outputs if tone shifts per persona |
 
 Interpret samples **summaristically**; do not stash full bodies into long-term prose outside the negotiated profile document the user accepts.

@@ -12,7 +12,7 @@ Produce **implementable**, human-applied Mail rules derived from MCP analytics. 
 ### 1. Quantify Sources
 
 ```
-get_top_senders(limit=30, days_back=30, group_by_domain=true)
+get_top_senders(top_n=30, days_back=30, group_by_domain=true)
 ```
 
 Focus on recurring automated domains versus human counterparts. See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical bounded-scan rules; `get_top_senders(days_back=0)` returns `UNBOUNDED_SCAN_REQUIRED`; start at `days_back=14` and widen the window rather than reaching for `full_inbox_export`, which is disabled (`UNBOUNDED_EXPORT_DISABLED`).

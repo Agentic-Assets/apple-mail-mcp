@@ -7,7 +7,7 @@ Use analytics tools to understand email patterns before reorganizing or cleaning
 - `get_statistics(scope="account_overview")`: totals, read/unread ratio, flagged count, sample senders, mailbox distribution.
 - `get_statistics(scope="sender_stats", sender="name@example.com")`: message count and unread count from a specific sender, plus attachment volume.
 - `get_statistics(scope="mailbox_breakdown", mailbox="FolderName")`: per-mailbox totals, unread count, and read ratio.
-- `get_top_senders(account="...", limit=20)`: surface the heaviest senders ranked by volume. Use this to identify newsletter overload, noisy systems, or recurring threads worth bulk-archiving.
+- `get_top_senders(account="...", top_n=20)`: surface the heaviest senders ranked by volume. Use this to identify newsletter overload, noisy systems, or recurring threads worth bulk-archiving.
 
 ## Workflows
 

@@ -546,8 +546,8 @@ move_email(message_ids=[e["message_id"] for e in preview["emails"]], to_mailbox=
 # folder holds more)
 preview = search_emails(mailbox="Temp/ProjectName", limit=50)
 ids = [e["message_id"] for e in preview["items"]]
-move_email(dry_run=True, message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)
-move_email(message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=100)
+move_email(dry_run=True, message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=min(len(ids), 50))
+move_email(message_ids=ids, to_mailbox="Archive/2025/ProjectName", max_moves=min(len(ids), 50))
 
 # Delete empty temp folder in Mail app
 ```

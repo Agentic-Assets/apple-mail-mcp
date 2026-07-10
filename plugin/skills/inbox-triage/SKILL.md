@@ -44,8 +44,11 @@ Run on the **configured default account** unless the user names another. Work **
 
 ### 1. Snapshot (30–60s)
 
+`get_inbox_overview` (and `list_mailboxes`) do not fall back to `DEFAULT_MAIL_ACCOUNT`; without an explicit `account`, they fan out and scan every configured account, so pass `account` explicitly to avoid that.
+
 ```
 get_inbox_overview(
+  account="Work",
   output_format="compact",
   include_mailboxes=false,
   include_recent=true,
@@ -63,7 +66,7 @@ Prefer ids from JSON search:
 search_emails(limit=5, recent_days=3, output_format="json", sort="date_desc")
 ```
 
-Use `list_inbox_emails(max_emails=5, include_content=false, output_format="json")` only for a quick subject skim. If rows lack `message_id`, re-resolve each human item with `search_emails(sender=..., limit=10, output_format="json")` before thread-check or archive.
+Use `list_inbox_emails(max_emails=5, include_content=false, output_format="json")` only for a quick subject skim. List rows always include `message_id`, so use it directly for thread-check or archive.
 
 Process this batch (read → thread-check → draft or no-action) before pulling more. Raise to `max_emails=8` / `limit=8` only if the first batch is clear and the user wants to continue.
 
@@ -88,12 +91,12 @@ Use when the user cares about follow-ups they already sent.
 After search or list returns a `message_id`, fetch the full message without re-searching:
 
 ```
-get_email_by_id(message_id="12345", include_content=true, output_format="json")
+get_email_by_id(account="Work", message_id="12345", include_content=true, output_format="json")
 ```
 
 In JSON rows, `message_id` is the numeric Apple Mail id for follow-up tool calls (`get_email_by_id`, `get_email_thread`, `reply_to_email`, `move_email`). `internet_message_id` is the RFC Message-ID header used for replied-header correlation only; do not pass it to tools that expect a numeric Mail id.
 
-Repo CLI equivalent: `apple-mail show --id 12345 --json`.
+Repo CLI equivalent: `apple-mail show --account "Work" --id 12345 --json`.
 
 **To draft:** load **`email-drafting`** (not this skill). Draft **one thread at a time**: pass the `message_id` from triage into `reply_to_email(message_id=..., reply_body=..., mode="draft")`; default `native_format=True` needs Mail focus + Accessibility (see `email-drafting` for `REPLY_WINDOW_FOCUS_FAILED` recovery). Finish verify for that draft before starting the next message in the batch.
 

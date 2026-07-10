@@ -5,7 +5,7 @@ One-page contract for coding agents. Full policy: `docs/CLAUDE-conventions.md`. 
 ## Default mutation path
 
 1. **Discover (newest first, small batch):** `search_emails(limit=5, recent_days=2..7, output_format="json")` first; use `list_inbox_emails(max_emails=5)` only for subject skim. See `recent-first-triage.md` and `exchange-account-patterns.md`.
-2. **Collect ids:** `message_id` / `message_ids` from JSON (`search_emails` → `"items"`). If `list_inbox_emails` rows lack `message_id`, re-resolve with `search_emails(sender=..., limit=10)` before any action.
+2. **Collect ids:** `message_id` / `message_ids` from JSON (`search_emails` → `"items"`, `list_inbox_emails` → `"emails"`). `message_id` is always present in both text and JSON output, so use it directly for follow-up actions without re-resolving.
 3. **Preview:** `dry_run=True` on moves, trash, status updates when supported.
 4. **Act:** pass exact ids only; never `subject_keyword`, `sender`, or `draft_subject` on action tools.
 
