@@ -1,11 +1,39 @@
 ---
 name: email-archive-cleanup
-description: This skill should be used when the user asks to "archive old mail safely", "move everything from X sender", "clear newsletters", "bulk mark read after export", "preview what would move with dry_run=True", or run staged cleanup campaigns. Uses search_emails, move_email(dry_run=True) preview → execute, update_email_status, export_emails, manage_trash (max_deletes cap), synchronize_account, and get_statistics when measuring progress. Do NOT use for taxonomy design sessions without execution (mailbox-taxonomy), proposing Mail filter rules copy (mail-rules-advisor only), drafting mail (email-drafting), or the 5-minute triage skim (inbox-triage).
+description: This skill should be used when the user asks to "archive old mail safely", "move everything from X sender" (screens out human correspondents unless confidently spam), "clear newsletters", "bulk mark read after export", "preview what would move with dry_run=True", or run staged cleanup campaigns. Uses search_emails, move_email(dry_run=True) preview → execute, update_email_status, export_emails, manage_trash (max_deletes cap), synchronize_account, and get_statistics when measuring progress. Do NOT use for taxonomy design sessions without execution (mailbox-taxonomy), proposing Mail filter rules copy (mail-rules-advisor only), drafting mail (email-drafting), or the 5-minute triage skim (inbox-triage).
 ---
 
 # Archive And Cleanup Campaigns
 
 High-leverage transformations with **explicit human checkpoints**. Optimize for reversible moves (`Archive`, `Trash` soft-delete) unless the operator understands permanent deletes.
+
+## Human-Sender Screen (apply before every archive proposal)
+
+Archiving is for promotional and marketing mail, spam, automated notifications and system alerts, newsletters, receipts, order and shipping confirmations, calendar and system notices, and other bulk or automated mail. It is not for messages from real people.
+
+Never propose archiving a message from a real person the operator corresponds with (a human sender, especially anyone the operator has emailed or replied to, or who addresses the operator by name) unless confident the message is spam. Apply this screen while building the candidate list during evidence-gathering, before any id reaches `move_email(dry_run=True, ...)`; it is a filter on what gets proposed, not a warning attached afterward.
+
+Every signal below uses a field a tool actually returns. Do not rely on headers or filters the tools do not expose (there is no `List-Unsubscribe` field and no direct sent-to filter).
+
+**Keep visible, do not archive, when the sender shows:**
+
+- A personalized greeting or one-to-one tone in `content_preview` rather than a bulk template
+- A reply thread the operator participated in: `in_reply_to` or `references` is populated on the candidate message
+- A human-looking From name and address, not `noreply@`, `no-reply@`, `notifications@`, `marketing@`, or a bulk ESP domain
+- No unsubscribe link or marketing/list footer visible in `content_preview`
+- Best-effort correspondence history: there is no direct sent-to filter, so `search_emails` cannot ask "did the operator ever email this address." When the stakes are high, search `mailbox="Sent"` for a bounded window and fetch full messages with `get_email_by_id`/`get_email_by_ids` to check the `to` field for the correspondent's address (`search_emails` results always leave `to` empty). Treat missing history as inconclusive, not as evidence the sender is automated.
+
+**Safe to archive when the sender shows:**
+
+- `noreply@`, `no-reply@`, `notifications@`, `marketing@`, or a known bulk ESP domain
+- An unsubscribe link or marketing/list footer visible in the message body preview (`content_preview`), a promotional template, or newsletter formatting
+- An automated receipt, order or shipping confirmation, or calendar/system notification
+- A one-to-one message versus a bulk blast: a generic salutation or template body in `content_preview` with no reply thread (`in_reply_to`/`references` both empty) points toward automated or bulk mail
+- Content that is confidently spam
+
+When it is uncertain whether a sender is a real person or an automated/bulk source, default to NOT archiving and leave the message in the inbox. Bias toward keeping human mail visible; archive only when confident the message is automated, promotional, or spam. If a candidate batch mixes human and automated senders, split it: drop the ambiguous or human-looking ids before quoting a dry-run total, and archive only the confidently automated or promotional subset.
+
+**Explicit override:** when the operator names a specific human sender by address or name and confirms, in that request, that they want that person's mail archived, proceed on that named id or sender at the operator's instruction, outside the automatic screen above. The screen governs automatic and bulk archive proposals, not an explicit, informed instruction about a named sender.
 
 ## Large-inbox pre-flight (required when inbox > ~5,000 messages)
 
@@ -19,10 +47,12 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 `move_email`, `update_email_status`, and `manage_trash` **require `message_ids` by default**. Passing `subject_keyword=` or `sender=` to action tools returns `code: TARGET_SELECTOR_DEPRECATED`; collect `message_ids` first. Date-only or explicit bulk paths still require `allow_filter_scan=True`.
 
+For any archive move (`to_mailbox` targeting Archive or similar), the id list in step 2 must already have passed the **Human-Sender Screen** (above) before it reaches step 3; do not build a dry-run from unscreened search results.
+
 On a 24k inbox, filter-based mutations re-pay the scan cost for every batch and often time out. Always:
 
 1. **List or search (bounded)**: `search_emails(sender_exact="...", subject_keyword="...", recent_days=30, limit=50)`, `search_emails(sender_domain="...", recent_days=30, limit=50)`, or `list_inbox_emails(...)`; inspect sample subjects.
-2. **Collect `message_id`s**: extract ids from the JSON/text result.
+2. **Collect `message_id`s**: extract ids from the JSON/text result. For archive moves, drop any id whose sender fails the Human-Sender Screen before it leaves this step.
 3. **Simulate**: `move_email(dry_run=True, message_ids=[ids], to_mailbox="...", max_moves=50)` (or `manage_trash(dry_run=True, message_ids=[ids], ...)`).
 4. **Execute**: `move_email(dry_run=False, message_ids=[ids], ...)` after the operator confirms counts.
 
@@ -47,14 +77,15 @@ Sequence:
 2. Optional analytics: `get_statistics(scope="sender_stats", sender="...")` or `scope="mailbox_breakdown"` for volume proof.
 3. When deletion risk looms: `export_emails(...)` snapshots before **`manage_trash`**.
 
-Always quote expected totals after dry runs.
+For archive campaigns, apply the **Human-Sender Screen** (above) to the preview results now: drop any human-looking or ambiguous sender from the candidate list before it becomes an id to move. Always quote expected totals after dry runs.
 
 ### 3. Simulate Mutations (`dry_run=True`, `message_ids` required)
 
-Mandatory first pass after collecting ids from step 2:
+Mandatory first pass after collecting ids from step 2. For archive moves, `ids` must already be screened: build it only from senders that passed the Human-Sender Screen, not the raw preview.
 
 ```
 ids = [e["message_id"] for e in preview["items"]]  # search_emails JSON uses "items"; list_inbox_emails uses "emails"
+# For archive moves, drop any id whose sender failed the Human-Sender Screen before this call.
 move_email(dry_run=True, message_ids=ids, to_mailbox="Archive", max_moves=50)
 ```
 
@@ -81,6 +112,7 @@ Finish with **`get_statistics(scope="account_overview")`** or **`get_inbox_overv
 
 | Hazard | Mitigation |
 |--------|-------------|
+| Archiving a real person's mail | Apply the Human-Sender Screen before every archive dry-run; when uncertain, leave the message in the inbox |
 | Over-broad keywords | Narrow by `mailbox=`, combine sender + unread flags |
 | Mailbox typos | `list_mailboxes` validation before destructive move |
 | Accidental unread wipe | Separate pass for unread-only subsets |

@@ -4,10 +4,16 @@
 # Reads the standard hook JSON from stdin:
 #   {"tool_name": "Edit"|"Write"|"MultiEdit", "tool_input": {"file_path": "..."}}
 #
-# Dispatches three checks based on the edited file's path:
+# Dispatches fast, per-edit checks based on the edited file's path:
 #   1. AppleScript syntax (tools/*.py, core.py)        — blocks on parse failure
 #   2. Targeted pytest    (tools/*.py)                  — blocks on test failure
-#   3. Manifest validate  (tools/*.py + manifests)      — blocks on drift
+#
+# Manifest/version parity and artifact freshness are whole-tree invariants that
+# cannot pass on an intermediate edit of a coordinated multi-file bump (a six-file
+# version bump fails this check on every step until the last file lands and the
+# artifacts are rebuilt), so they are intentionally NOT checked per-edit here.
+# They stay enforced at the right granularity by tools/gates/validate_manifests.sh,
+# the tests/infra/test_validate_manifests.py suite, tools/gates/dev-check.sh, and CI.
 #
 # Exit 2 with stderr surfaces feedback to Claude. Exit 0 stays silent.
 set -u
@@ -33,9 +39,10 @@ PY
 
 [ -z "$FILE" ] && exit 0
 
-# Skip files outside the source tree fast.
+# Only Python sources under plugin/apple_mail_mcp/ have a fast, per-edit check
+# below; everything else (manifests, tests, tools, JSON) short-circuits here.
 case "$FILE" in
-    plugin/apple_mail_mcp/*|tests/*|tools/*|*.json|pyproject.toml) ;;
+    plugin/apple_mail_mcp/*.py) ;;
     *) exit 0 ;;
 esac
 
@@ -82,20 +89,6 @@ case "$FILE" in
 $TRIMMED"
                 EXIT=2
             fi
-        fi
-        ;;
-esac
-
-# 3. Manifest drift check
-case "$FILE" in
-    plugin/apple_mail_mcp/tools/*.py|plugin/.claude-plugin/plugin.json|.claude-plugin/marketplace.json|server.json|pyproject.toml|apple-mail-mcpb/manifest.json)
-        OUT="$(bash tools/gates/validate_manifests.sh 2>&1)"
-        RC=$?
-        if [ "$RC" -ne 0 ]; then
-            TRIMMED="$(printf '%s\n' "$OUT" | tail -30)"
-            append_msg "Manifest validation FAILED after editing $FILE:
-$TRIMMED"
-            EXIT=2
         fi
         ;;
 esac

@@ -8,6 +8,8 @@ Mutations default to **`message_ids=[...]`** from a prior bounded `search_emails
 
 See **`email-archive-cleanup`** for the canonical campaign shape.
 
+**Archive moves inherit the Human-Sender Screen.** Every archive sequence below (any `move_email(..., to_mailbox="Archive...")` step) must apply the Human-Sender Screen documented in `email-archive-cleanup`'s `SKILL.md` before the dry run: drop human-looking or ambiguous senders from the candidate ids and archive only the confidently automated or promotional subset. Trash sequences that target confirmed spam or automated senders are not exempt either; when a candidate could be a real correspondent, apply the same screen before queuing it for `manage_trash`.
+
 ## Safety Defaults
 
 The MCP server enforces conservative defaults to prevent runaway destructive operations:
@@ -50,6 +52,8 @@ manage_trash(action="move_to_trash", message_ids=[...], dry_run=False)
 
 ```text
 search_emails(date_from="2025-01-01", date_to="2025-02-20", read_status="read")
+# Apply the Human-Sender Screen (email-archive-cleanup/SKILL.md) to the results here:
+# drop human-looking or ambiguous senders before the ids below are built.
 move_email(message_ids=[...], to_mailbox="Archive/2025", dry_run=True)
 move_email(message_ids=[...], to_mailbox="Archive/2025")
 ```
