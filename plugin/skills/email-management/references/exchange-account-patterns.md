@@ -9,20 +9,20 @@ For **actions** (archive, reply, attachment save), always obtain a numeric `mess
 | Tool | Good for | Weak for |
 |------|----------|----------|
 | `search_emails(..., output_format="json")` | Stable `message_id` in `"items"`, offset pagination, sender filters | Broad subject-only queries on some Exchange profiles |
-| `list_inbox_emails(..., output_format="json")` | Fast newest-first skim of subjects | **May omit `message_id` in JSON** depending on plugin version; do not archive or reply from list rows alone |
+| `list_inbox_emails(..., output_format="json")` | Fast newest-first skim of subjects; `message_id` is always present in text and JSON output, so list rows can be used directly for follow-up actions | No inline body content; fetch with `get_email_by_id` for full content |
 | `get_inbox_overview(compact)` | Unread totals and subject preview | No ids for bulk actions |
 
 **Reliable discovery loop on large Exchange accounts:**
 
 1. `search_emails(account=..., recent_days=3..7, limit=5, offset=N, output_format="json", sort="date_desc")`
 2. If subject search returns empty but overview/list shows the message, retry with `sender="Display Name"` and raise `limit` (e.g. 5 → 10).
-3. `get_email_by_id(message_id=...)` for body and attachment metadata.
+3. `get_email_by_id(account=..., message_id=...)` for body and attachment metadata.
 
 ## `get_needs_response` is a weak signal
 
 Treat `get_needs_response` as a **hint**, not a work queue. On noisy inboxes it often ranks newsletters, marketing, and noreply digests alongside human mail.
 
-- Default: `days_back=3`, `max_results=5`, and cross-check each candidate with `get_email_by_id`.
+- Start with `days_back=3`, `max_results=5`, and cross-check each candidate with `get_email_by_id`.
 - Do **not** draft from this list without thread verification.
 - Prefer the newest bounded `search_emails` or `list_inbox_emails` slice before widening `days_back`.
 
@@ -38,7 +38,7 @@ Thread tools can return **incomplete** results on Exchange:
 
 1. Anchor on `message_id` when the schema supports it.
 2. Independently search Sent: `search_emails(mailbox="Sent", sender=<user address>, recent_days=14, subject_keyword=...)`.
-3. Check Drafts with `get_email_thread(mailbox="Drafts", ...)` or `manage_drafts(action="list")`.
+3. Check Drafts with `get_email_thread(account=..., mailbox="Drafts", ...)` or `manage_drafts(action="list")`.
 4. If thread and Sent disagree, trust **Sent date order** over an empty thread view.
 
 ## Offset pagination drifts after archives

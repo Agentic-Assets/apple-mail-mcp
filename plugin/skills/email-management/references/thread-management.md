@@ -31,7 +31,7 @@ The result is already chronological. Read top to bottom for context.
 
 ### Archive a resolved thread
 
-1. `search_emails(...)` to identify the target message id, then `get_email_thread(message_id="...")` to surface related messages.
+1. `search_emails(...)` to identify the target message id, then `get_email_thread(account="Work", message_id="...")` to surface related messages.
 2. Collect every `message_id` from the thread result (and any stragglers the user confirms).
 3. `move_email(dry_run=True, message_ids=[...], to_mailbox="Archive/2026", max_moves=N)`; quote the count; then `move_email(dry_run=False, message_ids=[...], ...)` after confirmation. Do not pass `subject_keyword=` to `move_email` (returns `TARGET_SELECTOR_DEPRECATED`).
 

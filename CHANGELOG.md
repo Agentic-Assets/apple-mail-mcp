@@ -120,6 +120,39 @@ the mail surface.
 - `DEFAULT_CALENDAR` (env) sets the create target; unscoped reads fan out
   across calendars (capped), which deliberately differs from mail's
   account-scoping default and is documented in each fan-out tool.
+## 3.9.4 - 2026-07-10
+
+Bundled-skill guidance accuracy pass. A parallel review of all nine workflow
+skills against the live tool signatures found copy-paste examples that would
+fail or churn on first use; this release corrects them. No tool-surface or
+behavior change (still 31 tools).
+
+### Fixed
+
+- **`get_top_senders(limit=...)` examples corrected to `top_n=...`.** The tool
+  has no `limit` parameter, so the documented call raised a `TypeError`. Fixed
+  in the mail-rules-advisor, email-management, and mailbox-taxonomy skills.
+- **`get_email_thread` / `get_email_by_id` / `get_email_by_ids` examples now
+  pass the required `account`.** Unlike `search_emails` / `list_inbox_emails`,
+  these three tools have no `DEFAULT_MAIL_ACCOUNT` fallback, so examples that
+  omitted `account` failed with a missing-argument error. Fixed across the
+  drafting, style-profile, management, triage skills, the shared
+  `exchange-account-patterns` reference, and the CLI `show` example.
+- **`list_inbox_emails` result now read via the `emails` key, not `items`.** A
+  cleanup template read `result["items"]` off a `list_inbox_emails` result
+  (its shape is `{"emails": [...]}`), which raised a `KeyError`.
+- **`get_inbox_overview` example scoped with an explicit `account`.** That tool
+  does not honor `DEFAULT_MAIL_ACCOUNT` and otherwise fans out across every
+  configured account, so the triage skill now passes `account` and notes the
+  behavior.
+- **Dropped the stale "list rows may lack `message_id`" caveat.** List output
+  always includes `message_id`, so the guidance to re-resolve via an extra
+  `search_emails` round-trip was removing a bounded fast path.
+- **`get_statistics` docstring corrected** to the current per-mailbox cap of 50
+  messages (was "10 mailboxes by 75; longer windows 20 by 250").
+- Minor skill fixes: `skills/CLAUDE.md` reference-sync table completed, an
+  inconsistent `recent_days` ladder example, an inflated `max_moves` example,
+  and a mis-attributed `max_moves` cap on `manage_trash`.
 
 ## 3.9.3 - 2026-07-09
 

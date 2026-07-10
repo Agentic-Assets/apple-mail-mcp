@@ -33,6 +33,8 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `references/large-inbox-rules.md` | operator, triage, management, archive-cleanup, style-profile, attachments, mail-rules-advisor, mailbox-taxonomy |
 | `references/pre-draft-verification.md` | operator, triage, management, email-drafting |
 | `references/recent-first-triage.md` | operator, triage, management, email-drafting |
+| `references/exchange-account-patterns.md` | operator, triage, management, archive-cleanup |
+| `references/research-project-tracking.md` | triage, management, attachments |
 | `references/calendar-safety-limits.md` | calendar-operator, meeting-scheduler |
 | `references/agent-id-first-workflow.md` | maintainer index only (not copied; link from this CLAUDE.md) |
 

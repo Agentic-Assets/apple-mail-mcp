@@ -95,7 +95,7 @@ Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 min
 
 1. Get overview: `get_inbox_overview()` to see unread counts, recent messages, and suggested actions.
 2. Surface priorities: `get_needs_response(days_back=2, max_results=20, output_format="json")` for likely replies. Use each row's numeric `message_id` for downstream reads, replies, moves, and status updates; keep `internet_message_id` only for replied-header correlation. Optionally use `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
-3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(message_id=...)` for full content; do not re-search by subject.
+3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(account="...", message_id=...)` for full content; do not re-search by subject.
 4. Decide per message using the four-option rule: respond, defer, file, or delete.
    - For responses, defer to **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail.
    - To defer, flag with `update_email_status(action="flag", message_ids=["..."])`.
@@ -156,12 +156,12 @@ Mindset:
 | Follow-ups you sent | `get_awaiting_reply(days_back=7)` | Optional daily check |
 | Full dashboard | `inbox_dashboard()` | Heavier, richer view |
 | Find a specific email | `search_emails(subject_keyword="...")` | Defaults to last 48 hours |
-| Read one message by id | `get_email_by_id(message_id="...")` | After search/list returns an id |
+| Read one message by id | `get_email_by_id(account="...", message_id="...")` | After search/list returns an id |
 | Search by sender | `search_emails(sender_exact="person@example.com")` or `search_emails(sender_domain="example.com")` | Use fuzzy `sender="..."` only when the address is uncertain |
 | Search email bodies | `search_emails(body_text="...", allow_body_scan=True)` | Slower; requires explicit opt-in |
 | Cross-account search | `search_emails(account=None, all_accounts=True)` | Costly on Exchange; use sparingly |
 | Recent inbox listing | `list_inbox_emails(max_emails=50, read_status="unread", include_content=False)` | Default cap is 50; `read_status="unread"` is the cheapest pass on a large inbox. Legacy `include_read=False` still works but deprecated. |
-| View a conversation | `get_email_thread(message_id="...")` | **Discovery-only:** if no id yet, run bounded `search_emails` or `list_inbox_emails` first, then pass returned `message_id` |
+| View a conversation | `get_email_thread(account="...", message_id="...")` | **Discovery-only:** if no id yet, run bounded `search_emails` or `list_inbox_emails` first, then pass returned `message_id` |
 | Move messages | `move_email(message_ids=[...], max_moves=N)` | ID-first; filter scans need `allow_filter_scan=True` |
 | Flag / mark read | `update_email_status(action="...", message_ids=[...])` | ID-first; default cap 10 |
 | Move to trash / delete | `manage_trash(action="...", message_ids=[...])` | See `references/bulk-cleanup.md` |
@@ -174,7 +174,7 @@ Mindset:
 ### "I'm overwhelmed by my inbox"
 
 1. Size the problem: `get_inbox_overview()` and `get_statistics(scope="account_overview")`.
-2. Identify the worst senders: `get_top_senders(limit=10)`.
+2. Identify the worst senders: `get_top_senders(top_n=10)`.
 3. Adopt the Daily Triage workflow above for 15 to 30 minutes per day.
 4. Unsubscribe from non-essential senders identified in step 2.
 5. Build the minimum folder structure ("Action Required", "Waiting For", "Reference", "Archive").
