@@ -59,6 +59,33 @@ SAMPLE_KWARGS: dict[str, object] = {
     "newsletter_condition": "(false)",
     "body_scan_block": "",
     "date_check": "",
+    # Calendar script builders (calendar_core/scripts_read.py, scripts_write.py)
+    "calendar_name": "Test Calendar",
+    "timeout_seconds": 30,
+    "start_block": (
+        "set windowStart to current date\n"
+        "set time of windowStart to 0\n"
+        "set day of windowStart to 1\n"
+        "set year of windowStart to 2026\n"
+        "set month of windowStart to 7\n"
+        "set day of windowStart to 10\n"
+        "set time of windowStart to 0"
+    ),
+    "end_block": (
+        "set windowEnd to current date\n"
+        "set time of windowEnd to 0\n"
+        "set day of windowEnd to 1\n"
+        "set year of windowEnd to 2026\n"
+        "set month of windowEnd to 7\n"
+        "set day of windowEnd to 17\n"
+        "set time of windowEnd to 0"
+    ),
+    "uid_condition": 'uid is "TEST-UID"',
+    "event_uid": "TEST-UID",
+    "title": "Test Event",
+    "new_name": "Renamed Calendar",
+    "set_lines": "",
+    "include_detail": False,
 }
 
 
@@ -159,7 +186,7 @@ def _check_module(module_path: Path) -> list[tuple[str, str]]:
         if not isinstance(text, str):
             continue
         head = text.lstrip().split("\n", 1)[0]
-        if 'tell application "Mail"' not in head:
+        if 'tell application "Mail"' not in head and 'tell application "Calendar"' not in head:
             continue  # fragment, not a full script
         ok, err = _osacompile_check(text)
         if not ok:

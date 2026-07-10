@@ -34,6 +34,11 @@ READ_ONLY_TOOLS = {
     "get_statistics",
     "inbox_dashboard",
     "full_inbox_export",
+    "list_calendars",
+    "list_events",
+    "get_events_by_id",
+    "check_availability",
+    "respond_to_invitation",
 }
 
 WRITE_TOOLS = {
@@ -42,11 +47,14 @@ WRITE_TOOLS = {
     "move_email",
     "create_mailbox",
     "create_rich_email_draft",
+    "create_event",
+    "batch_create_events",
 }
 
 IDEMPOTENT_WRITE_TOOLS = {
     "update_email_status",
     "synchronize_account",
+    "update_event",
 }
 
 DESTRUCTIVE_TOOLS = {
@@ -55,6 +63,8 @@ DESTRUCTIVE_TOOLS = {
     "reply_to_email",
     "forward_email",
     "manage_drafts",
+    "delete_events",
+    "manage_calendars",
 }
 
 
@@ -66,7 +76,7 @@ class ReadOnlyRegistryTests(unittest.TestCase):
     def test_send_tools_registered_by_default(self):
         names = set(self.by_name)
         self.assertTrue(set(SEND_TOOLS).issubset(names))
-        self.assertGreaterEqual(len(names), 31)
+        self.assertGreaterEqual(len(names), 41)
 
     def test_remove_send_tools_drops_only_send_tools(self):
         mock_mcp = MagicMock()

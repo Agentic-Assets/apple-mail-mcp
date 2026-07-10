@@ -18,7 +18,7 @@
  </picture>
 </a>
 
-An MCP server that gives AI assistants full access to Apple Mail -- read, search, compose, organize, and analyze emails via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **31 tools**, Python **3.10+**.
+An MCP server that gives AI assistants full access to Apple Mail and Apple Calendar -- read, search, compose, organize, and analyze emails, plus bounded calendar reads, conflict-checked event creation, and availability search, via natural language. Built with [FastMCP](https://github.com/jlowin/fastmcp) (`fastmcp>=3.1.0,<4`). **41 tools**, Python **3.10+**.
 
 ## Documentation map
 
@@ -58,7 +58,7 @@ Track bugs and feature work in the [Apple Mail MCP](https://linear.app/agenticas
 
 ### Claude Code Plugin (Recommended)
 
-One install — MCP server (31 tools) and **nine** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
+One install: MCP server (41 tools) and **eleven** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
@@ -156,7 +156,7 @@ python3 -m venv .venv
   --arg ./start_mcp.sh \
   --arg=--draft-safe \
   --cwd "$PWD/plugin" \
-  --expect-count 31 \
+  --expect-count 41 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -191,7 +191,7 @@ VERSION=3.9.1
   --arg "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION/start_mcp.sh" \
   --arg=--draft-safe \
   --cwd "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION" \
-  --expect-count 31 \
+  --expect-count 41 \
   --required-tool reply_to_email \
   --required-tool compose_email \
   --required-tool manage_drafts \
@@ -328,7 +328,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 
 </details>
 
-## Tools (31)
+## Tools (41)
 
 ### Reading & Search
 | Tool | Description |
@@ -385,11 +385,25 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Disabled: returns a structured `UNBOUNDED_EXPORT_DISABLED` error instead of walking the mailbox. Stays registered for compatibility; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`) instead. |
 
+### Apple Calendar
+| Tool | Description |
+|------|-------------|
+| `list_calendars` | List every calendar with id, writability, defaults, and engine diagnostics |
+| `list_events` | Bounded event listing/search with query filter, recurring expansion, and paging (default: next 7 days) |
+| `get_events_by_id` | Full detail (notes, alarms, attendees) for exact event ids; always window-bounded |
+| `check_availability` | Busy blocks and free slots inside working hours over a bounded window (max 62 days) |
+| `create_event` | Timezone-correct event creation with alarms, allowlisted recurrence, and conflict detection on by default |
+| `batch_create_events` | Up to 25 one-off events on one calendar; all items validate before any write |
+| `update_event` | ID-first PATCH update; recurring targets require `span='all_occurrences'`; attendee sets are diffed |
+| `delete_events` | Exact-id bulk delete, dry-run default, capped and chunked; one unresolved id aborts everything |
+| `manage_calendars` | Create/rename/delete calendars; delete is triple-gated with a cascade event-count preview |
+| `respond_to_invitation` | Documented refusal (`CALENDAR_RSVP_UNSUPPORTED`): no public macOS API can RSVP |
+
 ## Configuration
 
 ### Read-Only Mode
 
-Pass `--read-only` to disable tools that send email (`compose_email`, `reply_to_email`, `forward_email`). Draft management remains available (list, create, delete) but sending a draft via `manage_drafts` is blocked.
+Pass `--read-only` to disable tools that send email (`compose_email`, `reply_to_email`, `forward_email`) and to remove every calendar write and destructive tool (`create_event`, `update_event`, `batch_create_events`, `manage_calendars`, `delete_events`). Draft management remains available (list, create, delete) but sending a draft via `manage_drafts` is blocked.
 
 ```json
 {
@@ -404,7 +418,7 @@ Pass `--read-only` to disable tools that send email (`compose_email`, `reply_to_
 
 ### Draft-Safe Mode
 
-Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows available while blocking actual sends. This is the recommended mode for shared agent workspaces.
+Pass `--draft-safe` to keep read, search, draft, and open-for-review workflows available while blocking actual sends. Calendar event creation and updates stay available, but calendar deletes are blocked (`CALENDAR_DELETE_BLOCKED`; operator env unlock `CALENDAR_ALLOW_DESTRUCTIVE=1`) and attendee invitation sends are blocked (`INVITE_SEND_BLOCKED`). This is the recommended mode for shared agent workspaces.
 
 ```json
 {
@@ -594,13 +608,15 @@ Workflow skills ship with the Claude Code and Codex plugin installs and load aut
 | [`email-drafting`](plugin/skills/email-drafting/) | Compose, reply, forward, rich drafts (`--draft-safe` aware) |
 | [`email-style-profile`](plugin/skills/email-style-profile/) | Learn voice from Sent mail + preferences for drafting |
 | [`email-attachments`](plugin/skills/email-attachments/) | List and save attachments with path safety |
+| [`calendar-operator`](plugin/skills/calendar-operator/) | Bounded calendar reads, safe event CRUD, ID-first deletes, TCC troubleshooting |
+| [`meeting-scheduler`](plugin/skills/meeting-scheduler/) | Find-slot workflow, cross-timezone scheduling, invitation limits + .ics alternative |
 
 For standalone MCP installs, copy the needed skill directories manually (example loop):
 
 ```bash
 for d in apple-mail-operator inbox-triage email-management mailbox-taxonomy \
          email-archive-cleanup mail-rules-advisor email-drafting \
-         email-style-profile email-attachments; do
+         email-style-profile email-attachments calendar-operator meeting-scheduler; do
   cp -r "plugin/skills/$d" "$HOME/.claude/skills/$d"
 done
 ```
@@ -643,7 +659,7 @@ apple-mail-mcp/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
-│   ├── apple_mail_mcp/        # Python MCP server package (31 tools)
+│   ├── apple_mail_mcp/        # Python MCP server package (41 tools)
 │   ├── apple_mail_mcp.py      # Entry point
 │   ├── start_mcp.sh           # Startup wrapper (auto-creates venv)
 │   └── requirements.txt

@@ -1,7 +1,7 @@
 {
   "name": "apple-mail",
-  "version": "3.9.4",
-  "description": "Natural language interface for Apple Mail -- search, compose, triage, organize, analyze, and verify drafts with 31 MCP tools plus bundled workflow skills.",
+  "version": "3.10.0",
+  "description": "Natural language interface for Apple Mail and Apple Calendar: search, compose, triage, organize, analyze, verify drafts, and manage calendar events with 41 MCP tools plus bundled workflow skills.",
   "author": {
     "name": "Agentic Assets",
     "url": "https://github.com/Agentic-Assets"
@@ -24,8 +24,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Apple Mail",
-    "shortDescription": "Draft-safe Apple Mail workflows for Codex.",
-    "longDescription": "Natural language Apple Mail workflows for Codex and Claude: search, compose drafts, reply, forward, triage, organize, analyze, export, and manage attachments through a local macOS MCP server. Default plugin launches with --draft-safe so agents create reviewable drafts instead of sending mail.",
+    "shortDescription": "Draft-safe Apple Mail and Apple Calendar workflows for Codex.",
+    "longDescription": "Natural language Apple Mail and Apple Calendar workflows for Codex and Claude: search, compose drafts, reply, forward, triage, organize, analyze, export, manage attachments, list and create calendar events, check availability, and manage calendars through a local macOS MCP server. Default plugin launches with --draft-safe so agents create reviewable drafts instead of sending mail, and calendar deletes stay blocked.",
     "developerName": "Agentic Assets",
     "category": "Productivity",
     "capabilities": [

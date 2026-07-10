@@ -47,6 +47,8 @@ SYNC_MAP: dict[str, list[str]] = {
     "email-attachments": ["large-inbox-rules.md", "research-project-tracking.md"],
     "mail-rules-advisor": ["large-inbox-rules.md"],
     "mailbox-taxonomy": ["large-inbox-rules.md"],
+    "calendar-operator": ["calendar-safety-limits.md"],
+    "meeting-scheduler": ["calendar-safety-limits.md"],
 }
 
 

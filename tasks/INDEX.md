@@ -17,6 +17,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
+| [`active/apple-calendar-tools/`](active/apple-calendar-tools/) | Apple Calendar tool surface (research + 3.10.0 implementation) | Implemented on `feat/apple-calendar-tools`; live verification + review pending |
 | [`active/native-reply/`](active/native-reply/) | Native-format reply drafts (v3.8.0 ship + live TO-TEST) | Shipped; live verification pending |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 selector retirement, metadata-index spike, decision briefs | Planning / next major lane |
 | [`active/agent-guidance-audit/`](active/agent-guidance-audit/) | Skills, docs, and training-surface consistency audit | In progress |

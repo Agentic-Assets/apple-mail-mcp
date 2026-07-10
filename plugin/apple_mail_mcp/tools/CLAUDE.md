@@ -1,5 +1,5 @@
 # tools/ — MCP tool registrations
-All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these six tool surfaces — the `inbox/`, `search/`, `compose/`, `manage/`, `analytics/`, and `smart_inbox/` packages — for side-effect registration. **31 tools** — verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools | wc -l` (recursive: every surface is a package).
+All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these seven tool surfaces (the `inbox/`, `search/`, `compose/`, `manage/`, `analytics/`, `smart_inbox/`, and `calendar/` packages) for side-effect registration. **41 tools**; verify: `rg '^@mcp\.tool' plugin/apple_mail_mcp/tools | wc -l` (recursive: every surface is a package).
 
 ## Module map
 
@@ -33,6 +33,23 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | `smart_inbox/awaiting_reply.py` | 1 | Follow-up tracking: `get_awaiting_reply` (sent-vs-inbox Message-ID cross-reference; `helpers.py` shares `_normalize_message_id`) |
 | `smart_inbox/needs_response.py` | 1 | Actionable detection: `get_needs_response` (newsletter/automated filtering, replied-detection join) |
 | `smart_inbox/top_senders.py` | 1 | Sender analytics: `get_top_senders` (bounded newest-first Counter aggregation, domain grouping) |
+| `calendar/calendars_list.py` | 1 | Calendar enumeration: `list_calendars` (writability, defaults, engine diagnostics) |
+| `calendar/events_list.py` | 1 | Bounded event listing/search: `list_events` (windows, query, recurring expansion, paging; `helpers.py` shares the fan-out collector) |
+| `calendar/events_get.py` | 1 | Exact-id detail fetch: `get_events_by_id` (notes, alarms, attendees; window-bounded) |
+| `calendar/availability.py` | 1 | Free-busy folding: `check_availability` (busy blocks + free slots, 62-day cap) |
+| `calendar/events_create.py` | 1 | Event creation: `create_event` (timezone-correct, alarms, allowlisted RRULE, conflict detection) |
+| `calendar/events_batch.py` | 1 | Batch creation: `batch_create_events` (25-item cap, all-or-nothing validation, per-item writes) |
+| `calendar/events_update.py` | 1 | ID-first PATCH: `update_event` (span rules, attendee-set diffing, dry-run) |
+| `calendar/events_delete.py` | 1 | Exact-id bulk delete: `delete_events` (dry-run default, resolve-first, chunked) |
+| `calendar/calendars_manage.py` | 1 | Calendar CRUD: `manage_calendars` (create/rename/delete, triple-gated cascade delete) |
+| `calendar/rsvp.py` | 1 | Refusal shim: `respond_to_invitation` (returns `CALENDAR_RSVP_UNSUPPORTED`, no engine call) |
+
+## Calendar surface notes
+
+- All Calendar.app I/O flows through `calendar_core/` (engine seam): reads via `calendar.get_engine()` (AppleScript, or EventKit when installed and already granted), writes via `calendar.get_write_engine()` (AppleScript only in 3.10.0). Never emit `every event of` outside `calendar_core/scripts_read.py`/`scripts_write.py`; the lint in `tests/calendar_surface/test_calendar_scripts.py` enforces date-bounded predicates.
+- Mode gating is stricter than mail (new plumbing, not the `_send_blocked` port): `--read-only` removes `CALENDAR_WRITE_TOOLS` + `CALENDAR_DESTRUCTIVE_TOOLS`; `--draft-safe` blocks deletes (`CALENDAR_DELETE_BLOCKED`, env unlock `CALENDAR_ALLOW_DESTRUCTIVE=1`) and attendee sends (`INVITE_SEND_BLOCKED`). Internal guards live in `calendar/helpers.py` because the CLI bypasses registry removal.
+- Caps live in `constants.CALENDAR_BOUNDS`; every event read requires a `bounded_calendar_window` token. Unscoped reads fan out (capped at 20 calendars + a 240s call budget), which deliberately differs from mail's account-scoping default.
+- Calendar ids are UUID-like strings (`calendar_core.validation.normalize_event_ids`), never the numeric Mail id helpers.
 
 ## Add a tool
 

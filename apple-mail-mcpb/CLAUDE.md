@@ -22,7 +22,7 @@ Copies `apple_mail_mcp.py`, `start_mcp.sh`, `requirements.txt`, `apple_mail_mcp/
 
 ## tools[] must match code
 
-Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; description must claim correct count (**31**). Count with `find plugin/apple_mail_mcp/tools -name '*.py' | xargs grep -h '^@mcp.tool' | wc -l` (recursive; package-nested tools count). Validated by [`tools/gates/validate_manifests.sh`](../tools/gates/validate_manifests.sh).
+Full `tools[]` in `manifest.json` must list every `@mcp.tool` name in code; description must claim correct count (**41**). Count with `find plugin/apple_mail_mcp/tools -name '*.py' | xargs grep -h '^@mcp.tool' | wc -l` (recursive; package-nested tools count). Validated by [`tools/gates/validate_manifests.sh`](../tools/gates/validate_manifests.sh).
 
 ## vs plugin/ and Cowork
 

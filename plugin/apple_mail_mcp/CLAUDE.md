@@ -18,15 +18,16 @@ Tool/CLI work: delegate to subagents when available and permitted; use **`plugin
 | `core/` | Facade package (`__init__.py` re-exports + `__all__`) over `applescript`/`escaping`/`preferences`/`normalization`/`validation`/`script_fragments`/`replied`: `run_applescript`, `escape_applescript`, validation, `@inject_preferences`, script builders |
 | `cli/` | `apple-mail` subcommands package (facade `__init__.py` + `constants`/`formatting`/`parser`/`perf`/`draft_smoke`/`commands`); search, inbox, draft, smoke-test, quick-check, … |
 | `__main__.py` | MCP stdio entry, orphan watcher (python-sdk#526), read-only tool removal |
-| `__init__.py` | Side-effect imports of six `tools/` modules; `UI_AVAILABLE` flag |
-| `constants.py` | Shared patterns (`SKIP_FOLDERS`, newsletter detection, `TIME_RANGES`, `SCAN_BOUNDS`) |
+| `__init__.py` | Side-effect imports of seven `tools/` surfaces; `UI_AVAILABLE` flag |
+| `constants.py` | Shared patterns (`SKIP_FOLDERS`, newsletter detection, `TIME_RANGES`, `SCAN_BOUNDS`, `CALENDAR_BOUNDS`) |
 | `bounded_scan.py` | `ScanWindow` tokens, `compute_scan_upper_bound`, safe AppleScript builders |
+| `calendar_core/` | Calendar engine seam: `CalendarWindow` tokens, validation, RRULE expansion, AppleScript builders, optional EventKit read fast path (`get_engine`/`get_write_engine`) |
 
 ## `tools/` subfolder
 
-**31 tools** in **6 surfaces** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools | awk -F: '{sum+=$NF} END {print sum}'` (recursive: `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` are packages). For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`** — do not duplicate those conventions here.
+**41 tools** in **7 surfaces** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3, calendar 10). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools | awk -F: '{sum+=$NF} END {print sum}'` (recursive: `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`, and `calendar/` are packages). For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`**; do not duplicate those conventions here.
 
-**Module line budget:** every tool surface (`compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`) is split into under-budget packages; no tool module exceeds **600 LOC**. CI warns and blocks further growth (`docs/CLAUDE-conventions.md` § Module line budget).
+**Module line budget:** every tool surface (`compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`, `calendar/`) is split into under-budget packages; no tool module exceeds **600 LOC**. CI warns and blocks further growth (`docs/CLAUDE-conventions.md` § Module line budget).
 
 ## Shared state (`server.py`)
 
@@ -36,6 +37,8 @@ Tool/CLI work: delegate to subagents when available and permitted; use **`plugin
 - `READ_ONLY` / `DRAFT_SAFE` — set by CLI flags in `__main__.py`
 - Annotation presets: `READ_ONLY_TOOL_ANNOTATIONS`, `WRITE_TOOL_ANNOTATIONS`, `IDEMPOTENT_WRITE_TOOL_ANNOTATIONS`, `DESTRUCTIVE_TOOL_ANNOTATIONS`
 - `SEND_TOOLS = ("compose_email", "reply_to_email", "forward_email")` — removed in read-only mode
+- `CALENDAR_WRITE_TOOLS` + `CALENDAR_DESTRUCTIVE_TOOLS`: removed in read-only mode; deletes also blocked under draft-safe unless `CALENDAR_ALLOW_DESTRUCTIVE=1`
+- `DEFAULT_CALENDAR`: from env; calendar create-target default (reads keep capped fan-out)
 
 ## AppleScript rule
 

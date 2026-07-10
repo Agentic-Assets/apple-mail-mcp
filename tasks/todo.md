@@ -2,11 +2,15 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; CI enforces).
 
-**Current branch:** `codex/agentic-assets-marketplace-install` (marketplace rename to `Agentic-Assets`; doc sync in progress).
+**Current branch:** `feat/apple-calendar-tools` (Apple Calendar tool surface, target v3.10.0).
 
-**Current workstream:** [`tasks/active/manifest-release-hardening/`](active/manifest-release-hardening/) captures the 2026-07-07 public version-surface hardening and release artifact parity pass, plus the Agentic Assets marketplace install rename on this branch.
+**Current workstream:** [`tasks/active/apple-calendar-tools/`](active/apple-calendar-tools/). Phase-1 research consolidated in [`research-report-2026-07-10.md`](active/apple-calendar-tools/research-report-2026-07-10.md); adversarially refined implementation plan in [`final-plan-2026-07-10.md`](active/apple-calendar-tools/final-plan-2026-07-10.md) (supersedes `plan-2026-07-10.md`); implementation report in [`reports/phase4-implementation-2026-07-10.md`](active/apple-calendar-tools/reports/phase4-implementation-2026-07-10.md).
 
-**Next action:** run `bash tools/gates/dev-check.sh`, then open or update PR for merge after Cayman approval.
+**Implemented (v3.10.0, this branch):** 10 Apple Calendar tools (41 total), `calendar_core/` hybrid engine (AppleScript guaranteed + optional EventKit read fast path), new calendar mode gating, 2 workflow skills (`calendar-operator`, `meeting-scheduler`, 11 total), CLI `calendars` / `calendar-events` / `calendar-grant`, full mocked test suite under `tests/calendar_surface/`.
+
+**Next action:** owner-present live verification per final plan section 8 (answer the Calendar Automation prompt first; the EventKit Events grant is already resolved on this host), then PR review. Post-implementation review complete: code-review findings F1-F8 fixed ([`reports/phase7-review-fixes-2026-07-10.md`](active/apple-calendar-tools/reports/phase7-review-fixes-2026-07-10.md)), plugin-validator and skill-reviewer findings applied (Auburn timezone, example accuracy, error-code wording). Lane files renamed to dated names.
+
+**Prior pointer (parked):** `codex/agentic-assets-marketplace-install` / [`tasks/active/manifest-release-hardening/`](active/manifest-release-hardening/) (2026-07-07 version-surface hardening; PR pending after Cayman approval).
 
 **Previous branch:** `chore/module-line-budget-splits` (v3.9.1 pushed; commit `3d2c515`).
 

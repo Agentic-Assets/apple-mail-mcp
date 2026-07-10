@@ -23,6 +23,8 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `email-drafting/` | Compose, reply, forward, rich drafts; respects `--draft-safe` |
 | `email-style-profile/` | Learn writing voice from Sent mail + `USER_EMAIL_PREFERENCES` |
 | `email-attachments/` | List + save attachments safely |
+| `calendar-operator/` | Bounded calendar reads, safe event CRUD, ID-first deletes, TCC troubleshooting |
+| `meeting-scheduler/` | Find-slot workflow, cross-timezone scheduling, invitation platform limits |
 
 **Shared references:** Canonical sources live in [`references/`](references/) at this directory level (maintainer edit + `python3 tools/validators/sync_skill_references.py` to copy into each skill's `references/`). Packaged skills must only link in-skill paths like `references/large-inbox-rules.md`, never `../references/...`; enforced by `tests/infra/test_packaged_skill_paths.py`.
 
@@ -33,6 +35,7 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `references/recent-first-triage.md` | operator, triage, management, email-drafting |
 | `references/exchange-account-patterns.md` | operator, triage, management, archive-cleanup |
 | `references/research-project-tracking.md` | triage, management, attachments |
+| `references/calendar-safety-limits.md` | calendar-operator, meeting-scheduler |
 | `references/agent-id-first-workflow.md` | maintainer index only (not copied; link from this CLAUDE.md) |
 
 Already-replied safeguard: canonical rules in [`references/pre-draft-verification.md`](references/pre-draft-verification.md); honored by:
@@ -55,6 +58,8 @@ Already-replied safeguard: canonical rules in [`references/pre-draft-verificatio
 | Draft mail | `email-drafting` |
 | Match my tone | `email-style-profile` → `email-drafting` |
 | Save PDFs / zips | `email-attachments` |
+| My schedule, personal events, calendar cleanup | `calendar-operator` |
+| Meetings with others, free slots, invitations | `meeting-scheduler` |
 
 **Reply drafting after triage or operator navigation:** `inbox-triage` and `apple-mail-operator` stay read-first. When the user wants a reply, hand off to **`email-drafting`**: `reply_to_email(message_id=..., reply_body=..., mode="draft")` with default `native_format=True` (Mail focus + Accessibility). On `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible; do not switch to `native_format=False` (gated: `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True`, which agents must never set). If focus still cannot be acquired, stop and report the blocker. Never pass `subject_keyword` to action tools; discover via `search_emails` / `list_inbox_emails` first.
 
