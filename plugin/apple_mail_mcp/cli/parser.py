@@ -246,6 +246,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_json_flag(draft)
 
+    calendars = subparsers.add_parser("calendars", help="List Calendar.app calendars")
+    _add_json_flag(calendars)
+
+    cal_events = subparsers.add_parser(
+        "calendar-events",
+        help="List calendar events in a bounded window (default: next 7 days)",
+    )
+    cal_events.add_argument("--calendar", help="Calendar name (fuzzy-resolved); omit to fan out, capped")
+    cal_events.add_argument("--days", type=float, default=7.0, dest="days_ahead", help="Days ahead (default 7)")
+    cal_events.add_argument("--days-back", type=float, default=0.0, dest="days_back", help="Days back (default 0)")
+    cal_events.add_argument("--query", help="Case-insensitive substring over title/location/notes")
+    cal_events.add_argument("--timezone", help="IANA zone for interpretation and output")
+    cal_events.add_argument("--limit", type=int, default=50, help="Maximum events returned")
+    _add_json_flag(cal_events)
+
+    grant = subparsers.add_parser(
+        "calendar-grant",
+        help="Request EventKit Calendars full access (run by a human at a terminal; shows the macOS prompt)",
+    )
+    grant.add_argument(
+        "--wait",
+        type=float,
+        default=30.0,
+        dest="wait_seconds",
+        help="Seconds to pump the run loop waiting for the consent prompt (default 30)",
+    )
+
     config = subparsers.add_parser("mcp-config", help="Print Claude/OpenClaw MCP config JSON")
     config.add_argument(
         "--repo",

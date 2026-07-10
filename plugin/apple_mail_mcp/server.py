@@ -42,13 +42,18 @@ mcp = cast(
     FastMCP(
         "Apple Mail MCP",
         instructions=(
-            "Mail.app automation is single-threaded. This server serializes every "
-            "AppleScript call behind a lock, so invoking multiple Apple Mail tools "
-            "at once does not run them in parallel; the calls queue and can time "
-            "out waiting their turn. Call one Apple Mail tool at a time and wait "
-            "for its result before issuing the next. On large Exchange or Gmail "
-            "mailboxes, prefer small bounded calls (low max_emails, small "
-            "recent_days, offset paging) over large ones."
+            "Mail.app and Calendar.app automation is single-threaded. This server "
+            "serializes every AppleScript call behind one lock, so invoking "
+            "multiple Apple Mail or Apple Calendar tools at once does not run "
+            "them in parallel; the calls queue and can time out waiting their "
+            "turn. Call one tool at a time and wait for its result before "
+            "issuing the next. On large Exchange or Gmail mailboxes, prefer "
+            "small bounded calls (low max_emails, small recent_days, offset "
+            "paging) over large ones. Mode flags gate the two domains "
+            "differently: for mail tools, --read-only and --draft-safe block "
+            "only the send paths; for calendar tools, --read-only removes every "
+            "calendar write and --draft-safe additionally blocks calendar "
+            "deletes and attendee invitation sends."
         ),
     ),
 )
@@ -84,6 +89,22 @@ DESTRUCTIVE_TOOL_ANNOTATIONS = ToolAnnotations(
 
 SEND_TOOLS = ("compose_email", "reply_to_email", "forward_email")
 
+# Calendar mode gating (3.10.0). This is deliberately stricter than the mail
+# gating above: --read-only removes every calendar write and destructive tool
+# from the registry, and --draft-safe blocks calendar deletes and attendee
+# invitation sends inside the tool bodies. The equivalent mail actions
+# (manage_trash, move_email, create_mailbox) are NOT mode-gated today; keeping
+# that asymmetry visible here and in the server instructions is intentional
+# (final plan F4/F12), and unifying mail-side gating is a separately scoped
+# forward item.
+CALENDAR_WRITE_TOOLS = (
+    "create_event",
+    "update_event",
+    "batch_create_events",
+    "manage_calendars",
+)
+CALENDAR_DESTRUCTIVE_TOOLS = ("delete_events",)
+
 # Load user preferences from environment
 USER_PREFERENCES = os.environ.get("USER_EMAIL_PREFERENCES", "")
 
@@ -94,6 +115,20 @@ USER_PREFERENCES = os.environ.get("USER_EMAIL_PREFERENCES", "")
 # server.DEFAULT_MAIL_ACCOUNT``) rather than importing the constant once.
 DEFAULT_MAIL_ACCOUNT = os.environ.get("DEFAULT_MAIL_ACCOUNT", "").strip() or None
 DEFAULT_MAIL_SIGNATURE = os.environ.get("DEFAULT_MAIL_SIGNATURE", "").strip() or None
+
+# Default calendar for create targets only (reads keep their capped fan-out
+# default; see tools/calendar docstrings). Tools read this lazily via
+# ``server.DEFAULT_CALENDAR`` so tests can monkeypatch it.
+DEFAULT_CALENDAR = os.environ.get("DEFAULT_CALENDAR", "").strip() or None
+
+# Operator-level unlock for calendar deletes under --draft-safe. Env-only by
+# design: an agent can never grant itself delete power mid-session.
+CALENDAR_ALLOW_DESTRUCTIVE = os.environ.get("CALENDAR_ALLOW_DESTRUCTIVE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 # Read-only mode flag — set via --read-only CLI argument.
 # When enabled, tools that send email are disabled. Drafts remain available.

@@ -43,8 +43,8 @@ Fresh-install test: remove `plugin/venv/` and run `./start_mcp.sh --doctor` from
 
 ## Subfolders
 
-- **`apple_mail_mcp/`** — Python package (source of truth for all 31 MCP tools)
-- **`skills/`** — Procedural workflows (nine shipped workflow skills — see `skills/CLAUDE.md`)
+- **`apple_mail_mcp/`**: Python package (source of truth for all 41 MCP tools)
+- **`skills/`**: Procedural workflows (eleven shipped workflow skills; see `skills/CLAUDE.md`)
 - **`ui/`** — Inbox dashboard HTML via `mcp-ui-server` (`dashboard.py`, `templates/`)
 
 ## Related distribution shapes

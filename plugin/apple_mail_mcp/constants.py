@@ -111,3 +111,54 @@ SCAN_BOUNDS = {
     "MAX_MAILBOXES_PER_SEARCH": 20,
     "MAX_MAILBOXES_PER_SEARCH_ALL": 10,
 }
+
+
+# ---------------------------------------------------------------------------
+# Calendar bounds (3.10.0 Apple Calendar surface)
+#
+# Centralized caps for every calendar read, write, and fan-out path. One edit
+# retunes every calendar tool. Values chosen in
+# tasks/active/apple-calendar-tools/final-plan-2026-07-10.md section 4:
+# Calendar.app AppleScript `whose` scans cost tracks total store size (not
+# window size), so result caps, an inner scan cap, and an aggregate per-call
+# wall-clock budget all apply together.
+# ---------------------------------------------------------------------------
+CALENDAR_BOUNDS = {
+    # Hard cap on any event window width in days (a year plus slack).
+    "MAX_WINDOW_DAYS": 370,
+    # Maximum events returned per call; page with `offset`.
+    "EVENT_RETURN_CAP": 200,
+    # Inner AppleScript slice cap applied per fetch pass.
+    "EVENT_SCAN_CAP": 300,
+    # Hard stop for recurring-occurrence expansion per call.
+    "OCCURRENCE_SCAN_CEILING": 750,
+    # check_availability window cap (slot folding walks the window).
+    "AVAILABILITY_MAX_WINDOW_DAYS": 62,
+    # Availability fetch extends back this many days to catch events that
+    # started before the requested window but overlap it.
+    "AVAILABILITY_FETCH_PAD_DAYS": 1,
+    # batch_create_events items per call.
+    "BATCH_CREATE_CAP": 25,
+    # delete_events default max_deletes and its absolute ceiling.
+    "BULK_DELETE_DEFAULT_MAX": 20,
+    "BULK_DELETE_CEILING": 100,
+    # Attendee and alarm caps per event.
+    "MAX_ATTENDEES": 50,
+    "MAX_ALARMS_PER_EVENT": 5,
+    # get_events_by_id input cap; also the delete-path per-osascript chunk.
+    "MAX_EVENT_IDS_PER_CALL": 25,
+    # Unscoped fan-out cap across calendars.
+    "MAX_CALENDARS_PER_QUERY": 20,
+    # list_events bounded default window (days ahead).
+    "DEFAULT_UPCOMING_DAYS": 7,
+    # Default id-lookup window when no absolute window is provided.
+    "UID_LOOKUP_BACK_DAYS": 30,
+    "UID_LOOKUP_AHEAD_DAYS": 90,
+    # Recurring-master second-pass horizon and its own result cap.
+    "RECURRING_LOOKBACK_DAYS": 400,
+    "RECURRING_MASTER_SCAN_CAP": 200,
+    # list_events notes preview truncation.
+    "NOTES_PREVIEW_CHARS": 280,
+    # Aggregate wall-clock budget per fan-out tool call (seconds).
+    "CALL_BUDGET_SECONDS": 240,
+}

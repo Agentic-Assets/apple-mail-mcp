@@ -4,7 +4,7 @@ Part of the **Apple Mail Claude Code plugin** skill suite. This directory is the
 
 ## What this skill is
 
-- **Apple Mail MCP** = 31 tools (read, search, compose, organize, analyze, verify drafts)
+- **Apple Mail MCP** = 41 tools (read, search, compose, organize, analyze, verify drafts, calendar)
 - **This skill** = when to use those tools for long-running inbox discipline, plus references/examples for deep workflows
 - **Sibling skills** = faster, sharper entry points (triage scan, taxonomy, archive campaigns, drafting, etc.)
 
@@ -26,7 +26,7 @@ claude plugin marketplace update Agentic-Assets
 claude plugin install apple-mail@Agentic-Assets --scope user
 ```
 
-All nine skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
+All eleven skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
 
 ## Install (Codex Desktop / CLI plugin)
 

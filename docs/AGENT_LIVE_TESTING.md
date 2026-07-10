@@ -370,7 +370,7 @@ This adds `--draft-safe` so send tools stay blocked during agent testing.
 
 ## Plugin workflow skills (agent UX)
 
-The Claude Code plugin bundles **nine** workflow skills under `plugin/skills/`. They complement live CLI testing: skills guide **tool selection and safety**; this doc guides **verification**.
+The Claude Code plugin bundles **eleven** workflow skills under `plugin/skills/`. They complement live CLI testing: skills guide **tool selection and safety**; this doc guides **verification**.
 
 | Agent task | Start with skill | Live CLI probes (examples) |
 |------------|------------------|----------------------------|

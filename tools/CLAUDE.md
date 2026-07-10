@@ -72,7 +72,7 @@ The individual checks live in the sibling `manifest_checks/` package (`common.py
 Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].name`):
 
 1. **Version sync** — Claude/Codex `plugin.json`, Claude marketplace `plugins[0].version`, `server.json` (×2), `apple-mail-mcpb/manifest.json`
-2. **Tool count claims**: descriptions must match a recursive scan of `plugin/apple_mail_mcp/tools/` for `^@mcp.tool` (package-nested tools such as `compose/` count toward **31**)
+2. **Tool count claims**: descriptions must match a recursive scan of `plugin/apple_mail_mcp/tools/` for `^@mcp.tool` (package-nested tools such as `compose/` count toward **41**)
 3. **MCPB name parity** — `@mcp.tool` names ↔ `apple-mail-mcpb/manifest.json` `tools[]`
 4. **Install contracts** — Claude plugin `mcpServers`, Codex `.mcp.json`, marketplace `source`/skills, MCPB `server` config, `server.json` package metadata, and PyPI package deps/packages must point at the shipped runtime
 5. **Payload syntax** — `plugin/start_mcp.sh` and shipped Python files must parse before release
@@ -194,7 +194,7 @@ bash tools/gates/dev-check.sh release   # always before commit/PR
 `tools/expected_test_count.txt` holds the one canonical collected-test count. Docs no
 longer hardcode the number; `run_test_count_check` (in `default` and `release`)
 recomputes the real count with `PYTEST_ADDOPTS='' pytest --collect-only tests` and fails
-on drift, printing the new number to drop into that one file. The tool count (31) is
+on drift, printing the new number to drop into that one file. The tool count (41) is
 already derived/enforced separately by `validate_manifests`.
 
 ## pre-commit hook

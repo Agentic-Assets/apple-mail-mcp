@@ -285,6 +285,99 @@ def _cmd_draft(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_calendars(args: argparse.Namespace) -> int:
+    from apple_mail_mcp.tools.calendar import list_calendars
+
+    return _run_tool(list_calendars, args.json, output_format="json" if args.json else "text")
+
+
+def _cmd_calendar_events(args: argparse.Namespace) -> int:
+    from apple_mail_mcp.tools.calendar import list_events
+
+    return _run_tool(
+        list_events,
+        args.json,
+        calendar=args.calendar,
+        days_back=args.days_back,
+        days_ahead=args.days_ahead,
+        query=args.query,
+        timezone=args.timezone,
+        limit=args.limit,
+        output_format="json" if args.json else "text",
+    )
+
+
+def _cmd_calendar_grant(args: argparse.Namespace) -> int:
+    """Request EventKit Calendars full access with a bounded run-loop pump.
+
+    This is the ONLY code path in the package that may trigger the EventKit
+    consent prompt, and it is reachable exclusively by a human running the
+    CLI from a terminal. Exit codes: 0 granted, 2 denied/restricted,
+    3 unavailable or timed out (permission-specific codes so scripts can
+    branch without parsing text).
+    """
+    import time
+
+    from apple_mail_mcp.calendar_core.eventkit import eventkit_status, load_frameworks
+
+    available, reason = eventkit_status()
+    if available:
+        print("Calendars full access is already granted for this process ancestry.")
+        return 0
+    if reason.startswith("dependency_missing"):
+        print(f"EventKit fast path unavailable: {reason}", file=sys.stderr)
+        return 3
+    if reason in ("denied", "restricted"):
+        print(
+            f"Calendars access is {reason}. Enable it under System Settings > Privacy & Security > "
+            "Calendars for the app that launches this process, or run: tccutil reset Calendar",
+            file=sys.stderr,
+        )
+        return 2
+
+    frameworks = load_frameworks()
+    if frameworks is None:  # pragma: no cover - eventkit_status covered this
+        print("EventKit frameworks are not importable.", file=sys.stderr)
+        return 3
+    eventkit_mod, foundation_mod = frameworks
+    store = eventkit_mod.EKEventStore.alloc().init()
+    outcome: dict[str, Any] = {}
+
+    def _completion(granted: bool, error: Any) -> None:
+        outcome["granted"] = bool(granted)
+        outcome["error"] = str(error) if error else None
+
+    request = getattr(store, "requestFullAccessToEventsWithCompletion_", None)
+    if request is not None:
+        request(_completion)
+    else:  # pragma: no cover - pre-macOS-14 fallback
+        entity = getattr(eventkit_mod, "EKEntityTypeEvent", 0)
+        store.requestAccessToEntityType_completion_(entity, _completion)
+
+    print("Requested Calendars full access; answer the macOS prompt if one appears...")
+    run_loop = foundation_mod.NSRunLoop.currentRunLoop()
+    deadline = time.monotonic() + args.wait_seconds
+    while "granted" not in outcome and time.monotonic() < deadline:
+        run_loop.runMode_beforeDate_(
+            getattr(foundation_mod, "NSDefaultRunLoopMode", "kCFRunLoopDefaultMode"),
+            foundation_mod.NSDate.dateWithTimeIntervalSinceNow_(0.25),
+        )
+
+    if outcome.get("granted"):
+        print("Granted: the EventKit read fast path is now available.")
+        return 0
+    if "granted" in outcome:
+        print(f"Denied by the user or the system. {outcome.get('error') or ''}".strip(), file=sys.stderr)
+        return 2
+    print(
+        f"No response within {args.wait_seconds:.0f}s. If no prompt appeared, the launching app "
+        "may lack a Calendars usage description (known limitation inside Claude Desktop and "
+        "Codex Desktop); run this command from Terminal instead.",
+        file=sys.stderr,
+    )
+    return 3
+
+
 def _cmd_mcp_config(args: argparse.Namespace) -> int:
     start_script = Path(args.repo).expanduser() / "plugin" / "start_mcp.sh"
     tool_args = [str(start_script)]

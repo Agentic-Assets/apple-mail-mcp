@@ -35,3 +35,24 @@ def _pass_through_known_test_accounts(monkeypatch):
         "apple_mail_mcp.cli._mailbox_count",
         lambda account: 0,
     )
+
+
+@pytest.fixture(autouse=True)
+def _calendar_test_guardrails(monkeypatch):
+    """Calendar analogue of the account fixture: never touch live Calendar.
+
+    Stubs calendar-name resolution against three known test calendars and
+    replaces the calendar engine's osascript seam with a tripwire so any
+    unpatched engine call fails loudly instead of talking to Calendar.app.
+    Tests that exercise the AppleScript engine patch
+    ``apple_mail_mcp.calendar_core.engine.run_applescript`` themselves.
+    """
+
+    def _no_live_calendar(script, timeout=120):
+        raise AssertionError("test attempted a live Calendar.app osascript call; patch the engine seam")
+
+    monkeypatch.setattr("apple_mail_mcp.calendar_core.engine.run_applescript", _no_live_calendar)
+    monkeypatch.setattr(
+        "apple_mail_mcp.tools.calendar.list_calendar_names",
+        lambda timeout=None: ["Work", "Home", "MCP Test Calendar"],
+    )

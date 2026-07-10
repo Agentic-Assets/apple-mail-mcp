@@ -26,7 +26,7 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 ## Plugin workflow skills (Claude Code and Codex)
 
-Nine skills ship under [`plugin/skills/`](../plugin/skills/) and auto-load with Claude Code and Codex plugin installs. They teach **when** and **how** to call the 31 MCP tools — they do not implement tool logic.
+Eleven skills ship under [`plugin/skills/`](../plugin/skills/) and auto-load with Claude Code and Codex plugin installs. They teach **when** and **how** to call the 41 MCP tools; they do not implement tool logic.
 
 | Skill | Use when the user wants… |
 |-------|---------------------------|
@@ -39,6 +39,8 @@ Nine skills ship under [`plugin/skills/`](../plugin/skills/) and auto-load with 
 | [`email-drafting`](../plugin/skills/email-drafting/) | Compose, reply, forward, rich drafts (`--draft-safe` aware) |
 | [`email-style-profile`](../plugin/skills/email-style-profile/) | Voice from Sent mail + `USER_EMAIL_PREFERENCES` before drafting |
 | [`email-attachments`](../plugin/skills/email-attachments/) | List and save attachments with path safety |
+| [`calendar-operator`](../plugin/skills/calendar-operator/) | Bounded calendar reads, safe event CRUD, ID-first deletes, TCC troubleshooting |
+| [`meeting-scheduler`](../plugin/skills/meeting-scheduler/) | Find-slot workflow, cross-timezone scheduling, invitation limits |
 
 **Routing index:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md) (sibling cheat sheet). **Authoring rules:** [`CLAUDE-conventions.md`](CLAUDE-conventions.md) § Skill authoring. **User install blurb:** root [`README.md`](../README.md) § Claude Code Skills.
 

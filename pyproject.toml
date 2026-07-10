@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-apple-mail"
-version = "3.9.3"
+version = "3.10.0"
 description = "MCP server giving AI assistants full access to Apple Mail - read, search, compose, organize & analyze emails"
 readme = "README.md"
 license = "MIT"
@@ -63,6 +63,11 @@ include = ["plugin/apple_mail_mcp/**"]
 # and are not yet stable across all tools in the ecosystem this repo targets).
 # ---------------------------------------------------------------------------
 [project.optional-dependencies]
+# Optional EventKit read fast path for the calendar tools (macOS only; the
+# AppleScript engine works without it). Install: pip install 'mcp-apple-mail[eventkit]'
+eventkit = [
+    "pyobjc-framework-EventKit>=10,<13",
+]
 dev = [
     "ruff>=0.4.0",
     "mypy>=1.10.0",

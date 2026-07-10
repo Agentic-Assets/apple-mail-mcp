@@ -5,6 +5,95 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.10.0 - 2026-07-10
+
+Apple Calendar tool surface: 10 new MCP tools (41 total), 2 new workflow skills
+(11 total), and a hybrid calendar engine, all behind the same safety doctrine as
+the mail surface.
+
+### Added
+
+- **10 Apple Calendar tools**: `list_calendars`, `list_events`, `get_events_by_id`,
+  `check_availability`, `create_event`, `batch_create_events`, `update_event`,
+  `delete_events`, `manage_calendars`, and the `respond_to_invitation`
+  documented-refusal shim (no public macOS API can RSVP).
+- **Hybrid calendar engine**: Calendar.app AppleScript via the shared
+  `run_applescript` lock is the guaranteed engine on every install surface; an
+  optional EventKit read fast path (`pip install 'mcp-apple-mail[eventkit]'`)
+  activates only when Calendars full access is already granted and never
+  triggers the consent prompt from a tool call.
+- **Bounded-read contract for calendars**: every event read requires a capped
+  window (370-day width cap, 200-event return cap with paging, 750-occurrence
+  recurring expansion ceiling, 20-calendar fan-out cap, and an aggregate
+  240-second per-call budget with partial results). Central caps live in
+  `constants.CALENDAR_BOUNDS`.
+- **New mode gating for calendars** (stricter than the mail tools by design):
+  `--read-only` removes every calendar write tool; `--draft-safe` additionally
+  blocks calendar deletes (`CALENDAR_DELETE_BLOCKED`, env unlock
+  `CALENDAR_ALLOW_DESTRUCTIVE=1`) and attendee invitation sends
+  (`INVITE_SEND_BLOCKED`). Mail tool gating is unchanged; the server
+  instructions now document the domain split.
+- **Safety doctrine**: ID-first mutations with no fuzzy destructive selectors,
+  dry-run-default deletes that abort on any unresolved id, a triple-gated
+  calendar delete (preview, confirm, force), recurring mutations requiring
+  `span='all_occurrences'`, allowlisted RRULE grammar, and attendee writes
+  gated behind explicit `send_invitations=True` with
+  `invitation_delivery: "platform_dependent"` disclosure.
+- **Timezone correctness**: IANA `timezone` parameters everywhere, dual
+  zone-local plus UTC output, and integer-component AppleScript date
+  interpolation (no locale string coercion).
+- **2 new workflow skills**: `calendar-operator` (bounded reads, ID-first
+  mutations, TCC troubleshooting) and `meeting-scheduler` (find-slot workflow,
+  cross-timezone discipline, the .ics-via-Mail invitation alternative), plus
+  the shared `calendar-safety-limits.md` reference.
+- **CLI**: `apple-mail calendars`, `apple-mail calendar-events`, and
+  `apple-mail calendar-grant` (the only code path allowed to request EventKit
+  access; human-run, terminal only, permission-specific exit codes).
+
+### Fixed
+
+- **All-day timezone date shift**: all-day events now land on the requested
+  calendar date in the requested zone instead of the host-local conversion of
+  midnight-in-zone. Previously an all-day request in a zone far east or west of
+  the Mac could roll the date back or forward one day (`create_event`,
+  `batch_create_events`, and `update_event` all-day paths).
+- **Delete access-denied is no longer soft**: an Automation-denied
+  (`-1743`/not authorized) `delete_events` now raises the structured
+  `CALENDAR_ACCESS_DENIED` remediation like create/update, instead of reporting
+  a "successful" empty delete.
+- **Recurring write lookup**: `update_event` and `delete_events` widen the
+  write-side uid lookup for recurring targets back by the 400-day recurring
+  lookback horizon (still date-bounded), so a standing series whose master
+  started before the read window no longer spuriously returns `EVENT_NOT_FOUND`.
+- **Attendee-removal honesty**: `update_event` no longer reports
+  `attendees_changed`/`invitation_delivery` for a removal-only or empty
+  attendee diff (Calendar.app scripting cannot remove attendees); it returns an
+  explicit "attendee removal is unsupported" note instead.
+
+### Changed
+
+- **Recurring coverage disclosure**: `list_events` and `check_availability`
+  now surface `recurring_lookback_days` and a `recurring_coverage_note` when the
+  AppleScript recurring-master pass runs, so callers know standing series older
+  than the 400-day horizon may be missing (the EventKit engine expands
+  natively and carries no such note).
+- **Honest `output_format="text"`**: `get_events_by_id`, `update_event`,
+  `delete_events`, `batch_create_events`, and `manage_calendars` now emit
+  compact text summaries in text mode instead of pretty-printed JSON, matching
+  `list_events`/`list_calendars`/`check_availability`.
+- **Docstrings**: `list_events` states the 280-char `notes_preview` query match
+  limit and the recurring lookback horizon; `update_event`/`delete_events`
+  document the recurring-target lookup requirement and all-day moves.
+
+### Notes
+
+- Invitation delivery and RSVP are platform gaps, not omissions: no public
+  macOS API guarantees invitation transmission, and EventKit participant
+  status is read-only. Both are documented in the tools and skills.
+- `DEFAULT_CALENDAR` (env) sets the create target; unscoped reads fan out
+  across calendars (capped), which deliberately differs from mail's
+  account-scoping default and is documented in each fan-out tool.
+
 ## 3.9.3 - 2026-07-09
 
 Safe-by-design bounded mail access. Every scan, search, and export is now hard

@@ -251,6 +251,8 @@ Entry points ship as skills only. Do not restore `plugin/commands/`; the old `/e
 | `email-drafting` | Compose / reply / forward / rich drafts |
 | `email-style-profile` | Voice contract before drafting |
 | `email-attachments` | List + save attachments |
+| `calendar-operator` | Bounded calendar reads + safe event CRUD |
+| `meeting-scheduler` | Find-slot scheduling + invitation limits |
 
 **Routing cheat sheet:** [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). **Narrow skills** may stay shorter than the umbrella template if they include triggers, sibling matrix, performance notes, and destructive red lines. **Umbrella template:** `plugin/skills/email-management/SKILL.md` (also has `references/`, `examples/`, `templates/`).
 

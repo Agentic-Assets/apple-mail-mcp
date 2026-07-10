@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**31 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**41 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
 ## Distribution channels (four install surfaces from one source tree)
 
@@ -48,7 +48,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 | Plugin wrapper, `start_mcp.sh`, manifests | [`plugin/docs/CLAUDE.md`](plugin/docs/CLAUDE.md) |
 | Package entry, `core/`, `server.py`, `cli/` | [`plugin/apple_mail_mcp/CLAUDE.md`](plugin/apple_mail_mcp/CLAUDE.md) |
 | Individual MCP tools | [`plugin/apple_mail_mcp/tools/CLAUDE.md`](plugin/apple_mail_mcp/tools/CLAUDE.md) |
-| Skills (9 workflow skills) | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) |
+| Skills (11 workflow skills) | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) |
 | Tests & mocking AppleScript | [`tests/CLAUDE.md`](tests/CLAUDE.md) |
 | Manifest validation, pre-commit | [`tools/CLAUDE.md`](tools/CLAUDE.md) |
 | Live CLI testing, agent workflows | [`docs/CLAUDE.md`](docs/CLAUDE.md) |

@@ -56,10 +56,10 @@ def main() -> None:
     server.DRAFT_SAFE = args.draft_safe or args.read_only
 
     from apple_mail_mcp import mcp  # noqa: E402
-    from apple_mail_mcp.server import SEND_TOOLS
+    from apple_mail_mcp.server import CALENDAR_DESTRUCTIVE_TOOLS, CALENDAR_WRITE_TOOLS, SEND_TOOLS
 
     if args.read_only:
-        for name in SEND_TOOLS:
+        for name in SEND_TOOLS + CALENDAR_WRITE_TOOLS + CALENDAR_DESTRUCTIVE_TOOLS:
             with suppress(KeyError, ValueError):
                 mcp.remove_tool(name)
 

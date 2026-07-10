@@ -1,8 +1,8 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.9.3",
-  "description": "Natural language interface for Apple Mail with 31 tools: email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, draft verification, attachments, Mail rules advising, bounded export, and security-hardened destructive operations. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
+  "version": "3.10.0",
+  "description": "Natural language interface for Apple Mail and Apple Calendar with 41 tools: email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, draft verification, attachments, Mail rules advising, bounded export, security-hardened destructive operations, bounded calendar reads, conflict-checked event creation, availability search, and gated calendar management. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
   },
@@ -83,7 +83,7 @@
     },
     {
       "name": "reply_to_email",
-      "description": "Reply by message_id (required — discover via search_emails or list_inbox_emails). subject_keyword on this tool is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Default native_format=true composes in Mail's native reply window (keeps colored quote bar and logo signature); reply_body is typed above the quote and needs Mail window focus plus Accessibility permission for the host, or returns REPLY_WINDOW_FOCUS_FAILED. native_format=false is the windowless object-model fallback (plain-text quote). Default mode saves to Drafts and verifies exact Drafts id when Mail exposes one. mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, and CC/BCC. body_html is accepted for backward compatibility but ignored for native replies."
+      "description": "Reply by message_id (required \u2014 discover via search_emails or list_inbox_emails). subject_keyword on this tool is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Default native_format=true composes in Mail's native reply window (keeps colored quote bar and logo signature); reply_body is typed above the quote and needs Mail window focus plus Accessibility permission for the host, or returns REPLY_WINDOW_FOCUS_FAILED. native_format=false is the windowless object-model fallback (plain-text quote). Default mode saves to Drafts and verifies exact Drafts id when Mail exposes one. mode=open saves first then leaves the compose window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, reply-all, and CC/BCC. body_html is accepted for backward compatibility but ignored for native replies."
     },
     {
       "name": "compose_email",
@@ -91,7 +91,7 @@
     },
     {
       "name": "forward_email",
-      "description": "Forward by message_id (required — discover via search_emails or list_inbox_emails). subject_keyword is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, optional prepended message, and CC/BCC."
+      "description": "Forward by message_id (required \u2014 discover via search_emails or list_inbox_emails). subject_keyword is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, optional prepended message, and CC/BCC."
     },
     {
       "name": "create_rich_email_draft",
@@ -111,11 +111,11 @@
     },
     {
       "name": "list_email_attachments",
-      "description": "List attachments by message_ids (required — discover via search_emails or list_inbox_emails). subject_keyword is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Capped at max_results (default 50) for fast responses on large inboxes."
+      "description": "List attachments by message_ids (required \u2014 discover via search_emails or list_inbox_emails). subject_keyword is schema-compat only and returns TARGET_SELECTOR_DEPRECATED. Capped at max_results (default 50) for fast responses on large inboxes."
     },
     {
       "name": "save_email_attachment",
-      "description": "Save a specific attachment to disk. Requires message_ids from prior search_emails, list_inbox_emails, or list_email_attachments; use list_email_attachments to pick attachment_index. Validates target path — blocks writes to sensitive directories."
+      "description": "Save a specific attachment to disk. Requires message_ids from prior search_emails, list_inbox_emails, or list_email_attachments; use list_email_attachments to pick attachment_index. Validates target path \u2014 blocks writes to sensitive directories."
     },
     {
       "name": "search_emails",
@@ -139,7 +139,7 @@
     },
     {
       "name": "manage_trash",
-      "description": "Trash lifecycle: move_to_trash, delete_permanent, empty_trash. Prefer message_ids; allow_filter_scan=true plus older_than_days only for date/bulk paths — subject_keyword and sender always return TARGET_SELECTOR_DEPRECATED. empty_trash requires confirm_empty=True. Default max 5."
+      "description": "Trash lifecycle: move_to_trash, delete_permanent, empty_trash. Prefer message_ids; allow_filter_scan=true plus older_than_days only for date/bulk paths \u2014 subject_keyword and sender always return TARGET_SELECTOR_DEPRECATED. empty_trash requires confirm_empty=True. Default max 5."
     },
     {
       "name": "create_mailbox",
@@ -176,6 +176,46 @@
     {
       "name": "inbox_dashboard",
       "description": "Interactive UI dashboard for MCP Apps-compatible clients (requires mcp-ui-server). Account cards, recent emails, and search."
+    },
+    {
+      "name": "list_calendars",
+      "description": "List every calendar with id, writability, defaults, and engine diagnostics"
+    },
+    {
+      "name": "list_events",
+      "description": "List events in a bounded window with query filter, recurring expansion, and paging"
+    },
+    {
+      "name": "get_events_by_id",
+      "description": "Fetch full detail (notes, alarms, attendees) for exact event ids, window-bounded"
+    },
+    {
+      "name": "check_availability",
+      "description": "Busy blocks and free slots folded in Python over a bounded window (max 62 days)"
+    },
+    {
+      "name": "create_event",
+      "description": "Create one event with timezone-correct times, alarms, recurrence, and conflict detection"
+    },
+    {
+      "name": "batch_create_events",
+      "description": "Create up to 25 one-off events on one calendar with all-or-nothing validation"
+    },
+    {
+      "name": "update_event",
+      "description": "ID-first PATCH update with recurring span rules and attendee-set diffing"
+    },
+    {
+      "name": "delete_events",
+      "description": "Exact-id bulk delete with dry-run default, caps, and whole-series span confirmation"
+    },
+    {
+      "name": "manage_calendars",
+      "description": "Create, rename, or delete calendars; delete is triple-gated with a cascade preview"
+    },
+    {
+      "name": "respond_to_invitation",
+      "description": "Documented refusal: no public macOS API can RSVP to invitations"
     }
   ],
   "prompts": []
