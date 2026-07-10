@@ -118,7 +118,7 @@ SCAN_BOUNDS = {
 #
 # Centralized caps for every calendar read, write, and fan-out path. One edit
 # retunes every calendar tool. Values chosen in
-# tasks/active/apple-calendar-tools/final-plan-2026-07-10.md section 4:
+# tasks/archive/2026-07/shipped/apple-calendar-tools/final-plan-2026-07-10.md section 4:
 # Calendar.app AppleScript `whose` scans cost tracks total store size (not
 # window size), so result caps, an inner scan cap, and an aggregate per-call
 # wall-clock budget all apply together.
