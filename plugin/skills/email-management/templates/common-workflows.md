@@ -62,7 +62,7 @@ processed = list_inbox_emails(
     include_content=False,
     output_format="json",
 )
-processed_ids = [item["message_id"] for item in processed["items"]]
+processed_ids = [item["message_id"] for item in processed["emails"]]
 move_email(
     account="Work",
     message_ids=processed_ids,
@@ -954,7 +954,7 @@ get_statistics(scope="account_overview", days_back=7)
 get_needs_response(account="Work", check_already_replied=True, include_already_replied=False)
 list_inbox_emails(max_emails=20, output_format="json")
 search_emails(sender_exact="...", mailboxes=["INBOX"], max_results=20, output_format="json")
-get_email_thread(message_id="<message_id from search>")
+get_email_thread(account="Work", message_id="<message_id from search>")
 reply_to_email(message_id="<message_id from search>", reply_body="...")  # load email-drafting for native reply
 move_email(message_ids=["<id>"], to_mailbox="Archive", from_mailbox="INBOX", max_moves=1)
 

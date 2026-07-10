@@ -19,7 +19,7 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). When the user
 
 Canonical rules: [`pre-draft-verification.md`](references/pre-draft-verification.md). Summary:
 
-1. Fetch the conversation: `get_email_thread(message_id=...)`. If no id is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id`.
+1. Fetch the conversation: `get_email_thread(account=..., message_id=...)`. If no id is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id`.
 2. Cross-check senders in the thread against `list_account_addresses(account=...)`. If any message in the thread was sent by one of the user's own addresses, **abort the draft** and report which message already replied (date, subject snippet), unless the user explicitly said "redraft" or "include already-replied".
 3. Only after the thread shows no user-sent message do you proceed to `reply_to_email(message_id=...)`.
 
@@ -39,7 +39,7 @@ Never use standalone draft creators (`compose_email`, `create_rich_email_draft`,
 
 1. Know the **`account`** (defaults follow `DEFAULT_MAIL_ACCOUNT`) and signature intent. Compose/reply/forward default to **`include_signature=True`**, which applies **`DEFAULT_MAIL_SIGNATURE`** when that env var is set; when unset, the tool does not force a named signature and Mail may still apply the account's normal default signature. Pass `include_signature=False` to suppress plugin-applied signatures, or `signature_name` to override the default for one call. For replies, disabling signatures cannot skip `reply_body` insertion. On native replies (`native_format=True`) Mail supplies its own default reply signature with the logo preserved; `signature_name` and `include_signature=False` still override it, whereas the windowless `native_format=False` path yields a flattened text signature only.
 2. Confirm the `mcp__apple-mail__*` tools are actually registered before any drafting call. If they are absent, fix MCP registration or use the documented MCP-only absolute-path fallback; do not draft with generic AppleScript, Mail UI scripting, shell `osascript`, or a standalone compose fallback.
-3. For replies/forwards, use the Mail **`message_id`** returned by `search_emails`, `get_email_by_id`, or thread tools whenever available. **`list_inbox_emails` JSON may omit `message_id` on some builds**; re-resolve with `search_emails` before `reply_to_email`. Do not pass `subject_keyword` to action tools just because the subject is visible. **Discovery-only:** pass `subject_keyword` to `search_emails`, then pass the returned `message_id` to `reply_to_email` / `forward_email`. Use `list_inbox_emails` for bounded recent listing when no subject filter is needed.
+3. For replies/forwards, use the Mail **`message_id`** returned by `search_emails`, `get_email_by_id`, or thread tools whenever available. **`list_inbox_emails` JSON always includes `message_id`**, so use it directly for `reply_to_email`. Do not pass `subject_keyword` to action tools just because the subject is visible. **Discovery-only:** pass `subject_keyword` to `search_emails`, then pass the returned `message_id` to `reply_to_email` / `forward_email`. Use `list_inbox_emails` for bounded recent listing when no subject filter is needed.
 4. Reply drafting requires `reply_to_email(message_id=...)`. If no `message_id` is known, run `search_emails` or `list_inbox_emails` first; `subject_keyword` on `reply_to_email` returns `TARGET_SELECTOR_DEPRECATED`.
 5. Load **`USER_EMAIL_PREFERENCES`** plus any capture from **`email-style-profile`** before writing content.
 
@@ -54,7 +54,7 @@ Restate these in chat **before** invoking `compose_email`, `reply_to_email`, `fo
 5. **Source message id** (replies/forwards only): pass the `message_id` returned by search/list. If no id is known yet, run bounded `search_emails` or `list_inbox_emails` first; never pass `subject_keyword` to `reply_to_email` or `forward_email`.
 6. **Standalone-confirmed override:** `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` refuse `Re:`/`Fwd:` subjects or bodies containing quoted-thread markers and return a structured error. If the user explicitly wants a fresh standalone message that happens to look threaded (e.g. a new "Re: weekly review" note unrelated to any prior thread), pass `standalone_confirmed=True` (CLI: `--standalone-confirmed`); never use this override to substitute for `reply_to_email` / `forward_email`.
 
-**Large-inbox caveat:** the pre-draft `get_email_thread` verification can stall on long threads in a 24k mailbox. If no `message_id` is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id` (`get_email_thread(message_id=...)` or `get_email_by_id(message_id=...)`).
+**Large-inbox caveat:** the pre-draft `get_email_thread` verification can stall on long threads in a 24k mailbox. If no `message_id` is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id` (`get_email_thread(account=..., message_id=...)` or `get_email_by_id(account=..., message_id=...)`).
 
 `mode="open"` saves first then leaves the compose window open, so closing it should not trigger Mail's Save/Don't Save prompt.
 
@@ -104,7 +104,7 @@ date-filtered scan that is slow on large accounts and silently drops brand-new
 drafts (an unsent `outgoing message` has a null received date). Instead use the
 exact Drafts verification: `verify_draft(draft_id="...", expected_body_contains="...")` or `verify_drafts(draft_ids=[...])`
 or bounded Drafts lookup: `manage_drafts(action="list", subject_contains="...")`
-(newest-first) or `get_email_by_id(message_id=..., mailbox="Drafts")`. Use
+(newest-first) or `get_email_by_id(account=..., message_id=..., mailbox="Drafts")`. Use
 the returned exact `draft_id` for `manage_drafts(action="open"|"delete"|"send")`. Confirm
 `to`/`cc` are the intended recipients and the body is present. For replies,
 `reply_body` must appear above the quoted original; mere presence below the

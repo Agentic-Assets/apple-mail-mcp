@@ -1,6 +1,6 @@
 ---
 name: email-archive-cleanup
-description: This skill should be used when the user asks to "archive old mail safely", "move everything from X sender", "clear newsletters", "bulk mark read after export", "preview what would move with dry_run=True", or run staged cleanup campaigns. Uses search_emails, move_email(dry_run=True) preview → execute, update_email_status, export_emails, manage_trash (with max_deletes / max_moves caps), synchronize_account, and get_statistics when measuring progress. Do NOT use for taxonomy design sessions without execution (mailbox-taxonomy), proposing Mail filter rules copy (mail-rules-advisor only), drafting mail (email-drafting), or the 5-minute triage skim (inbox-triage).
+description: This skill should be used when the user asks to "archive old mail safely", "move everything from X sender", "clear newsletters", "bulk mark read after export", "preview what would move with dry_run=True", or run staged cleanup campaigns. Uses search_emails, move_email(dry_run=True) preview → execute, update_email_status, export_emails, manage_trash (max_deletes cap), synchronize_account, and get_statistics when measuring progress. Do NOT use for taxonomy design sessions without execution (mailbox-taxonomy), proposing Mail filter rules copy (mail-rules-advisor only), drafting mail (email-drafting), or the 5-minute triage skim (inbox-triage).
 ---
 
 # Archive And Cleanup Campaigns
