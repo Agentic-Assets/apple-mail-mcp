@@ -222,13 +222,19 @@ end tell"""
 
 
 def delete_calendar_script(*, calendar_name: str, timeout_seconds: int = 120) -> str:
-    """Delete a calendar addressed by exact name (cascade deletes its events)."""
+    """Delete a calendar via the inline whose-specifier form (cascade deletes its events).
+
+    The variable-bound form (``set targetCal to calendar "X"`` then ``delete
+    targetCal``) fails live with ``Calendar got an error: AppleEvent handler
+    failed`` on current Calendar.app; the inline ``delete (first calendar whose
+    name is ...)`` specifier deletes cleanly (verified live, including on a
+    non-empty calendar whose events cascade away with it).
+    """
     safe_calendar = escape_applescript(calendar_name)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         try
-            set targetCal to calendar "{safe_calendar}"
-            delete targetCal
+            delete (first calendar whose name is "{safe_calendar}")
             return "DELETED_CAL|||{safe_calendar}"
         on error errMsg
             return "ERROR_CALENDAR_WRITE|||" & errMsg

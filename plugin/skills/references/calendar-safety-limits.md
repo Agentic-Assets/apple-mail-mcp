@@ -45,12 +45,14 @@ calendar surface is gated harder, under the same two flags:
 | `EVENT_NOT_FOUND` | Widen the lookup window (`days_back`/`days_ahead`, or `lookup_days_back`/`lookup_days_ahead` on `update_event`) or pass the right `calendar` |
 | `RECURRING_SPAN_REQUIRED` | Pass `span='all_occurrences'` after confirming the whole series should change |
 | `RECURRING_SPAN_UNSUPPORTED` | Per-occurrence edits are not possible on this engine; tell the user |
+| `RECURRING_DELETE_INCOMPLETE` | `delete_events` verified the series after deleting and occurrences survive (Calendar.app scripting removes only individual occurrences). Delete the whole series in Calendar.app; the error lists the surviving dates |
 | `EVENT_CONFLICT` | Offer the listed conflicts; retry with `on_conflict='warn'`/`'allow'` or find a free slot |
 | `INVITE_SEND_REQUIRES_CONFIRM` | Ask the user, then retry with `send_invitations=True` |
 | `INVITE_SEND_BLOCKED` / `CALENDAR_DELETE_BLOCKED` / `CALENDAR_WRITE_BLOCKED` | Mode-blocked; do not work around it, report to the user |
 | `TOO_MANY_DELETES` / `BATCH_TOO_LARGE` | Split into smaller batches deliberately |
 | `CALENDAR_CONFIRMATION_REQUIRED` | Run the delete dry-run, review, then pass the confirm flags |
 | `CALENDAR_ACCESS_DENIED` | Follow the pane named in remediation (Automation for AppleScript, Calendars for EventKit) |
+| `CALENDAR_WRITE_FAILED` | Calendar.app rejected the write with an error; retry once, then make the change in Calendar.app if it persists |
 
 ## Platform limitations (verified against primary sources)
 
@@ -60,8 +62,14 @@ calendar surface is gated harder, under the same two flags:
   compose path (draft first, never auto-send).
 - **RSVP:** accepting/declining/tentative is impossible through any public API;
   `respond_to_invitation` always returns `CALENDAR_RSVP_UNSUPPORTED`.
-- **Recurring spans:** Calendar.app scripting mutates whole series only
-  (`span='all_occurrences'`).
+- **Recurring spans:** `span='all_occurrences'` is the only supported span
+  (per-occurrence edits are impossible). `update_event` propagates a change to the
+  whole series (verified live). `delete_events` cannot delete a whole series:
+  Calendar.app scripting `delete` removes only the targeted occurrence and
+  rule-clearing is silently ignored, so a recurring delete is verified after
+  running and returns `RECURRING_DELETE_INCOMPLETE` (with the surviving occurrence
+  dates) when the series is not fully gone. Delete a whole series in Calendar.app
+  for a reliable removal.
 - **Recurring read coverage (AppleScript engine):** recurring occurrences are
   projected from masters whose start date falls within the last 400 days, so a
   standing series created earlier can be missing from a read window with no

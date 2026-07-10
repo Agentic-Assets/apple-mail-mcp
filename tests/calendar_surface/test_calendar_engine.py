@@ -137,10 +137,12 @@ class TestWriteErrorMapping:
         assert exc.value.code == "CALENDAR_ACCESS_DENIED"
         assert "Automation" in str(exc.value.remediation)
 
-    def test_generic_write_error_raises_exception(self, monkeypatch):
+    def test_generic_write_error_maps_to_structured_error(self, monkeypatch):
         monkeypatch.setattr(engine_mod, "run_applescript", _Capture("ERROR_CALENDAR_WRITE|||boom"))
-        with pytest.raises(Exception, match="boom"):
+        with pytest.raises(ToolError) as exc:
             AppleScriptCalendarEngine().rename_calendar(name="A", new_name="B")
+        assert exc.value.code == "CALENDAR_WRITE_FAILED"
+        assert "boom" in exc.value.message
 
     def test_create_event_returns_uid(self, monkeypatch):
         monkeypatch.setattr(engine_mod, "run_applescript", _Capture("CREATED|||NEW-UID"))

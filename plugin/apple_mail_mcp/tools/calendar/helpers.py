@@ -402,6 +402,42 @@ def find_conflicts(
     return conflicts
 
 
+def surviving_recurring_occurrences(
+    *,
+    engine: CalendarReadEngine,
+    window: CalendarWindow,
+    calendar_names: list[str],
+    recurring_ids: list[str],
+    timeout: int | None = None,
+) -> dict[str, list[str]]:
+    """Re-query recurring uids after a delete; return ``{uid: [surviving dates]}``.
+
+    Calendar.app AppleScript ``delete`` removes only the targeted occurrence of a
+    recurring series (verified live: no scripting form deletes a whole series, and
+    recurrence-clearing is silently ignored), so a recurring delete must be
+    verified rather than trusted. EventKit reflects the true post-delete state; the
+    AppleScript engine re-expands from the rule and can over-report survivors, which
+    errs on the safe side (report incomplete rather than a false success).
+    """
+    wanted = set(recurring_ids)
+    survivors, _errors, _exhausted = collect_window_events(
+        engine=engine,
+        window=window,
+        calendar_names=calendar_names,
+        expand_recurring=True,
+        event_ids=recurring_ids,
+        timeout=timeout,
+    )
+    by_uid: dict[str, list[str]] = {}
+    for payload in survivors:
+        uid = str(payload.get("event_id"))
+        if uid not in wanted:
+            continue
+        date_label = payload.get("occurrence_date") or str(payload.get("start") or "")[:10]
+        by_uid.setdefault(uid, []).append(str(date_label))
+    return {uid: sorted(set(dates)) for uid, dates in by_uid.items()}
+
+
 def recurring_lookback_disclosure(engine: CalendarReadEngine, expand_recurring: bool) -> dict[str, Any] | None:
     """Disclosure fields when the AppleScript recurring-master lookback pass ran (F2).
 
@@ -477,6 +513,7 @@ __all__ = [
     "render_events_text",
     "resolve_create_target",
     "resolve_read_calendars",
+    "surviving_recurring_occurrences",
     "timeout_error",
     "tz_for_window",
     "validate_on_conflict",

@@ -189,6 +189,24 @@ def isoformat_pair(dt: datetime, tz: tzinfo) -> tuple[str, str]:
     return dt.astimezone(tz).isoformat(), dt.astimezone(timezone.utc).isoformat()
 
 
+def all_day_echo_instants(start_dt: datetime, end_dt: datetime) -> tuple[str, str, str, str]:
+    """Echo instants (start_local, start_utc, end_local, end_utc) for an all-day create.
+
+    All-day events are stored on the host-local calendar date: the requested-zone
+    date is carried through unchanged (see ``scripts_read.applescript_date_block``),
+    NOT converted to a host-local instant. Echoing the requested-zone midnight
+    instant would describe a moment hours away from what ``get_events_by_id`` reads
+    back afterward, so the response must echo host-local midnight of the same
+    calendar date to match the stored event (bug 4).
+    """
+    host_tz = datetime.now().astimezone().tzinfo or timezone.utc
+    echo_start = datetime(start_dt.year, start_dt.month, start_dt.day, tzinfo=host_tz)
+    echo_end = datetime(end_dt.year, end_dt.month, end_dt.day, tzinfo=host_tz)
+    start_local, start_utc = isoformat_pair(echo_start, host_tz)
+    end_local, end_utc = isoformat_pair(echo_end, host_tz)
+    return start_local, start_utc, end_local, end_utc
+
+
 def window_payload(window: CalendarWindow) -> dict[str, Any]:
     """JSON-friendly description of an issued window for tool responses."""
     tz, _ = resolve_timezone(window.timezone_name if _is_iana(window.timezone_name) else None)
@@ -213,6 +231,7 @@ def _is_iana(name: str) -> bool:
 
 __all__ = [
     "CalendarWindow",
+    "all_day_echo_instants",
     "bounded_calendar_window",
     "isoformat_pair",
     "parse_iso_datetime",

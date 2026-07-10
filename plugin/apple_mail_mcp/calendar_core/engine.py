@@ -116,7 +116,16 @@ def _map_write_error(result: str) -> str:
                     "note": "Enable Calendar under the host app that launches this server, then retry.",
                 },
             )
-        raise Exception(f"Calendar write failed: {detail}")
+        raise ToolError(
+            code="CALENDAR_WRITE_FAILED",
+            message=f"Calendar.app rejected the write: {detail}",
+            remediation={
+                "note": (
+                    "The AppleScript write returned an error from Calendar.app. Retry once; if it "
+                    "persists, make the change in Calendar.app directly."
+                )
+            },
+        )
     return result
 
 

@@ -129,6 +129,46 @@ class TestRecurringWriteWindow:
         assert (window.end - window.start).days <= 121
 
 
+class _VanishingRecurringEngine(FakeReadEngine):
+    """Serves a recurring master on the resolve pass, then reports it gone.
+
+    Models a delete that actually removed the whole series: the verify re-query
+    (the second id-scoped ``fetch_window``) finds no surviving occurrences.
+    """
+
+    def fetch_window(self, window, calendar_name, *, scan_cap, include_detail=False, event_ids=None, timeout=None):
+        rows, errs = super().fetch_window(
+            window, calendar_name, scan_cap=scan_cap, include_detail=include_detail, event_ids=event_ids, timeout=timeout
+        )
+        if event_ids:
+            if getattr(self, "_served", False):
+                return [], errs
+            self._served = True
+        return rows, errs
+
+
+class TestRecurringVerify:
+    """Bug 2: recurring delete is verified; false whole-series success is impossible."""
+
+    def _recurring_events(self):
+        return [raw_event("UID-R", recurrence="FREQ=WEEKLY", start=datetime.now(HOST_TZ) + timedelta(days=1))]
+
+    def test_survivors_report_incomplete_not_success(self, fake_engines):
+        # The default fake keeps serving the series, so the verify finds survivors.
+        _read, write = fake_engines(read=_engine(self._recurring_events()))
+        payload = _run(event_ids=["UID-R"], span="all_occurrences", dry_run=False)
+        assert payload["code"] == "RECURRING_DELETE_INCOMPLETE"
+        assert "UID-R" in payload["remediation"]["surviving_occurrences"]
+        assert write.deleted  # the delete was still attempted
+
+    def test_verified_removal_reports_whole_series(self, fake_engines):
+        read = _VanishingRecurringEngine(events=self._recurring_events())
+        _read, write = fake_engines(read=read)
+        payload = _run(event_ids=["UID-R"], span="all_occurrences", dry_run=False)
+        assert payload["recurring_deleted_whole_series"] is True
+        assert payload["deleted_count"] >= 1
+
+
 class TestTextOutput:
     def test_dry_run_text_is_not_json(self, fake_engines):
         _read, _write = fake_engines(read=_engine())

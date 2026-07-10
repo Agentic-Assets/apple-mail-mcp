@@ -73,9 +73,12 @@ correct absolute instant regardless of the Mac's own zone.
   destructive selectors, by design. Pass `calendar` as a lookup hint to avoid fan-out.
 - `update_event` is PATCH-style: only the fields you pass change. On `EVENT_NOT_FOUND`,
   widen `lookup_days_back`/`lookup_days_ahead` or pass the right calendar.
-- Recurring targets require `span='all_occurrences'` and mutate the whole series;
-  `this_occurrence`/`future_occurrences` return `RECURRING_SPAN_UNSUPPORTED` (a
-  Calendar.app scripting limitation).
+- Recurring targets require `span='all_occurrences'`. `update_event` applies the
+  change to the whole series; `delete_events` cannot remove a whole series
+  (Calendar.app scripting deletes only individual occurrences), so it verifies
+  after deleting and returns `RECURRING_DELETE_INCOMPLETE` with the surviving dates
+  when the series is not fully gone. `this_occurrence`/`future_occurrences` return
+  `RECURRING_SPAN_UNSUPPORTED`.
 - `batch_create_events` creates up to 25 one-off blocking events in one call
   (no attendees, no recurrence in items); use `dry_run=True` first for bulk plans.
 
@@ -84,7 +87,7 @@ correct absolute instant regardless of the Mac's own zone.
 | Action | Rule |
 |--------|------|
 | `delete_events` | Always run the default `dry_run=True` preview and show it before `dry_run=False`; exact ids only; one unresolved id aborts everything |
-| Recurring deletes | `span='all_occurrences'` removes the whole series; say so before confirming |
+| Recurring deletes | Calendar.app scripting cannot remove a whole series; `delete_events` verifies after running and returns `RECURRING_DELETE_INCOMPLETE` with surviving dates. For a reliable series delete, direct the user to Calendar.app |
 | `manage_calendars(action="delete")` | Three steps: dry-run preview with `event_count`, then `confirm_delete_calendar=True`, plus `force_nonempty=True` when events exist; exact name or `calendar_id` only |
 | Draft-safe mode | Deletes return `CALENDAR_DELETE_BLOCKED`; never suggest the `CALENDAR_ALLOW_DESTRUCTIVE` env unlock, that is an operator decision at launch |
 | Bulk anything | Respect `TOO_MANY_DELETES` / `BATCH_TOO_LARGE`; split deliberately, never loop to evade caps |

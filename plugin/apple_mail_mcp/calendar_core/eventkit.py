@@ -158,15 +158,29 @@ class EventKitCalendarEngine:
             recurring = bool(event.hasRecurrenceRules())
         except Exception:
             recurring = False
+        # AppleScript's ``uid`` (the namespace the write engine matches on for
+        # update/delete) equals EventKit's ``calendarItemIdentifier`` on every
+        # account type, verified live against Google-CalDAV, iCloud, and local
+        # stores. ``calendarItemExternalIdentifier`` is a different value (a
+        # ``...@google.com`` id on Google, a hex string on iCloud) and never
+        # round-trips through the AppleScript writer, so it must not be the
+        # ``event_id``; it is kept as a secondary field for cross-referencing a
+        # synced source.
         event_id = None
+        external_id = None
         try:
-            event_id = _text(event.calendarItemExternalIdentifier())
+            external_id = _text(event.calendarItemExternalIdentifier())
+        except Exception:
+            external_id = None
+        try:
+            event_id = _text(event.calendarItemIdentifier())
         except Exception:
             event_id = None
         if not event_id:
             event_id = _text(event.eventIdentifier()) or ""
         record: dict[str, Any] = {
             "event_id": event_id,
+            "external_id": external_id,
             "calendar": _text(event.calendar().title()) if event.calendar() is not None else None,
             "title": _text(event.title()) or "",
             "start": datetime.fromtimestamp(start_ts, tz=timezone.utc),

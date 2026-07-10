@@ -52,6 +52,33 @@ the mail surface.
 
 ### Fixed
 
+- **Cross-engine event ids now round-trip** (default `auto` mode): the EventKit
+  read engine reports `calendarItemIdentifier` (the value Calendar.app AppleScript
+  exposes as `uid` on every account type, verified live against Google-CalDAV,
+  iCloud, and local stores) as `event_id`, not `calendarItemExternalIdentifier`
+  (a `...@google.com` / hex id that never resolved through the AppleScript writer).
+  A create id now round-trips to `get_events_by_id` / `update_event` /
+  `delete_events` under the shipped default; the external id is preserved as a
+  secondary `external_id` payload field.
+- **Recurring delete never reports an unverified whole-series success**:
+  Calendar.app scripting cannot delete a whole recurring series (its `delete`
+  removes only the targeted occurrence and rule-clearing is silently ignored,
+  proven live). `delete_events` now re-queries the series after deleting and returns
+  the structured `RECURRING_DELETE_INCOMPLETE` (with the surviving occurrence dates
+  and a Calendar.app remediation) when occurrences survive, instead of the previous
+  false `recurring_deleted_whole_series: true`. `update_event` still mutates the
+  whole series (that path works and is verified live).
+- **`manage_calendars(action="delete")` works**: the delete script now uses the
+  inline `delete (first calendar whose name is ...)` specifier, which deletes
+  cleanly (including non-empty calendars whose events cascade away); the previous
+  variable-bound `delete targetCal` form failed live with `AppleEvent handler
+  failed`. Generic Calendar.app write failures now surface the structured
+  `CALENDAR_WRITE_FAILED` error instead of raw `Error:` text.
+- **All-day create echo instant**: `create_event` / `batch_create_events` all-day
+  responses now echo the host-local calendar-date midnight actually stored (so the
+  echo matches a later `get_events_by_id`), instead of the requested-zone midnight
+  instant, which for a far-east or far-west zone described a moment hours away from
+  the stored event.
 - **All-day timezone date shift**: all-day events now land on the requested
   calendar date in the requested zone instead of the host-local conversion of
   midnight-in-zone. Previously an all-day request in a zone far east or west of

@@ -3,7 +3,7 @@
 from typing import Any
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.calendar_core import validate_alarms
+from apple_mail_mcp.calendar_core import all_day_echo_instants, validate_alarms
 from apple_mail_mcp.constants import CALENDAR_BOUNDS
 from apple_mail_mcp.core import AppleScriptTimeout, inject_preferences
 from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
@@ -191,11 +191,18 @@ def batch_create_events(
         return error_json(exc)
 
     def _spec_payload(spec: dict[str, Any]) -> dict[str, Any]:
+        # All-day items store on the host-local calendar date, so echo host-local
+        # midnight to match a later read (bug 4), never the requested-zone instant.
+        if spec["all_day"]:
+            start_iso, _su, end_iso, _eu = all_day_echo_instants(spec["start"], spec["end"])
+        else:
+            start_iso = spec["start"].isoformat()
+            end_iso = spec["end"].isoformat()
         return {
             "index": spec["index"],
             "title": spec["title"],
-            "start": spec["start"].isoformat(),
-            "end": spec["end"].isoformat(),
+            "start": start_iso,
+            "end": end_iso,
             "all_day": spec["all_day"],
             "conflicts": spec["conflicts"],
         }

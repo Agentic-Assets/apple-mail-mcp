@@ -1,7 +1,7 @@
 """create_event tool: times, alarms, rrules, conflicts, attendee gating."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -49,6 +49,17 @@ class TestHappyPath:
         assert created["all_day"] is True
         assert (created["end"] - created["start"]) == timedelta(days=1)
         assert created["start"].hour == 0
+
+    def test_all_day_echo_matches_host_local_midnight(self, fake_engines):
+        # Bug 4: all-day events store on the host-local calendar date, so the echo
+        # must be host-local midnight of 2026-07-15, not Tokyo midnight (a
+        # different absolute instant, the old buggy echo).
+        _read, _write = fake_engines()
+        payload = _run(start="2026-07-15", all_day=True, duration_minutes=None, timezone="Asia/Tokyo")
+        expected_start = datetime(2026, 7, 15, tzinfo=HOST_TZ)
+        assert payload["start"] == expected_start.isoformat()
+        assert payload["start_utc"] == expected_start.astimezone(timezone.utc).isoformat()
+        assert not payload["start"].endswith("+09:00")
 
     def test_alarms_and_rrule_forwarded(self, fake_engines):
         _read, write = fake_engines()

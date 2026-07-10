@@ -127,8 +127,14 @@ class _EventStub:
     def hasRecurrenceRules(self):
         return self._recurring
 
-    def calendarItemExternalIdentifier(self):
+    def calendarItemIdentifier(self):
+        # Equals the AppleScript uid on every account type (verified live); this is
+        # the round-trippable event_id the engine must report.
         return self._uid
+
+    def calendarItemExternalIdentifier(self):
+        # A distinct, non-round-tripping id (e.g. a Google/iCloud external id).
+        return f"ext-{self._uid}"
 
     def eventIdentifier(self):
         return f"local-{self._uid}"
@@ -202,7 +208,10 @@ class TestEventKitEngine:
         records, errors = engine.fetch_window(window, "Work", scan_cap=300)
         assert errors == []
         record = records[0]
+        # event_id is calendarItemIdentifier (round-trips with the AppleScript
+        # writer), not the external identifier; external_id carries the latter.
         assert record["event_id"] == "EK-1"
+        assert record["external_id"] == "ext-EK-1"
         assert record["recurring_flag"] is True
         assert record["start"] == datetime(2026, 7, 10, 9, tzinfo=UTC)
         # The predicate was scoped to the named calendar.

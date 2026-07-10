@@ -5,6 +5,7 @@ from typing import Any
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.calendar_core import (
+    all_day_echo_instants,
     isoformat_pair,
     parse_iso_datetime,
     resolve_timezone,
@@ -207,8 +208,11 @@ def create_event(
         return f"Error: {exc}"
 
     tz, _ = resolve_timezone(timezone)
-    start_local, start_utc = isoformat_pair(start_dt, tz)
-    end_local, end_utc = isoformat_pair(end_dt, tz)
+    if all_day:
+        start_local, start_utc, end_local, end_utc = all_day_echo_instants(start_dt, end_dt)
+    else:
+        start_local, start_utc = isoformat_pair(start_dt, tz)
+        end_local, end_utc = isoformat_pair(end_dt, tz)
     payload: dict[str, Any] = {
         "created": True,
         "event_id": event_id,

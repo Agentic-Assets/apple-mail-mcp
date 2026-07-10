@@ -61,6 +61,7 @@ from apple_mail_mcp.calendar_core.validation import (
 )
 from apple_mail_mcp.calendar_core.window import (
     CalendarWindow,
+    all_day_echo_instants,
     bounded_calendar_window,
     isoformat_pair,
     parse_iso_datetime,
@@ -77,6 +78,7 @@ __all__ = [
     "CalendarWindow",
     "EventKitCalendarEngine",
     "RecurrenceRule",
+    "all_day_echo_instants",
     "applescript_date_block",
     "bounded_calendar_window",
     "build_event_set_lines",

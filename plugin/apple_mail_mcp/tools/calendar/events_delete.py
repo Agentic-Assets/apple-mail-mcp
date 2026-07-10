@@ -20,6 +20,7 @@ from apple_mail_mcp.tools.calendar.helpers import (
     finish,
     output_format_error,
     resolve_read_calendars,
+    surviving_recurring_occurrences,
     timeout_error,
     widen_write_window_for_recurring,
 )
@@ -71,12 +72,16 @@ def delete_events(
     Never deletes by query. Every id must resolve inside the bounded lookup
     window before anything is deleted: one unresolved id fails the whole call
     with ``EVENT_NOT_FOUND`` (a typo never partially deletes). Recurring ids
-    require ``span='all_occurrences'`` and the whole series is removed (the
-    Calendar.app scripting limitation, stated in the response). The write-side
-    lookup for recurring targets is widened back by the recurring lookback
-    horizon (400 days) to locate the master; a series whose master started
-    earlier returns ``EVENT_NOT_FOUND``, so widen ``days_back`` past the series
-    start. Under
+    require ``span='all_occurrences'`` as an explicit whole-series confirmation,
+    but Calendar.app scripting cannot actually delete a whole recurring series
+    (its ``delete`` removes only the targeted occurrence and rule-clearing is
+    ignored), so the tool verifies the series after deleting and returns
+    ``RECURRING_DELETE_INCOMPLETE`` (with the surviving occurrence dates) when the
+    series is not fully gone; delete a whole series in Calendar.app for a reliable
+    removal. The write-side lookup for recurring targets is widened back by the
+    recurring lookback horizon (400 days) to locate the master; a series whose
+    master started earlier returns ``EVENT_NOT_FOUND``, so widen ``days_back`` past
+    the series start. Under
     --draft-safe the tool refuses with ``CALENDAR_DELETE_BLOCKED`` unless the
     operator launched with ``CALENDAR_ALLOW_DESTRUCTIVE=1``; under
     --read-only the tool is removed from the registry.
@@ -173,7 +178,10 @@ def delete_events(
                 "deleted": [],
                 "would_delete": targets,
                 "recurring_note": (
-                    "Recurring ids delete the whole series (Calendar.app scripting limitation)."
+                    "Recurring delete is best-effort: Calendar.app scripting removes only individual "
+                    "occurrences, so the whole series may not be deleted. The tool verifies after "
+                    "deleting and returns RECURRING_DELETE_INCOMPLETE (with the surviving occurrence "
+                    "dates) if any remain. To reliably remove a whole series, delete it in Calendar.app."
                     if recurring_targets
                     else None
                 ),
@@ -199,12 +207,44 @@ def delete_events(
             )
             deleted.extend(chunk_deleted)
             delete_errors.extend(f"{calendar_name}: {err}" for err in chunk_errors)
+        # Verify-after-delete for recurring targets: Calendar.app scripting removes
+        # only the targeted occurrence, so re-query the series and never claim a
+        # whole-series delete the write did not achieve.
+        recurring_survivors: dict[str, list[str]] = {}
+        if recurring_targets:
+            recurring_survivors = surviving_recurring_occurrences(
+                engine=read_engine,
+                window=write_window,
+                calendar_names=names,
+                recurring_ids=recurring_targets,
+                timeout=timeout,
+            )
     except AppleScriptTimeout:
         return timeout_error("delete_events", timeout)
     except ToolError as exc:
         return error_json(exc)
     except Exception as exc:
         return f"Error: {exc}"
+
+    if recurring_survivors:
+        return serialize_tool_error(
+            ToolError(
+                code="RECURRING_DELETE_INCOMPLETE",
+                message=(
+                    "Calendar.app scripting cannot delete a whole recurring series; it removed only "
+                    "individual occurrence(s) and the rest survive. The delete was verified after "
+                    "running and is incomplete."
+                ),
+                remediation={
+                    "surviving_occurrences": recurring_survivors,
+                    "occurrences_removed": deleted,
+                    "manual": (
+                        "Open Calendar.app, select any occurrence of the series, choose Delete, and pick "
+                        "'Delete All' to remove the whole series."
+                    ),
+                },
+            )
+        )
 
     payload: dict[str, Any] = {
         "dry_run": False,
@@ -213,6 +253,8 @@ def delete_events(
         "deleted_count": len(deleted),
         "errors": delete_errors + lookup_errors,
         "span": span,
+        # Only true when a recurring target existed AND verification found zero
+        # surviving occurrences (survivors return RECURRING_DELETE_INCOMPLETE above).
         "recurring_deleted_whole_series": bool(recurring_targets),
         "window": window_payload(window),
         "engine": "applescript",

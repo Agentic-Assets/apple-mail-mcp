@@ -212,6 +212,11 @@ def event_payload(
         "recurrence_rule": raw.get("recurrence"),
         "engine": engine,
     }
+    external_id = raw.get("external_id")
+    if external_id:
+        # EventKit-only secondary id (e.g. a Google ``...@google.com`` id); the
+        # primary ``event_id`` is the AppleScript-resolvable calendarItemIdentifier.
+        payload["external_id"] = external_id
     if expansion is not None:
         payload["expansion"] = expansion
         payload["occurrence_date"] = start.astimezone(tz).date().isoformat()
