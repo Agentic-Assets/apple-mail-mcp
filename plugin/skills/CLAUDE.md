@@ -41,9 +41,11 @@ New or edited skills: delegate drafting to subagents when available and permitte
 Already-replied safeguard: canonical rules in [`references/pre-draft-verification.md`](references/pre-draft-verification.md); honored by:
 
 - `email-drafting/`: full compose workflow and native reply defaults.
-- `inbox-triage/`: default `include_already_replied=False`; pass `exclude_replied=True` on list/search.
+- `inbox-triage/`: `get_needs_response` excludes replied/drafted rows by default (`include_already_replied=False`, `include_drafted=False`); `list_inbox_emails` / `search_emails` return every row by default, so pass `exclude_replied=True` and `exclude_drafted=True` together when building a reply-candidate list (both matter, or already-drafted rows can still slip through).
 - `email-management/`: cross-references pre-draft verification before replies in program workflows.
 - `apple-mail-operator/`: hands off to `email-drafting` when navigation leads to a reply.
+- Abort the draft when a discovery row shows `has_draft=true` (a matching draft already exists) or when `was_replied_to=true` with no matching draft; treat `has_draft=null` as unknown and fall back to a manual draft check. Override only when the user explicitly says "redraft", "include already-replied", or "include drafted".
+- `include_draft_state` (default `True` on all 8 annotated tools) runs the bounded Drafts snapshot behind `has_draft`; set `False` only for bare-fastest listing on a huge account, in which case `has_draft` comes back `null` and nothing is excluded for draft state.
 
 ## Sibling routing cheat sheet
 

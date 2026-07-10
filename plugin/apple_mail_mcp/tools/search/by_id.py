@@ -22,8 +22,10 @@ from apple_mail_mcp.core import (
     inject_preferences,
     normalize_message_ids,
 )
+from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import search
+from apple_mail_mcp.tools.reply_state_wiring import annotate_rows_with_reply_state, build_draft_scan_status
 from apple_mail_mcp.tools.search.records import _format_search_records_text, _parse_search_records
 
 
@@ -148,6 +150,7 @@ def _fetch_email_record_by_id(
                 if messageRead then
                     set readValue to "true"
                 end if
+                {was_replied_fragment(var="aMessage")}
 
                 {to_recipients_script}
 
@@ -157,7 +160,7 @@ def _fetch_email_record_by_id(
 
                 {bcc_recipients_script}
 
-                return messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips
+                return messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips & "|||" & wasRepliedToken
             on error errMsg
                 return "ERROR|||" & errMsg
             end try
@@ -314,6 +317,7 @@ def _fetch_email_records_by_ids(
                             if messageRead then
                                 set readValue to "true"
                             end if
+                            {was_replied_fragment(var="aMessage")}
 
                             {to_recipients_script}
 
@@ -323,7 +327,7 @@ def _fetch_email_records_by_ids(
 
                             {bcc_recipients_script}
 
-                            set end of recordLines to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips
+                            set end of recordLines to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips & "|||" & wasRepliedToken
                         end try
                     end repeat
 
@@ -366,6 +370,7 @@ def get_email_by_id(
     max_content_length: int = 5000,
     output_format: str = "text",
     timeout: int | None = None,
+    include_draft_state: bool = True,
 ) -> str:
     """
     Fetch one email by its exact Apple Mail message id.
@@ -376,10 +381,13 @@ def get_email_by_id(
 
     Returned fields include ``to``, ``cc``, ``bcc`` (recipient addresses),
     ``in_reply_to`` and ``references`` (thread-linking headers parsed from the
-    raw ``all headers`` of the message), and ``has_quoted_original`` (True when
-    the content contains a quoted prior message). When ``in_reply_to`` or
-    ``references`` are present, the message is confirmed to be part of a thread
-    — useful for verifying that a draft reply is correctly threaded.
+    raw ``all headers`` of the message), ``has_quoted_original`` (True when
+    the content contains a quoted prior message), ``was_replied_to`` (bool,
+    always present: Mail's native read-only "was replied to" property), and
+    ``has_draft`` (true/false/null; see ``include_draft_state``). When
+    ``in_reply_to`` or ``references`` are present, the message is confirmed to
+    be part of a thread, useful for verifying that a draft reply is
+    correctly threaded.
 
     Args:
         account: Account name to search in (e.g., "Gmail", "Work").
@@ -389,13 +397,23 @@ def get_email_by_id(
         max_content_length: Maximum content characters to return when include_content=True.
         output_format: Output format: "text" or "json" (default: "text").
         timeout: Optional AppleScript timeout in seconds (default: 120s).
+        include_draft_state: When True (default), fetch a bounded Drafts
+            snapshot for the message's account and set ``has_draft`` on the
+            item (true/false when the scan reached that account, null when it
+            was skipped or errored). Set False to skip the Drafts scan
+            entirely (zero extra AppleScript calls); ``has_draft`` is then
+            always null and ``draft_scan.status`` is "skipped".
 
     Returns:
-        One matching email as text, or JSON with {"item": ...}. If no message is
-        found, JSON returns {"item": null}. JSON items include ``content``,
-        ``content_available``, ``content_truncated``, ``content_status``,
-        ``to``, ``cc``, ``bcc``, ``in_reply_to``, ``references``, and
-        ``has_quoted_original`` when available.
+        One matching email as text (prefixed with `[REPLIED]` / `[HAS DRAFT]`
+        when applicable), or JSON with {"item": ..., "draft_scan": {...}}. If
+        no message is found, JSON returns {"item": null}. JSON items include
+        ``content``, ``content_available``, ``content_truncated``,
+        ``content_status``, ``to``, ``cc``, ``bcc``, ``in_reply_to``,
+        ``references``, ``has_quoted_original``, ``was_replied_to``, and
+        ``has_draft`` when available. ``draft_scan`` is
+        ``{"status": "ok" | "error" | "skipped", "scanned": N, "accounts": [...],
+        "error"?: "..."}``.
     """
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
@@ -434,8 +452,17 @@ def get_email_by_id(
     except ValueError as exc:
         return f"Error: {exc}"
 
+    snapshots = annotate_rows_with_reply_state(
+        [item] if item is not None else [],
+        runner=search.run_applescript,
+        timeout=effective_timeout,
+        include_draft_state=include_draft_state,
+        date_field="received_date",
+    )
+    draft_scan = build_draft_scan_status(snapshots)
+
     if output_format == "json":
-        return json.dumps({"item": item})
+        return json.dumps({"item": item, "draft_scan": draft_scan})
 
     if item is None:
         return f"Error: No email found for message_id={numeric_id} in {mailbox}"
@@ -452,6 +479,7 @@ def get_email_by_ids(
     max_content_length: int = 1000,
     output_format: str = "json",
     timeout: int | None = None,
+    include_draft_state: bool = True,
 ) -> str:
     """
     Fetch multiple emails by exact Apple Mail message ids.
@@ -470,10 +498,20 @@ def get_email_by_ids(
         max_content_length: Maximum content characters to return when include_content=True.
         output_format: Output format: "json" or "text" (default: "json").
         timeout: Optional per-chunk AppleScript timeout in seconds (default: 120s).
+        include_draft_state: When True (default), fetch one bounded Drafts
+            snapshot per account appearing in the returned items (lazily,
+            capped at 5 accounts) and set `has_draft` on every item
+            (true/false when scanned, null when the scan was skipped or
+            errored, never silently False). Set False to skip the Drafts
+            scan entirely (zero extra AppleScript calls).
 
     Returns:
         JSON with requested_ids, items in requested order, missing_ids, invalid_ids,
-        returned count, and chunk_size. Text mode formats found items and lists
+        returned count, chunk_size, and draft_scan (`{"status": "ok" | "error" |
+        "skipped", "scanned": N, "accounts": [...], "error"?: "..."}`). Every
+        item also carries `was_replied_to` (bool, always present) and
+        `has_draft` (true/false/null). Text mode formats found items
+        (prefixed with `[REPLIED]` / `[HAS DRAFT]` when applicable) and lists
         missing or invalid ids.
     """
     if output_format not in {"text", "json"}:
@@ -518,6 +556,15 @@ def get_email_by_ids(
     ordered_items = [records_by_id[mid] for mid in normalized_ids if mid in records_by_id]
     missing_ids = [mid for mid in normalized_ids if mid not in records_by_id]
 
+    snapshots = annotate_rows_with_reply_state(
+        ordered_items,
+        runner=search.run_applescript,
+        timeout=effective_timeout,
+        include_draft_state=include_draft_state,
+        date_field="received_date",
+    )
+    draft_scan = build_draft_scan_status(snapshots)
+
     if output_format == "json":
         return json.dumps(
             {
@@ -530,6 +577,7 @@ def get_email_by_ids(
                 "mailbox": mailbox,
                 "include_content": include_content,
                 "chunk_size": MAX_WHOSE_IDS,
+                "draft_scan": draft_scan,
             }
         )
 

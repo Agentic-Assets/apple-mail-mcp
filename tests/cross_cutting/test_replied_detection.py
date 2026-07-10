@@ -4,9 +4,12 @@ Covers three tool surfaces:
 
 - ``smart_inbox.get_needs_response`` — replaces fragile subject-substring
   matching with In-Reply-To / References header parsing.
-- ``inbox.list_inbox_emails`` — gains ``exclude_replied`` and
-  ``flag_replied`` parameters.
-- ``search.search_emails`` — same.
+- ``inbox.list_inbox_emails``: ``exclude_replied``/``flag_replied`` now read
+  Mail's native ``was_replied_to`` property (2026-07-10 reply-state-annotation
+  rework, see ``core.reply_state.was_replied_fragment``); no more
+  Sent-mailbox Message-ID join for this tool (see ``ListInboxRepliedTests``).
+- ``search.search_emails``: same native-property rework (see
+  ``SearchEmailsRepliedTests``).
 
 These tests follow the existing pattern of mocking ``run_applescript`` and
 asserting on the generated script text plus the rendered output.
@@ -46,9 +49,7 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
             captured["scripts"].append(script)
             return ""
 
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
             smart_inbox_tools.get_needs_response(
                 account="Work",
                 days_back=1,
@@ -82,9 +83,7 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
             captured["scripts"].append(script)
             return ""
 
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
             smart_inbox_tools.get_needs_response(
                 account="Work",
                 days_back=1,
@@ -108,9 +107,7 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
         def fake_run(script, timeout=120):
             return sequence.pop(0) if sequence else ""
 
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
             result = smart_inbox_tools.get_needs_response(
                 account="Work",
                 days_back=1,
@@ -139,9 +136,7 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
         def fake_run(script, timeout=120):
             return sequence.pop(0) if sequence else ""
 
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=fake_run):
             result = smart_inbox_tools.get_needs_response(
                 account="Work",
                 days_back=1,
@@ -158,57 +153,55 @@ class GetNeedsResponseScriptTests(unittest.TestCase):
 
 
 class ListInboxRepliedTests(unittest.TestCase):
-    def test_exclude_replied_requests_message_id_in_script(self):
+    """list_inbox_emails replied-detection: native ``was_replied_to`` flag
+    (see ``core.reply_state.was_replied_fragment``). No second Sent-mailbox
+    AppleScript round trip fires anymore for exclude/flag_replied (2026-07-10
+    reply-state-annotation rework); a single mocked ``run_applescript``
+    response covers the whole call. ``include_draft_state=False`` keeps
+    these tests isolated from the (also-added) Drafts-scan call."""
+
+    def test_exclude_replied_requests_no_sent_scan_script(self):
         captured = {"scripts": []}
 
         def fake_run(script, timeout=120):
             captured["scripts"].append(script)
             return ""
 
-        with patch(
-            "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
             _run(
                 inbox_tools.list_inbox_emails(
                     account="Work",
                     max_emails=3,
                     output_format="json",
                     exclude_replied=True,
+                    include_draft_state=False,
                 )
             )
 
-        # First script: inbox JSON. Second: replied-id probe.
-        self.assertGreaterEqual(len(captured["scripts"]), 2)
+        # Exactly one script: the inbox JSON emitter. No Sent-mailbox probe.
+        self.assertEqual(len(captured["scripts"]), 1)
         inbox_script = captured["scripts"][0]
-        replied_script = captured["scripts"][1]
-        self.assertIn("message id of aMessage", inbox_script)
-        # The replied-id probe builds the repliedIds list and parses headers.
-        self.assertIn("set repliedIds to {}", replied_script)
-        self.assertIn("In-Reply-To:", replied_script)
+        self.assertIn("was replied to of aMessage", inbox_script)
+        self.assertNotIn("set repliedIds to {}", inbox_script)
 
     def test_exclude_replied_filters_matching_emails_json(self):
-        # 1st call: inbox JSON for Work. 2nd call: fetch_replied_ids script
-        # that emits one ID per line. 3rd call would not be made.
-        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||internet_message_id
+        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||was_replied_to
         inbox_raw = (
-            "S1|||a@example.com|||Date|||false|||Work|||101|||<id-1@example.com>\n"
-            "S2|||b@example.com|||Date|||false|||Work|||102|||<id-2@example.com>"
+            "S1|||a@example.com|||Date|||false|||Work|||101|||false\n"
+            "S2|||b@example.com|||Date|||false|||Work|||102|||true"
         )
-        replied_raw = "<id-2@example.com>"
-        sequence = [inbox_raw, replied_raw]
 
         def fake_run(script, timeout=120):
-            return sequence.pop(0) if sequence else ""
+            return inbox_raw
 
-        with patch(
-            "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
             response = _run(
                 inbox_tools.list_inbox_emails(
                     account="Work",
                     max_emails=10,
                     output_format="json",
                     exclude_replied=True,
+                    include_draft_state=False,
                 )
             )
 
@@ -218,20 +211,16 @@ class ListInboxRepliedTests(unittest.TestCase):
         self.assertEqual(subjects, ["S1"])
 
     def test_flag_replied_annotates_json_with_already_replied_field(self):
-        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||internet_message_id
+        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||was_replied_to
         inbox_raw = (
-            "S1|||a@example.com|||Date|||false|||Work|||101|||<id-1@example.com>\n"
-            "S2|||b@example.com|||Date|||false|||Work|||102|||<id-2@example.com>"
+            "S1|||a@example.com|||Date|||false|||Work|||101|||false\n"
+            "S2|||b@example.com|||Date|||false|||Work|||102|||true"
         )
-        replied_raw = "<id-2@example.com>"
-        sequence = [inbox_raw, replied_raw]
 
         def fake_run(script, timeout=120):
-            return sequence.pop(0) if sequence else ""
+            return inbox_raw
 
-        with patch(
-            "apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
             response = _run(
                 inbox_tools.list_inbox_emails(
                     account="Work",
@@ -239,40 +228,44 @@ class ListInboxRepliedTests(unittest.TestCase):
                     output_format="json",
                     exclude_replied=False,
                     flag_replied=True,
+                    include_draft_state=False,
                 )
             )
 
         # v3.2.x: JSON path returns a dict directly.
         self.assertIsInstance(response, dict)
-        marked = {
-            r["subject"]: r.get("already_replied", False) for r in response["emails"]
-        }
+        marked = {r["subject"]: r.get("already_replied", False) for r in response["emails"]}
         self.assertEqual(marked, {"S1": False, "S2": True})
 
 
 class SearchEmailsRepliedTests(unittest.TestCase):
+    """search_emails replied-detection: native ``was_replied_to`` flag, 15th
+    pipe field (see ``core.reply_state.was_replied_fragment``). No second
+    Sent-mailbox AppleScript round trip fires anymore for exclude/flag_replied
+    (unlike ``list_inbox_emails``/``get_needs_response``, which keep their own
+    opt-in Sent-scan paths), so a single mocked ``run_applescript`` response
+    covers the whole call. ``include_draft_state=False`` keeps these tests
+    isolated from the (also-added) Drafts-scan call."""
+
     def test_exclude_replied_filters_matching_records(self):
-        # Search script returns 8-pipe records; minimal mock.
+        # 15-field rows: ...|||content_preview|||to|||cc|||in_reply_to|||references|||bcc|||was_replied_to
         search_raw = (
-            "1|||<id-1@example.com>|||Sub 1|||a@x.com|||INBOX|||Work|||false|||2026-05-01T00:00:00|||"
+            "1|||<id-1@example.com>|||Sub 1|||a@x.com|||INBOX|||Work|||false|||2026-05-01T00:00:00|||||||||||||||||||||false"
             "\n"
-            "2|||<id-2@example.com>|||Sub 2|||b@x.com|||INBOX|||Work|||false|||2026-05-02T00:00:00|||"
+            "2|||<id-2@example.com>|||Sub 2|||b@x.com|||INBOX|||Work|||false|||2026-05-02T00:00:00|||||||||||||||||||||true"
         )
-        replied_raw = "<id-2@example.com>"
-        sequence = [search_raw, replied_raw]
 
         def fake_run(script, timeout=120):
-            return sequence.pop(0) if sequence else ""
+            return search_raw
 
-        with patch(
-            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
             result = _run(
                 search_tools.search_emails(
                     account="Work",
                     recent_days=2.0,
                     output_format="json",
                     exclude_replied=True,
+                    include_draft_state=False,
                 )
             )
 
@@ -282,19 +275,15 @@ class SearchEmailsRepliedTests(unittest.TestCase):
 
     def test_flag_replied_marks_records_already_replied_in_json(self):
         search_raw = (
-            "1|||<id-1@example.com>|||Sub 1|||a@x.com|||INBOX|||Work|||false|||2026-05-01T00:00:00|||"
+            "1|||<id-1@example.com>|||Sub 1|||a@x.com|||INBOX|||Work|||false|||2026-05-01T00:00:00|||||||||||||||||||||false"
             "\n"
-            "2|||<id-2@example.com>|||Sub 2|||b@x.com|||INBOX|||Work|||false|||2026-05-02T00:00:00|||"
+            "2|||<id-2@example.com>|||Sub 2|||b@x.com|||INBOX|||Work|||false|||2026-05-02T00:00:00|||||||||||||||||||||true"
         )
-        replied_raw = "<id-2@example.com>"
-        sequence = [search_raw, replied_raw]
 
         def fake_run(script, timeout=120):
-            return sequence.pop(0) if sequence else ""
+            return search_raw
 
-        with patch(
-            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
             result = _run(
                 search_tools.search_emails(
                     account="Work",
@@ -302,28 +291,29 @@ class SearchEmailsRepliedTests(unittest.TestCase):
                     output_format="json",
                     exclude_replied=False,
                     flag_replied=True,
+                    include_draft_state=False,
                 )
             )
 
         payload = json.loads(result)
+        was_replied = {item["subject"]: item["was_replied_to"] for item in payload["items"]}
+        self.assertEqual(was_replied, {"Sub 1": False, "Sub 2": True})
+        # Legacy already_replied field: only set (True) for compat, never
+        # added as an explicit False key.
         marked = {item["subject"]: item.get("already_replied", False) for item in payload["items"]}
         self.assertEqual(marked, {"Sub 1": False, "Sub 2": True})
 
     def test_flag_replied_text_output_includes_replied_marker(self):
         search_raw = (
-            "1|||<id-1@example.com>|||Sub 1|||a@x.com|||INBOX|||Work|||false|||2026-05-01T00:00:00|||"
+            "1|||<id-1@example.com>|||Sub 1|||a@x.com|||INBOX|||Work|||false|||2026-05-01T00:00:00|||||||||||||||||||||false"
             "\n"
-            "2|||<id-2@example.com>|||Sub 2|||b@x.com|||INBOX|||Work|||false|||2026-05-02T00:00:00|||"
+            "2|||<id-2@example.com>|||Sub 2|||b@x.com|||INBOX|||Work|||false|||2026-05-02T00:00:00|||||||||||||||||||||true"
         )
-        replied_raw = "<id-2@example.com>"
-        sequence = [search_raw, replied_raw]
 
         def fake_run(script, timeout=120):
-            return sequence.pop(0) if sequence else ""
+            return search_raw
 
-        with patch(
-            "apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run
-        ):
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
             result = _run(
                 search_tools.search_emails(
                     account="Work",
@@ -331,12 +321,35 @@ class SearchEmailsRepliedTests(unittest.TestCase):
                     output_format="text",
                     exclude_replied=False,
                     flag_replied=True,
+                    include_draft_state=False,
                 )
             )
 
-        # The text formatter prefixes the subject of replied emails.
+        # The text formatter prefixes the subject of replied emails, driven
+        # by the native was_replied_to flag (flag_replied no longer gates
+        # the marker itself; it only adds the legacy JSON field).
         self.assertIn("[REPLIED] Sub 2", result)
         self.assertNotIn("[REPLIED] Sub 1", result)
+
+    def test_native_replied_marker_shown_without_flag_replied(self):
+        """was_replied_to drives the [REPLIED] marker unconditionally, no
+        parameter gates it, unlike the deprecated flag_replied."""
+        search_raw = "1|||<id-1@example.com>|||Sub 1|||a@x.com|||INBOX|||Work|||false|||2026-05-01T00:00:00|||||||||||||||||||||true"
+
+        def fake_run(script, timeout=120):
+            return search_raw
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = _run(
+                search_tools.search_emails(
+                    account="Work",
+                    recent_days=2.0,
+                    output_format="text",
+                    include_draft_state=False,
+                )
+            )
+
+        self.assertIn("[REPLIED] Sub 1", result)
 
 
 class CoreRepliedIdsScriptTests(unittest.TestCase):
@@ -362,9 +375,7 @@ class CoreRepliedIdsScriptTests(unittest.TestCase):
         # should be ignored, the unbracketed should be wrapped.
         raw = "<id-a@example.com>\nid-b@example.com\n\n"
 
-        with patch(
-            "apple_mail_mcp.core.run_applescript", return_value=raw
-        ):
+        with patch("apple_mail_mcp.core.run_applescript", return_value=raw):
             ids = fetch_replied_ids("Work", sent_cap=50)
 
         self.assertEqual(ids, {"<id-a@example.com>", "<id-b@example.com>"})

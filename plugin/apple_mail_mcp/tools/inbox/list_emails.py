@@ -15,6 +15,7 @@ from apple_mail_mcp.core import (
     account_not_found_json,
     inject_preferences,
 )
+from apple_mail_mcp.core.reply_state import DraftsSnapshot, fetch_drafts_snapshot
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import inbox
 from apple_mail_mcp.tools.inbox.list_scripts import (
@@ -22,15 +23,18 @@ from apple_mail_mcp.tools.inbox.list_scripts import (
     _build_list_inbox_text_script,
 )
 from apple_mail_mcp.tools.inbox.parsing import (
+    _annotate_text_rows_with_reply_state,
     _parse_pipe_delimited_emails,
     _resolve_read_filter,
     _strip_count_marker,
 )
-from apple_mail_mcp.tools.inbox.replied import (
-    _apply_replied_to_emails,
-    _filter_text_body_by_replied,
-    fetch_replied_ids,
+from apple_mail_mcp.tools.reply_state_wiring import (
+    MAX_DRAFT_SNAPSHOT_ACCOUNTS,
+    annotate_rows_with_reply_state,
+    build_draft_scan_status,
 )
+
+_SKIPPED_DRAFT_SCAN: dict[str, Any] = {"status": "skipped", "scanned": 0, "accounts": []}
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -45,6 +49,8 @@ async def list_inbox_emails(
     output_format: str = "text",
     exclude_replied: bool = False,
     flag_replied: bool = False,
+    exclude_drafted: bool = False,
+    include_draft_state: bool = True,
     timeout: int | None = None,
     limit: int | None = None,
     unread_only: bool | None = None,
@@ -92,18 +98,31 @@ async def list_inbox_emails(
             explicitly. Prefer ``read_status``.
         include_content: Whether to include a content preview for each email (slower, default: False)
         output_format: "text" (default, human-readable) or "json" (structured list of email dicts)
-        exclude_replied: When True, filter out emails the user has already
-            replied to (detected via Message-ID matching against the Sent
-            mailbox). Default False keeps the legacy unfiltered behavior.
-            When True, ``flag_replied`` has no visible effect because
-            replied emails are removed before formatting.
-        flag_replied: When True (opt-in; default False) AND
-            ``exclude_replied=False``, already-replied emails are
-            annotated — text mode prefixes the subject with ``[REPLIED] ``;
-            JSON mode adds an ``already_replied: true`` field per email
-            entry. Default False keeps the per-call cost low (no extra
-            Sent-mailbox AppleScript probe); set True for safer agent
-            workflows. Only matters when ``exclude_replied=False``.
+        exclude_replied: When True, filter out rows where Mail's native
+            ``was_replied_to`` flag is true. Every row already carries
+            ``was_replied_to`` unconditionally (JSON) or a ``[REPLIED]`` tag
+            (text); this only controls whether matching rows are dropped.
+            No Sent-mailbox scan is performed for this check (v3.11.0+: the
+            native per-message property replaces the old Message-ID probe).
+        flag_replied: Deprecated; ``was_replied_to`` is now always present
+            on every row (no parameter gates it), so this flag no longer
+            changes what is fetched. Kept only for backward compatibility:
+            when True (and ``exclude_replied=False``), matching rows also
+            get a legacy ``already_replied: true`` field alongside
+            ``was_replied_to``. Text mode already prefixes replied rows
+            with ``[REPLIED] `` regardless of this flag.
+        exclude_drafted: When True, filter out rows where ``has_draft`` is
+            true (a draft reply already exists). Never excludes a row whose
+            ``has_draft`` is ``null`` (unknown/errored scan; see
+            ``include_draft_state``). Default False.
+        include_draft_state: When True (default), correlate each row
+            against a bounded Drafts-mailbox snapshot (one per distinct
+            account in the results, capped at 5 accounts) and populate
+            ``has_draft`` (JSON: true/false/null; text: ``[HAS DRAFT]``
+            tag). Set False to skip the Drafts scan entirely (JSON:
+            ``has_draft`` is null on every row and the top-level
+            ``draft_scan.status`` is ``"skipped"``; text: no
+            ``[HAS DRAFT]`` tags, no extra AppleScript call).
         timeout: Optional per-account AppleScript timeout in seconds (default: 120s).
             Raise this for known-slow accounts (large Exchange inboxes) when
             the default budget is too tight.
@@ -119,8 +138,12 @@ async def list_inbox_emails(
         read status (always a ``str``).
 
         JSON mode (``output_format='json'``): a Python ``dict`` with stable
-        shape ``{"emails": [...], "errors": [...]}``. ``errors`` is the list
-        of account names whose AppleScript probe timed out (empty list when
+        shape ``{"emails": [...], "errors": [...], "draft_scan": {...}}``.
+        Every email row always carries ``was_replied_to`` (bool) and
+        ``has_draft`` (bool or null); ``draft_scan`` summarizes the Drafts
+        correlation scan: ``{"status": "ok"|"error"|"skipped", "scanned":
+        N, "accounts": [...], "error"?: "..."}``. ``errors`` is the list of
+        account names whose AppleScript probe timed out (empty list when
         nothing timed out). When deprecated aliases (`limit`, `unread_only`)
         are used a ``warnings`` key is also present.
 
@@ -221,8 +244,9 @@ async def list_inbox_emails(
                 return cast(dict[str, Any], json.loads(account_not_found_json(account, timeout=validation_timeout)))
             return account_err
 
-    # When replied-detection is requested we need the Message-ID per row.
-    want_message_id = bool(exclude_replied or flag_replied)
+    # Native was_replied_to needs no id lookup; internet_message_id is only
+    # fetched when has_draft's header-path correlation can use it.
+    want_message_id = include_draft_state
 
     if output_format == "json":
         body = await inbox._list_inbox_emails_json(
@@ -234,6 +258,8 @@ async def list_inbox_emails(
             exclude_replied=exclude_replied,
             flag_replied=flag_replied,
             include_message_id=want_message_id,
+            include_draft_state=include_draft_state,
+            exclude_drafted=exclude_drafted,
         )
         return _attach_warnings_to_json(body, warnings)
 
@@ -244,8 +270,9 @@ async def list_inbox_emails(
         include_content,
         timeout,
         exclude_replied=exclude_replied,
-        flag_replied=flag_replied,
         include_message_id=want_message_id,
+        include_draft_state=include_draft_state,
+        exclude_drafted=exclude_drafted,
     )
     if warnings:
         return "\n".join(warnings) + "\n" + text_body
@@ -291,14 +318,41 @@ async def _list_inbox_emails_text(
     timeout: int | None,
     *,
     exclude_replied: bool = False,
-    flag_replied: bool = False,
     include_message_id: bool = False,
+    include_draft_state: bool = True,
+    exclude_drafted: bool = False,
 ) -> str:
-    """Async text-format implementation, dispatching one script per account."""
+    """Async text-format implementation, dispatching one script per account.
+
+    Every message row carries an unconditional native ``was_replied_to``
+    token (rendered as ``[REPLIED]``); ``exclude_replied``/``exclude_drafted``
+    drop matching blocks instead of tagging them. ``has_draft`` correlation
+    (``[HAS DRAFT]``) fetches at most one bounded Drafts snapshot per
+    distinct account (capped at ``MAX_DRAFT_SNAPSHOT_ACCOUNTS``), skipped
+    entirely when ``include_draft_state=False``.
+    """
     header = "INBOX EMAILS - ALL ACCOUNTS\n\n"
     footer_template = (
         "========================================\nTOTAL EMAILS: {total}\n========================================\n"
     )
+    draft_timeout = timeout if timeout is not None else 60
+    snapshots: dict[str, DraftsSnapshot] = {}
+
+    async def snapshot_for(acct: str) -> DraftsSnapshot | None:
+        if not include_draft_state:
+            return None
+        if acct not in snapshots and len(snapshots) < MAX_DRAFT_SNAPSHOT_ACCOUNTS:
+            snapshots[acct] = await asyncio.to_thread(fetch_drafts_snapshot, acct, inbox.run_applescript, draft_timeout)
+        return snapshots.get(acct)
+
+    async def annotate(clean: str, acct: str) -> str:
+        # Skip the live Drafts scan entirely when the body has no `__ROW__`
+        # markers to annotate (empty account, or a hand-built test fixture
+        # with no rows): never pay for a snapshot with nothing to match.
+        snap = await snapshot_for(acct) if "__ROW__|||" in clean else None
+        return _annotate_text_rows_with_reply_state(
+            clean, exclude_replied=exclude_replied, exclude_drafted=exclude_drafted, draft_snapshot=snap
+        )
 
     if account:
         try:
@@ -314,14 +368,7 @@ async def _list_inbox_emails_text(
         except AppleScriptTimeout:
             return header + footer_template.format(total=0) + f"\nPARTIAL: 1 account(s) timed out: {account}\n"
         clean, count = _strip_count_marker(body)
-        if include_message_id and (exclude_replied or flag_replied):
-            replied = await asyncio.to_thread(fetch_replied_ids, account, 200, timeout)
-            clean, _skipped = _filter_text_body_by_replied(
-                clean,
-                replied,
-                exclude_replied=exclude_replied,
-                flag_replied=flag_replied,
-            )
+        clean = await annotate(clean, account)
         return header + clean + "\n" + footer_template.format(total=count)
 
     # Multi-account: probe account list, then dispatch sequentially (each
@@ -352,12 +399,6 @@ async def _list_inbox_emails_text(
 
     results = [await run_one(a) for a in accounts]
 
-    # Pre-fetch per-account replied sets sequentially when needed.
-    replied_sets: dict[str, set[str]] = {}
-    if include_message_id and (exclude_replied or flag_replied):
-        replied_results = [await asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts]
-        replied_sets = dict(zip(accounts, replied_results, strict=True))
-
     pieces: list[str] = [header]
     total = 0
     errors: list[str] = []
@@ -366,13 +407,7 @@ async def _list_inbox_emails_text(
             errors.append(acct)
             continue
         clean, count = _strip_count_marker(outcome)
-        if include_message_id and (exclude_replied or flag_replied):
-            clean, _skipped = _filter_text_body_by_replied(
-                clean,
-                replied_sets.get(acct, set()),
-                exclude_replied=exclude_replied,
-                flag_replied=flag_replied,
-            )
+        clean = await annotate(clean, acct)
         if clean:
             pieces.append(clean)
             pieces.append("\n")
@@ -418,25 +453,32 @@ async def _list_inbox_emails_json(
     exclude_replied: bool = False,
     flag_replied: bool = False,
     include_message_id: bool = False,
+    include_draft_state: bool = True,
+    exclude_drafted: bool = False,
 ) -> dict[str, Any]:
     """Return inbox emails as a structured dict.
 
-    Stable shape: ``{"emails": [...], "errors": [...]}`` for both the
-    single-account and multi-account paths. ``errors`` is the list of
-    account names whose probe timed out (empty list when nothing timed
-    out). Account-listing timeouts surface as
-    ``{"emails": [], "errors": ["__account_listing__"]}``.
+    Stable shape: ``{"emails": [...], "errors": [...], "draft_scan": {...}}``
+    for both the single-account and multi-account paths. ``errors`` is the
+    list of account names whose probe timed out (empty list when nothing
+    timed out). Account-listing timeouts surface as
+    ``{"emails": [], "errors": ["__account_listing__"], "draft_scan": ...}``.
 
-    When ``include_content`` is True each record gains a ``content_preview``
-    field; when replied detection is requested, records may carry an
-    ``already_replied`` field or be filtered out entirely depending on the
-    flags.
+    Every email always carries ``was_replied_to`` (bool, Mail's native
+    property, no extra AppleScript round trip) and ``has_draft``
+    (true/false/null, governed by ``include_draft_state``). When
+    ``include_content`` is True each record also gains a
+    ``content_preview`` field. ``exclude_replied``/``exclude_drafted`` drop
+    matching rows; ``flag_replied`` (deprecated) additionally sets a legacy
+    ``already_replied: true`` field when ``exclude_replied=False``.
+    ``draft_scan`` summarizes the Drafts correlation scan:
+    ``{"status": "ok"|"error"|"skipped", "scanned": N, "accounts": [...]}``.
 
     **Breaking change (v3.2.x):** previously returned a JSON-encoded
     ``str`` (sometimes a raw list, sometimes a dict). Callers that did
     ``json.loads(result)`` should drop the ``json.loads``.
     """
-
+    errors: list[str]
     if account:
         try:
             raw = await asyncio.to_thread(
@@ -449,62 +491,59 @@ async def _list_inbox_emails_json(
                 include_message_id,
             )
         except AppleScriptTimeout:
-            return {"emails": [], "errors": [account]}
+            return {"emails": [], "errors": [account], "draft_scan": dict(_SKIPPED_DRAFT_SCAN)}
         emails = _parse_pipe_delimited_emails(raw, has_message_id=include_message_id)
-        if include_message_id and (exclude_replied or flag_replied):
-            replied = await asyncio.to_thread(fetch_replied_ids, account, 200, timeout)
-            emails = _apply_replied_to_emails(
-                emails,
-                replied,
-                exclude_replied=exclude_replied,
-                flag_replied=flag_replied,
-            )
-        return {"emails": emails, "errors": []}
-
-    try:
-        accounts = await asyncio.to_thread(inbox._list_mail_accounts, timeout)
-    except AppleScriptTimeout:
-        return {"emails": [], "errors": ["__account_listing__"]}
-
-    if not accounts:
-        return {"emails": [], "errors": []}
-
-    async def run_one(acct: str) -> tuple[str, str | AppleScriptTimeout]:
+        errors = []
+    else:
         try:
-            return acct, await asyncio.to_thread(
-                _run_json_one,
-                acct,
-                max_emails,
-                read_filter,
-                include_content,
-                timeout,
-                include_message_id,
-            )
+            accounts = await asyncio.to_thread(inbox._list_mail_accounts, timeout)
         except AppleScriptTimeout:
-            return acct, AppleScriptTimeout(acct)
+            return {"emails": [], "errors": ["__account_listing__"], "draft_scan": dict(_SKIPPED_DRAFT_SCAN)}
 
-    results = [await run_one(a) for a in accounts]
+        if not accounts:
+            return {"emails": [], "errors": [], "draft_scan": dict(_SKIPPED_DRAFT_SCAN)}
 
-    # Pre-fetch per-account replied sets sequentially when needed.
-    replied_sets: dict[str, set[str]] = {}
-    if include_message_id and (exclude_replied or flag_replied):
-        replied_results = [await asyncio.to_thread(fetch_replied_ids, a, 200, timeout) for a in accounts]
-        replied_sets = dict(zip(accounts, replied_results, strict=True))
+        async def run_one(acct: str) -> tuple[str, str | AppleScriptTimeout]:
+            try:
+                return acct, await asyncio.to_thread(
+                    _run_json_one,
+                    acct,
+                    max_emails,
+                    read_filter,
+                    include_content,
+                    timeout,
+                    include_message_id,
+                )
+            except AppleScriptTimeout:
+                return acct, AppleScriptTimeout(acct)
 
-    combined: list[dict[str, Any]] = []
-    errors: list[str] = []
-    for acct, outcome in results:
-        if isinstance(outcome, AppleScriptTimeout):
-            errors.append(acct)
-            continue
-        parsed = _parse_pipe_delimited_emails(outcome, has_message_id=include_message_id)
-        if include_message_id and (exclude_replied or flag_replied):
-            parsed = _apply_replied_to_emails(
-                parsed,
-                replied_sets.get(acct, set()),
-                exclude_replied=exclude_replied,
-                flag_replied=flag_replied,
-            )
-        combined.extend(parsed)
+        results = [await run_one(a) for a in accounts]
 
-    return {"emails": combined, "errors": errors}
+        emails = []
+        errors = []
+        for acct, outcome in results:
+            if isinstance(outcome, AppleScriptTimeout):
+                errors.append(acct)
+                continue
+            emails.extend(_parse_pipe_delimited_emails(outcome, has_message_id=include_message_id))
+
+    # Replied-detection: `was_replied_to` is parsed straight off Mail's
+    # native property, so no Sent-mailbox AppleScript round trip is needed.
+    if exclude_replied:
+        emails = [e for e in emails if not e.get("was_replied_to")]
+    elif flag_replied:
+        for email in emails:
+            if email.get("was_replied_to"):
+                email["already_replied"] = True
+
+    draft_timeout = timeout if timeout is not None else 60
+    snapshots = annotate_rows_with_reply_state(
+        emails,
+        runner=inbox.run_applescript,
+        timeout=draft_timeout,
+        include_draft_state=include_draft_state,
+    )
+    if exclude_drafted:
+        emails = [e for e in emails if not e.get("has_draft")]
+
+    return {"emails": emails, "errors": errors, "draft_scan": build_draft_scan_status(snapshots)}

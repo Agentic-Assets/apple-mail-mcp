@@ -263,6 +263,238 @@ class GetNeedsResponseJsonTests(unittest.TestCase):
         self.assertEqual(total, 2)
 
 
+class GetNeedsResponseReplyStateTests(unittest.TestCase):
+    """Default exclusion of replied/drafted rows, opt-in restoration, and fail-open behavior.
+
+    Mirrors ``tasks/active/reply-state-annotation/plan-2026-07-10.md``: the
+    native ``was_replied_to`` flag (the trailing MSG field) and a Drafts
+    snapshot (correlated via ``core.reply_state.DraftsSnapshot.matches``)
+    are both excluded by default, with the exclusion always reported via
+    ``skipped_replied_count`` / ``skipped_drafted_count``.
+    """
+
+    INBOX_RAW = "\n".join(
+        [
+            "MSG|||601|||<a1@example.com>|||Keep me|||alice@example.com|||2026-07-10T09:00:00|||false|||false|||false",
+            "MSG|||602|||<a2@example.com>|||Already replied|||bob@example.com|||2026-07-09T09:00:00|||false|||false|||true",
+            "MSG|||603|||<a3@example.com>|||Drafted item|||carol@example.com|||2026-07-08T09:00:00|||false|||false|||false",
+            "MSG|||604|||<a4@example.com>|||Both signals|||dave@example.com|||2026-07-07T09:00:00|||false|||false|||true",
+        ]
+    )
+    DRAFTS_RAW = "\n".join(
+        [
+            "DRAFT|||Re: Drafted item|||carol@example.com|||2026-07-08T10:00:00|||",
+            "DRAFT|||Re: Both signals|||dave@example.com|||2026-07-07T12:00:00|||",
+            "COUNT|||2",
+        ]
+    )
+
+    @staticmethod
+    def _dispatch_runner(*, inbox=None, sent=None, drafts=None, drafts_calls=None):
+        """Return a fake ``run_applescript`` that routes by script marker.
+
+        ``draftsMailbox`` only appears in the Drafts-snapshot script build
+        (``core.reply_state.drafts_mailbox_block``); ``sentMailbox`` only
+        in the Sent-header scan script (``core.replied.sent_mailbox_resolve_script``);
+        anything else is the inbox scan. *drafts_calls*, if given, is a
+        list appended to on every Drafts-scan invocation so tests can
+        assert call counts (e.g. zero calls when the scan is disabled).
+        """
+
+        def _runner(script, timeout=120):
+            if "draftsMailbox" in script:
+                if drafts_calls is not None:
+                    drafts_calls.append(script)
+                return drafts if drafts is not None else "COUNT|||0"
+            if "sentMailbox" in script:
+                return sent if sent is not None else ""
+            return inbox if inbox is not None else ""
+
+        return _runner
+
+    def test_default_excludes_replied_and_drafted_with_correct_skip_counts(self):
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts=self.DRAFTS_RAW)
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work", days_back=7, max_results=10, output_format="json"
+            )
+
+        all_entries = result["high_priority"] + result["normal_priority"]
+        subjects = {e["subject"] for e in all_entries}
+        self.assertEqual(subjects, {"Keep me"})
+        self.assertEqual(result["skipped_replied_count"], 2)
+        self.assertEqual(result["skipped_drafted_count"], 2)
+        self.assertEqual(result["draft_scan"]["status"], "ok")
+        self.assertEqual(result["draft_scan"]["scanned"], 2)
+        self.assertEqual(result["draft_scan"]["accounts"], ["Work"])
+        kept = all_entries[0]
+        self.assertFalse(kept["was_replied_to"])
+        self.assertFalse(kept["has_draft"])
+
+    def test_include_already_replied_restores_replied_rows_but_not_drafted(self):
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts=self.DRAFTS_RAW)
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=7,
+                max_results=10,
+                include_already_replied=True,
+                output_format="json",
+            )
+
+        all_entries = result["high_priority"] + result["normal_priority"]
+        subjects = {e["subject"] for e in all_entries}
+        self.assertEqual(subjects, {"Keep me", "Already replied"})
+        self.assertEqual(result["skipped_replied_count"], 0)
+        self.assertEqual(result["skipped_drafted_count"], 2)
+        replied_entry = next(e for e in all_entries if e["subject"] == "Already replied")
+        self.assertTrue(replied_entry["was_replied_to"])
+        self.assertTrue(replied_entry["already_replied"])
+        self.assertIn("[ALREADY REPLIED]", replied_entry["priority"])
+
+    def test_include_drafted_restores_drafted_rows_but_not_replied(self):
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts=self.DRAFTS_RAW)
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=7,
+                max_results=10,
+                include_drafted=True,
+                output_format="json",
+            )
+
+        all_entries = result["high_priority"] + result["normal_priority"]
+        subjects = {e["subject"] for e in all_entries}
+        self.assertEqual(subjects, {"Keep me", "Drafted item"})
+        self.assertEqual(result["skipped_replied_count"], 2)
+        self.assertEqual(result["skipped_drafted_count"], 0)
+        drafted_entry = next(e for e in all_entries if e["subject"] == "Drafted item")
+        self.assertTrue(drafted_entry["has_draft"])
+        self.assertIn("[HAS DRAFT]", drafted_entry["priority"])
+
+    def test_include_draft_state_false_skips_snapshot_and_excludes_nothing_for_drafts(self):
+        drafts_calls: list = []
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts=self.DRAFTS_RAW, drafts_calls=drafts_calls)
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=7,
+                max_results=10,
+                include_draft_state=False,
+                output_format="json",
+            )
+
+        self.assertEqual(drafts_calls, [])
+        all_entries = result["high_priority"] + result["normal_priority"]
+        subjects = {e["subject"] for e in all_entries}
+        # "Drafted item" is no longer excluded: has_draft is null, not True.
+        self.assertEqual(subjects, {"Keep me", "Drafted item"})
+        self.assertEqual(result["skipped_drafted_count"], 0)
+        self.assertEqual(result["skipped_replied_count"], 2)
+        self.assertEqual(result["draft_scan"], {"status": "skipped", "scanned": 0, "accounts": []})
+        for entry in all_entries:
+            self.assertIsNone(entry["has_draft"])
+
+    def test_drafts_snapshot_error_fails_open(self):
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts="ERROR|||Could not find Drafts mailbox")
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work", days_back=7, max_results=10, output_format="json"
+            )
+
+        self.assertEqual(result["draft_scan"]["status"], "error")
+        self.assertIn("Could not find Drafts mailbox", result["draft_scan"]["error"])
+        self.assertEqual(result["skipped_drafted_count"], 0)
+        all_entries = result["high_priority"] + result["normal_priority"]
+        subjects = {e["subject"] for e in all_entries}
+        # Both non-replied rows survive: has_draft is null on scan error,
+        # so nothing is excluded for draft state (fail open).
+        self.assertEqual(subjects, {"Keep me", "Drafted item"})
+        for entry in all_entries:
+            self.assertIsNone(entry["has_draft"])
+
+    def test_check_already_replied_legacy_path_ors_into_replied_state(self):
+        inbox_raw = (
+            "MSG|||701|||<b1@example.com>|||Untouched|||frank@example.com|||2026-07-10T09:00:00|||false|||false|||false\n"
+            "MSG|||702|||<b2@example.com>|||Legacy match|||erin@example.com|||2026-07-09T09:00:00|||false|||false|||false"
+        )
+        runner = self._dispatch_runner(inbox=inbox_raw, sent="<b2@example.com>")
+
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            default_result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=7,
+                max_results=10,
+                check_already_replied=True,
+                include_draft_state=False,
+                output_format="json",
+            )
+        default_subjects = {e["subject"] for e in default_result["high_priority"] + default_result["normal_priority"]}
+        self.assertEqual(default_subjects, {"Untouched"})
+        self.assertEqual(default_result["skipped_replied_count"], 1)
+
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            kept_result = smart_inbox_tools.get_needs_response(
+                account="Work",
+                days_back=7,
+                max_results=10,
+                check_already_replied=True,
+                include_already_replied=True,
+                include_draft_state=False,
+                output_format="json",
+            )
+        all_entries = kept_result["high_priority"] + kept_result["normal_priority"]
+        legacy_entry = next(e for e in all_entries if e["subject"] == "Legacy match")
+        # Native flag was false; the Sent-header scan is the only reason
+        # this row counts as replied, so was_replied_to stays False while
+        # already_replied (the combined signal) is True.
+        self.assertFalse(legacy_entry["was_replied_to"])
+        self.assertTrue(legacy_entry["already_replied"])
+        self.assertIn("[ALREADY REPLIED]", legacy_entry["priority"])
+
+    def test_text_mode_reports_skip_notes_for_replied_and_drafted(self):
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts=self.DRAFTS_RAW)
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(account="Work", days_back=7, max_results=10)
+
+        self.assertIsInstance(result, str)
+        self.assertIn("Filtered 2 already-replied email(s)", result)
+        self.assertIn("Re-run with include_already_replied=True", result)
+        self.assertIn("Filtered 2 drafted email(s)", result)
+        self.assertIn("Re-run with include_drafted=True", result)
+
+    def test_text_mode_notes_disabled_draft_state(self):
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW)
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work", days_back=7, max_results=10, include_draft_state=False
+            )
+
+        self.assertIn("Draft-state check disabled", result)
+
+    def test_text_mode_notes_draft_scan_error(self):
+        runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts="ERROR|||boom")
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", side_effect=runner):
+            result = smart_inbox_tools.get_needs_response(account="Work", days_back=7, max_results=10)
+
+        self.assertIn("Draft scan failed", result)
+
+    def test_json_shape_carries_draft_scan_and_skip_keys_with_no_candidates(self):
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=""):
+            result = smart_inbox_tools.get_needs_response(
+                account="Work", days_back=7, max_results=10, output_format="json"
+            )
+
+        self.assertEqual(result["high_priority"], [])
+        self.assertEqual(result["normal_priority"], [])
+        self.assertEqual(result["skipped_replied_count"], 0)
+        self.assertEqual(result["skipped_drafted_count"], 0)
+        # No candidates at all: the Drafts snapshot is never fetched
+        # (lazy fetch), so the scan is reported as skipped rather than
+        # "ok" with zero scanned.
+        self.assertEqual(result["draft_scan"], {"status": "skipped", "scanned": 0, "accounts": []})
+
+
 class GetAwaitingReplyJsonTests(unittest.TestCase):
     def _two_script_runner(self, inbox_raw: str, sent_raw: str):
         def runner(script, timeout=120):
@@ -421,6 +653,27 @@ class NeedsResponseRowParsingTests(unittest.TestCase):
         rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].subject, "S")
+
+    def test_parser_reads_native_was_replied_field(self):
+        raw = "MSG|||301|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false|||true"
+
+        rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
+
+        self.assertTrue(rows[0].was_replied_to)
+
+    def test_parser_defaults_was_replied_false_for_legacy_eight_field_rows(self):
+        raw = "MSG|||301|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false"
+
+        rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
+
+        self.assertFalse(rows[0].was_replied_to)
+
+    def test_parser_defaults_was_replied_false_for_legacy_seven_field_rows(self):
+        raw = "MSG|||<a@example.com>|||Good|||alice@example.com|||2026-05-20|||false|||false"
+
+        rows = smart_inbox_tools._parse_needs_response_inbox_rows(raw)
+
+        self.assertFalse(rows[0].was_replied_to)
 
 
 class GetTopSendersJsonTests(unittest.TestCase):

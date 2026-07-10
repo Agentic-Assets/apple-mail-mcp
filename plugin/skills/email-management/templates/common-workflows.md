@@ -2,7 +2,7 @@
 
 This document provides ready-to-use workflow templates for common email management tasks. Copy and adapt these patterns to your specific needs.
 
-**Action-tool contract:** Mutation examples follow `search-patterns.md`. Use `sender_exact`, `sender_domain`, and `subject_keyword` on **`search_emails`** only. Use `list_inbox_emails` for bounded recent listing (`exclude_replied=True` when feeding reply candidates). Pass returned `message_id` / `message_ids` to `reply_to_email`, `move_email`, `manage_trash`, and related action tools. For daily triage, prefer the **`inbox-triage`** skill over keyword-only sweeps below.
+**Action-tool contract:** Mutation examples follow `search-patterns.md`. Use `sender_exact`, `sender_domain`, and `subject_keyword` on **`search_emails`** only. Use `list_inbox_emails` for bounded recent listing (`exclude_replied=True` and `exclude_drafted=True` together when feeding reply candidates, so already-answered and already-drafted rows are both filtered). Pass returned `message_id` / `message_ids` to `reply_to_email`, `move_email`, `manage_trash`, and related action tools. For daily triage, prefer the **`inbox-triage`** skill over keyword-only sweeps below.
 
 ## Quick Triage Workflows
 
@@ -11,8 +11,9 @@ This document provides ready-to-use workflow templates for common email manageme
 Prefer the **`inbox-triage`** skill for the full daily loop. Minimal pattern:
 
 ```
-# 1. Needs-response queue (read-first triage)
-get_needs_response(account="Work", check_already_replied=True, include_already_replied=False, max_results=20)
+# 1. Needs-response queue (read-first triage); defaults already exclude
+#    already-replied/already-drafted rows
+get_needs_response(account="Work", max_results=20)
 
 # 2. VIP unread (discovery on search_emails only)
 vip_matches = search_emails(
@@ -343,7 +344,10 @@ search_emails(
     max_content_length=300
 )
 
-# 2. Verify the thread has not already been answered by the user
+# 2. Check the row before drafting: was_replied_to/has_draft are on every
+#    discovery row. Abort if has_draft=true, or was_replied_to=true with no
+#    matching draft. Thread check below is a fallback for extra certainty
+#    or when has_draft is null.
 get_email_thread(
     account="Work",
     message_id="<message_id from search>"
@@ -379,7 +383,10 @@ search_emails(
     max_content_length=500
 )
 
-# 2. Verify the thread has not already been answered by the user
+# 2. Check the row before drafting: was_replied_to/has_draft are on every
+#    discovery row. Abort if has_draft=true, or was_replied_to=true with no
+#    matching draft. Thread check below is a fallback for extra certainty
+#    or when has_draft is null.
 get_email_thread(
     account="Work",
     message_id="<message_id from search>"
@@ -951,7 +958,7 @@ get_statistics(scope="account_overview", days_back=7)
 
 ```
 # Daily essentials (discovery → ids → action)
-get_needs_response(account="Work", check_already_replied=True, include_already_replied=False)
+get_needs_response(account="Work")  # excludes already-replied/already-drafted by default
 list_inbox_emails(max_emails=20, output_format="json")
 search_emails(sender_exact="...", mailboxes=["INBOX"], max_results=20, output_format="json")
 get_email_thread(account="Work", message_id="<message_id from search>")

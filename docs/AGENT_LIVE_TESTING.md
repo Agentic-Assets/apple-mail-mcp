@@ -141,13 +141,24 @@ apple-mail -o json get-statistics --raw '{
   "output_format":"json"
 }'
 
-# Triage: emails likely needing a response with replied-detection enabled.
+# Triage: emails likely needing a response. Defaults already exclude rows
+# with was_replied_to=true or has_draft=true, and report skipped_replied_count
+# / skipped_drafted_count; check_already_replied adds the legacy Sent-header
+# scan as an extra verification layer.
 apple-mail -o json get-needs-response --raw '{
   "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
   "days_back":7,
   "max_results":20,
-  "check_already_replied":true,
-  "include_already_replied":false,
+  "output_format":"json"
+}'
+
+# Same window, widened to see already-replied and already-drafted rows again.
+apple-mail -o json get-needs-response --raw '{
+  "account":"'"$DEFAULT_MAIL_ACCOUNT"'",
+  "days_back":7,
+  "max_results":20,
+  "include_already_replied":true,
+  "include_drafted":true,
   "output_format":"json"
 }'
 

@@ -107,6 +107,7 @@ class ParserFieldCountValidationTests(unittest.TestCase):
 
     def setUp(self):
         from apple_mail_mcp.tools.inbox import _parse_pipe_delimited_emails
+
         self.parse = _parse_pipe_delimited_emails
 
     def test_well_formed_row(self):
@@ -123,7 +124,8 @@ class ParserFieldCountValidationTests(unittest.TestCase):
         raw = "a|||b|||from@ex.com|||2026-05-27|||false|||Work|||12345"
         out = self.parse(raw)
         self.assertEqual(
-            out, [],
+            out,
+            [],
             "Corrupted row with non-numeric mail_app_id slot must be dropped",
         )
 
@@ -132,7 +134,7 @@ class ParserFieldCountValidationTests(unittest.TestCase):
         self.assertEqual(self.parse(raw), [])
 
     def test_well_formed_with_internet_message_id(self):
-        raw = "subj|||from|||2026-05-27|||false|||Work|||12345|||<x@y>"
+        raw = "subj|||from|||2026-05-27|||false|||Work|||12345|||false|||<x@y>"
         out = self.parse(raw, has_message_id=True)
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["internet_message_id"], "<x@y>")
@@ -156,28 +158,38 @@ class InboxScriptBuilderEmitsSanitizerTests(unittest.TestCase):
 
     def test_text_script_sanitizes_subject_and_sender(self):
         from apple_mail_mcp.tools.inbox import _build_list_inbox_text_script
+
         script = _build_list_inbox_text_script(
-            account="Work", max_emails=5, read_filter="all",
+            account="Work",
+            max_emails=5,
+            read_filter="all",
             include_content=False,
         )
         # Sanitizer emits the distinctive delimiter swap.
         self.assertIn(
-            'set AppleScript\'s text item delimiters to "|||"', script,
+            'set AppleScript\'s text item delimiters to "|||"',
+            script,
         )
         self.assertIn(
-            'set AppleScript\'s text item delimiters to "| | |"', script,
+            'set AppleScript\'s text item delimiters to "| | |"',
+            script,
         )
 
     def test_json_script_sanitizes_subject_and_sender(self):
         from apple_mail_mcp.tools.inbox import _build_list_inbox_json_script
+
         script = _build_list_inbox_json_script(
-            account="Work", max_emails=5, read_filter="all",
+            account="Work",
+            max_emails=5,
+            read_filter="all",
         )
         self.assertIn(
-            'set AppleScript\'s text item delimiters to "|||"', script,
+            'set AppleScript\'s text item delimiters to "|||"',
+            script,
         )
         self.assertIn(
-            'set AppleScript\'s text item delimiters to "| | |"', script,
+            'set AppleScript\'s text item delimiters to "| | |"',
+            script,
         )
 
 

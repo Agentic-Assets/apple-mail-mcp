@@ -7,6 +7,7 @@ Pure string building only (escape / mailbox refs / scan-bound math); no
 from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import build_mailbox_ref, escape_applescript
+from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.tools.search.records import _build_applescript_date
 
 
@@ -456,8 +457,9 @@ def _build_search_script(
                                                     if messageRead then
                                                         set readValue to "true"
                                                     end if
+                                                    {was_replied_fragment(var="aMessage")}
 
-                                                    set recordLine to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & "" & "|||" & "" & "|||" & ""
+                                                    set recordLine to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & "" & "|||" & "" & "|||" & "" & "|||" & wasRepliedToken
                                                     set end of recordLines to recordLine
                                                     set collectLimit to collectLimit - 1
                                                     if collectLimit <= 0 then exit repeat

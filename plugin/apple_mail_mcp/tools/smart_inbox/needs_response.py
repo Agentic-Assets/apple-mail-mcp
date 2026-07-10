@@ -1,12 +1,19 @@
-"""``get_needs_response`` tool: unread-emails-likely-needing-reply heuristic.
+"""``get_needs_response`` tool: unread emails that still need a reply from you.
 
-Filters newsletters/automated senders, labels priority, and joins against the
-replied-detection set. Patched names (``run_applescript``, ``validate_account_name``)
-are referenced via the ``smart_inbox`` package facade so the test seams keep firing;
-``fetch_replied_ids`` is invoked with ``runner=smart_inbox.run_applescript``.
+Filters newsletters/automated senders, labels priority, and joins two
+independent reply-state signals from ``core.reply_state``
+(``tasks/active/reply-state-annotation/plan-2026-07-10.md``): the native
+``was replied to`` flag read inline in the per-message loop, and a bounded
+Drafts snapshot correlated against each candidate. By default this tool
+reports what still needs you: rows already replied to or already drafted
+are excluded, and the exclusion is never silent, ``skipped_replied_count``
+and ``skipped_drafted_count`` report how many rows were left out. Patched
+names (``run_applescript``, ``validate_account_name``) are referenced via
+the ``smart_inbox`` package facade so the test seams keep firing;
+``fetch_replied_ids`` and ``fetch_drafts_snapshot`` are both invoked with
+``runner=smart_inbox.run_applescript``.
 """
 
-from dataclasses import dataclass
 from typing import Any
 
 from apple_mail_mcp import server as _server
@@ -23,9 +30,24 @@ from apple_mail_mcp.core import (
     inject_preferences,
     sanitize_pipe_delimited_field,
 )
+from apple_mail_mcp.core.reply_state import (
+    DraftsSnapshot,
+    fetch_drafts_snapshot,
+    was_replied_fragment,
+)
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import smart_inbox
-from apple_mail_mcp.tools.smart_inbox.helpers import _normalize_message_id
+
+# ``_NeedsResponseRow`` (the row dataclass), the ``MSG|||...`` parser, the
+# priority-label formatter, and the classifier now live in
+# ``reply_state_glue`` (module line budget split, see that module's
+# docstring); the ``smart_inbox`` package facade re-exports all of them
+# from there so ``smart_inbox_tools._parse_needs_response_inbox_rows`` etc.
+# keep resolving.
+from apple_mail_mcp.tools.smart_inbox.reply_state_glue import (
+    _classify_needs_response_rows,
+    _parse_needs_response_inbox_rows,
+)
 
 
 def _newsletter_filter_condition(sender_var: str = "messageSender") -> str:
@@ -44,125 +66,6 @@ def _newsletter_filter_condition(sender_var: str = "messageSender") -> str:
     return f"({platform_checks} or {keyword_checks})"
 
 
-@dataclass(frozen=True)
-class _NeedsResponseRow:
-    """Structured per-message candidate emitted by the inbox script."""
-
-    mail_app_id: str
-    internet_message_id: str
-    subject: str
-    sender: str
-    date_str: str
-    is_flagged: bool
-    has_question: bool
-
-    @property
-    def message_id(self) -> str:
-        """Backward-compatible alias for older internal tests/helpers."""
-        return self.internet_message_id
-
-
-def _parse_needs_response_inbox_rows(raw: str) -> list[_NeedsResponseRow]:
-    """Parse ``MSG|||...`` lines into ``_NeedsResponseRow`` instances.
-
-    Schema: MSG|||mail_app_id|||internet_message_id|||subject|||sender|||date_str|||is_flagged|||has_question
-    Booleans are encoded as ``"true"`` / ``"false"``. Malformed rows are
-    skipped silently so a single bad message can't poison the result.
-    """
-    rows: list[_NeedsResponseRow] = []
-    for line in raw.splitlines():
-        if not line.startswith("MSG|||"):
-            continue
-        parts = line.split("|||", 7)
-        if len(parts) == 7:
-            # Backwards-compatible parser for older tests/log captures that
-            # emitted only the Internet Message-ID in the message_id slot.
-            _, internet_message_id, subject, sender, date_str, is_flagged, has_question = parts
-            mail_app_id = ""
-        elif len(parts) == 8:
-            _, mail_app_id, internet_message_id, subject, sender, date_str, is_flagged, has_question = parts
-        else:
-            continue
-        rows.append(
-            _NeedsResponseRow(
-                mail_app_id=mail_app_id,
-                internet_message_id=internet_message_id,
-                subject=subject,
-                sender=sender,
-                date_str=date_str,
-                is_flagged=is_flagged.strip().lower() == "true",
-                has_question=has_question.strip().lower() == "true",
-            )
-        )
-    return rows
-
-
-def _priority_label(*, has_question: bool, is_flagged: bool, already_replied: bool) -> str:
-    """Match the AppleScript priority labeling the legacy tool produced."""
-    if has_question or is_flagged:
-        if has_question and is_flagged:
-            label = "HIGH (flagged + question)"
-        elif is_flagged:
-            label = "HIGH (flagged)"
-        else:
-            label = "MEDIUM (contains question)"
-    else:
-        label = "NORMAL"
-    if already_replied:
-        label = f"[ALREADY REPLIED] {label}"
-    return label
-
-
-def _classify_needs_response_rows(
-    rows: list[_NeedsResponseRow],
-    *,
-    replied_ids: set[str],
-    include_already_replied: bool,
-    max_results: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-    """Split candidates into (high, normal, skipped_replied_count).
-
-    Each item dict matches the JSON output shape; the text formatter just
-    re-renders the same dicts. The high/normal split mirrors the legacy
-    AppleScript behavior: ``has_question or is_flagged`` -> high.
-    """
-    high: list[dict[str, Any]] = []
-    normal: list[dict[str, Any]] = []
-    skipped = 0
-
-    for row in rows:
-        if len(high) + len(normal) >= max_results:
-            break
-        already_replied = False
-        if row.internet_message_id and replied_ids:
-            already_replied = _normalize_message_id(row.internet_message_id) in replied_ids
-
-        if already_replied and not include_already_replied:
-            skipped += 1
-            continue
-
-        priority = _priority_label(
-            has_question=row.has_question,
-            is_flagged=row.is_flagged,
-            already_replied=already_replied,
-        )
-        entry = {
-            "subject": row.subject,
-            "sender": row.sender,
-            "date": row.date_str,
-            "priority": priority,
-            "already_replied": already_replied,
-            "message_id": row.mail_app_id,
-            "internet_message_id": row.internet_message_id,
-        }
-        if row.has_question or row.is_flagged:
-            high.append(entry)
-        else:
-            normal.append(entry)
-
-    return high, normal, skipped
-
-
 def _format_needs_response_text(
     *,
     account: str,
@@ -171,9 +74,13 @@ def _format_needs_response_text(
     high: list[dict[str, Any]],
     normal: list[dict[str, Any]],
     skipped_replied: int,
+    skipped_drafted: int,
     include_already_replied: bool,
+    include_drafted: bool,
+    include_draft_state: bool,
+    draft_scan: dict[str, Any],
 ) -> str:
-    """Render the human-readable output identical to the legacy AppleScript."""
+    """Render the human-readable output identical to the legacy AppleScript, plus reply-state notes."""
     lines = [
         "EMAILS NEEDING RESPONSE",
         f"Account: {account} | Mailbox: {mailbox} | Last {days_back} days",
@@ -195,6 +102,15 @@ def _format_needs_response_text(
             f"Filtered {skipped_replied} already-replied email(s). "
             "Re-run with include_already_replied=True to see them."
         )
+    if not include_drafted and skipped_drafted > 0:
+        lines.append(f"Filtered {skipped_drafted} drafted email(s). Re-run with include_drafted=True to see them.")
+    if not include_draft_state:
+        lines.append("Draft-state check disabled (include_draft_state=False); has_draft not evaluated.")
+    elif draft_scan.get("status") == "error":
+        lines.append(
+            f"Draft scan failed ({draft_scan.get('error', 'unknown error')}); "
+            "has_draft is unavailable for these results."
+        )
     # Trailing newline + return-style separator matched the legacy output.
     return "\n".join(lines) + "\n"
 
@@ -211,11 +127,15 @@ def _build_needs_response_inbox_script(
     """Return AppleScript that emits one ``MSG|||...`` row per candidate email.
 
     Filters newsletters/automated senders inline (cheaper than fetching every
-    sender into Python). Does NOT perform replied-detection — that runs as a
-    separate script so the per-message loop is a flat O(N) walk.
+    sender into Python). Does NOT perform Sent-header replied-detection or
+    Drafts correlation, those run as separate, optional passes so this
+    per-message loop stays a flat O(N) walk. It does read Mail's native
+    ``was replied to`` flag inline (``was_replied_fragment()``, no extra
+    AppleScript round trip) and appends it as the row's trailing field.
     """
     newsletter_condition = _newsletter_filter_condition("messageSender")
     date_check = "if messageDate < cutoffDate then exit repeat" if days_back > 0 else ""
+    was_replied_script = was_replied_fragment(var="aMessage")
     body_scan_block = (
         """
                             try
@@ -291,6 +211,8 @@ def _build_needs_response_inbox_script(
                                 set isFlagged to flagged status of aMessage
                             end try
 
+                            {was_replied_script}
+
                             set mailAppMessageId to id of aMessage as string
 
                             -- Internet Message-ID may not be available on every
@@ -311,7 +233,7 @@ def _build_needs_response_inbox_script(
                             {sanitize_pipe_delimited_field("messageSubject")}
                             {sanitize_pipe_delimited_field("messageSender")}
 
-                            set end of outputLines to "MSG|||" & mailAppMessageId & "|||" & inboxInternetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText
+                            set end of outputLines to "MSG|||" & mailAppMessageId & "|||" & inboxInternetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & flagText & "|||" & questionText & "|||" & wasRepliedToken
                             set emittedCount to emittedCount + 1
                         end if
                     end if
@@ -349,21 +271,41 @@ def get_needs_response(
     max_results: int = 20,
     scan_body: bool = False,
     include_already_replied: bool = False,
+    include_drafted: bool = False,
+    include_draft_state: bool = True,
     check_already_replied: bool = False,
     timeout: int | None = None,
     output_format: str = "text",
 ) -> str | dict[str, Any]:
-    """Identify unread emails that likely need a response from you.
+    """Identify unread emails that still need a response from you.
 
     Filters out newsletters, automated emails, and noreply senders.
     Prioritises direct emails (To: you) with question marks as likely
-    needing a reply.
+    needing a reply. This is the "what still needs me" tool: by default it
+    excludes emails that are already handled, either because Mail's native
+    ``was replied to`` flag is set on them or because a matching draft
+    reply already exists in Drafts, so an agent never re-drafts a reply
+    that already exists.
 
-    Replied-detection: scans the Sent mailbox for ``In-Reply-To:`` and
-    ``References:`` headers to build a set of Message-IDs the user has
-    replied to, then matches each candidate's Internet Message-ID against
-    that set in Python (O(1) set lookup). Header-based detection only —
-    no subject-substring matching.
+    Reply-state signals (see ``core/reply_state.py``):
+
+    - ``was_replied_to``: Mail's native, read-only ``was replied to``
+      boolean, read for every candidate in the same per-message loop that
+      reads subject/sender/date. This is the primary, always-on signal;
+      no parameter gates it.
+    - ``has_draft``: a bounded, newest-first Drafts snapshot for *account*
+      (fetched once, lazily, only when there is at least one candidate
+      row) correlated against each candidate by In-Reply-To/References
+      headers or by subject plus recipient plus date. ``true``/``false``
+      when the scan ran; ``null`` when the scan was skipped or errored, in
+      which case nothing is excluded for draft state (fail open).
+
+    Default exclusion: rows with ``was_replied_to=true`` or
+    ``has_draft=true`` are left out of the results. The exclusion is never
+    silent: ``skipped_replied_count`` and ``skipped_drafted_count`` report
+    how many rows were left out (JSON keys; a one-line note in text mode).
+    Rows that remain always carry ``was_replied_to`` and ``has_draft`` in
+    their entry.
 
     Args:
         account: Account name (e.g., "Gmail", "Work", "Personal").
@@ -373,25 +315,40 @@ def get_needs_response(
         max_results: Maximum results to return (default: 20)
         scan_body: When True, scan message body for question marks (slower).
             Subject-only detection is usually enough for daily triage (default: False).
-        include_already_replied: When False (default), emails the user has
-            already replied to are filtered out — this is the safe default
-            to prevent agents drafting duplicate replies. When True, those
-            emails are kept but annotated with a ``[ALREADY REPLIED]``
-            prefix in the priority label.
-        check_already_replied: When True, scan the Sent mailbox to detect
-            already-replied emails (duplicate-reply protection). Defaults to
-            ``False`` because reading Sent headers on Exchange triggers per-message
-            IMAP downloads and causes timeouts on large inboxes. Enable on
-            smaller accounts or when duplicate-reply protection is required.
+        include_already_replied: When False (default), rows where the
+            combined replied signal is true are excluded. When True, those
+            rows are kept and annotated with a ``[ALREADY REPLIED]`` prefix
+            in the priority label.
+        include_drafted: When False (default), rows where ``has_draft`` is
+            true are excluded. When True, those rows are kept and
+            annotated with a ``[HAS DRAFT]`` prefix in the priority label.
+        include_draft_state: When True (default), a bounded Drafts snapshot
+            is fetched and correlated against candidates so ``has_draft``
+            is populated. When False, the snapshot is skipped entirely:
+            ``has_draft`` is ``null`` on every row, nothing is excluded for
+            draft state, and ``draft_scan.status`` is ``"skipped"``.
+        check_already_replied: When True, additionally scan the Sent
+            mailbox for ``In-Reply-To:``/``References:`` headers as an
+            extra, opt-in verification layer for edge cases the native
+            flag might miss; a match is OR'd into the replied state (the
+            ``already_replied`` field reflects the combined signal).
+            Defaults to False because reading Sent headers on Exchange
+            triggers per-message IMAP downloads and can cause timeouts on
+            large inboxes; the native ``was_replied_to`` flag is now the
+            primary signal and needs no opt-in.
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
         output_format: ``"text"`` (default, human-readable) or ``"json"``
             (returns a structured dict suitable for programmatic use).
 
     Returns:
-        Ranked list of emails likely needing a response. Either a formatted
-        text block or a dict ``{"account", "mailbox", "days_back",
-        "max_results", "high_priority": [...], "normal_priority": [...],
-        "skipped_replied_count", "errors"}`` depending on *output_format*.
+        Ranked list of emails that still need a response. Either a
+        formatted text block or a dict ``{"account", "mailbox",
+        "days_back", "max_results", "high_priority": [...],
+        "normal_priority": [...], "skipped_replied_count",
+        "skipped_drafted_count", "draft_scan": {"status", "scanned",
+        "accounts", "error"?}, "errors"}`` depending on *output_format*.
+        Each entry in ``high_priority``/``normal_priority`` carries
+        ``was_replied_to`` (bool) and ``has_draft`` (bool or ``null``).
     """
     if output_format not in {"text", "json"}:
         return _needs_response_error(
@@ -429,8 +386,10 @@ def get_needs_response(
 
     # Budget: when replied-detection is on, the inbox scan gets the bulk
     # of the wall-clock budget (the Sent scan is bounded and typically
-    # 1–3 s). Mirrors the get_awaiting_reply 60/40 split, but skewed
-    # further toward inbox because the Sent slice here is smaller.
+    # 1-3 s). Mirrors the get_awaiting_reply 60/40 split, but skewed
+    # further toward inbox because the Sent slice here is smaller. The
+    # Drafts snapshot gets its own small, fixed budget (~2s flat per the
+    # plan's live measurement), independent of this split.
     effective_timeout = timeout if timeout is not None else 120
     if check_already_replied:
         inbox_timeout = max(30, int(effective_timeout * 0.7))
@@ -438,6 +397,7 @@ def get_needs_response(
     else:
         inbox_timeout = effective_timeout
         sent_timeout = effective_timeout  # unused when check_already_replied=False
+    drafts_timeout = 30 if timeout is None else min(timeout, 30)
 
     inbox_script = _build_needs_response_inbox_script(
         escaped_account=escaped_account,
@@ -453,8 +413,8 @@ def get_needs_response(
     except AppleScriptTimeout:
         return _needs_response_error(
             (
-                f"get_needs_response timed out on account '{account}' after "
-                f"{inbox_timeout}s — try increasing timeout or reducing days_back"
+                f"get_needs_response timed out on account '{account}' after {inbox_timeout}s. "
+                "Try increasing timeout or reducing days_back."
             ),
             output_format=output_format,
         )
@@ -469,11 +429,14 @@ def get_needs_response(
             }
         return inbox_raw
 
+    rows = _parse_needs_response_inbox_rows(inbox_raw)
+
     # Replied set: fetched via core helper which routes through this module's
     # ``run_applescript`` symbol via the injected runner so tests patching
     # ``apple_mail_mcp.tools.smart_inbox.run_applescript`` see the call.
-    # When check_already_replied=False the set stays empty and the inbox
-    # script is the only AppleScript invocation.
+    # When check_already_replied=False the set stays empty and no Sent scan
+    # runs; the native was_replied_to flag read in the inbox loop is the
+    # primary signal either way.
     if check_already_replied:
         replied_ids: set[str] = fetch_replied_ids(
             account,
@@ -484,11 +447,36 @@ def get_needs_response(
     else:
         replied_ids = set()
 
-    rows = _parse_needs_response_inbox_rows(inbox_raw)
-    high, normal, skipped_replied = _classify_needs_response_rows(
+    # Drafts snapshot: one bounded scan per call, fetched lazily (only when
+    # there is at least one candidate row to correlate against) so an empty
+    # inbox slice never pays for a Drafts round trip. Skipped entirely when
+    # include_draft_state=False.
+    drafts_snapshot: DraftsSnapshot | None = None
+    if include_draft_state and rows:
+        drafts_snapshot = fetch_drafts_snapshot(
+            account,
+            runner=smart_inbox.run_applescript,
+            timeout=drafts_timeout,
+        )
+
+    draft_scan: dict[str, Any]
+    if drafts_snapshot is None:
+        draft_scan = {"status": "skipped", "scanned": 0, "accounts": []}
+    else:
+        draft_scan = {
+            "status": drafts_snapshot.status,
+            "scanned": drafts_snapshot.scanned,
+            "accounts": [account],
+        }
+        if drafts_snapshot.status == "error" and drafts_snapshot.error:
+            draft_scan["error"] = drafts_snapshot.error
+
+    high, normal, skipped_replied, skipped_drafted = _classify_needs_response_rows(
         rows,
         replied_ids=replied_ids,
         include_already_replied=include_already_replied,
+        include_drafted=include_drafted,
+        drafts_snapshot=drafts_snapshot,
         max_results=max_results,
     )
 
@@ -501,6 +489,8 @@ def get_needs_response(
             "high_priority": high,
             "normal_priority": normal,
             "skipped_replied_count": skipped_replied,
+            "skipped_drafted_count": skipped_drafted,
+            "draft_scan": draft_scan,
             "errors": [],
         }
 
@@ -511,5 +501,9 @@ def get_needs_response(
         high=high,
         normal=normal,
         skipped_replied=skipped_replied,
+        skipped_drafted=skipped_drafted,
         include_already_replied=include_already_replied,
+        include_drafted=include_drafted,
+        include_draft_state=include_draft_state,
+        draft_scan=draft_scan,
     )
