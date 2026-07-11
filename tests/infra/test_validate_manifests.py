@@ -808,7 +808,7 @@ class ValidateManifestsTests(unittest.TestCase):
 
         self.assertIn('export CODEX_HOME="$TMP_HOME"', script)
         self.assertIn(
-            'CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-https://github.com/Agentic-Assets/apple-mail-mcp.git}"',
+            'CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-$ROOT}"',
             script,
         )
         self.assertIn('codex plugin marketplace add "$CODEX_MARKETPLACE_SOURCE"', script)

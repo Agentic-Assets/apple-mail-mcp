@@ -199,8 +199,8 @@ Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/
 | Path | Role |
 |------|------|
 | `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**41 tools**) |
-| `start_mcp.sh` | Creates `venv/`, installs `requirements.txt`, execs Python entry |
-| `requirements.txt` | Runtime Python dependencies |
+| `start_mcp.sh` | Creates `venv/`, installs only bundled hash-checked wheels, execs Python entry |
+| `requirements.lock` + `wheelhouse/` | Offline runtime dependency payload for macOS arm64 CPython 3.13 |
 | `ui/` | MCP Apps dashboard helpers for `inbox_dashboard` |
 | `skills/` | Bundled Claude Code skills (`SKILL.md` per subdirectory) |
 
@@ -281,9 +281,10 @@ def _check_artifact_freshness(
         (common.ROOT / "apple-mail-mcpb/manifest.json", "manifest.json"),
         (common.ROOT / "plugin/apple_mail_mcp.py", "apple_mail_mcp.py"),
         (common.ROOT / "plugin/requirements.txt", "requirements.txt"),
+        (common.ROOT / "plugin/requirements.lock", "requirements.lock"),
         (common.ROOT / "plugin/start_mcp.sh", "start_mcp.sh"),
     ]
-    for subdir in ("apple_mail_mcp", "skills", "ui"):
+    for subdir in ("apple_mail_mcp", "skills", "ui", "wheelhouse"):
         root = common.ROOT / "plugin" / subdir
         if not root.exists():
             continue
