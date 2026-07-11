@@ -78,6 +78,8 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
             status="body_after_quote",
             body_missing_artifact_id=artifact_id,
         )
+    if status == "IDENTITY_UNAVAILABLE":
+        return _ReplyDraftVerification(ok=False, status="identity_unavailable")
     return _ReplyDraftVerification(ok=False, status="not_found")
 
 
@@ -91,7 +93,13 @@ def _reply_attachment_details_requested(verification: _ReplyDraftVerification) -
     return bool(verification.attachment_status and verification.attachment_status != "not_requested")
 
 
-def _format_reply_verification_lines(verification: _ReplyDraftVerification, fallback_draft_id: str | None) -> str:
+def _format_reply_verification_lines(
+    verification: _ReplyDraftVerification,
+    fallback_draft_id: str | None,
+    *,
+    retyped: bool = False,
+    stale_artifact_id: str | None = None,
+) -> str:
     """Return stable success metadata lines for a verified reply draft."""
     verified_id = verification.matched_artifact_id or fallback_draft_id or ""
     lines = [
@@ -101,7 +109,16 @@ def _format_reply_verification_lines(verification: _ReplyDraftVerification, fall
         lines.append(f"Verified Draft ID: {verified_id}")
     if verification.ok and fallback_draft_id and verified_id and verified_id != fallback_draft_id:
         lines.append(
-            "Warning: saved draft was verified by bounded Drafts fallback, not by the exact Draft ID returned by Mail"
+            "Warning: saved draft was verified by bounded Drafts fallback, not by the exact Draft ID from the compose result"
+        )
+    if verification.status == "found":
+        lines.append("Body Verification: full body matched above quote (case-sensitive)")
+    if retyped:
+        lines.append("Note: reply body was retyped once after an initial mismatch")
+    if stale_artifact_id:
+        lines.append(
+            f"Warning: original draft {stale_artifact_id} may still exist in Drafts; its deletion "
+            "before retyping was not confirmed"
         )
     if verification.attachment_status:
         lines.append(f"Attachment Verification Status: {verification.attachment_status}")
@@ -129,12 +146,15 @@ def _reply_success_payload(
     reply_subject: str | None,
     draft_id: str | None,
     verification: _ReplyDraftVerification,
+    captured_draft_id_source: str = "mail_returned",
+    retyped: bool = False,
+    stale_artifact_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the machine-readable success contract for verified reply drafts."""
     verified_id = verification.matched_artifact_id or draft_id
     response_draft_id = draft_id or verified_id
     if draft_id:
-        draft_id_source = "mail_returned"
+        draft_id_source = captured_draft_id_source
     elif verified_id:
         draft_id_source = "verification_fallback"
     else:
@@ -150,6 +170,9 @@ def _reply_success_payload(
         "verification_status": verification.status,
         "exact_id_verified": _reply_exact_id_verified(verification, draft_id),
         "body_present": verification.status == "found",
+        "body_verified": "full_above_quote",
+        "retyped": retyped,
+        "stale_artifact_id": stale_artifact_id,
         "attachment_status": verification.attachment_status,
         "attachment_count": verification.attachment_count,
         "attachments_applied": verification.attachments_applied or [],
@@ -192,8 +215,15 @@ def _reply_draft_verification_error(
     *,
     mode_text: str,
     reply_body: str,
+    retyped: bool = False,
 ) -> str:
-    """Serialize a structured draft-verification failure when an artifact id is known."""
+    """Serialize a structured draft-verification failure when an artifact id is known.
+
+    Handles ``body_after_quote``, ``verification_timeout``, and
+    ``applescript_error``. ``body_missing`` is the truncated/miscased-body
+    defect this branch (AGENTIC-1214) exists to catch and is dispatched to
+    ``_reply_body_mismatch_error`` instead; see ``_reply_verification_failure_response``.
+    """
     artifact_id = verification.body_missing_artifact_id or verification.error_artifact_id
     if not artifact_id:
         return (
@@ -204,9 +234,6 @@ def _reply_draft_verification_error(
     if verification.status == "body_after_quote":
         code = "REPLY_DRAFT_BODY_AFTER_QUOTE"
         detail = "contains the inserted reply body after the quoted original instead of above it"
-    elif verification.status == "body_missing":
-        code = "REPLY_DRAFT_BODY_MISSING"
-        detail = "does not contain the inserted reply body"
     elif verification.status == "verification_timeout":
         code = "REPLY_DRAFT_VERIFICATION_TIMEOUT"
         detail = "could not be verified before the verifier timed out"
@@ -219,6 +246,7 @@ def _reply_draft_verification_error(
             code=code,
             message=(
                 f"Reply draft was {mode_text}, but saved Drafts artifact {artifact_id} {detail}. No email was sent."
+                + (" An automatic retype was attempted once and still did not resolve this." if retyped else "")
             ),
             remediation={
                 "artifact_message_id": artifact_id,
@@ -226,9 +254,98 @@ def _reply_draft_verification_error(
                 "mailbox": "Drafts",
                 "verification_status": verification.status,
                 "expected_body_needle": _first_non_empty_line(reply_body),
+                "retyped": retyped,
                 "preferred": (
                     "Inspect or delete the artifact by exact Drafts message_id, then retry after Mail finishes saving."
                 ),
             },
         )
+    )
+
+
+def _reply_body_mismatch_error(
+    verification: _ReplyDraftVerification,
+    *,
+    mode_text: str,
+    reply_body: str,
+    retyped: bool,
+    stale_artifact_id: str | None = None,
+) -> str:
+    """Serialize REPLY_BODY_MISMATCH.
+
+    Fires when the saved draft's full body above the quote (whitespace-
+    flattened, smart-punctuation-folded, compared case-sensitively) does not
+    match the requested ``reply_body`` (AGENTIC-1214 Bug 1 truncation / Bug 3
+    ALL CAPS). Fired only for ``status == "body_missing"``; see
+    ``_reply_verification_failure_response`` for the dispatch that keeps
+    ``not_found`` / ``verification_timeout`` / ``applescript_error`` /
+    ``body_after_quote`` on ``_reply_draft_verification_error`` instead.
+    """
+    artifact_id = verification.body_missing_artifact_id or verification.matched_artifact_id
+    remediation: dict[str, Any] = {
+        "artifact_message_id": artifact_id,
+        "draft_id": artifact_id,
+        "mailbox": "Drafts",
+        "verification_status": verification.status,
+        "retyped": retyped,
+        "preferred": (
+            "Inspect the draft with verify_draft(draft_id=...). If the body is truncated or in the "
+            "wrong case, delete it with manage_drafts(action='delete', draft_id=...) and retry with "
+            "Mail visible and holding focus."
+        ),
+        "cleanup": (
+            "Delete the suspected artifact by exact Drafts id before retrying so a duplicate draft is not left behind."
+        ),
+        "expected_body_preview": _first_non_empty_line(reply_body),
+    }
+    if stale_artifact_id:
+        remediation["stale_artifact_id"] = stale_artifact_id
+        remediation["stale_artifact_warning"] = (
+            f"The first attempt's draft {stale_artifact_id} could not be confirmed deleted before "
+            "retyping; it may still exist in Drafts as a truncated or miscased duplicate. Inspect and "
+            "delete it by exact id."
+        )
+    return serialize_tool_error(
+        ToolError(
+            code="REPLY_BODY_MISMATCH",
+            message=(
+                f"Reply draft was {mode_text}, but the saved Drafts artifact "
+                f"{artifact_id or '(id unavailable)'} does not contain the full reply body above the "
+                "quoted original when compared case-sensitively with whitespace and smart-punctuation "
+                "normalized. This indicates the typed body was truncated or miscased. No email was sent."
+                + (" An automatic retype was attempted once and still did not match." if retyped else "")
+            ),
+            remediation=remediation,
+        )
+    )
+
+
+def _reply_verification_failure_response(
+    verification: _ReplyDraftVerification,
+    *,
+    mode_text: str,
+    reply_body: str,
+    retyped: bool,
+    stale_artifact_id: str | None = None,
+) -> str:
+    """Map a failed reply-draft verification to its final structured error response.
+
+    ``body_missing`` alone routes to ``REPLY_BODY_MISMATCH``; every other
+    status (``body_after_quote``, ``not_found``, ``verification_timeout``,
+    ``applescript_error``) keeps ``_reply_draft_verification_error``'s
+    pre-existing codes.
+    """
+    if verification.status == "body_missing":
+        return _reply_body_mismatch_error(
+            verification,
+            mode_text=mode_text,
+            reply_body=reply_body,
+            retyped=retyped,
+            stale_artifact_id=stale_artifact_id,
+        )
+    return _reply_draft_verification_error(
+        verification,
+        mode_text=mode_text,
+        reply_body=reply_body,
+        retyped=retyped,
     )

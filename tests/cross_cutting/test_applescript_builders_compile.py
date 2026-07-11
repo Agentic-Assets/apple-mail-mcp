@@ -227,6 +227,55 @@ class OsacompileAvailableTests(unittest.TestCase):
         from apple_mail_mcp.tools import smart_inbox as m
         self._assert_compiles(m, "_build_needs_response_inbox_script")
 
+    # --- compose builders ---
+
+    def test_compose_build_reply_native_window_applescript_compiles(self):
+        """Compile the helper-prefixed native reply builder and its chunk typer.
+
+        This builder intentionally does not meet the generic discovery rule: its
+        name ends in ``_applescript`` rather than ``_script``, it requires
+        structured script fragments, and it starts with top-level handlers
+        before the Mail ``tell`` block.  Compile its fully generated script
+        explicitly so a syntax error in the native reply flow, including the
+        focus-guarded ``typeReplyBodyChunks`` handler, cannot be hidden by
+        discovery filtering.
+        """
+        from apple_mail_mcp.tools.compose import reply_scripts as m
+
+        script = m._build_reply_native_window_applescript(
+            header_text="SAVING REPLY AS DRAFT",
+            success_text="Reply saved as draft!",
+            safe_account="Test Account",
+            lookup_script="set foundMessage to missing value",
+            not_found_message="Email not found",
+            body_temp_path="/tmp/apple-mail-compile-check-body.txt",
+            reply_options="with opening window",
+            sender_script="",
+            signature_script="",
+            cc_script="",
+            bcc_script="",
+            attachment_script="",
+            mode="draft",
+            cleanup_script="",
+            safe_cc="",
+            safe_bcc="",
+            safe_attachment_info="",
+            has_cc=False,
+            has_bcc=False,
+            has_attachments=False,
+        )
+
+        self.assertIn("on chunkFocusBlockedName(expectedTitle, derivedTitle)", script)
+        self.assertIn("on typeReplyBodyChunks(bodyText, expectedTitle, derivedTitle)", script)
+        self.assertIn("key up shift", script)
+        ok, err = _osacompile_check(script)
+        self.assertTrue(
+            ok,
+            "\n\nnative reply builder produced script that osacompile rejected:\n"
+            f"{err}\n\n"
+            "Fix the generated native reply script before relying on tests.",
+        )
+
     # --- inbox builders ---
 
     def test_inbox_build_list_inbox_json_script_compiles(self):

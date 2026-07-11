@@ -80,6 +80,14 @@ If `verify_draft` / `verify_drafts` are not registered in the client:
 - Confirm drafts via bounded `manage_drafts(action="list")` or Drafts thread lookup anchored on `message_id` when available.
 - Inspect body above quoted original in Mail before send; Drafts preview snippets may show signature blocks first.
 
+## Draft ids drift on sync (do not cache across turns)
+
+On Exchange and other server accounts, numeric Drafts `draft_id`s are reassigned when the mailbox re-syncs, including between two `manage_drafts(action="list")` calls with **zero writes in between** (observed live: `103` -> `91058` -> `91061`). Do not cache a `draft_id` from an earlier turn and act on it later.
+
+- **Before `verify_draft`, `manage_drafts(action="open"|"send"|"delete")`, or `manage_drafts(action="cleanup_empty")`:** re-resolve the id immediately beforehand with a fresh `manage_drafts(action="list")` or `action="find")` call in the same turn, not a cached id from a prior call.
+- **Durable handle for a reply draft:** `manage_drafts(action="find", in_reply_to=<source Message-ID>)` matches the source Internet Message-ID in the draft's threading headers, so it survives an id reassignment; prefer it over remembering a numeric id.
+- `reply_to_email`'s own post-save retry (on a `body_missing`/`body_after_quote` verification mismatch) deletes and re-verifies within the same call, so it is not affected by this; the caution above is for ids handed back across separate tool calls or conversation turns.
+
 ## Archive hygiene
 
 1. Collect ids from the triage pass; do not pass `subject_keyword` to `move_email` (`TARGET_SELECTOR_DEPRECATED` on v3.x).

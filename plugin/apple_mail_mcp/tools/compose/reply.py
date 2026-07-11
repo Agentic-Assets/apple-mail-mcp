@@ -31,6 +31,12 @@ from apple_mail_mcp.tools.compose.payload import (
     _compose_sender_script,
     _strip_cdata_wrappers,
 )
+from apple_mail_mcp.tools.compose.reply_identity import native_reply_draft_identity_from_output
+from apple_mail_mcp.tools.compose.reply_runner import (
+    _delete_reply_artifact,
+    _native_reply_abort_response,
+    _native_reply_effective_timeout,
+)
 from apple_mail_mcp.tools.compose.reply_scripts import (
     _build_reply_native_window_applescript,
     _build_reply_objectmodel_applescript,
@@ -42,8 +48,9 @@ from apple_mail_mcp.tools.compose.saved_draft_checks import _verify_saved_reply_
 from apple_mail_mcp.tools.compose.verification import (
     _extract_output_field,
     _format_reply_verification_lines,
-    _reply_draft_verification_error,
     _reply_success_payload,
+    _reply_verification_failure_response,
+    _ReplyDraftVerification,
 )
 
 
@@ -77,6 +84,13 @@ def reply_to_email(
     ``WINDOWLESS_FALLBACK_DISABLED`` unless ``allow_windowless_fallback=True`` is
     passed. Agents must never use the fallback.
 
+    The saved draft's full body above the quoted original is verified
+    case-sensitively (not just its first line) before this call reports
+    success. On a placement mismatch with a known artifact id, the native
+    path automatically deletes that artifact and retypes the identical body
+    once before re-verifying; a mismatch that still does not resolve returns
+    ``REPLY_BODY_MISMATCH`` naming the suspect Drafts artifact id.
+
     ``subject_keyword`` is a deprecated selector retained for v3.x schema
     compatibility. Use ``search_emails(...)`` or ``list_inbox_emails(...)`` to
     discover candidate ids, then pass ``message_id``. Passing ``subject_keyword``
@@ -100,7 +114,12 @@ def reply_to_email(
             ``search_emails`` or ``list_inbox_emails``.
         recent_days: Schema-compat parameter for deprecated subject_keyword path
             (default: 2.0 / 48h). Ignored when ``message_id`` is set.
-        timeout: Optional per-AppleScript timeout in seconds. Defaults to 120s for the main reply script and up to 30s for alias validation.
+        timeout: Optional per-AppleScript timeout in seconds. When omitted, the native
+            path (``native_format=True``) scales the timeout with the projected
+            chunked-typing time for ``reply_body``, floored at 120s; a body long
+            enough to exceed the documented typing budget is refused up front with
+            ``REPLY_BODY_TYPING_BUDGET_EXCEEDED`` instead of risking a mid-typing
+            timeout. Alias validation uses up to 30s.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
         output_format: "text" (default) preserves the existing success output.
@@ -108,9 +127,19 @@ def reply_to_email(
             saved-draft verification succeeds.
         native_format: When True (default), compose the reply in Mail's native reply
             window so the draft keeps Mail's colored quote bar and the account's
-            default reply signature (with logo), inserting reply_body with a typed
-            keystroke above the quote. This needs the Mail window to take focus and
-            Accessibility permission for the host process. When False, compose the
+            default reply signature (with logo), inserting reply_body above the
+            quote via typed keystrokes sent in small focus-guarded chunks (never one
+            keystroke of the whole body). This needs the Mail window to take and
+            keep focus and Accessibility permission for the host process; losing
+            focus before typing starts returns ``REPLY_WINDOW_FOCUS_FAILED`` or
+            ``REPLY_SUBJECT_GUARD_MISMATCH``, and losing it mid-typing returns
+            ``REPLY_BODY_TYPING_INTERRUPTED`` with the partially typed compose
+            window already discarded. Known limitation: accented or composed
+            characters may corrupt during typing (observed live: "Renée" saved
+            as "Renae"); the full-body verifier catches this and returns
+            ``REPLY_BODY_MISMATCH`` instead of saving silently, so prefer ASCII
+            spellings in ``reply_body`` until the typing-fidelity follow-up
+            ships. When False, compose the
             reply through the object model with no window (headless/bulk-safe, no
             Accessibility needed); the quote and signature are flattened to plain
             text. ``native_format=False`` is gated: it returns
@@ -185,6 +214,19 @@ def reply_to_email(
     # body_html is accepted for backwards compatibility only and is ignored:
     # replies use Mail's native reply composer so quoted chains preserve Mail's
     # normal formatting; reply_body is inserted as plain text above that quote.
+
+    if native_format:
+        # A literal tab is a field-navigation key under System Events keystroke
+        # typing: it can move focus out of the compose body (e.g. into the
+        # subject field), corrupting the draft. Convert before anything reads
+        # reply_body downstream (the temp file write below, the retry rewrite
+        # at the bottom of the verification loop, and verification itself all
+        # reuse this same variable), so one conversion covers every use. The
+        # saved-draft verifier strips all whitespace, including tabs and
+        # spaces, before comparing, so this cannot cause a verification
+        # mismatch. The object-model path assigns content directly and never
+        # goes through keystroke typing, so it is left untouched.
+        reply_body = reply_body.replace("\t", " ")
 
     try:
         sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
@@ -335,103 +377,63 @@ def reply_to_email(
         )
 
     try:
-        result = (
-            compose.run_applescript(script) if timeout is None else compose.run_applescript(script, timeout=timeout)
+        if native_format:
+            effective_timeout, timeout_error = _native_reply_effective_timeout(reply_body, timeout)
+            if timeout_error:
+                return timeout_error
+        else:
+            effective_timeout = timeout
+
+        def _run_reply_script() -> str:
+            return (
+                compose.run_applescript(script)
+                if effective_timeout is None
+                else compose.run_applescript(script, timeout=effective_timeout)
+            )
+
+        current_result = _run_reply_script()
+        abort_response = _native_reply_abort_response(
+            current_result, account=account, reply_body=reply_body, timeout=timeout
         )
-        if result.startswith("GUARD_ABORT"):
-            guard_reply_subject = _extract_output_field(result, "Subject") or ""
-            derived_reply_subject = _extract_output_field(result, "DerivedSubject") or ""
-            guard_verification = _verify_saved_reply_draft(
-                account,
-                guard_reply_subject or derived_reply_subject,
-                reply_body,
-                draft_id=None,
-                quoted_needle="wrote:",
-                signature_requested=None,
-                timeout=timeout,
-            )
-            suspected_artifact_id = (
-                guard_verification.matched_artifact_id
-                or guard_verification.body_missing_artifact_id
-                or guard_verification.error_artifact_id
-            )
-            artifact_status = guard_verification.status
-            subject_mismatch = result.startswith("GUARD_ABORT_SUBJECT")
-            if subject_mismatch:
-                return serialize_tool_error(
-                    ToolError(
-                        code="REPLY_SUBJECT_GUARD_MISMATCH",
-                        message=(
-                            "Native reply opened a compose window, but the window title did not "
-                            "match the expected reply subject after Mail subject normalization, "
-                            "so the body was not typed and no email was sent."
-                        ),
-                        remediation={
-                            "preferred": (
-                                "Retry once with Mail visible. If this persists, report the "
-                                "Subject / DerivedSubject / mailFront values from detail; Mail "
-                                "may have normalized the subject differently than expected."
-                            ),
-                            "alternative": (
-                                "Do not switch off native formatting. Inspect or delete any "
-                                "empty compose window left open, then retry native_format=True."
-                            ),
-                            "expected_subject": guard_reply_subject or derived_reply_subject,
-                            "derived_subject": derived_reply_subject or None,
-                            "draft_artifact_status": artifact_status,
-                            "suspected_draft_id": suspected_artifact_id,
-                            "cleanup": (
-                                "If suspected_draft_id is present, inspect or delete that exact "
-                                "Drafts artifact with verify_draft or "
-                                "manage_drafts(action='delete', draft_id=...)."
-                            ),
-                            "detail": result,
-                        },
-                    )
-                )
-            return serialize_tool_error(
-                ToolError(
-                    code="REPLY_WINDOW_FOCUS_FAILED",
-                    message=(
-                        "Native reply could not bring the reply window into focus to type the "
-                        "body, so the intended reply body was not safely saved and no email was sent."
-                    ),
-                    remediation={
-                        "preferred": (
-                            "Retry with Mail visible and not being clicked; native replies type "
-                            "into the reply window and need it to hold focus for a moment."
-                        ),
-                        "alternative": (
-                            "Do not switch off native formatting. Retry with native_format=True "
-                            "(the default) once Mail can take focus. If focus still cannot be "
-                            "acquired, stop and report the blocker."
-                        ),
-                        "draft_artifact_status": artifact_status,
-                        "suspected_draft_id": suspected_artifact_id,
-                        "cleanup": (
-                            "If suspected_draft_id is present, inspect or delete that exact Drafts "
-                            "artifact with verify_draft or manage_drafts(action='delete', draft_id=...)."
-                        ),
-                        "detail": result,
-                    },
-                )
-            )
-        if effective_mode in ("draft", "open") and mode_plan.success_text in result:
-            reply_subject = _extract_output_field(result, "Subject")
-            draft_id = _extract_output_field(result, "Draft ID")
-            quoted_needle = _extract_output_field(result, "Quote Needle")
-            # The native window inherits Mail's own default reply signature (with logo),
-            # whose rich text we never set and cannot reliably substring-match. Only
-            # assert a signature when one was explicitly requested by name; otherwise
-            # skip the check so the native default signature is not flagged "missing".
-            signature_requested_for_verify: bool | None = include_signature
-            if native_format and include_signature and not resolved_signature_name:
-                signature_requested_for_verify = None
+        if abort_response is not None:
+            return abort_response
+
+        if effective_mode not in ("draft", "open") or mode_plan.success_text not in current_result:
+            return current_result
+
+        mode_text = "opened" if effective_mode == "open" else "created"
+        reply_subject = _extract_output_field(current_result, "Subject")
+        native_draft_identity = native_reply_draft_identity_from_output(current_result) if native_format else None
+        draft_id = (
+            native_draft_identity.draft_id
+            if native_draft_identity
+            else (None if native_format else _extract_output_field(current_result, "Draft ID"))
+        )
+        quoted_needle = _extract_output_field(current_result, "Quote Needle")
+        # The native window inherits Mail's own default reply signature (with logo),
+        # whose rich text we never set and cannot reliably substring-match. Only
+        # assert a signature when one was explicitly requested by name; otherwise
+        # skip the check so the native default signature is not flagged "missing".
+        signature_requested_for_verify: bool | None = include_signature
+        if native_format and include_signature and not resolved_signature_name:
+            signature_requested_for_verify = None
+
+        # Only the native path retries: one automatic delete-artifact-and-retype
+        # pass when the FULL-body verifier (AGENTIC-1214) finds a placement
+        # failure with a concrete artifact id to delete. The object-model path
+        # assigns content directly and never mismatches this way, so it gets a
+        # single verification attempt like before.
+        retyped = False
+        stale_artifact_id: str | None = None
+        verification: _ReplyDraftVerification | None = None
+        max_attempts = 2 if native_format else 1
+        for attempt in range(max_attempts):
             verification = _verify_saved_reply_draft(
                 account,
                 reply_subject or "",
                 reply_body,
                 draft_id=draft_id,
+                native_draft_identity=native_draft_identity,
                 quoted_needle=quoted_needle,
                 expected_attachment_count=len(validated_paths) if validated_paths else None,
                 expected_attachment_names=[Path(path).name for path in validated_paths],
@@ -439,24 +441,84 @@ def reply_to_email(
                 expected_signature_name=resolved_signature_name,
                 timeout=timeout,
             )
-            if not verification.ok:
-                mode_text = "opened" if effective_mode == "open" else "created"
-                return _reply_draft_verification_error(
+            if verification.ok:
+                break
+
+            artifact_id = verification.body_missing_artifact_id
+            placement_fail = verification.status in ("body_missing", "body_after_quote")
+            # Invariant: this tool only ever deletes a Drafts artifact whose id
+            # Mail itself returned for this compose call (draft_id, extracted
+            # from Mail's own compose output). The verifier's subject-scan
+            # fallback records the FIRST mismatching same-subject draft seen
+            # across up to 20 eventual-consistency attempts, so under Exchange
+            # materialization lag that id can belong to a pre-existing draft
+            # the user wrote on the same thread. Requiring artifact_id to equal
+            # draft_id keeps the delete-and-retype retry from ever touching a
+            # draft Mail did not just create for us.
+            can_retry = (
+                native_format
+                and attempt == 0
+                and placement_fail
+                and bool(artifact_id)
+                and bool(draft_id)
+                and native_draft_identity is not None
+                and artifact_id == draft_id
+            )
+            if not can_retry:
+                return _reply_verification_failure_response(
                     verification,
                     mode_text=mode_text,
                     reply_body=reply_body,
+                    retyped=retyped,
+                    stale_artifact_id=stale_artifact_id,
                 )
-            if output_format == "json":
-                return json.dumps(
-                    _reply_success_payload(
-                        mode=effective_mode,
-                        reply_subject=reply_subject,
-                        draft_id=draft_id,
-                        verification=verification,
-                    )
+
+            assert artifact_id is not None  # can_retry required a truthy artifact_id
+            assert native_draft_identity is not None  # can_retry required a persisted identity capsule
+            deleted = _delete_reply_artifact(
+                account,
+                artifact_id,
+                identity=native_draft_identity,
+                timeout=timeout,
+            )
+            stale_artifact_id = None if deleted else artifact_id
+            retyped = True
+
+            # Rewrite the same body_temp_path (the prior run's `rm -f` already
+            # removed it) and re-run the SAME script; nothing about the compose
+            # script itself changes between attempts, so no rebuild is needed.
+            Path(body_temp_path).write_text(reply_body, encoding="utf-8")
+            current_result = _run_reply_script()
+            retry_abort_response = _native_reply_abort_response(
+                current_result, account=account, reply_body=reply_body, timeout=timeout
+            )
+            if retry_abort_response is not None:
+                return retry_abort_response
+            if mode_plan.success_text not in current_result:
+                return current_result
+            reply_subject = _extract_output_field(current_result, "Subject")
+            native_draft_identity = native_reply_draft_identity_from_output(current_result)
+            draft_id = native_draft_identity.draft_id if native_draft_identity else None
+            quoted_needle = _extract_output_field(current_result, "Quote Needle")
+
+        assert verification is not None  # loop always runs at least once
+        if output_format == "json":
+            return json.dumps(
+                _reply_success_payload(
+                    mode=effective_mode,
+                    reply_subject=reply_subject,
+                    draft_id=draft_id,
+                    verification=verification,
+                    captured_draft_id_source=(
+                        "persisted_header_identity" if native_draft_identity else "mail_returned"
+                    ),
+                    retyped=retyped,
+                    stale_artifact_id=stale_artifact_id,
                 )
-            result += _format_reply_verification_lines(verification, draft_id)
-        return result
+            )
+        return current_result + _format_reply_verification_lines(
+            verification, draft_id, retyped=retyped, stale_artifact_id=stale_artifact_id
+        )
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out while replying on account {account!r}. Try again or pass a larger `timeout`."

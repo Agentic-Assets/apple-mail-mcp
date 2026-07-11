@@ -5,6 +5,146 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.11.2 - 2026-07-11
+
+### Fixed
+
+- **Native reply verification now uses a persisted, header-linked Drafts
+  identity.** `reply_to_email` never treats Mail's transient outgoing-message
+  id as a Drafts id. After saving, it takes a complete bounded Drafts snapshot,
+  requires exactly one new persisted message, and requires that message's RFC
+  `Message-ID` and `In-Reply-To` link it to the source. Only then does it emit
+  `Draft ID` plus the internal identity capsule, verify that exact artifact, or
+  permit an automatic delete-and-retype. The verifier and deletion path both
+  revalidate the capsule. Cap limits, indexing delay, ambiguity, or identity
+  drift fail closed: fallback may report an artifact, but never authorizes
+  deletion or retyping.
+- **`verify_draft(expected_body_contains=...)` no longer mistakes ordinary
+  authored `wrote:` prose for quoted text.** Quote scoping now recognizes an
+  Apple Mail `On <date>, ... wrote:` attribution, Outlook's structured header
+  block, or the Outlook original-message separator. If none is present, the
+  expectation checks the whole body preview.
+- **Native reply AppleScript is now explicitly compiled in the test suite.**
+  This covers the helper-prefixed native builder and its focus-guarded chunked
+  typer, which generic builder discovery does not select.
+
+## 3.11.1 - 2026-07-10
+
+AGENTIC-1214 reply drafting correctness: chunked native typing, full-body
+draft verification, and honest threading contracts.
+
+### Fixed
+
+- **AGENTIC-1214: `reply_to_email` native reply body no longer truncates or
+  types in ALL CAPS.** The native reply path (`native_format=True`) previously
+  inserted the entire `reply_body` with one System Events `keystroke` call,
+  which silently dropped the tail of long bodies around 320-480 characters
+  and could leak leftover shift state into ALL-CAPS output on short bodies.
+  It now types the body in small, focus-guarded chunks (`TYPING_CHUNK_SIZE`,
+  `TYPING_INTER_CHUNK_DELAY`), releasing keyboard modifiers before and after
+  every chunk and re-checking both Mail's own front window and System
+  Events' process-level focus before each chunk, aborting immediately
+  (never re-stealing focus) on a mismatch instead of typing into whatever
+  now holds focus. A mid-typing abort discards the partially typed compose
+  window and returns the new `REPLY_BODY_TYPING_INTERRUPTED` structured
+  error, distinct from the pre-typing `REPLY_WINDOW_FOCUS_FAILED` /
+  `REPLY_SUBJECT_GUARD_MISMATCH` abort codes. The native-path AppleScript
+  timeout now scales with the projected chunk-typing time (floored at
+  120s); a body long enough to exceed the documented typing budget is
+  refused up front with `REPLY_BODY_TYPING_BUDGET_EXCEEDED` instead of
+  risking a mid-typing timeout.
+- **AGENTIC-1214: post-save reply verification now checks the full body, not
+  just its first line.** The saved-draft verifier previously matched only
+  the first non-empty line of `reply_body`, so a truncated or miscased tail
+  could still pass. It now compares the FULL body against the saved draft
+  above the quoted original: whitespace-flattened, smart-punctuation-folded,
+  sentence-start case neutralized (so Mail's own autocapitalization cannot
+  cause a false mismatch), located first under `considering case` so a body
+  that itself contains "wrote:" cannot false-fail into "after quote", then
+  compared case-sensitively so an ALL-CAPS draft still fails. On a
+  `body_missing` mismatch with a concrete artifact id, `reply_to_email`
+  automatically deletes the artifact and retypes the identical body once
+  before re-verifying; a mismatch that persists (or an unconfirmed delete)
+  returns the new `REPLY_BODY_MISMATCH` structured error naming the suspect
+  Drafts artifact id, with `retyped` and `stale_artifact_id` remediation
+  fields. The success payload and text output gained `body_verified`,
+  `retyped`, and `stale_artifact_id`. This verification (and its automatic
+  retype) only runs for `mode="draft"` / `mode="open"`; a `mode="send"`
+  native reply still gets the chunked-typing fix above but has no saved
+  Drafts artifact left to verify afterward, so draft-then-verify-then-send
+  stays the safe sequence when typed-body correctness matters.
+- **AGENTIC-1214: `manage_drafts(action="create")` no longer silently drops
+  `in_reply_to`.** Passing `in_reply_to` to `action="create"` now returns a
+  structured `CREATE_CANNOT_THREAD` error before any AppleScript runs and
+  before the standalone reply-like guard, since the Mail scripting
+  dictionary exposes no header property on a new outgoing message and
+  `create` can never set In-Reply-To/References. `in_reply_to` remains
+  honored only by `action="find"`. The remediation points at
+  `reply_to_email(message_id=...)` to thread a reply, or
+  `manage_drafts(action="find", in_reply_to=...)` to locate an
+  already-saved reply draft.
+- **`manage_drafts(action="create")`'s standalone reply-like guard now names
+  the tool that was actually called.** `_standalone_compose_thread_warning`
+  previously always said "compose_email" in its error message even when
+  `manage_drafts(action="create")` triggered it; it now names the calling
+  tool.
+- **Draft-id instability on Exchange is now documented.** `manage_drafts`'s
+  `action` and `draft_id` docstrings now note that server-account Drafts
+  numeric ids are reassigned on sync (observed drifting between two
+  `action="list"` calls with zero writes in between) and are not a stable
+  handle across turns; `action="find"` with `in_reply_to` is the durable
+  handle for a reply draft.
+- **Native typing timeout projection now models per-chunk overhead.** The
+  scaled AppleScript timeout accounts for the per-chunk focus re-check and
+  keystroke cost (`TYPING_PER_CHUNK_OVERHEAD_SECONDS`), not just the
+  inter-chunk delay, so long reply bodies no longer risk `AppleScriptTimeout`
+  killing osascript mid-typing and stranding a partially typed compose window.
+- **The automatic retype never deletes a draft that is not provably ours.**
+  The delete-and-retype retry now requires the verifier's mismatch artifact id
+  to equal the draft id Mail itself returned for this compose call; under
+  Exchange eventual-consistency lag the subject-scan fallback could otherwise
+  name a pre-existing same-subject draft the user wrote, and the retry would
+  have deleted it. When ids differ, the tool returns `REPLY_BODY_MISMATCH`
+  naming the suspect id and deletes nothing.
+- **Tab characters in `reply_body` are converted to spaces on the native typed
+  path.** A typed tab is a field-navigation key that can move focus out of the
+  compose body mid-draft; the conversion happens before the body temp file is
+  written and is compare-neutral in verification (which flattens all
+  whitespace on both sides).
+- **The reply-draft verifier's sentence-start case fold now scales with
+  sentence count instead of body length.** The previous per-character
+  AppleScript walk was quadratic over the full draft content, so replies on
+  long quoted threads could exhaust the verification timeout and mask real
+  body mismatches as `verification_timeout`.
+- **AGENTIC-1192 item 2: `verify_draft` / `verify_drafts` no longer false-pass
+  `expected_body_contains` on quoted text.** The needle is now scoped to the
+  reply body above the first quote boundary; when it appears only inside the
+  quoted original the payload carries `body_needle_only_in_quote: true` and an
+  `expected_body_only_in_quote` warning instead of a pass.
+
+### Known limitations (found in the 2026-07-10 live verification, fail closed)
+
+- **Accented and composed characters can corrupt during native typing.**
+  Observed live: "Renée" saved as "Renae" (System Events keystroke layer or
+  Mail autocorrect; smart quotes, em dashes, and ellipsis typed correctly).
+  The full-body verifier catches this and returns `REPLY_BODY_MISMATCH`
+  naming the artifact instead of silently saving a corrupted draft. Until the
+  typing-fidelity follow-up ships, prefer ASCII spellings in `reply_body` on
+  the native path.
+- **The automatic retype engages only when Mail exposes the compose draft id
+  and the verifier resolves the same id.** On Exchange, post-save id capture
+  can fail or drift, in which case the tool skips the delete-and-retype (it
+  never deletes a draft it cannot prove it created) and returns
+  `REPLY_BODY_MISMATCH` with the suspect id for manual cleanup.
+- **A focus steal landing mid-keystroke can corrupt the typed body without
+  tripping `REPLY_BODY_TYPING_INTERRUPTED`** (the per-chunk guard checks
+  before each chunk, not during one). Verification still fails closed with
+  `REPLY_BODY_MISMATCH`; the caller deletes the named artifact and retries.
+- **`verify_draft`'s `body_preview` is capped at 5000 characters** (a
+  pre-existing cap, unchanged here), so `expected_body_contains` needles for
+  replies longer than that must target the body prefix, not the tail.
+  `reply_to_email`'s internal full-body verifier has no such cap.
+
 ## 3.11.0 - 2026-07-10
 
 Automatic reply-state annotation: every primary read and triage tool now reports

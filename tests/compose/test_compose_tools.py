@@ -10,6 +10,9 @@ from unittest.mock import MagicMock, patch
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import compose as compose_tools
+from apple_mail_mcp.tools.compose import constants as compose_constants
+from apple_mail_mcp.tools.compose import reply_runner
+from apple_mail_mcp.tools.compose.reply_identity import NativeReplyDraftIdentity
 
 
 def _make_subprocess_result(returncode=0, stdout=b"", stderr=b""):
@@ -30,12 +33,41 @@ def _assert_ordered(testcase, text, *snippets):
         last_position = position
 
 
+def _assert_full_body_verifier_shape(testcase, verifier_script):
+    """Assert the saved-reply verifier reads the full body from a temp file.
+
+    AGENTIC-1214: the verifier no longer builds a first-line ``replyBodyNeedle``
+    needle; it reads the whole intended body from a second temp file and
+    compares it case-sensitively above the quote, whitespace-flattened and
+    smart-punctuation-folded.
+    """
+    testcase.assertIn('set fullReplyBody to do shell script "cat "', verifier_script)
+    testcase.assertIn("on flattenForCompare(theText)", verifier_script)
+    testcase.assertIn("on replyBodyAboveQuoteStatus(draftContent, fullReplyBody, quotedNeedle)", verifier_script)
+    testcase.assertIn("considering case", verifier_script)
+    testcase.assertNotIn("set replyBodyNeedle to", verifier_script)
+
+
 def _main_reply_script(scripts):
     """Return the generated reply script, skipping helper probes."""
     reply_scripts = [script for script in scripts if "reply foundMessage" in script]
     if len(reply_scripts) != 1:
         raise AssertionError(f"expected one reply script, got {len(reply_scripts)}")
     return reply_scripts[0]
+
+
+def _assert_native_saved_draft_id_contract(testcase, script, *, quiet_close: bool):
+    """Assert native output resolves an exact Drafts identity before quiet close."""
+    capture = script.index("set replyDraftIdentity to my persistedReplyDraftIdentity")
+    output = script.index('set outputText to outputText & "Draft ID: " & replyDraftId', capture)
+    save = script.rfind("save replyMessage", 0, capture)
+    testcase.assertGreater(save, -1)
+    testcase.assertLess(save, capture)
+    if quiet_close:
+        close = script.index("close (every window whose name is replySubject) saving no", capture)
+        testcase.assertLess(close, output)
+    else:
+        testcase.assertNotIn("close (every window whose name is replySubject) saving no", script[capture:output])
 
 
 def _save_draft_script(scripts):
@@ -51,8 +83,11 @@ def _saved_reply_draft_output(
     to="Sender <sender@example.com>",
     subject="Re: Test",
     draft_id=None,
+    draft_identity=None,
     quote_needle=None,
 ):
+    if draft_id is not None and draft_identity is None:
+        draft_identity = f"{draft_id}|||<draft-{draft_id}@example.com>|||<source@example.com>"
     lines = [
         "SAVING REPLY AS DRAFT",
         "",
@@ -62,6 +97,8 @@ def _saved_reply_draft_output(
     ]
     if draft_id is not None:
         lines.append(f"Draft ID: {draft_id}")
+    if draft_identity is not None:
+        lines.append(f"Draft Identity: {draft_identity}")
     if quote_needle is not None:
         lines.append(f"Quote Needle: {quote_needle}")
     return "\n".join(lines) + "\n"
@@ -978,17 +1015,27 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         script = _main_reply_script(captured)
         # Native default: Mail's own reply window owns the rich quote + signature,
         # and the reply body is TYPED in (never reassigned via `set content`, which
-        # flattens the native formatting, and never the clipboard).
+        # flattens the native formatting, and never the clipboard), in small
+        # focus-guarded chunks rather than one keystroke of the whole body
+        # (AGENTIC-1214: a single keystroke drops its tail near 320-480 chars).
         _assert_ordered(
             self,
             script,
             "set replyBodyText to do shell script",
             "set replyMessage to reply foundMessage with opening window",
             'perform action "AXRaise" of (first window whose name is replySubject)',
-            "keystroke replyBodyText",
+            "my typeReplyBodyChunks(replyBodyText",
             'set quotedNeedle to "wrote:"',
             "save replyMessage",
         )
+        # The typeReplyBodyChunks handler definition (hoisted near the top of the
+        # script, before the guard loop that calls it) types in chunks and clears
+        # modifier state before and after each chunk (the suspected source of
+        # Bug 3's leaked shift state).
+        self.assertIn("keystroke chunkText", script)
+        self.assertIn("key up shift", script)
+        # The old one-shot keystroke of the whole body must be gone.
+        self.assertNotIn("keystroke replyBodyText", script)
         # Body is typed, so content is never reassigned and no plain-text quote is built.
         self.assertNotIn("set content of replyMessage", script)
         self.assertNotIn("set composedReplyContent", script)
@@ -1100,7 +1147,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["subject"], "Re: Test")
         self.assertEqual(payload["draft_id"], "84053")
         self.assertEqual(payload["captured_draft_id"], "84053")
-        self.assertEqual(payload["draft_id_source"], "mail_returned")
+        self.assertEqual(payload["draft_id_source"], "persisted_header_identity")
         self.assertEqual(payload["verified_draft_id"], "84053")
         self.assertEqual(payload["verification_status"], "found")
         self.assertTrue(payload["exact_id_verified"])
@@ -1455,7 +1502,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         verifier_script = next(script for script in captured if "set targetDraftIdText" in script)
         self.assertIn('set targetDraftIdText to "84053"', verifier_script)
-        self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
+        _assert_full_body_verifier_shape(self, verifier_script)
         self.assertIn("set expectedAttachmentCount to 1", verifier_script)
         self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
 
@@ -1490,8 +1537,10 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("set sourceSubject to subject of foundMessage as string", script)
         self.assertNotIn("set replySubject to subject of replyMessage as string", script)
         self.assertIn('set outputText to outputText & "Subject: " & replySubject', script)
-        # Typed body: no plain-text quote assembly, no content reassignment.
-        self.assertIn("keystroke replyBodyText", script)
+        # Typed body: no plain-text quote assembly, no content reassignment. Body
+        # is typed in focus-guarded chunks (AGENTIC-1214), not one keystroke.
+        self.assertIn("my typeReplyBodyChunks(replyBodyText", script)
+        self.assertNotIn("keystroke replyBodyText", script)
         self.assertNotIn("set quotedOriginalText to", script)
         self.assertNotIn("set composedReplyContent", script)
         self.assertNotIn("set content of replyMessage", script)
@@ -1525,10 +1574,121 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("Verification Status: found", result)
         verifier_script = next(script for script in captured if "repeat with verifyAttempt from 1 to 20" in script)
         self.assertIn("messages 1 thru headEnd of draftsMailbox", verifier_script)
-        self.assertIn('set replyBodyNeedle to "Reply body"', verifier_script)
+        _assert_full_body_verifier_shape(self, verifier_script)
         self.assertIn('if "Re: Test" is "" or draftSubject is "Re: Test" then', verifier_script)
-        self.assertIn("my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)", verifier_script)
+        self.assertIn("my replyBodyAboveQuoteStatus(draftContent, fullReplyBody, quotedNeedle)", verifier_script)
         self.assertIn('return "BODY_MISSING|" & bodyMissingDraftId', verifier_script)
+
+    def test_native_reply_scripts_capture_saved_draft_id_only_for_draft_and_open(self):
+        """Draft/open expose an exact ID before draft mode closes its window.
+
+        The retry path may delete only the full Drafts identity capsule emitted
+        by the compose script. Keep this test at the generator boundary,
+        instead of merely fabricating that output from ``run_applescript``, so
+        it catches a future removal or reordering of the AppleScript contract.
+        """
+        for mode in ("draft", "open", "send"):
+            with self.subTest(mode=mode):
+                captured = []
+
+                def fake_run(script, timeout=120, captured=captured):
+                    captured.append(script)
+                    return ""
+
+                with (
+                    patch.object(compose_tools._server, "READ_ONLY", False),
+                    patch.object(compose_tools._server, "DRAFT_SAFE", False),
+                    patch(
+                        "apple_mail_mcp.tools.compose.run_applescript",
+                        side_effect=fake_run,
+                    ),
+                ):
+                    compose_tools.reply_to_email(
+                        account="Work",
+                        message_id="12345",
+                        reply_body="Reply body",
+                        mode=mode,
+                    )
+
+                script = _main_reply_script(captured)
+                if mode == "send":
+                    self.assertIn("send replyMessage", script)
+                    self.assertNotIn("set replyDraftIdentity to my persistedReplyDraftIdentity", script)
+                else:
+                    self.assertIn("set sourceRfcMessageId to my sourceRfcMessageIdFor(foundMessage)", script)
+                    self.assertIn("set preSaveDraftSnapshot to my fullDraftRfcSnapshot(draftsMailbox, 75)", script)
+                    self.assertIn("set candidateDraftId to id of aDraft as string", script)
+                    self.assertIn("if my headerHasExactRfcToken(item 2 of inReplyToResult, sourceMessageId)", script)
+                    self.assertIn("if (count of matchingDraftIdentities) is 1 then", script)
+                    self.assertIn('if postSaveDraftCount is not (preSaveDraftCount + 1) then return ""', script)
+                    self.assertIn("if totalDrafts > draftCap then return missing value", script)
+                    self.assertIn("repeat with identityAttempt from 1 to 3", script)
+                    self.assertNotIn("set replyDraftId to id of replyMessage as string", script)
+                    _assert_ordered(
+                        self,
+                        script,
+                        "set preSaveDraftSnapshot to my fullDraftRfcSnapshot",
+                        "save replyMessage",
+                        "set replyDraftIdentity to my persistedReplyDraftIdentity",
+                    )
+                    _assert_native_saved_draft_id_contract(self, script, quiet_close=mode == "draft")
+                    self.assertIn('"Draft Identity: " & replyDraftId & "|||"', script)
+
+    def test_native_identity_capsule_verifier_refuses_subject_fallback_on_drift(self):
+        """A native capsule permits only immediate exact-ID identity verification."""
+        captured = []
+        identity = NativeReplyDraftIdentity(
+            draft_id="91061",
+            draft_rfc_message_id="<draft-91061@example.com>",
+            source_rfc_message_id="<source@example.com>",
+        )
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "IDENTITY_UNAVAILABLE"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id=identity.draft_id,
+                native_draft_identity=identity,
+            )
+
+        self.assertFalse(verification.ok)
+        self.assertEqual(verification.status, "identity_unavailable")
+        script = captured[0]
+        self.assertIn("set requireNativeIdentity to true", script)
+        self.assertIn('if requireNativeIdentity then return "IDENTITY_UNAVAILABLE"', script)
+        self.assertIn('set expectedDraftRfcMessageId to "<draft-91061@example.com>"', script)
+        self.assertIn('set expectedSourceRfcMessageId to "<source@example.com>"', script)
+
+    def test_native_identity_capsule_delete_refuses_rfc_or_thread_drift(self):
+        """Retry cleanup does not delete a matching numeric ID after identity drift."""
+        captured = []
+        identity = NativeReplyDraftIdentity(
+            draft_id="91061",
+            draft_rfc_message_id="<draft-91061@example.com>",
+            source_rfc_message_id="<source@example.com>",
+        )
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "NOT_IDENTITY|91061"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            deleted = reply_runner._delete_reply_artifact(
+                "Work",
+                "91061",
+                identity=identity,
+                timeout=None,
+            )
+
+        self.assertFalse(deleted)
+        script = captured[0]
+        self.assertIn('if (message id of targetDraft as string) is not "<draft-91061@example.com>"', script)
+        self.assertIn('my headerHasExactRfcToken(item 2 of inReplyToResult, "<source@example.com>")', script)
 
     def test_reply_draft_verifier_falls_back_when_exact_id_is_not_yet_resolvable(self):
         captured = []
@@ -1647,6 +1807,11 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertFalse(temp_path.exists())
 
     def test_reply_draft_success_reports_structured_artifact_error_when_body_missing(self):
+        # AGENTIC-1214: a persistent BODY_MISSING on the exact draft id triggers one
+        # automatic delete-artifact-and-retype pass (the delete script's generic "ok"
+        # response here does not confirm the delete, so it is surfaced as a stale
+        # artifact). The second attempt mismatches too, so the final error is
+        # REPLY_BODY_MISMATCH, not the un-retried REPLY_DRAFT_BODY_MISSING.
         sentinel = "AA-REPLY-BODY-SENTINEL-84053"
 
         def fake_run(script, timeout=120):
@@ -1667,11 +1832,14 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         payload = json.loads(result)
-        self.assertEqual(payload["code"], "REPLY_DRAFT_BODY_MISSING")
+        self.assertEqual(payload["code"], "REPLY_BODY_MISMATCH")
         self.assertEqual(payload["remediation"]["artifact_message_id"], "84053")
         self.assertEqual(payload["remediation"]["draft_id"], "84053")
-        self.assertEqual(payload["remediation"]["expected_body_needle"], sentinel)
+        self.assertEqual(payload["remediation"]["expected_body_preview"], sentinel)
+        self.assertTrue(payload["remediation"]["retyped"])
+        self.assertEqual(payload["remediation"]["stale_artifact_id"], "84053")
         self.assertIn("No email was sent", payload["message"])
+        self.assertIn("automatic retype was attempted once", payload["message"])
 
     def test_reply_draft_verifier_timeout_preserves_saved_draft_id(self):
         def fake_run(script, timeout=120):
@@ -1992,7 +2160,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             "reply foundMessage with opening window and reply to all",
             script,
         )
-        self.assertIn("keystroke replyBodyText", script)
+        self.assertIn("my typeReplyBodyChunks(replyBodyText", script)
+        self.assertNotIn("keystroke replyBodyText", script)
         self.assertNotIn("to recipients of foundMessage", script)
         self.assertNotIn("cc recipients of foundMessage", script)
         self.assertNotIn(
@@ -2023,7 +2192,8 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         script = _main_reply_script(captured)
         # Native plain reply (no reply-to-all): window opens without "reply to all".
         self.assertIn("set replyMessage to reply foundMessage with opening window", script)
-        self.assertIn("keystroke replyBodyText", script)
+        self.assertIn("my typeReplyBodyChunks(replyBodyText", script)
+        self.assertNotIn("keystroke replyBodyText", script)
         self.assertNotIn("reply to all", script)
         self.assertNotIn("cc recipients of foundMessage", script)
         self.assertNotIn(
@@ -2156,7 +2326,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         verifier_script = next(script for script in captured if "set signatureWasRequested" in script)
         self.assertIn('set targetDraftIdText to "81121"', verifier_script)
-        self.assertIn(f'set replyBodyNeedle to "{body_sentinel}"', verifier_script)
+        _assert_full_body_verifier_shape(self, verifier_script)
         self.assertIn("set signatureWasRequested to false", verifier_script)
         self.assertIn("every message of draftsMailbox whose id is targetDraftId", verifier_script)
 
@@ -2273,10 +2443,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                         "GUARD_ABORT_SUBJECT",
                         "Subject: Re: Placeholder: Equire CRE Demo",
                         "DerivedSubject: RE:  Re: Placeholder: Equire CRE Demo",
-                        (
-                            "Detail: could not focus reply window "
-                            "(mailFront=Re: Other Thread seFront=Re: Other Thread)"
-                        ),
+                        ("Detail: could not focus reply window (mailFront=Re: Other Thread seFront=Re: Other Thread)"),
                     ]
                 )
             if 'set targetDraftIdText to ""' in script:
@@ -2348,7 +2515,11 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         )
         # Still never reassign content on the native path.
         self.assertNotIn("set content of replyMessage", script)
-        self.assertIn("keystroke replyBodyText", script)
+        # Short body (one chunk): still goes through the chunked typing handler
+        # with its modifier-hygiene `key up` clear, the Bug 3 regression anchor.
+        self.assertIn("my typeReplyBodyChunks(replyBodyText", script)
+        self.assertNotIn("keystroke replyBodyText", script)
+        self.assertIn("key up shift", script)
 
     def test_windowless_fallback_disabled_without_ack(self):
         # native_format=False is gated: without allow_windowless_fallback=True the tool
@@ -2370,8 +2541,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
     def test_native_reply_verifier_rejoins_soft_wrapped_lines(self):
         # Mail soft-wraps long typed lines, and `content as string` renders the wraps
-        # as line breaks (sometimes mid-word). The verifier strips CR/LF before the
-        # contiguous-substring match so a wrapped body needle is still found.
+        # as line breaks (sometimes mid-word). flattenForCompare strips whitespace
+        # (return/linefeed/tab/space/nbsp) before the case-sensitive contiguous-
+        # substring match, so a wrapped body is still found (AGENTIC-1214).
         captured = []
 
         def fake_run(script, timeout=120):
@@ -2390,10 +2562,340 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             )
 
         verifier_script = captured[0]
-        self.assertIn("on stripLineBreaks(theText)", verifier_script)
-        self.assertIn(
-            "set bodyOffset to my textOffset(flatContent, my stripLineBreaks(replyBodyNeedle))", verifier_script
-        )
+        _assert_full_body_verifier_shape(self, verifier_script)
+        self.assertIn("on foldPair(theText, fromText, toText)", verifier_script)
+        self.assertIn("repeat with stripChar in {return, linefeed, tab, space, (character id 160)}", verifier_script)
+        self.assertNotIn("on stripLineBreaks(theText)", verifier_script)
+
+    def test_native_reply_verifier_folds_sentence_starts_with_delimiter_split_not_character_walk(self):
+        # AGENTIC-1214 perf fix: foldSentenceStarts used to walk the whole
+        # draft body character-by-character (a handler call plus a string
+        # reallocation per character), which is O(n^2) and could burn the
+        # verifier's timeout on long quoted-thread drafts. It now splits on
+        # each sentence delimiter via AppleScript's text item delimiters and
+        # only rewrites the first character of each following item, so cost
+        # tracks sentence count, not text length.
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|not_requested|not_requested"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+            )
+
+        verifier_script = captured[0]
+        self.assertIn("on foldFirstChar(theString)", verifier_script)
+        self.assertIn('repeat with delimiterChar in {".", "!", "?"}', verifier_script)
+        self.assertNotIn("repeat with i from 1 to n", verifier_script)
+        self.assertNotIn("set foldNext to true", verifier_script)
+
+    def test_native_reply_full_body_verifier_is_case_sensitive_and_above_quote(self):
+        # AGENTIC-1214: the saved-reply verifier compares the full body above the
+        # quote, case-sensitively, from a temp file (not a first-line needle).
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="91061")
+            if 'set targetDraftIdText to "91061"' in script:
+                return "FOUND|91061|not_requested|not_requested"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        verifier_script = next(script for script in captured if 'set targetDraftIdText to "91061"' in script)
+        _assert_full_body_verifier_shape(self, verifier_script)
+
+    def test_native_reply_chunks_body_with_typing_bounds(self):
+        # AGENTIC-1214 Bug 1/Bug 3: the native path types in focus-guarded chunks
+        # sized from TYPING_CHUNK_SIZE/TYPING_INTER_CHUNK_DELAY, not one keystroke.
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            if "count of outgoing messages" in script:
+                return "0"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        script = _main_reply_script(captured)
+        self.assertIn("on typeReplyBodyChunks(bodyText, expectedTitle, derivedTitle)", script)
+        self.assertIn(f"set chunkEnd to chunkStart + {compose_tools.TYPING_CHUNK_SIZE} - 1", script)
+        self.assertIn(f"delay {compose_tools.TYPING_INTER_CHUNK_DELAY}", script)
+        self.assertIn("key up shift", script)
+        self.assertIn("key up option", script)
+        self.assertIn("key up control", script)
+        self.assertIn("key up command", script)
+
+    def test_native_reply_typing_interrupted_returns_structured_error(self):
+        # AGENTIC-1214: focus lost mid-chunk-typing aborts and discards the
+        # partially typed compose window; no partial draft is left behind.
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return "\n".join(
+                    [
+                        "TYPING_INTERRUPTED",
+                        "Subject: Re: Test",
+                        "DerivedSubject: Re: Test",
+                        "Detail: interrupted:Inbox (mailFront=Re: Test seFront=Re: Test)",
+                    ]
+                )
+            if 'set targetDraftIdText to ""' in script:
+                return "NOT_FOUND"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["error"])
+        self.assertEqual(payload["code"], "REPLY_BODY_TYPING_INTERRUPTED")
+        self.assertIn("suspected_draft_id", payload["remediation"])
+        self.assertIn("cleanup", payload["remediation"])
+        self.assertIn("no email was sent", payload["message"].lower())
+        self.assertIn("interrupted:Inbox", payload["remediation"]["detail"])
+
+    def test_native_reply_body_mismatch_retries_then_returns_mismatch(self):
+        # AGENTIC-1214: a BODY_MISSING verification with a concrete artifact id
+        # triggers one delete-and-retype pass; a second BODY_MISSING (with the
+        # drifted Exchange-style id 91062) returns the final REPLY_BODY_MISMATCH.
+        compose_calls = {"count": 0}
+        delete_scripts = []
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                compose_calls["count"] += 1
+                draft_id = "91061" if compose_calls["count"] == 1 else "91062"
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id=draft_id,
+                    draft_identity=f"{draft_id}|||<draft-{draft_id}@example.com>|||<source@example.com>",
+                )
+            if 'set targetDraftIdText to "91061"' in script:
+                return "BODY_MISSING|91061"
+            if 'set targetDraftIdText to "91062"' in script:
+                return "BODY_MISSING|91062"
+            if "delete targetDraft" in script:
+                delete_scripts.append(script)
+                return "DELETED|91061"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_BODY_MISMATCH")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "91062")
+        self.assertTrue(payload["remediation"]["retyped"])
+        self.assertEqual(compose_calls["count"], 2)
+        self.assertEqual(len(delete_scripts), 1)
+        self.assertIn("every message of draftsMailbox whose id is 91061", delete_scripts[0])
+
+    def test_native_reply_body_mismatch_retype_succeeds(self):
+        # Same delete-and-retype path as above, but the second attempt verifies.
+        # Assert the generated native script itself resolves and emits the exact
+        # persisted Drafts ID that this mocked Mail result represents. Without that
+        # contract, a mocked ``Draft ID`` response could make this retry pass
+        # while the real plugin has no safe delete target.
+        compose_calls = {"count": 0}
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                compose_calls["count"] += 1
+                _assert_native_saved_draft_id_contract(self, script, quiet_close=True)
+                draft_id = "91061" if compose_calls["count"] == 1 else "91062"
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id=draft_id,
+                    draft_identity=f"{draft_id}|||<draft-{draft_id}@example.com>|||<source@example.com>",
+                )
+            if 'set targetDraftIdText to "91061"' in script:
+                return "BODY_MISSING|91061"
+            if 'set targetDraftIdText to "91062"' in script:
+                return "FOUND|91062|not_requested|not_requested"
+            if "delete targetDraft" in script:
+                return "DELETED|91061"
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertNotIn("error", payload)
+        self.assertTrue(payload["retyped"])
+        self.assertTrue(payload["body_present"])
+        self.assertEqual(payload["body_verified"], "full_above_quote")
+        self.assertEqual(payload["draft_id"], "91062")
+        self.assertEqual(compose_calls["count"], 2)
+
+    def test_native_reply_ambiguous_persisted_drafts_id_omits_id_and_does_not_retry(self):
+        # A zero/multiple-candidate persisted-Drafts resolver emits no Draft ID.
+        # The bounded verifier can still report a suspected artifact, but without
+        # a script-proven exact ID this path must never delete or retype it.
+        compose_calls = {"count": 0}
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                compose_calls["count"] += 1
+                self.assertIn("if (count of matchingDraftIdentities) is 1 then", script)
+                self.assertIn("if my headerHasExactRfcToken(item 2 of inReplyToResult, sourceMessageId)", script)
+                return _saved_reply_draft_output(to="native reply recipients")
+            if 'set targetDraftIdText to ""' in script:
+                return "BODY_MISSING|91061"
+            if "delete targetDraft" in script:
+                raise AssertionError("ambiguity must not trigger exact-id deletion")
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_BODY_MISMATCH")
+        self.assertFalse(payload["remediation"]["retyped"])
+        self.assertEqual(compose_calls["count"], 1)
+
+    def test_native_reply_retry_skipped_when_mismatch_artifact_differs_from_draft_id(self):
+        # Native identity capsules now suppress subject fallback entirely, but
+        # keep this parser-level defense: a malformed or unexpected verifier
+        # response whose artifact id differs from the capsule's Drafts id must
+        # never delete or retype any draft.
+        compose_calls = {"count": 0}
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                compose_calls["count"] += 1
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id="91061",
+                    draft_identity="91061|||<draft-91061@example.com>|||<source@example.com>",
+                )
+            if 'set targetDraftIdText to "91061"' in script:
+                return "BODY_MISSING|55555"
+            if "delete targetDraft" in script:
+                raise AssertionError("retry must not delete when artifact id differs from compose draft id")
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_BODY_MISMATCH")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "55555")
+        self.assertFalse(payload["remediation"]["retyped"])
+        self.assertEqual(compose_calls["count"], 1)
+
+    def test_native_reply_converts_tabs_to_spaces_before_temp_file_write(self):
+        # AGENTIC-1214 design amendment 7: a literal tab typed via System Events
+        # keystroke is a field-navigation key and can move focus out of the
+        # compose body field. The native path must convert tabs to spaces in
+        # reply_body before the body temp file (read by the AppleScript typing
+        # loop) is written.
+        captured_temp_writes = []
+
+        class _CapturingTempFile:
+            name = "/tmp/mail_reply_tab_test.txt"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def write(self, data):
+                captured_temp_writes.append(data)
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="91061")
+            if 'set targetDraftIdText to "91061"' in script:
+                return "FOUND|91061|not_requested|not_requested"
+            return "ok"
+
+        with (
+            patch(
+                "apple_mail_mcp.tools.compose.tempfile.NamedTemporaryFile",
+                return_value=_CapturingTempFile(),
+            ),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Line one\tLine two",
+            )
+
+        # The same NamedTemporaryFile patch also captures the verifier's own
+        # comparison temp file (saved_draft_checks.py writes the same already-
+        # converted reply_body for its "cat"-and-compare check), so every
+        # capture must show the converted, tab-free body.
+        self.assertTrue(captured_temp_writes)
+        for written in captured_temp_writes:
+            self.assertEqual(written, "Line one Line two")
+            self.assertNotIn("\t", written)
 
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):
         captured = []
@@ -3542,6 +4044,59 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
             cc_script,
             'make new cc recipient at end of cc recipients with properties {address:"one@example.com"}\n',
         )
+
+
+class NativeReplyEffectiveTimeoutTests(unittest.TestCase):
+    """AGENTIC-1214 defect 1: the timeout projection must include per-chunk
+    focus-recheck + keystroke overhead, not just the inter-chunk delay."""
+
+    def test_ten_thousand_char_body_projects_beyond_the_floor(self):
+        reply_body = "a" * 10_000
+        chunk_count = -(-len(reply_body) // compose_constants.TYPING_CHUNK_SIZE)
+        expected_projected_seconds = chunk_count * (
+            compose_constants.TYPING_INTER_CHUNK_DELAY + compose_constants.TYPING_PER_CHUNK_OVERHEAD_SECONDS
+        )
+        expected_timeout = max(
+            120,
+            int(
+                expected_projected_seconds
+                + reply_runner._NATIVE_TYPING_FIXED_OVERHEAD_SECONDS
+                + reply_runner._NATIVE_TYPING_SLACK_SECONDS
+            ),
+        )
+
+        effective_timeout, timeout_error = reply_runner._native_reply_effective_timeout(reply_body, None)
+
+        self.assertIsNone(timeout_error)
+        self.assertEqual(effective_timeout, expected_timeout)
+        self.assertGreater(effective_timeout, 120)
+
+    def test_body_above_projected_cap_is_still_refused(self):
+        # Above the documented cap, the tool must refuse up front rather than
+        # hand out a timeout that could still be exceeded mid-typing. Derive a
+        # body length that exceeds the cap under the new (larger) per-chunk
+        # cost instead of hardcoding a magic character count.
+        per_chunk_cost = (
+            compose_constants.TYPING_INTER_CHUNK_DELAY + compose_constants.TYPING_PER_CHUNK_OVERHEAD_SECONDS
+        )
+        chunks_to_exceed_cap = int(reply_runner._NATIVE_TYPING_MAX_PROJECTED_SECONDS // per_chunk_cost) + 2
+        reply_body = "a" * (chunks_to_exceed_cap * compose_constants.TYPING_CHUNK_SIZE)
+
+        effective_timeout, timeout_error = reply_runner._native_reply_effective_timeout(reply_body, None)
+
+        self.assertIsNone(effective_timeout)
+        self.assertIsNotNone(timeout_error)
+        payload = json.loads(timeout_error)
+        self.assertEqual(payload["code"], "REPLY_BODY_TYPING_BUDGET_EXCEEDED")
+        self.assertGreater(
+            payload["remediation"]["projected_typing_seconds"],
+            reply_runner._NATIVE_TYPING_MAX_PROJECTED_SECONDS,
+        )
+
+    def test_explicit_timeout_is_used_as_is(self):
+        effective_timeout, timeout_error = reply_runner._native_reply_effective_timeout("a" * 10_000, 45)
+        self.assertEqual(effective_timeout, 45)
+        self.assertIsNone(timeout_error)
 
 
 if __name__ == "__main__":

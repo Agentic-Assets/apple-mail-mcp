@@ -1,8 +1,26 @@
 """Pure helpers for Apple Mail Drafts verification payloads."""
 
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+_APPLE_QUOTE_ATTRIBUTION = re.compile(
+    r"(?<!\w)(?i:on)\s+"
+    r"(?i:(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+    r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|"
+    r"\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|"
+    r"\d{1,4}(?:[/-]\d{1,4}){1,2}))\b.{0,500}?\b(?i:wrote):"
+)
+_ORIGINAL_MESSAGE_SEPARATOR = re.compile(r"-----\s*original message\s*-----", re.IGNORECASE)
+_OUTLOOK_QUOTE_HEADERS = re.compile(
+    r"(?<!\w)(?i:from):\s+\S.{0,1000}?"
+    r"(?<!\w)(?i:sent|date):\s+\S.{0,1000}?"
+    r"(?<!\w)(?i:to|cc):\s+\S.{0,1000}?"
+    r"(?<!\w)(?i:subject):"
+)
 
 
 def _parse_expected_attachments(expected_attachments: str | list[str] | None) -> list[str]:
@@ -44,6 +62,27 @@ def _normalize_attachment_rows(raw_rows: str) -> list[dict[str, Any]]:
             size = None
         attachments.append({"filename": name, "size": size})
     return attachments
+
+
+def _body_above_quote(body_preview: str) -> tuple[str, bool]:
+    """Return the authored region before a reliable flattened quote boundary.
+
+    ``body_preview`` has already had line breaks flattened to spaces and is
+    capped at 5000 characters by the AppleScript verifier. Bare ``"wrote:"``
+    is therefore not enough to identify a quote: it can appear in ordinary
+    prose. Recognize only established Apple Mail attributions (``On <date>,
+    ... wrote:``), Outlook's structured header block, or its original-message
+    separator. If none is present, return the full preview so callers retain
+    whole-body behavior instead of rejecting valid authored text.
+    """
+    boundaries = [
+        match.start()
+        for pattern in (_APPLE_QUOTE_ATTRIBUTION, _ORIGINAL_MESSAGE_SEPARATOR, _OUTLOOK_QUOTE_HEADERS)
+        if (match := pattern.search(body_preview)) is not None
+    ]
+    if not boundaries:
+        return body_preview, False
+    return body_preview[: min(boundaries)], True
 
 
 def _build_source_resolution(
@@ -101,10 +140,16 @@ def _build_verify_draft_payload(
     warnings: list[str] = []
 
     body_contains_expected = None
+    body_needle_only_in_quote = False
     if expected_body_contains is not None:
-        body_contains_expected = expected_body_contains in body_preview
+        above_quote, has_quote_boundary = _body_above_quote(body_preview)
+        body_contains_expected = expected_body_contains in above_quote
         if not body_contains_expected:
-            warnings.append("expected_body_missing")
+            if has_quote_boundary and expected_body_contains in body_preview:
+                body_needle_only_in_quote = True
+                warnings.append("expected_body_only_in_quote")
+            else:
+                warnings.append("expected_body_missing")
 
     subject_matches = None
     if expected_subject is not None:
@@ -153,6 +198,7 @@ def _build_verify_draft_payload(
         "subject_matches_expected": subject_matches,
         "body_preview": body_preview,
         "body_contains_expected": body_contains_expected,
+        **({"body_needle_only_in_quote": True} if body_needle_only_in_quote else {}),
         "signature": {
             "requested": expected_signature,
             "detected_above_quote": signature_detected,

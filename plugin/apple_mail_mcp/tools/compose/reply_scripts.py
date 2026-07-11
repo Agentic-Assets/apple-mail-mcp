@@ -8,7 +8,14 @@ module without touching any I/O or patched name.
 from dataclasses import dataclass
 
 from apple_mail_mcp.core import inbox_mailbox_script
+from apple_mail_mcp.tools.compose.constants import TYPING_CHUNK_SIZE, TYPING_INTER_CHUNK_DELAY
 from apple_mail_mcp.tools.compose.lookup_scripts import _compose_signature_script
+from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
+    _native_reply_draft_resolver_handlers_applescript,
+    _native_reply_draft_resolver_script,
+    _native_reply_draft_resolver_setup_script,
+)
+from apple_mail_mcp.tools.compose.typing_scripts import build_chunked_typing_handler
 
 
 @dataclass(frozen=True)
@@ -208,25 +215,28 @@ tell application "Mail"
 def _native_reply_post_action(mode: str) -> str:
     """Return the post-keystroke Mail action for the windowed native reply path.
 
-    draft: save, then close the reply window quietly (one draft remains; the
-    auto-created shell is reused by ``save``, so no dedupe is needed). open: save
-    and leave the window up for review. send: send (the window closes itself).
+    draft: save; the caller resolves a persisted Drafts ID and then closes the
+    reply window quietly (one draft remains; the auto-created shell is reused
+    by ``save``, so no dedupe is needed). open: save and leave the window up
+    for review. send: send (the window closes itself).
     """
     if mode == "send":
         return "send replyMessage\n        delay 0.5"
     if mode == "open":
         return "save replyMessage\n        delay 0.8\n        activate"
-    return (
-        "save replyMessage\n"
-        "        delay 1.0\n"
-        "        try\n"
-        "            close (every window whose name is replySubject) saving no\n"
-        "        end try\n"
-        "        try\n"
-        "            if derivedReplySubject is not replySubject then "
-        "close (every window whose name is derivedReplySubject) saving no\n"
-        "        end try"
-    )
+    return "save replyMessage\n        delay 1.0"
+
+
+def _native_reply_draft_window_close_script() -> str:
+    """Return the quiet close used only after native Drafts resolution."""
+    return """
+        try
+            close (every window whose name is replySubject) saving no
+        end try
+        try
+            if derivedReplySubject is not replySubject then close (every window whose name is derivedReplySubject) saving no
+        end try
+    """
 
 
 def _native_reply_subject_helpers_applescript() -> str:
@@ -322,8 +332,12 @@ def _build_reply_native_window_applescript(
     (with logo). Those exist only in the rendered compose window, never in the
     dictionary ``content``, so this path NEVER reassigns ``content`` (doing so
     flattens them — the prior bug). Instead the reply body is inserted with a
-    TYPED System Events keystroke (never the clipboard, which clobbered the
-    pasteboard and leaked bodies into the wrong thread).
+    TYPED System Events keystroke, in small focus-guarded chunks rather than one
+    keystroke of the whole body (AGENTIC-1214: a single keystroke of the whole
+    body drops its tail near 320-480 chars and can leak shift state into ALL
+    CAPS output; see ``typing_scripts.build_chunked_typing_handler``). Never the
+    clipboard, which clobbered the pasteboard and leaked bodies into the wrong
+    thread in two prior live reverts.
 
     UI scripting is isolated to the focus guard + keystroke and is unavoidable
     here: the native rich format cannot be expressed through the Mail dictionary.
@@ -332,9 +346,13 @@ def _build_reply_native_window_applescript(
     Re:/Fwd: prefixes). The keystroke itself still requires exact title equality
     against that adopted ``replySubject``. An empty System Events title is
     tolerated (AX quirk); a different non-empty SE title aborts without typing.
-    Requires Accessibility permission for the host process; callers that cannot
-    grant it must stop and report the blocker; the ``native_format=False`` path
-    is gated behind ``allow_windowless_fallback``.
+    The same exact-title-or-empty check runs again before EVERY chunk (not just
+    once before the loop), so a focus loss mid-typing aborts immediately instead
+    of leaking chunks into whatever now holds focus; the abort discards the
+    partially typed compose window (``close ... saving no``) so no partial draft
+    is ever left behind. Requires Accessibility permission for the host process;
+    callers that cannot grant it must stop and report the blocker; the
+    ``native_format=False`` path is gated behind ``allow_windowless_fallback``.
     """
     extra_output_lines = _reply_extra_output_lines(
         safe_cc=safe_cc,
@@ -345,15 +363,28 @@ def _build_reply_native_window_applescript(
         has_attachments=has_attachments,
     )
     post_action = _native_reply_post_action(mode)
+    draft_resolver_handlers = _native_reply_draft_resolver_handlers_applescript()
+    draft_resolver_setup_script = _native_reply_draft_resolver_setup_script() if mode != "send" else ""
+    draft_resolver_script = _native_reply_draft_resolver_script() if mode != "send" else ""
+    draft_window_close_script = _native_reply_draft_window_close_script() if mode == "draft" else ""
     subject_helpers = _native_reply_subject_helpers_applescript()
+    typing_handler = build_chunked_typing_handler(
+        chunk_size=TYPING_CHUNK_SIZE,
+        inter_chunk_delay=TYPING_INTER_CHUNK_DELAY,
+    )
     return f'''
 {subject_helpers}
+{typing_handler}
+{draft_resolver_handlers}
 set bodyTempPath to "{body_temp_path}"
 set derivedReplySubject to ""
 set replySubject to ""
 set replyMessage to missing value
+set replyDraftId to ""
+set replyDraftRfcMessageId to ""
 set quotedNeedle to ""
 set didType to false
+set typingInterruptedDetail to ""
 set guardMail to "(unset)"
 set guardSE to "(unset)"
 
@@ -367,6 +398,8 @@ try
             {cleanup_script}
             return "{not_found_message}"
         end if
+
+        {draft_resolver_setup_script}
 
         set sourceSubject to subject of foundMessage as string
         if sourceSubject starts with "Re:" or sourceSubject starts with "RE:" or sourceSubject starts with "re:" then
@@ -465,22 +498,28 @@ try
             set mailOk to (guardMail is replySubject)
             set seOk to (guardSE is replySubject or guardSE is "" or guardSE is "(unset)")
             if mailOk and seOk then
-                tell application "System Events"
-                    tell process "Mail"
-                        keystroke replyBodyText
-                    end tell
-                end tell
-                set didType to true
+                set typeChunksResult to my typeReplyBodyChunks(replyBodyText, replySubject, derivedReplySubject)
+                if typeChunksResult is "typed" then
+                    set didType to true
+                else
+                    set typingInterruptedDetail to typeChunksResult
+                end if
                 exit repeat
             end if
             delay 0.5
         end repeat
 
         if didType is false then
-            -- Distinguish true focus loss (Inbox / other app window) from a reply
-            -- window whose title still does not core-match the expected subject.
+            -- Distinguish a mid-typing focus loss (chunked keystroke aborted
+            -- partway through) from a pre-typing focus failure: true focus loss
+            -- (Inbox / other app window) vs. a reply window whose title still
+            -- does not core-match the expected subject.
+            set abortDetailText to "could not focus reply window"
             set abortCode to "GUARD_ABORT"
-            if guardMail is not "(unset)" and guardMail is not "" then
+            if typingInterruptedDetail is not "" then
+                set abortCode to "TYPING_INTERRUPTED"
+                set abortDetailText to typingInterruptedDetail
+            else if guardMail is not "(unset)" and guardMail is not "" then
                 if (my subjectCoresMatch(guardMail, derivedReplySubject)) is false then
                     if my looksLikeReplyWindowTitle(guardMail) then
                         set abortCode to "GUARD_ABORT_SUBJECT"
@@ -498,7 +537,7 @@ try
                 end try
                 {cleanup_script}
             end tell
-            return abortCode & return & "Subject: " & replySubject & return & "DerivedSubject: " & derivedReplySubject & return & "Detail: could not focus reply window (mailFront=" & guardMail & " seFront=" & guardSE & ")"
+            return abortCode & return & "Subject: " & replySubject & return & "DerivedSubject: " & derivedReplySubject & return & "Detail: " & abortDetailText & " (mailFront=" & guardMail & " seFront=" & guardSE & ")"
         end if
         set quotedNeedle to "wrote:"
     end if
@@ -507,10 +546,21 @@ try
     tell application "Mail"
         {post_action}
 
+        -- Mail's outgoing-message ID is not a Drafts ID on every account.
+        -- Resolve only a uniquely new, header-linked persisted Drafts message
+        -- from a complete bounded snapshot. Ambiguity, cap truncation, indexing
+        -- lag, or an AppleScript failure leaves this empty, which disables the
+        -- exact-ID-only delete/retype path safely.
+        {draft_resolver_script}
+
+        {draft_window_close_script}
+
         set outputText to "{header_text}" & return & return
         set outputText to outputText & "{success_text}" & return
         set outputText to outputText & "To: native reply recipients" & return
         set outputText to outputText & "Subject: " & replySubject & return
+        if replyDraftId is not "" then set outputText to outputText & "Draft ID: " & replyDraftId & return
+        if replyDraftId is not "" then set outputText to outputText & "Draft Identity: " & replyDraftId & "|||" & replyDraftRfcMessageId & "|||" & sourceRfcMessageId & return
         if quotedNeedle is not "" then set outputText to outputText & "Quote Needle: " & quotedNeedle & return
         {extra_output_lines}
 
