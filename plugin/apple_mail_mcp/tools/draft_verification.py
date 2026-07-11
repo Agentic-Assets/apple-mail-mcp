@@ -46,6 +46,27 @@ def _normalize_attachment_rows(raw_rows: str) -> list[dict[str, Any]]:
     return attachments
 
 
+def _body_above_quote(body_preview: str) -> tuple[str, bool]:
+    """Split ``body_preview`` at the earliest quote-attribution boundary.
+
+    Returns ``(region, has_quote_boundary)``. The boundary is the first
+    occurrence of the bare substring ``"wrote:"`` in ``body_preview``, the
+    same needle the internal saved-draft verifier uses (see
+    ``saved_draft_checks.py``'s ``quoted_needle="wrote:"``). ``body_preview``
+    has already had its line breaks flattened to single spaces and been
+    truncated to 5000 characters by the AppleScript verifier before this
+    function ever sees it, so there is no per-line text to match against;
+    this looks for the needle anywhere in the flattened string and never
+    fetches more text than it was given. When no boundary is found, the
+    full ``body_preview`` is returned unchanged with ``has_quote_boundary``
+    ``False`` so callers can fall back to whole-body semantics.
+    """
+    boundary = body_preview.find("wrote:")
+    if boundary == -1:
+        return body_preview, False
+    return body_preview[:boundary], True
+
+
 def _build_source_resolution(
     in_reply_to: str,
     resolve_recent_days: float,
@@ -101,10 +122,17 @@ def _build_verify_draft_payload(
     warnings: list[str] = []
 
     body_contains_expected = None
+    body_needle_only_in_quote = False
     if expected_body_contains is not None:
-        body_contains_expected = expected_body_contains in body_preview
+        above_quote, has_quote_boundary = _body_above_quote(body_preview)
+        search_region = above_quote if has_quote_boundary else body_preview
+        body_contains_expected = expected_body_contains in search_region
         if not body_contains_expected:
-            warnings.append("expected_body_missing")
+            if has_quote_boundary and expected_body_contains in body_preview:
+                body_needle_only_in_quote = True
+                warnings.append("expected_body_only_in_quote")
+            else:
+                warnings.append("expected_body_missing")
 
     subject_matches = None
     if expected_subject is not None:
@@ -153,6 +181,7 @@ def _build_verify_draft_payload(
         "subject_matches_expected": subject_matches,
         "body_preview": body_preview,
         "body_contains_expected": body_contains_expected,
+        **({"body_needle_only_in_quote": True} if body_needle_only_in_quote else {}),
         "signature": {
             "requested": expected_signature,
             "detected_above_quote": signature_detected,

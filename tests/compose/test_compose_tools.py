@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import compose as compose_tools
+from apple_mail_mcp.tools.compose import constants as compose_constants
+from apple_mail_mcp.tools.compose import reply_runner
 
 
 def _make_subprocess_result(returncode=0, stdout=b"", stderr=b""):
@@ -2439,6 +2441,37 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("repeat with stripChar in {return, linefeed, tab, space, (character id 160)}", verifier_script)
         self.assertNotIn("on stripLineBreaks(theText)", verifier_script)
 
+    def test_native_reply_verifier_folds_sentence_starts_with_delimiter_split_not_character_walk(self):
+        # AGENTIC-1214 perf fix: foldSentenceStarts used to walk the whole
+        # draft body character-by-character (a handler call plus a string
+        # reallocation per character), which is O(n^2) and could burn the
+        # verifier's timeout on long quoted-thread drafts. It now splits on
+        # each sentence delimiter via AppleScript's text item delimiters and
+        # only rewrites the first character of each following item, so cost
+        # tracks sentence count, not text length.
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "FOUND|84053|not_requested|not_requested"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id="84053",
+            )
+
+        verifier_script = captured[0]
+        self.assertIn("on foldFirstChar(theString)", verifier_script)
+        self.assertIn('repeat with delimiterChar in {".", "!", "?"}', verifier_script)
+        self.assertNotIn("repeat with i from 1 to n", verifier_script)
+        self.assertNotIn("set foldNext to true", verifier_script)
+
     def test_native_reply_full_body_verifier_is_case_sensitive_and_above_quote(self):
         # AGENTIC-1214: the saved-reply verifier compares the full body above the
         # quote, case-sensitively, from a temp file (not a first-line needle).
@@ -2632,6 +2665,92 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
         self.assertIn("Mail did not verify it", result)
         self.assertEqual(compose_calls["count"], 1)
+
+    def test_native_reply_retry_skipped_when_mismatch_artifact_differs_from_draft_id(self):
+        # AGENTIC-1214 defect 2: the verifier's subject-scan fallback can report
+        # a mismatching artifact id that is NOT the draft Mail just created for
+        # this compose call (e.g. a pre-existing same-subject draft surfaced
+        # under Exchange eventual-consistency lag). The retry must only ever
+        # delete an artifact whose id matches the compose-reported draft_id, so
+        # when the verifier's reported id (55555) differs from draft_id
+        # (91061), no delete/retype may happen and the normal REPLY_BODY_MISMATCH
+        # failure (naming the suspect id) must be returned instead.
+        compose_calls = {"count": 0}
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                compose_calls["count"] += 1
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="91061")
+            if 'set targetDraftIdText to "91061"' in script:
+                return "BODY_MISSING|55555"
+            if "delete (item 1 of targetDrafts)" in script:
+                raise AssertionError("retry must not delete when artifact id differs from compose draft id")
+            return "ok"
+
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=fake_run,
+        ):
+            result = compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Reply body",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_BODY_MISMATCH")
+        self.assertEqual(payload["remediation"]["artifact_message_id"], "55555")
+        self.assertFalse(payload["remediation"]["retyped"])
+        self.assertEqual(compose_calls["count"], 1)
+
+    def test_native_reply_converts_tabs_to_spaces_before_temp_file_write(self):
+        # AGENTIC-1214 design amendment 7: a literal tab typed via System Events
+        # keystroke is a field-navigation key and can move focus out of the
+        # compose body field. The native path must convert tabs to spaces in
+        # reply_body before the body temp file (read by the AppleScript typing
+        # loop) is written.
+        captured_temp_writes = []
+
+        class _CapturingTempFile:
+            name = "/tmp/mail_reply_tab_test.txt"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def write(self, data):
+                captured_temp_writes.append(data)
+
+        def fake_run(script, timeout=120):
+            if "reply foundMessage" in script:
+                return _saved_reply_draft_output(to="native reply recipients", draft_id="91061")
+            if 'set targetDraftIdText to "91061"' in script:
+                return "FOUND|91061|not_requested|not_requested"
+            return "ok"
+
+        with (
+            patch(
+                "apple_mail_mcp.tools.compose.tempfile.NamedTemporaryFile",
+                return_value=_CapturingTempFile(),
+            ),
+            patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run),
+        ):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="12345",
+                reply_body="Line one\tLine two",
+            )
+
+        # The same NamedTemporaryFile patch also captures the verifier's own
+        # comparison temp file (saved_draft_checks.py writes the same already-
+        # converted reply_body for its "cat"-and-compare check), so every
+        # capture must show the converted, tab-free body.
+        self.assertTrue(captured_temp_writes)
+        for written in captured_temp_writes:
+            self.assertEqual(written, "Line one Line two")
+            self.assertNotIn("\t", written)
 
     def test_invalid_reply_signature_is_rejected_before_native_reply(self):
         captured = []
@@ -3780,6 +3899,59 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
             cc_script,
             'make new cc recipient at end of cc recipients with properties {address:"one@example.com"}\n',
         )
+
+
+class NativeReplyEffectiveTimeoutTests(unittest.TestCase):
+    """AGENTIC-1214 defect 1: the timeout projection must include per-chunk
+    focus-recheck + keystroke overhead, not just the inter-chunk delay."""
+
+    def test_ten_thousand_char_body_projects_beyond_the_floor(self):
+        reply_body = "a" * 10_000
+        chunk_count = -(-len(reply_body) // compose_constants.TYPING_CHUNK_SIZE)
+        expected_projected_seconds = chunk_count * (
+            compose_constants.TYPING_INTER_CHUNK_DELAY + compose_constants.TYPING_PER_CHUNK_OVERHEAD_SECONDS
+        )
+        expected_timeout = max(
+            120,
+            int(
+                expected_projected_seconds
+                + reply_runner._NATIVE_TYPING_FIXED_OVERHEAD_SECONDS
+                + reply_runner._NATIVE_TYPING_SLACK_SECONDS
+            ),
+        )
+
+        effective_timeout, timeout_error = reply_runner._native_reply_effective_timeout(reply_body, None)
+
+        self.assertIsNone(timeout_error)
+        self.assertEqual(effective_timeout, expected_timeout)
+        self.assertGreater(effective_timeout, 120)
+
+    def test_body_above_projected_cap_is_still_refused(self):
+        # Above the documented cap, the tool must refuse up front rather than
+        # hand out a timeout that could still be exceeded mid-typing. Derive a
+        # body length that exceeds the cap under the new (larger) per-chunk
+        # cost instead of hardcoding a magic character count.
+        per_chunk_cost = (
+            compose_constants.TYPING_INTER_CHUNK_DELAY + compose_constants.TYPING_PER_CHUNK_OVERHEAD_SECONDS
+        )
+        chunks_to_exceed_cap = int(reply_runner._NATIVE_TYPING_MAX_PROJECTED_SECONDS // per_chunk_cost) + 2
+        reply_body = "a" * (chunks_to_exceed_cap * compose_constants.TYPING_CHUNK_SIZE)
+
+        effective_timeout, timeout_error = reply_runner._native_reply_effective_timeout(reply_body, None)
+
+        self.assertIsNone(effective_timeout)
+        self.assertIsNotNone(timeout_error)
+        payload = json.loads(timeout_error)
+        self.assertEqual(payload["code"], "REPLY_BODY_TYPING_BUDGET_EXCEEDED")
+        self.assertGreater(
+            payload["remediation"]["projected_typing_seconds"],
+            reply_runner._NATIVE_TYPING_MAX_PROJECTED_SECONDS,
+        )
+
+    def test_explicit_timeout_is_used_as_is(self):
+        effective_timeout, timeout_error = reply_runner._native_reply_effective_timeout("a" * 10_000, 45)
+        self.assertEqual(effective_timeout, 45)
+        self.assertIsNone(timeout_error)
 
 
 if __name__ == "__main__":

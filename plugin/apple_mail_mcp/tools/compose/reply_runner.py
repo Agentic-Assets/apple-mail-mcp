@@ -13,7 +13,11 @@ compose attempt and a retype attempt.
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.core import escape_applescript, normalize_message_ids
 from apple_mail_mcp.tools import compose
-from apple_mail_mcp.tools.compose.constants import TYPING_CHUNK_SIZE, TYPING_INTER_CHUNK_DELAY
+from apple_mail_mcp.tools.compose.constants import (
+    TYPING_CHUNK_SIZE,
+    TYPING_INTER_CHUNK_DELAY,
+    TYPING_PER_CHUNK_OVERHEAD_SECONDS,
+)
 from apple_mail_mcp.tools.compose.saved_draft_checks import _verify_saved_reply_draft
 from apple_mail_mcp.tools.compose.verification import _extract_output_field
 
@@ -37,17 +41,18 @@ def _native_reply_effective_timeout(reply_body: str, timeout: int | None) -> tup
 
     An explicit ``timeout`` from the caller is used as-is (returned unchanged,
     with no error). When ``timeout`` is ``None``, the effective timeout scales
-    with the projected chunk-typing duration (chunk count x inter-chunk delay)
-    plus fixed overhead and slack, floored at the standard 120s. Bodies whose
-    projected typing time exceeds the documented cap are refused with a
-    structured error naming the ``timeout`` parameter rather than handed a
-    timeout that ``AppleScriptTimeout`` could fire mid-typing.
+    with the projected chunk-typing duration (chunk count x (inter-chunk delay
+    + per-chunk focus/keystroke overhead)) plus fixed overhead and slack,
+    floored at the standard 120s. Bodies whose projected typing time exceeds
+    the documented cap are refused with a structured error naming the
+    ``timeout`` parameter rather than handed a timeout that
+    ``AppleScriptTimeout`` could fire mid-typing.
     """
     if timeout is not None:
         return timeout, None
     body_length = len(reply_body)
     chunk_count = -(-body_length // TYPING_CHUNK_SIZE) if body_length else 0
-    projected_seconds = chunk_count * TYPING_INTER_CHUNK_DELAY
+    projected_seconds = chunk_count * (TYPING_INTER_CHUNK_DELAY + TYPING_PER_CHUNK_OVERHEAD_SECONDS)
     if projected_seconds > _NATIVE_TYPING_MAX_PROJECTED_SECONDS:
         return None, serialize_tool_error(
             ToolError(

@@ -125,6 +125,16 @@ def _verify_saved_reply_draft(
         return ch
     end lowercaseChar
 
+    on foldFirstChar(theString)
+        -- ASCII-lowercases the first character of theString and leaves the
+        -- rest untouched. Guarded for empty and single-character input so
+        -- "text 2 thru -1 of" never runs off the end of a short string.
+        set stringLength to count of characters of theString
+        if stringLength is 0 then return theString
+        if stringLength is 1 then return my lowercaseChar(theString)
+        return (my lowercaseChar(character 1 of theString)) & (text 2 thru -1 of theString)
+    end foldFirstChar
+
     on foldSentenceStarts(theText)
         -- Neutralizes macOS "Capitalize words automatically" at sentence starts
         -- (text start and immediately after ".", "!", "?") on BOTH compare sides,
@@ -132,20 +142,32 @@ def _verify_saved_reply_draft(
         -- (Bug 3) still fails: this only folds the first letter of each
         -- sentence, not every letter, so the rest of an ALL-CAPS sentence stays
         -- mismatched against the source's normal case.
-        set n to count of characters of theText
-        if n is 0 then return theText
-        set resultText to ""
-        set foldNext to true
-        repeat with i from 1 to n
-            set ch to character i of theText
-            if foldNext then set ch to my lowercaseChar(ch)
-            set resultText to resultText & ch
-            if ch is "." or ch is "!" or ch is "?" then
-                set foldNext to true
-            else
-                set foldNext to false
+        --
+        -- O(number of sentence delimiters), not O(characters): the old
+        -- per-character loop called a handler and reallocated the result
+        -- string on every single character, which is O(n^2) on
+        -- AppleScript's copy-on-append strings. Real Exchange drafts carry
+        -- long quoted thread histories (tens of KB), so that walk could burn
+        -- the whole verifier timeout on one candidate draft, surfacing a real
+        -- body mismatch (AGENTIC-1214) as a timeout instead. This version
+        -- text-item-delimiter-splits on each of ".", "!", "?" in turn and only
+        -- rewrites the first character of the (few) items that follow a
+        -- delimiter, so cost tracks sentence count, not text length.
+        if theText is "" then return theText
+        set resultText to my foldFirstChar(theText)
+        set previousDelimiters to AppleScript's text item delimiters
+        repeat with delimiterChar in {{".", "!", "?"}}
+            set AppleScript's text item delimiters to (contents of delimiterChar)
+            set theParts to text items of resultText
+            set partCount to count of theParts
+            if partCount > 1 then
+                repeat with partIndex from 2 to partCount
+                    set item partIndex of theParts to my foldFirstChar(item partIndex of theParts)
+                end repeat
+                set resultText to theParts as string
             end if
         end repeat
+        set AppleScript's text item delimiters to previousDelimiters
         return resultText
     end foldSentenceStarts
 
@@ -157,6 +179,7 @@ def _verify_saved_reply_draft(
         -- substitution, and neutralizes sentence-start capitalization. Case is
         -- preserved everywhere else, so an ALL-CAPS draft still fails the
         -- case-sensitive compare in replyBodyAboveQuoteStatus.
+        if theText is "" then return theText
         set t to theText as string
         repeat with stripChar in {{return, linefeed, tab, space, (character id 160)}}
             set t to my foldPair(t, (contents of stripChar), "")

@@ -100,6 +100,17 @@ def verify_draft(
     readiness decisions.
 
     Args:
+        expected_body_contains: Checked against the body ABOVE the quoted
+            original only, when a quote boundary (the first ``"wrote:"`` in
+            the body preview) is present. A needle that appears only inside
+            the quoted original below that boundary sets
+            ``body_contains_expected=False`` and adds
+            ``body_needle_only_in_quote=True`` to the JSON payload, so a
+            reply whose new text was truncated cannot false-pass this check
+            just because the quoted thread happens to contain the phrase.
+            When no quote boundary is present, the full body preview (already
+            newline-flattened and capped at 5000 characters) is checked, same
+            as before.
         resolve_source: When True and the draft has a non-empty In-Reply-To
             header, resolve that header back to the SOURCE Inbox message's
             numeric id, subject, sender, and received date via one bounded
@@ -285,7 +296,10 @@ def verify_drafts(
     ``resolve_source=True`` (see ``verify_draft`` for the resolution
     semantics and the honest ``not_found_in_window`` / ``no_in_reply_to_header``
     reasons). Default ``resolve_source=False`` preserves the exact prior
-    per-draft payload shape (no ``source`` key at all).
+    per-draft payload shape (no ``source`` key at all). Each item's
+    ``expected_body_contains`` check reuses ``verify_draft``'s above-quote
+    scoping, including the optional ``body_needle_only_in_quote`` field (see
+    ``verify_draft`` for the exact semantics).
     """
     account, account_error = _resolve_account(account, timeout=timeout)
     if account_error:

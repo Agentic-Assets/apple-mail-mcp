@@ -1,4 +1,5 @@
 from apple_mail_mcp.tools.draft_verification import (
+    _body_above_quote,
     _build_verify_draft_payload,
     _csv_contains_all,
     _normalize_attachment_rows,
@@ -99,6 +100,99 @@ def test_build_verify_draft_payload_reports_unexpected_signature_and_quote():
     assert payload["attachments"]["status"] == "not_requested"
     assert payload["checks"]["to_matches_expected"] is None
     assert payload["warnings"] == ["signature_unexpected", "quoted_original_unexpected"]
+
+
+def test_body_above_quote_splits_at_first_wrote_occurrence():
+    region, has_boundary = _body_above_quote("New text here. On Monday, Ann wrote: old text also wrote: again")
+
+    assert has_boundary is True
+    assert region == "New text here. On Monday, Ann "
+
+
+def test_body_above_quote_returns_full_text_when_no_boundary_present():
+    region, has_boundary = _body_above_quote("No attribution marker in this body at all")
+
+    assert has_boundary is False
+    assert region == "No attribution marker in this body at all"
+
+
+def _base_payload_kwargs(*, body_preview: str, expected_body_contains: str) -> dict:
+    return {
+        "numeric_id": "1",
+        "subject": "Subject",
+        "to_recips": "to@example.com",
+        "cc_recips": "",
+        "bcc_recips": "",
+        "body_preview": body_preview,
+        "in_reply_to": "",
+        "references": "",
+        "quoted_text": "true",
+        "signature_text": "false",
+        "attachment_rows": "",
+        "expected_to_values": [],
+        "expected_cc_values": [],
+        "expected_subject": None,
+        "expected_body_contains": expected_body_contains,
+        "expected_attachment_names": [],
+        "expected_signature": None,
+        "require_quoted_original": None,
+    }
+
+
+def test_build_verify_draft_payload_body_needle_found_above_quote_boundary():
+    # "confirmed" appears both above and inside the quote; found-above wins.
+    payload = _build_verify_draft_payload(
+        **_base_payload_kwargs(
+            body_preview="Thanks, confirmed for Tuesday. On Monday, Ann wrote: confirmed the original plan",
+            expected_body_contains="confirmed",
+        )
+    )
+
+    assert payload["body_contains_expected"] is True
+    assert "body_needle_only_in_quote" not in payload
+    assert payload["warnings"] == []
+
+
+def test_build_verify_draft_payload_body_needle_only_in_quote_is_false_pass():
+    # Regression for AGENTIC-1192 item 2: a needle that only appears inside
+    # the quoted original must not pass verification for the new reply text.
+    payload = _build_verify_draft_payload(
+        **_base_payload_kwargs(
+            body_preview="Thanks, see you then. On Monday, Ann wrote: let's meet at noon tomorrow",
+            expected_body_contains="meet at noon",
+        )
+    )
+
+    assert payload["body_contains_expected"] is False
+    assert payload["body_needle_only_in_quote"] is True
+    assert payload["warnings"] == ["expected_body_only_in_quote"]
+    assert "expected_body_missing" not in payload["warnings"]
+
+
+def test_build_verify_draft_payload_body_needle_uses_full_body_when_no_quote_boundary():
+    payload = _build_verify_draft_payload(
+        **_base_payload_kwargs(
+            body_preview="Just a quick note with no quoted original at all",
+            expected_body_contains="quick note",
+        )
+    )
+
+    assert payload["body_contains_expected"] is True
+    assert "body_needle_only_in_quote" not in payload
+    assert payload["warnings"] == []
+
+
+def test_build_verify_draft_payload_body_needle_missing_entirely_unchanged():
+    payload = _build_verify_draft_payload(
+        **_base_payload_kwargs(
+            body_preview="Thanks, see you then. On Monday, Ann wrote: let's meet at noon tomorrow",
+            expected_body_contains="totally absent phrase",
+        )
+    )
+
+    assert payload["body_contains_expected"] is False
+    assert "body_needle_only_in_quote" not in payload
+    assert payload["warnings"] == ["expected_body_missing"]
 
 
 def test_build_verify_draft_payload_requires_multiset_attachment_counts():

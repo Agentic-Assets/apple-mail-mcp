@@ -5,6 +5,11 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.11.1 - 2026-07-10
+
+AGENTIC-1214 reply drafting correctness: chunked native typing, full-body
+draft verification, and honest threading contracts.
+
 ### Fixed
 
 - **AGENTIC-1214: `reply_to_email` native reply body no longer truncates or
@@ -66,6 +71,33 @@ here. The plugin/MCPB/marketplace versions track this file.
   `action="list"` calls with zero writes in between) and are not a stable
   handle across turns; `action="find"` with `in_reply_to` is the durable
   handle for a reply draft.
+- **Native typing timeout projection now models per-chunk overhead.** The
+  scaled AppleScript timeout accounts for the per-chunk focus re-check and
+  keystroke cost (`TYPING_PER_CHUNK_OVERHEAD_SECONDS`), not just the
+  inter-chunk delay, so long reply bodies no longer risk `AppleScriptTimeout`
+  killing osascript mid-typing and stranding a partially typed compose window.
+- **The automatic retype never deletes a draft that is not provably ours.**
+  The delete-and-retype retry now requires the verifier's mismatch artifact id
+  to equal the draft id Mail itself returned for this compose call; under
+  Exchange eventual-consistency lag the subject-scan fallback could otherwise
+  name a pre-existing same-subject draft the user wrote, and the retry would
+  have deleted it. When ids differ, the tool returns `REPLY_BODY_MISMATCH`
+  naming the suspect id and deletes nothing.
+- **Tab characters in `reply_body` are converted to spaces on the native typed
+  path.** A typed tab is a field-navigation key that can move focus out of the
+  compose body mid-draft; the conversion happens before the body temp file is
+  written and is compare-neutral in verification (which flattens all
+  whitespace on both sides).
+- **The reply-draft verifier's sentence-start case fold now scales with
+  sentence count instead of body length.** The previous per-character
+  AppleScript walk was quadratic over the full draft content, so replies on
+  long quoted threads could exhaust the verification timeout and mask real
+  body mismatches as `verification_timeout`.
+- **AGENTIC-1192 item 2: `verify_draft` / `verify_drafts` no longer false-pass
+  `expected_body_contains` on quoted text.** The needle is now scoped to the
+  reply body above the first quote boundary; when it appears only inside the
+  quoted original the payload carries `body_needle_only_in_quote: true` and an
+  `expected_body_only_in_quote` warning instead of a pass.
 
 ## 3.11.0 - 2026-07-10
 

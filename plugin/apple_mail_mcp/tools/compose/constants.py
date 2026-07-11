@@ -33,3 +33,10 @@ MAX_OPEN_COMPOSE_WINDOWS = 5
 # generated AppleScript.
 TYPING_CHUNK_SIZE: Final[int] = 80
 TYPING_INTER_CHUNK_DELAY: Final[float] = 0.35
+# Additional per-chunk cost the inter-chunk delay alone does not capture: the
+# per-chunk focus re-check (two System Events "tell" blocks, each wrapped in a
+# try, roughly 0.3-0.5s together) plus the keystroke call itself. The timeout
+# projection in reply_runner.py multiplies this by chunk_count alongside
+# TYPING_INTER_CHUNK_DELAY so a long body cannot project under its real typing
+# time and get killed by AppleScriptTimeout mid-typing.
+TYPING_PER_CHUNK_OVERHEAD_SECONDS: Final[float] = 0.65

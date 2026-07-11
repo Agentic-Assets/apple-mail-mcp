@@ -209,6 +209,19 @@ def reply_to_email(
     # replies use Mail's native reply composer so quoted chains preserve Mail's
     # normal formatting; reply_body is inserted as plain text above that quote.
 
+    if native_format:
+        # A literal tab is a field-navigation key under System Events keystroke
+        # typing: it can move focus out of the compose body (e.g. into the
+        # subject field), corrupting the draft. Convert before anything reads
+        # reply_body downstream (the temp file write below, the retry rewrite
+        # at the bottom of the verification loop, and verification itself all
+        # reuse this same variable), so one conversion covers every use. The
+        # saved-draft verifier strips all whitespace, including tabs and
+        # spaces, before comparing, so this cannot cause a verification
+        # mismatch. The object-model path assigns content directly and never
+        # goes through keystroke typing, so it is left untouched.
+        reply_body = reply_body.replace("\t", " ")
+
     try:
         sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
     except AppleScriptTimeout:
@@ -421,7 +434,23 @@ def reply_to_email(
 
             artifact_id = verification.body_missing_artifact_id
             placement_fail = verification.status in ("body_missing", "body_after_quote")
-            can_retry = native_format and attempt == 0 and placement_fail and bool(artifact_id)
+            # Invariant: this tool only ever deletes a Drafts artifact whose id
+            # Mail itself returned for this compose call (draft_id, extracted
+            # from Mail's own compose output). The verifier's subject-scan
+            # fallback records the FIRST mismatching same-subject draft seen
+            # across up to 20 eventual-consistency attempts, so under Exchange
+            # materialization lag that id can belong to a pre-existing draft
+            # the user wrote on the same thread. Requiring artifact_id to equal
+            # draft_id keeps the delete-and-retype retry from ever touching a
+            # draft Mail did not just create for us.
+            can_retry = (
+                native_format
+                and attempt == 0
+                and placement_fail
+                and bool(artifact_id)
+                and bool(draft_id)
+                and artifact_id == draft_id
+            )
             if not can_retry:
                 return _reply_verification_failure_response(
                     verification,
