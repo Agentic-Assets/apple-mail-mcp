@@ -7,6 +7,8 @@ single edit retunes every tool; tests assert the literal ``"items 1 thru 100"`` 
 coordinated updates in ``tests/test_phase_2_scan_hardening.py``.
 """
 
+from typing import Final
+
 from apple_mail_mcp.constants import SCAN_BOUNDS
 
 DRAFT_LIST_CAP = SCAN_BOUNDS["DRAFT_LOOKUP"]
@@ -18,3 +20,16 @@ _MESSAGE_ID_REQUIRED_ERROR = (
 # mode="open" is used. Each call in mode="open" leaves a window open; at high
 # counts NSWindowServer OOMs. Agents doing bulk drafting must use mode="draft".
 MAX_OPEN_COMPOSE_WINDOWS = 5
+
+# System Events keystroke throughput bounds for the native reply typed path
+# (AGENTIC-1214). A single keystroke of the whole reply_body drops its tail
+# near 320-480 chars (Bug 1) and can leak shift-state into ALL CAPS (Bug 3).
+# Typing in small chunks with a settle delay keeps up with Mail's WebKit
+# compose editor, and clearing modifier state between chunks resets any
+# leaked shift state. TYPING_CHUNK_SIZE is well below the observed truncation
+# floor; both values are empirically tunable against Mail on the host (the
+# live-verification agent may retune them). Typed ``Final`` constants (not a
+# mixed-type dict) so mypy --strict keeps ``chunk_size`` an int in the
+# generated AppleScript.
+TYPING_CHUNK_SIZE: Final[int] = 80
+TYPING_INTER_CHUNK_DELAY: Final[float] = 0.35

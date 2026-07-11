@@ -119,8 +119,15 @@ def _standalone_compose_thread_warning(
     body: str | None,
     body_html: str | None,
     standalone_confirmed: bool,
+    tool_name: str = "compose_email",
 ) -> str | None:
-    """Return an error when a new compose looks like an accidental reply."""
+    """Return an error when a new compose looks like an accidental reply.
+
+    ``tool_name`` names the calling tool in the returned message so the
+    warning matches the tool the agent actually invoked (``compose_email``,
+    ``manage_drafts(action="create")``, or ``create_rich_email_draft``)
+    instead of always saying "compose_email".
+    """
     if standalone_confirmed:
         return None
 
@@ -136,7 +143,7 @@ def _standalone_compose_thread_warning(
         return None
 
     return (
-        "Error: compose_email creates a standalone new message and will not "
+        f"Error: {tool_name} creates a standalone new message and will not "
         "include the original email thread. This draft looks like a reply or "
         f"forward ({', '.join(signals)}). Use reply_to_email(message_id=...) "
         "or forward_email(message_id=...) after locating the source message. "

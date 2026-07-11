@@ -1,6 +1,6 @@
 """``manage_drafts`` tool: list/find/open/delete Mail drafts."""
 
-from apple_mail_mcp.backend.base import target_selector_deprecated_error
+from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, inject_preferences, normalize_message_ids
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import compose
@@ -44,7 +44,7 @@ def manage_drafts(
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
-        action: Action to perform: "list", "find", "create", "send", "open", "delete", or "cleanup_empty". Use "open" to open a draft in a visible compose window for review before sending. Use "cleanup_empty" to remove orphaned blank drafts (preview-only by default).
+        action: Action to perform: "list", "find", "create", "send", "open", "delete", or "cleanup_empty". Use "open" to open a draft in a visible compose window for review before sending. Use "cleanup_empty" to remove orphaned blank drafts (preview-only by default). On Exchange and other server accounts, Drafts numeric ids are reassigned on sync and are not stable across calls, including across repeated action="list" calls with no writes; re-run action="list" (or action="find") immediately before send/open/delete rather than caching a draft_id across turns.
         subject: Email subject (required for create)
         to: Recipient email(s) for create (comma-separated)
         body: Email body (required for create)
@@ -55,6 +55,11 @@ def manage_drafts(
             or ``manage_drafts(action="find", ...)`` to discover ``draft_id``. Passing
             ``draft_subject`` without ``draft_id`` returns ``TARGET_SELECTOR_DEPRECATED``.
         draft_id: Exact numeric Drafts message id for send/open/delete (required for targeting).
+            On Exchange and other server accounts this id is reassigned on sync and is not a
+            stable handle: re-resolve it with action="list" or action="find" immediately
+            before acting, do not cache it across turns. For a durable handle to a reply
+            draft, use action="find" with in_reply_to, which matches the source Message-ID
+            in the draft's threading headers instead of a store-assigned numeric id.
         from_address: Optional sender address for new drafts (action="create"). Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
@@ -63,7 +68,7 @@ def manage_drafts(
         dry_run: For action="cleanup_empty", when True (default) only previews which blank drafts would be removed without deleting. Set False to actually delete. Ignored by other actions.
         max_deletes: For action="cleanup_empty", maximum number of blank drafts to delete in one call (safety cap). Default 20. Ignored by other actions.
         limit: For action="list" and action="find", maximum newest Drafts messages to show or inspect. Defaults to the repo scan cap.
-        in_reply_to: For action="find", source Internet Message-ID to match against Drafts In-Reply-To or References headers.
+        in_reply_to: For action="find", source Internet Message-ID to match against Drafts In-Reply-To or References headers. Honored ONLY by action="find". action="create" cannot set In-Reply-To/References (the Mail scripting dictionary exposes no header property on a new outgoing message), so passing in_reply_to with action="create" returns CREATE_CANNOT_THREAD and creates no draft; use reply_to_email(message_id=...) to thread a reply instead.
 
     Returns:
         Formatted output based on action. For action="list" each draft now reports
@@ -137,7 +142,34 @@ def manage_drafts(
         if not subject or not to or not body:
             return "Error: 'subject', 'to', and 'body' are required for creating drafts"
 
-        thread_warning = _standalone_compose_thread_warning(subject, body, None, standalone_confirmed)
+        if in_reply_to:
+            return serialize_tool_error(
+                ToolError(
+                    code="CREATE_CANNOT_THREAD",
+                    message=(
+                        'manage_drafts(action="create") builds a standalone new message and cannot set '
+                        "In-Reply-To/References headers, so it cannot thread a reply. The in_reply_to "
+                        'parameter is only honored by action="find" (draft lookup), never by create. '
+                        "No draft was created."
+                    ),
+                    remediation={
+                        "preferred": (
+                            "To reply into an existing thread, use reply_to_email(message_id=...) after "
+                            "locating the source message with search_emails(...) or list_inbox_emails(...)."
+                        ),
+                        "find_existing": (
+                            "To locate an already-saved reply draft by its source Message-ID, use "
+                            'manage_drafts(action="find", in_reply_to=...).'
+                        ),
+                        "standalone": "If you truly want a new standalone draft, omit in_reply_to.",
+                        "in_reply_to": in_reply_to,
+                    },
+                )
+            )
+
+        thread_warning = _standalone_compose_thread_warning(
+            subject, body, None, standalone_confirmed, tool_name='manage_drafts(action="create")'
+        )
         if thread_warning:
             return thread_warning
 

@@ -2,6 +2,9 @@
 
 ``run_applescript`` is reached through the ``compose`` facade to preserve the existing patch seam."""
 
+from contextlib import suppress
+from pathlib import Path
+
 from apple_mail_mcp.applescript_snippets import sanitize_field_handler, text_offset_handler
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript
 from apple_mail_mcp.tools import compose
@@ -53,10 +56,19 @@ def _verify_saved_reply_draft(
     expected_signature_name: str | None = None,
     timeout: int | None = None,
 ) -> _ReplyDraftVerification:
-    """Confirm a native reply draft appears in a bounded newest Drafts window."""
+    """Confirm a native reply draft appears in a bounded newest Drafts window.
+
+    Compares the FULL reply body above the quoted original, not just its first
+    line (AGENTIC-1214: a first-line-only needle let a truncated or miscased
+    tail slip past verification). The body reaches the verifier AppleScript
+    through a second temp file — the original compose temp file is already
+    gone by the time this runs — and the compare is whitespace-flattened,
+    smart-punctuation-folded, sentence-start-case-neutralized, and only THEN
+    case-sensitive, so Mail's own Substitutions and autocapitalization do not
+    cause a false mismatch while an ALL-CAPS draft (Bug 3) still fails.
+    """
     safe_account = escape_applescript(account)
     safe_reply_subject = escape_applescript(reply_subject)
-    safe_body_needle = escape_applescript(_first_non_empty_line(reply_body))
     safe_draft_id = escape_applescript(draft_id or "")
     safe_quoted_needle = escape_applescript(_first_non_empty_line(quoted_needle or ""))
     expected_attachment_names = expected_attachment_names or []
@@ -71,35 +83,122 @@ def _verify_saved_reply_draft(
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
     sanitize_script = sanitize_field_handler(include_attachment_row_delimiter=True)
     text_offset_script = text_offset_handler()
+
+    with compose.tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".txt",
+        prefix="mail_reply_verify_",
+        delete=False,
+        encoding="utf-8",
+    ) as verify_body_tmp:
+        verify_body_tmp.write(reply_body)
+        verify_body_temp_path = verify_body_tmp.name
+
     script = f'''
     {sanitize_script}
 
     {text_offset_script}
 
-    on stripLineBreaks(theText)
-        -- Mail's compose window soft-wraps long lines, and `content as string`
-        -- renders those wraps as line breaks (sometimes mid-word), which would
-        -- defeat a contiguous-substring match for a typed reply body. Removing
-        -- CR/LF rejoins the text so the body needle is found regardless of wrap.
+    on foldPair(theText, fromText, toText)
+        if fromText is "" then return theText
         set previousDelimiters to AppleScript's text item delimiters
-        set AppleScript's text item delimiters to {{return, linefeed}}
-        set lineParts to text items of theText
-        set AppleScript's text item delimiters to ""
-        set joinedText to lineParts as string
+        set AppleScript's text item delimiters to fromText
+        set parts to text items of theText
+        set AppleScript's text item delimiters to toText
+        set joined to parts as string
         set AppleScript's text item delimiters to previousDelimiters
-        return joinedText
-    end stripLineBreaks
+        return joined
+    end foldPair
 
-    on replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
-        set flatContent to my stripLineBreaks(draftContent)
-        set bodyOffset to my textOffset(flatContent, my stripLineBreaks(replyBodyNeedle))
-        if bodyOffset is 0 then return "missing"
-        if quotedNeedle is "" then return "found"
-        set quoteOffset to my textOffset(flatContent, my stripLineBreaks(quotedNeedle))
-        if quoteOffset is 0 then return "found"
-        if bodyOffset < quoteOffset then return "found"
-        return "after_quote"
-    end replyBodyIsBeforeQuote
+    on lowercaseChar(ch)
+        -- ASCII-only case fold (A-Z). Accented capitals are left as-is; that is
+        -- an accepted gap, not a correctness bug, since it only widens (never
+        -- narrows) the set of sentence-starts left case-sensitive.
+        try
+            set codeNum to id of ch
+        on error
+            return ch
+        end try
+        if codeNum >= 65 and codeNum <= 90 then
+            return (character id (codeNum + 32))
+        end if
+        return ch
+    end lowercaseChar
+
+    on foldSentenceStarts(theText)
+        -- Neutralizes macOS "Capitalize words automatically" at sentence starts
+        -- (text start and immediately after ".", "!", "?") on BOTH compare sides,
+        -- so autocapitalize cannot cause a false mismatch. An ALL-CAPS draft
+        -- (Bug 3) still fails: this only folds the first letter of each
+        -- sentence, not every letter, so the rest of an ALL-CAPS sentence stays
+        -- mismatched against the source's normal case.
+        set n to count of characters of theText
+        if n is 0 then return theText
+        set resultText to ""
+        set foldNext to true
+        repeat with i from 1 to n
+            set ch to character i of theText
+            if foldNext then set ch to my lowercaseChar(ch)
+            set resultText to resultText & ch
+            if ch is "." or ch is "!" or ch is "?" then
+                set foldNext to true
+            else
+                set foldNext to false
+            end if
+        end repeat
+        return resultText
+    end foldSentenceStarts
+
+    on flattenForCompare(theText)
+        -- Whitespace-flattens (Mail's compose window soft-wraps long lines into
+        -- line breaks that the source text does not have), folds Mail's
+        -- Substitutions punctuation (smart quotes/dashes/ellipsis), collapses
+        -- hyphen runs so a source "--" matches Mail's single em-dash
+        -- substitution, and neutralizes sentence-start capitalization. Case is
+        -- preserved everywhere else, so an ALL-CAPS draft still fails the
+        -- case-sensitive compare in replyBodyAboveQuoteStatus.
+        set t to theText as string
+        repeat with stripChar in {{return, linefeed, tab, space, (character id 160)}}
+            set t to my foldPair(t, (contents of stripChar), "")
+        end repeat
+        set t to my foldPair(t, (character id 8216), "'")
+        set t to my foldPair(t, (character id 8217), "'")
+        set t to my foldPair(t, (character id 8220), "\\"")
+        set t to my foldPair(t, (character id 8221), "\\"")
+        set t to my foldPair(t, (character id 8211), "-")
+        set t to my foldPair(t, (character id 8212), "-")
+        set t to my foldPair(t, (character id 8230), "...")
+        repeat 20 times
+            if t does not contain "--" then exit repeat
+            set t to my foldPair(t, "--", "-")
+        end repeat
+        set t to my foldSentenceStarts(t)
+        return t
+    end flattenForCompare
+
+    on caseSensitiveOffset(haystackText, needleText)
+        -- Self-contained case-sensitive offset finder (its own `considering
+        -- case` wraps its own text-item-delimiter split), so callers never
+        -- depend on `considering case` propagating into a handler call.
+        if needleText is "" then return 0
+        set previousDelimiters to AppleScript's text item delimiters
+        considering case
+            try
+                set AppleScript's text item delimiters to needleText
+                set splitItems to text items of haystackText
+                if (count of splitItems) is 1 then
+                    set AppleScript's text item delimiters to previousDelimiters
+                    return 0
+                end if
+                set beforeNeedle to item 1 of splitItems
+                set AppleScript's text item delimiters to previousDelimiters
+                return ((count of characters of beforeNeedle) + 1)
+            on error
+                set AppleScript's text item delimiters to previousDelimiters
+                return 0
+            end try
+        end considering
+    end caseSensitiveOffset
 
     using terms from application "Mail"
 
@@ -155,7 +254,7 @@ def _verify_saved_reply_draft(
         return attachmentRowsText
     end attachmentRows
 
-    on signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested, expectedSignatureName)
+    on signatureStatus(draftContent, fullReplyBody, quotedNeedle, signatureWasRequested, expectedSignatureName)
         if signatureWasRequested is missing value then return "not_requested"
         if signatureWasRequested is false then return "not_requested"
         set newBodyText to draftContent
@@ -182,15 +281,37 @@ def _verify_saved_reply_draft(
         return "missing"
     end signatureStatus
 
-    on verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
+    on replyBodyAboveQuoteStatus(draftContent, fullReplyBody, quotedNeedle)
+        -- Locates the flattened body FIRST (case-sensitively); only a quote
+        -- marker occurrence AFTER that body match counts as the quote
+        -- boundary, so a reply body that itself contains "wrote:" (e.g. "As
+        -- Keynes wrote: ...") cannot false-fail into after_quote.
+        set flatBody to my flattenForCompare(fullReplyBody)
+        if flatBody is "" then return "found"
+        set flatDraft to my flattenForCompare(draftContent)
+        set bodyOffset to my caseSensitiveOffset(flatDraft, flatBody)
+        if bodyOffset is 0 then return "missing"
+        if quotedNeedle is "" then return "found"
+        set flatQuote to my flattenForCompare(quotedNeedle)
+        set bodyEndOffset to bodyOffset + (count of characters of flatBody)
+        if bodyEndOffset > (count of characters of flatDraft) then return "found"
+        set searchRegion to text bodyEndOffset thru -1 of flatDraft
+        set quoteOffsetAfterBody to my textOffset(searchRegion, flatQuote)
+        if quoteOffsetAfterBody > 0 then return "found"
+        set quoteOffsetAnywhere to my textOffset(flatDraft, flatQuote)
+        if quoteOffsetAnywhere > 0 and quoteOffsetAnywhere < bodyOffset then return "after_quote"
+        return "found"
+    end replyBodyAboveQuoteStatus
+
+    on verifyReplyDraft(draftMessage, fullReplyBody, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
         set draftId to id of draftMessage as string
         set draftContent to content of draftMessage as string
         set draftAttachmentStatus to my attachmentStatus(draftMessage, expectedAttachmentCount, expectedAttachmentNames)
         set draftAttachmentCount to my attachmentCount(draftMessage)
         set draftAttachmentRows to my attachmentRows(draftMessage)
-        set draftSignatureStatus to my signatureStatus(draftContent, replyBodyNeedle, quotedNeedle, signatureWasRequested, expectedSignatureName)
-        if replyBodyNeedle is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
-        set bodyStatus to my replyBodyIsBeforeQuote(draftContent, replyBodyNeedle, quotedNeedle)
+        set draftSignatureStatus to my signatureStatus(draftContent, fullReplyBody, quotedNeedle, signatureWasRequested, expectedSignatureName)
+        if fullReplyBody is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
+        set bodyStatus to my replyBodyAboveQuoteStatus(draftContent, fullReplyBody, quotedNeedle)
         if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         if bodyStatus is "after_quote" then return "BODY_AFTER_QUOTE|" & draftId
         return "BODY_MISSING|" & draftId
@@ -201,7 +322,7 @@ def _verify_saved_reply_draft(
     tell application "Mail"
         set targetAccount to account "{safe_account}"
         set targetDraftIdText to "{safe_draft_id}"
-        set replyBodyNeedle to "{safe_body_needle}"
+        set fullReplyBody to do shell script "cat " & quoted form of "{verify_body_temp_path}"
         set quotedNeedle to "{safe_quoted_needle}"
         set expectedAttachmentCount to {expected_attachment_count_value}
         set expectedAttachmentNames to {expected_attachment_names_script}
@@ -221,7 +342,7 @@ def _verify_saved_reply_draft(
                         set targetDrafts to every message of draftsMailbox whose id is targetDraftId
                         if (count of targetDrafts) > 0 then
                             set exactDraft to item 1 of targetDrafts
-                            set exactResult to my verifyReplyDraft(exactDraft, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
+                            set exactResult to my verifyReplyDraft(exactDraft, fullReplyBody, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
                             return exactResult
                         end if
                     end try
@@ -237,7 +358,7 @@ def _verify_saved_reply_draft(
                             set draftMatched to false
                             set draftSubject to subject of draftMessage as string
                             if "{safe_reply_subject}" is "" or draftSubject is "{safe_reply_subject}" then
-                                set draftResult to my verifyReplyDraft(draftMessage, replyBodyNeedle, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
+                                set draftResult to my verifyReplyDraft(draftMessage, fullReplyBody, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
                                 if draftResult starts with "FOUND|" then
                                     set draftMatched to true
                                     set foundDraftId to draftResult
@@ -278,4 +399,7 @@ def _verify_saved_reply_draft(
         return _ReplyDraftVerification(ok=False, status="verification_timeout", error_artifact_id=draft_id)
     except Exception:  # noqa: BLE001 - caller converts verification failure into a safe error
         return _ReplyDraftVerification(ok=False, status="applescript_error", error_artifact_id=draft_id)
+    finally:
+        with suppress(OSError):
+            Path(verify_body_temp_path).unlink(missing_ok=True)
     return _reply_verification_from_output(output)

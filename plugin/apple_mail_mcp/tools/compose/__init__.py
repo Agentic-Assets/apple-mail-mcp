@@ -40,6 +40,8 @@ from apple_mail_mcp.tools.compose.constants import (
     DRAFT_LIST_CAP,
     MAX_OPEN_COMPOSE_WINDOWS,
     MESSAGE_LOOKUP_CAP,
+    TYPING_CHUNK_SIZE,
+    TYPING_INTER_CHUNK_DELAY,
 )
 from apple_mail_mcp.tools.compose.drafts_scripts import (
     _build_manage_drafts_find_script,
@@ -87,6 +89,11 @@ from apple_mail_mcp.tools.compose.payload import (
     _validate_attachment_paths,
 )
 from apple_mail_mcp.tools.compose.reply import reply_to_email
+from apple_mail_mcp.tools.compose.reply_runner import (
+    _delete_reply_artifact,
+    _native_reply_abort_response,
+    _native_reply_effective_timeout,
+)
 from apple_mail_mcp.tools.compose.reply_scripts import (
     _build_reply_native_window_applescript,
     _build_reply_objectmodel_applescript,
@@ -101,15 +108,18 @@ from apple_mail_mcp.tools.compose.reply_scripts import (
 from apple_mail_mcp.tools.compose.rich_draft import create_rich_email_draft
 from apple_mail_mcp.tools.compose.saved_draft_checks import _verify_saved_forward_draft, _verify_saved_reply_draft
 from apple_mail_mcp.tools.compose.send import _send_html_email, compose_email
+from apple_mail_mcp.tools.compose.typing_scripts import build_chunked_typing_handler
 from apple_mail_mcp.tools.compose.verification import (
     _extract_output_field,
     _first_non_empty_line,
     _format_forward_verification_lines,
     _format_reply_verification_lines,
     _reply_attachment_details_requested,
+    _reply_body_mismatch_error,
     _reply_draft_verification_error,
     _reply_exact_id_verified,
     _reply_success_payload,
+    _reply_verification_failure_response,
     _reply_verification_from_output,
     _ReplyDraftVerification,
 )
@@ -133,6 +143,8 @@ __all__ = [
     "READ_ONLY_TOOL_ANNOTATIONS",
     "SENSITIVE_DIRS",
     "ToolError",
+    "TYPING_CHUNK_SIZE",
+    "TYPING_INTER_CHUNK_DELAY",
     "WRITE_TOOL_ANNOTATIONS",
     "_CDATA_BLOCK_PATTERN",
     "_MESSAGE_ID_REQUIRED_ERROR",
@@ -158,17 +170,21 @@ __all__ = [
     "_compose_signature_script",
     "_count_open_outgoing_messages",
     "_default_rich_draft_path",
+    "_delete_reply_artifact",
     "_extract_output_field",
     "_first_non_empty_line",
     "_format_forward_verification_lines",
     "_format_reply_verification_lines",
     "_indent_applescript_block",
     "_list_outgoing_message_ids",
+    "_native_reply_abort_response",
+    "_native_reply_effective_timeout",
     "_native_reply_post_action",
     "_native_reply_subject_helpers_applescript",
     "_parse_expected_attachments",
     "_prepare_rich_bodies",
     "_reply_attachment_details_requested",
+    "_reply_body_mismatch_error",
     "_reply_command_options",
     "_reply_draft_verification_error",
     "_reply_exact_id_verified",
@@ -176,6 +192,7 @@ __all__ = [
     "_reply_mode_plan",
     "_reply_signature_script",
     "_reply_success_payload",
+    "_reply_verification_failure_response",
     "_reply_verification_from_output",
     "_resolve_account",
     "_resolve_signature_name",
@@ -193,6 +210,7 @@ __all__ = [
     "_validate_signature_name",
     "_verify_saved_forward_draft",
     "_verify_saved_reply_draft",
+    "build_chunked_typing_handler",
     "compose_email",
     "create_rich_email_draft",
     "escape_applescript",

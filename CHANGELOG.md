@@ -5,6 +5,68 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+### Fixed
+
+- **AGENTIC-1214: `reply_to_email` native reply body no longer truncates or
+  types in ALL CAPS.** The native reply path (`native_format=True`) previously
+  inserted the entire `reply_body` with one System Events `keystroke` call,
+  which silently dropped the tail of long bodies around 320-480 characters
+  and could leak leftover shift state into ALL-CAPS output on short bodies.
+  It now types the body in small, focus-guarded chunks (`TYPING_CHUNK_SIZE`,
+  `TYPING_INTER_CHUNK_DELAY`), releasing keyboard modifiers before and after
+  every chunk and re-checking both Mail's own front window and System
+  Events' process-level focus before each chunk, aborting immediately
+  (never re-stealing focus) on a mismatch instead of typing into whatever
+  now holds focus. A mid-typing abort discards the partially typed compose
+  window and returns the new `REPLY_BODY_TYPING_INTERRUPTED` structured
+  error, distinct from the pre-typing `REPLY_WINDOW_FOCUS_FAILED` /
+  `REPLY_SUBJECT_GUARD_MISMATCH` abort codes. The native-path AppleScript
+  timeout now scales with the projected chunk-typing time (floored at
+  120s); a body long enough to exceed the documented typing budget is
+  refused up front with `REPLY_BODY_TYPING_BUDGET_EXCEEDED` instead of
+  risking a mid-typing timeout.
+- **AGENTIC-1214: post-save reply verification now checks the full body, not
+  just its first line.** The saved-draft verifier previously matched only
+  the first non-empty line of `reply_body`, so a truncated or miscased tail
+  could still pass. It now compares the FULL body against the saved draft
+  above the quoted original: whitespace-flattened, smart-punctuation-folded,
+  sentence-start case neutralized (so Mail's own autocapitalization cannot
+  cause a false mismatch), located first under `considering case` so a body
+  that itself contains "wrote:" cannot false-fail into "after quote", then
+  compared case-sensitively so an ALL-CAPS draft still fails. On a
+  `body_missing` mismatch with a concrete artifact id, `reply_to_email`
+  automatically deletes the artifact and retypes the identical body once
+  before re-verifying; a mismatch that persists (or an unconfirmed delete)
+  returns the new `REPLY_BODY_MISMATCH` structured error naming the suspect
+  Drafts artifact id, with `retyped` and `stale_artifact_id` remediation
+  fields. The success payload and text output gained `body_verified`,
+  `retyped`, and `stale_artifact_id`. This verification (and its automatic
+  retype) only runs for `mode="draft"` / `mode="open"`; a `mode="send"`
+  native reply still gets the chunked-typing fix above but has no saved
+  Drafts artifact left to verify afterward, so draft-then-verify-then-send
+  stays the safe sequence when typed-body correctness matters.
+- **AGENTIC-1214: `manage_drafts(action="create")` no longer silently drops
+  `in_reply_to`.** Passing `in_reply_to` to `action="create"` now returns a
+  structured `CREATE_CANNOT_THREAD` error before any AppleScript runs and
+  before the standalone reply-like guard, since the Mail scripting
+  dictionary exposes no header property on a new outgoing message and
+  `create` can never set In-Reply-To/References. `in_reply_to` remains
+  honored only by `action="find"`. The remediation points at
+  `reply_to_email(message_id=...)` to thread a reply, or
+  `manage_drafts(action="find", in_reply_to=...)` to locate an
+  already-saved reply draft.
+- **`manage_drafts(action="create")`'s standalone reply-like guard now names
+  the tool that was actually called.** `_standalone_compose_thread_warning`
+  previously always said "compose_email" in its error message even when
+  `manage_drafts(action="create")` triggered it; it now names the calling
+  tool.
+- **Draft-id instability on Exchange is now documented.** `manage_drafts`'s
+  `action` and `draft_id` docstrings now note that server-account Drafts
+  numeric ids are reassigned on sync (observed drifting between two
+  `action="list"` calls with zero writes in between) and are not a stable
+  handle across turns; `action="find"` with `in_reply_to` is the durable
+  handle for a reply draft.
+
 ## 3.10.1 - 2026-07-10
 
 ### Changed

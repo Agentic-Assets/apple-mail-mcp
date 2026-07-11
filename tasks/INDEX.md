@@ -17,6 +17,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
+| [`active/agentic-1214-reply-fixes/`](active/agentic-1214-reply-fixes/) | AGENTIC-1214: native reply body truncation/ALL-CAPS fix, full-body draft verification, `manage_drafts` create+`in_reply_to` contract | Implemented on `fix/agentic-1214-reply-body-truncation`; gates + live verification pending |
 | [`active/apple-calendar-tools/`](active/apple-calendar-tools/) | Apple Calendar tool surface (research + 3.10.0 implementation) | Implemented on `feat/apple-calendar-tools`; live verification + review pending |
 | [`active/native-reply/`](active/native-reply/) | Native-format reply drafts (v3.8.0 ship + live TO-TEST) | Shipped; live verification pending |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 selector retirement, metadata-index spike, decision briefs | Planning / next major lane |

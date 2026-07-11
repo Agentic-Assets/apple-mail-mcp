@@ -29,8 +29,9 @@ reply_to_email(message_id=message_id, reply_body="...", mode="draft")
 ```
 
 - Never pass `subject_keyword` to `reply_to_email` or `forward_email` (`TARGET_SELECTOR_DEPRECATED`).
-- Never use `compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")` for thread replies.
-- On `REPLY_WINDOW_FOCUS_FAILED`: log `draft_deferred` in action_log with intended one-sentence body summary, continue other courtesy drafts in the batch, and report the blocker. Retry with Mail visible when practical. Do not switch to `native_format=false`; it is gated (`WINDOWLESS_FALLBACK_DISABLED`) and reserved for deliberate headless/CI via `allow_windowless_fallback=True`, which agents must never set.
+- Never use `compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")` for thread replies. `manage_drafts(action="create", in_reply_to=...)` refuses up front with `CREATE_CANNOT_THREAD` (create cannot set In-Reply-To/References); use `reply_to_email(message_id=...)` to thread, or `manage_drafts(action="find", in_reply_to=...)` to locate an already-saved reply draft.
+- On `REPLY_WINDOW_FOCUS_FAILED`, `REPLY_SUBJECT_GUARD_MISMATCH` (window opened but its title never matched), or `REPLY_BODY_TYPING_INTERRUPTED` (focus lost partway through typing; the partial compose window was discarded, nothing partial left behind): log `draft_deferred` in action_log with intended one-sentence body summary, continue other courtesy drafts in the batch, and report the blocker. Retry with Mail visible when practical. Do not switch to `native_format=false`; it is gated (`WINDOWLESS_FALLBACK_DISABLED`) and reserved for deliberate headless/CI via `allow_windowless_fallback=True`, which agents must never set.
+- `reply_to_email` types the body in small chunks and verifies the FULL saved body above the quote (case-sensitive) before returning success, retrying once (delete + retype) on a placement mismatch. If it still does not match, it returns `REPLY_BODY_MISMATCH` naming the suspect Drafts artifact id: inspect with `verify_draft(draft_id=...)` and delete before retrying so no truncated or miscased duplicate is left behind.
 
 ## JSON key reminder
 
