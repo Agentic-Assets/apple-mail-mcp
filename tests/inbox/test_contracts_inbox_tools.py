@@ -31,22 +31,30 @@ def _run(coro):
 # ---------------------------------------------------------------------------
 
 # get_inbox_overview: HEADER|||account|||unread|||total, MAILBOX|||, RECENT|||
-OVERVIEW_PAYLOAD = "\n".join([
-    "HEADER|||Work|||3|||15",
-    "MAILBOX|||INBOX|||3",
-    "RECENT|||Weekly digest|||newsletter@example.com|||Friday, May 23, 2026 at 9:00:00 AM|||false",
-    "RECENT|||Meeting notes|||alice@example.com|||Thursday, May 22, 2026 at 2:30:00 PM|||true",
-    "RECENT|||Invoice #1234|||billing@example.com|||Wednesday, May 21, 2026 at 11:00:00 AM|||false",
-])
+# RECENT rows: subject|||sender|||date|||read|||wasRepliedToken (2026-07-10
+# reply-state-annotation: native was_replied_to, always present).
+OVERVIEW_PAYLOAD = "\n".join(
+    [
+        "HEADER|||Work|||3|||15",
+        "MAILBOX|||INBOX|||3",
+        "RECENT|||Weekly digest|||newsletter@example.com|||Friday, May 23, 2026 at 9:00:00 AM|||false|||false",
+        "RECENT|||Meeting notes|||alice@example.com|||Thursday, May 22, 2026 at 2:30:00 PM|||true|||true",
+        "RECENT|||Invoice #1234|||billing@example.com|||Wednesday, May 21, 2026 at 11:00:00 AM|||false|||false",
+    ]
+)
 
 # list_inbox_emails JSON script output: pipe-delimited rows
-# Schema: subject|||sender|||date|||read|||account|||mail_app_id[|||internet_message_id]
-INBOX_EMAILS_PAYLOAD = "\n".join([
-    "Project update|||alice@example.com|||May 23, 2026|||false|||Work|||101|||<msg1@example.com>",
-    "Re: Budget|||bob@example.com|||May 22, 2026|||true|||Work|||102|||<msg2@example.com>",
-    "Newsletter|||no-reply@news.com|||May 21, 2026|||false|||Work|||103|||",
-    "TOTAL:3",
-])
+# Schema: subject|||sender|||date|||read|||account|||mail_app_id|||was_replied_to[|||internet_message_id]
+# (2026-07-10 reply-state-annotation: was_replied_to is always emitted,
+# positioned right after mail_app_id, ahead of the optional internet_message_id).
+INBOX_EMAILS_PAYLOAD = "\n".join(
+    [
+        "Project update|||alice@example.com|||May 23, 2026|||false|||Work|||101|||true|||<msg1@example.com>",
+        "Re: Budget|||bob@example.com|||May 22, 2026|||true|||Work|||102|||false|||<msg2@example.com>",
+        "Newsletter|||no-reply@news.com|||May 21, 2026|||false|||Work|||103|||false|||",
+        "TOTAL:3",
+    ]
+)
 
 # ---------------------------------------------------------------------------
 # JSON Schemas
@@ -65,6 +73,7 @@ INBOX_OVERVIEW_SUCCESS_SCHEMA = {
         "include_recent",
         "include_suggestions",
         "max_recent",
+        "draft_scan",
     ],
     "properties": {
         "output_format": {"type": "string", "enum": ["json"]},
@@ -88,6 +97,16 @@ INBOX_OVERVIEW_SUCCESS_SCHEMA = {
         "include_suggestions": {"type": "boolean"},
         "max_recent": {"type": "integer", "minimum": 0},
         "suggestions": {"type": "array"},
+        "draft_scan": {
+            "type": "object",
+            "required": ["status", "scanned", "accounts"],
+            "properties": {
+                "status": {"type": "string", "enum": ["ok", "error", "skipped"]},
+                "scanned": {"type": "integer", "minimum": 0},
+                "accounts": {"type": "array"},
+                "error": {"type": "string"},
+            },
+        },
     },
     "additionalProperties": True,
 }
@@ -114,12 +133,14 @@ INBOX_OVERVIEW_ACCOUNT_ROW_SCHEMA = {
             "type": "array",
             "items": {
                 "type": "object",
-                "required": ["subject", "sender", "date", "is_read"],
+                "required": ["subject", "sender", "date", "is_read", "was_replied_to"],
                 "properties": {
                     "subject": {"type": "string"},
                     "sender": {"type": "string"},
                     "date": {"type": "string"},
                     "is_read": {"type": "boolean"},
+                    "was_replied_to": {"type": "boolean"},
+                    "has_draft": {"type": ["boolean", "null"]},
                 },
             },
         },
@@ -141,13 +162,22 @@ INBOX_OVERVIEW_ERROR_SCHEMA = {
 # Schema for list_inbox_emails success (output_format="json")
 LIST_INBOX_EMAILS_SUCCESS_SCHEMA = {
     "type": "object",
-    "required": ["emails", "errors"],
+    "required": ["emails", "errors", "draft_scan"],
     "properties": {
         "emails": {
             "type": "array",
             "items": {
                 "type": "object",
-                "required": ["subject", "sender", "date", "is_read", "account", "message_id"],
+                "required": [
+                    "subject",
+                    "sender",
+                    "date",
+                    "is_read",
+                    "account",
+                    "message_id",
+                    "was_replied_to",
+                    "has_draft",
+                ],
                 "properties": {
                     "subject": {"type": "string"},
                     "sender": {"type": "string"},
@@ -155,6 +185,8 @@ LIST_INBOX_EMAILS_SUCCESS_SCHEMA = {
                     "is_read": {"type": "boolean"},
                     "account": {"type": "string"},
                     "message_id": {"type": "string"},
+                    "was_replied_to": {"type": "boolean"},
+                    "has_draft": {"type": ["boolean", "null"]},
                     "internet_message_id": {"type": "string"},
                     "content_preview": {"type": "string"},
                     "already_replied": {"type": "boolean"},
@@ -162,6 +194,16 @@ LIST_INBOX_EMAILS_SUCCESS_SCHEMA = {
             },
         },
         "errors": {"type": "array"},
+        "draft_scan": {
+            "type": "object",
+            "required": ["status", "scanned", "accounts"],
+            "properties": {
+                "status": {"type": "string", "enum": ["ok", "error", "skipped"]},
+                "scanned": {"type": "integer", "minimum": 0},
+                "accounts": {"type": "array"},
+                "error": {"type": "string"},
+            },
+        },
     },
     "additionalProperties": True,
 }
@@ -356,12 +398,19 @@ class ListInboxEmailsContractTests(unittest.TestCase):
                 )
             )
 
-        required_fields = {"subject", "sender", "date", "is_read", "account", "message_id"}
+        required_fields = {
+            "subject",
+            "sender",
+            "date",
+            "is_read",
+            "account",
+            "message_id",
+            "was_replied_to",
+            "has_draft",
+        }
         for email in result.get("emails", []):
             missing = required_fields - email.keys()
-            self.assertEqual(
-                missing, set(), f"Email row missing fields {missing}: {email}"
-            )
+            self.assertEqual(missing, set(), f"Email row missing fields {missing}: {email}")
             self.assertIsInstance(email["is_read"], bool)
 
     def test_errors_key_is_list(self):

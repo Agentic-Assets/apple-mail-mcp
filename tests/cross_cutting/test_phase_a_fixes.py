@@ -179,7 +179,7 @@ class AccountValidationTests(unittest.TestCase):
 
     def test_dashboard_recent_parser_includes_exact_ids(self):
         parsed = analytics_tools._parse_recent_email_lines(
-            "Subject|||Sender|||Mon Jun 29 12:00:00 2026|||false|||Work|||INBOX|||123|||<abc@example.com>|||Preview"
+            "Subject|||Sender|||Mon Jun 29 12:00:00 2026|||false|||Work|||INBOX|||123|||<abc@example.com>|||true|||Preview"
         )
 
         self.assertEqual(
@@ -194,6 +194,7 @@ class AccountValidationTests(unittest.TestCase):
                     "mailbox": "INBOX",
                     "message_id": "123",
                     "internet_message_id": "<abc@example.com>",
+                    "was_replied_to": True,
                     "preview": "Preview",
                 }
             ],

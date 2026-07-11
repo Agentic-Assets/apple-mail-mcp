@@ -12,6 +12,7 @@ from urllib.parse import quote
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import AppleScriptTimeout
+from apple_mail_mcp.core.reply_state import reply_state_tags
 
 MONTH_NAMES = [
     "January",
@@ -60,6 +61,14 @@ def _parse_search_records(
 
     Each *mailbox_errors* entry is a dict with keys ``mailbox`` and ``message``
     for mailboxes that emitted an ``ERROR_MAILBOX|||`` marker line.
+
+    Rows carry a 15th field (index 14, ``wasRepliedToken`` from
+    ``core.reply_state.was_replied_fragment``) that becomes
+    ``was_replied_to`` (bool, always present in the returned record: Mail's
+    native read-only ``was replied to`` property, no parameter gates it). A
+    14-field row (no 15th field, e.g. an older-shaped mocked payload) is
+    tolerated defensively: ``was_replied_to`` simply defaults to ``False``
+    rather than raising.
     """
     if not output:
         return [], []
@@ -72,12 +81,12 @@ def _parse_search_records(
             mb, _, msg = tail.partition("|||")
             mailbox_errors.append({"mailbox": mb.strip(), "message": msg.strip()})
             continue
-        parts = line.split("|||", 13)
+        parts = line.split("|||", 14)
         if len(parts) < 8:
             continue
 
         internet_message_id = parts[1].strip()
-        record = {
+        record: dict[str, Any] = {
             "message_id": parts[0].strip(),
             "internet_message_id": internet_message_id,
             "subject": parts[2].strip(),
@@ -86,6 +95,7 @@ def _parse_search_records(
             "account": parts[5].strip(),
             "is_read": parts[6].strip().lower() == "true",
             "received_date": parts[7].strip(),
+            "was_replied_to": len(parts) > 14 and parts[14].strip().lower() == "true",
         }
         if internet_message_id:
             # Apple Mail requires: message:// scheme, angle brackets (percent-encoded),
@@ -143,8 +153,10 @@ def _format_search_records_text(
         lines.append("")
         for item in records:
             indicator = "✓" if item["is_read"] else "✉"
-            replied_prefix = "[REPLIED] " if item.get("already_replied") else ""
-            lines.append(f"{indicator} {replied_prefix}{item['subject']}")
+            was_replied = bool(item.get("was_replied_to") or item.get("already_replied"))
+            tags = reply_state_tags(was_replied, item.get("has_draft"))
+            tag_prefix = "".join(f"{tag} " for tag in tags)
+            lines.append(f"{indicator} {tag_prefix}{item['subject']}")
             lines.append(f"   From: {item['sender']}")
             lines.append(f"   Date: {item['received_date']}")
             lines.append(f"   Mailbox: {item['mailbox']}")
@@ -212,8 +224,17 @@ def _build_search_response(
     sender_only_hint: bool = False,
     include_content_hint: bool = False,
     body_text_hint: bool = False,
+    draft_scan: dict[str, Any] | None = None,
 ) -> str:
-    """Return either JSON or text for search results."""
+    """Return either JSON or text for search results.
+
+    *draft_scan* (from ``tools.reply_state_wiring.build_draft_scan_status``,
+    via ``annotate_rows_with_reply_state``) is surfaced as a top-level
+    ``draft_scan`` key only in JSON output
+    (``{"status": "ok" | "error" | "skipped", "scanned": N, "accounts": [...],
+    "error"?: "..."}``); text output instead relies on the ``[REPLIED]`` /
+    ``[HAS DRAFT]`` row prefixes already applied by ``_format_search_records_text``.
+    """
     sorted_records = _sort_search_records(records, sort)
     has_more = len(sorted_records) > limit
     items = sorted_records[:limit]
@@ -259,6 +280,8 @@ def _build_search_response(
             payload["errors"] = errors
         if error_details:
             payload["error_details"] = error_details
+        if draft_scan is not None:
+            payload["draft_scan"] = draft_scan
         return json.dumps(payload)
 
     text_result = _format_search_records_text(

@@ -11,6 +11,7 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     sanitize_pipe_delimited_field,
 )
+from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.tools.inbox.parsing import _read_filter_condition
 
 
@@ -60,17 +61,26 @@ def _build_list_inbox_text_script(
     (``scan_cap = min(max(max_emails*10, 100), 1000)``) and apply the
     predicate via an in-loop ``if`` (``build_bounded_filtered_scan``) —
     safe on Gmail and on 24K-message Exchange inboxes alike.
+
+    Every message unconditionally reads Mail's native ``was replied to``
+    property (``was_replied_fragment()``) and emits a
+    ``__ROW__|||subject|||sender|||date|||internetMessageId|||wasRepliedToken``
+    marker line ahead of its rendered block, so the Python side
+    (``parsing._annotate_text_rows_with_reply_state``) can inject
+    ``[REPLIED]``/``[HAS DRAFT]`` tags or drop the block without re-parsing
+    the decorated ✓/✉ display lines. *internetMessageId* is populated only
+    when *include_message_id* is True (an extra Mail property read); it is
+    otherwise emitted empty and draft correlation falls back to
+    subject/sender/date matching.
     """
     assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
-    message_id_text_block = ""
+    message_id_block = 'set internetMessageId to ""'
     if include_message_id:
-        message_id_text_block = (
-            'set internetMessageId to ""\n'
-            "                        try\n"
+        message_id_block += (
+            "\n                        try\n"
             "                            set internetMessageId to message id of aMessage\n"
-            "                        end try\n"
-            '                        set outputText to outputText & "__MSG_ID__|||" & internetMessageId & return'
+            "                        end try"
         )
 
     collection = _build_inbox_collection_block(max_emails, read_filter)
@@ -106,7 +116,9 @@ def _build_list_inbox_text_script(
                         -- and the replied-detection line walk stay aligned.
                         {sanitize_pipe_delimited_field("messageSubject")}
                         {sanitize_pipe_delimited_field("messageSender")}
-                        {message_id_text_block}
+                        {message_id_block}
+                        {was_replied_fragment()}
+                        set outputText to outputText & "__ROW__|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & internetMessageId & "|||" & wasRepliedToken & return
 
                         if messageRead then
                             set readIndicator to "✓"
@@ -146,11 +158,13 @@ def _build_list_inbox_json_script(
 
     Each emitted line always includes the integer Mail.app ``id`` of the
     message (field index 5, exposed as ``"message_id"`` by the parser) so
-    callers can pass it directly to ``get_email_by_id``.
+    callers can pass it directly to ``get_email_by_id``, followed
+    unconditionally by the native ``was replied to`` token (field index 6,
+    exposed as ``"was_replied_to"``; no parameter gates this field).
 
     When *include_message_id* is True, an extra
     ``|||<internet-message-id>`` field (RFC 2822 Message-ID) is appended
-    after the integer id for replied-detection.
+    after the was-replied token for draft/reply correlation.
 
     *read_filter* selects ``"all"`` / ``"read"`` / ``"unread"``; the
     filtered modes use the in-loop ``if`` pattern from
@@ -222,9 +236,10 @@ def _build_list_inbox_json_script(
                     -- message_id onto an email (would lose data on delete).
                     {sanitize_pipe_delimited_field("messageSubject")}
                     {sanitize_pipe_delimited_field("messageSender")}
+                    {was_replied_fragment()}
                     {content_field}
                     {message_id_field}
-                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailAppId{message_id_suffix}{content_suffix}
+                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailAppId & "|||" & wasRepliedToken{message_id_suffix}{content_suffix}
                 end try
             end repeat
         end try

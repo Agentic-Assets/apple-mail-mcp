@@ -18,8 +18,10 @@ from apple_mail_mcp.core import (
     inject_preferences,
     normalize_message_ids,
 )
+from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import search
+from apple_mail_mcp.tools.reply_state_wiring import annotate_rows_with_reply_state, build_draft_scan_status
 from apple_mail_mcp.tools.search.by_id import _fetch_email_record_by_id
 from apple_mail_mcp.tools.search.records import _build_applescript_date, _parse_search_records
 
@@ -144,6 +146,7 @@ def get_email_thread(
     include_preview: bool = True,
     output_format: str = "text",
     timeout: int | None = None,
+    include_draft_state: bool = True,
 ) -> str:
     """
       Get an email conversation thread - all messages with the same or similar subject.
@@ -174,9 +177,22 @@ def get_email_thread(
               reading message bodies during thread discovery.
           output_format: Output format: "text" or "json" (default: "text").
           timeout: Optional AppleScript timeout in seconds (default: 120).
+          include_draft_state: When True (default) and ``output_format="json"``,
+              fetch one bounded Drafts snapshot per account appearing in the
+              thread (lazily, capped at 5 accounts) and set `has_draft` on
+              every item (true/false when scanned, null when the scan was
+              skipped or errored). Set False to skip the Drafts scan
+              entirely. Text output does not carry `has_draft` (thread text
+              is rendered inside AppleScript, not from parsed rows); it still
+              shows the native `[REPLIED]` marker, which needs no Drafts scan.
 
       Returns:
-          Formatted thread view, or JSON with items, ids, headers, anchor, and strategy.
+          Formatted thread view (text mode prefixes replied messages with
+          `[REPLIED]`), or JSON with items, ids, headers, anchor, strategy,
+          and draft_scan. Every JSON item carries `was_replied_to` (bool,
+          always present) and `has_draft` (true/false/null, governed by
+          `include_draft_state`). `draft_scan` is `{"status": "ok" | "error" |
+          "skipped", "scanned": N, "accounts": [...], "error"?: "..."}`.
     """
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = search.validate_account_name(account, timeout=validation_timeout)
@@ -284,6 +300,7 @@ def get_email_thread(
         references_var="refsValue",
         include_on_error=True,
     )
+    was_replied_fragment_script = was_replied_fragment(var="aMessage")
     candidate_collection = f"""
                                 set candidateMessages to {{}}
                                 set messageCount to count of messages of currentMailbox
@@ -464,10 +481,13 @@ def get_email_thread(
                         set readIndicator to "✉"
                         set readValue to "false"
                     end if
+                    {was_replied_fragment_script}
+                    set repliedMarker to ""
+                    if wasRepliedToken is "true" then set repliedMarker to "[REPLIED] "
 
-                    set end of recordRows to messageId & "|||" & internetMessageId & "|||" & my sanitize_field(messageSubject) & "|||" & my sanitize_field(messageSender) & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||||||||" & inReplyTo & "|||" & refsValue & "|||"
+                    set end of recordRows to messageId & "|||" & internetMessageId & "|||" & my sanitize_field(messageSubject) & "|||" & my sanitize_field(messageSender) & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||||||||" & inReplyTo & "|||" & refsValue & "|||" & "" & "|||" & wasRepliedToken
 
-                    set outputText to outputText & readIndicator & " " & messageSubject & return
+                    set outputText to outputText & readIndicator & " " & repliedMarker & messageSubject & return
                     set outputText to outputText & "   From: " & messageSender & return
                     set outputText to outputText & "   Date: " & (messageDate as string) & return
                     {preview_text_block}
@@ -506,6 +526,14 @@ def get_email_thread(
             selection_strategy = first_line.split("|||", 1)[1].strip() or selection_strategy
             parse_result = remaining
         records, _mailbox_errors = _parse_search_records(parse_result)
+        snapshots = annotate_rows_with_reply_state(
+            records,
+            runner=search.run_applescript,
+            timeout=effective_timeout,
+            include_draft_state=include_draft_state,
+            date_field="received_date",
+        )
+        draft_scan = build_draft_scan_status(snapshots)
         payload: dict[str, Any] = {
             "items": records,
             "returned": len(records),
@@ -519,6 +547,7 @@ def get_email_thread(
             "include_preview": include_preview,
             "recent_days_applied": effective_recent_days,
             "max_messages": max_messages,
+            "draft_scan": draft_scan,
         }
         if anchor is not None:
             payload["anchor"] = {

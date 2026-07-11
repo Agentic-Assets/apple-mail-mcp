@@ -10,8 +10,10 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     inject_preferences,
 )
+from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import analytics
+from apple_mail_mcp.tools.reply_state_wiring import annotate_rows_with_reply_state, build_draft_scan_status
 
 
 def _build_recent_one_account_script(
@@ -67,8 +69,9 @@ def _build_recent_one_account_script(
                     try
                         set messageInternetId to message id of aMessage
                     end try
+                    {was_replied_fragment()}
                     {preview_block}
-                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||INBOX|||" & messageAppId & "|||" & messageInternetId & "|||" & {preview_field}
+                    set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||INBOX|||" & messageAppId & "|||" & messageInternetId & "|||" & wasRepliedToken & "|||" & {preview_field}
                 end try
             end repeat
         end try
@@ -79,13 +82,21 @@ def _build_recent_one_account_script(
 
 
 def _parse_recent_email_lines(result: str) -> list[dict[str, Any]]:
+    """Parse '|||'-delimited recent-message rows from ``_build_recent_one_account_script``.
+
+    Field order: subject|||sender|||date|||read|||account|||mailbox
+    |||message_id|||internet_message_id|||was_replied_to|||preview.
+    ``was_replied_to`` is Mail's native property, always present (no
+    parameter gates it); ``has_draft`` is added later by
+    ``reply_state_wiring.annotate_rows_with_reply_state``, not here.
+    """
     emails: list[dict[str, Any]] = []
     if not result:
         return emails
     for line in result.split("\n"):
         if "|||" not in line:
             continue
-        parts = line.split("|||", 8)
+        parts = line.split("|||", 9)
         if len(parts) >= 5:
             legacy_preview = parts[5].strip() if len(parts) > 5 else ""
             emails.append(
@@ -98,7 +109,8 @@ def _parse_recent_email_lines(result: str) -> list[dict[str, Any]]:
                     "mailbox": parts[5].strip() if len(parts) > 6 else "INBOX",
                     "message_id": parts[6].strip() if len(parts) > 6 else "",
                     "internet_message_id": parts[7].strip() if len(parts) > 7 else "",
-                    "preview": parts[8].strip() if len(parts) > 8 else legacy_preview,
+                    "was_replied_to": len(parts) > 8 and parts[8].strip().lower() == "true",
+                    "preview": parts[9].strip() if len(parts) > 9 else legacy_preview,
                 }
             )
     return emails
@@ -172,6 +184,7 @@ async def inbox_dashboard(
     max_per_account: int = 10,
     output_format: str = "ui",
     timeout: int | None = None,
+    include_draft_state: bool = True,
 ) -> Any:
     """
     Get an interactive dashboard view of your email inbox.
@@ -194,13 +207,23 @@ async def inbox_dashboard(
         max_per_account: Maximum recent emails per account (default: 10).
         output_format: ``ui`` (default) or ``json``.
         timeout: Optional per-call AppleScript timeout in seconds (default: 60).
+        include_draft_state: JSON mode only. When True (default), correlate
+            each recent email against a bounded per-account Drafts snapshot
+            and populate ``has_draft`` (true/false/null); when False, every
+            row's ``has_draft`` is null and ``draft_scan.status`` is
+            ``"skipped"``, with no extra AppleScript call. Every recent
+            email always carries ``was_replied_to`` (Mail's native
+            property) regardless of this flag.
 
     Note: Requires mcp-ui-server package and a compatible MCP client.
 
     Returns:
         UIResource with uri "ui://apple-mail/inbox-dashboard" containing
         an interactive HTML dashboard, or a structured dict when
-        ``output_format="json"``.
+        ``output_format="json"``. JSON mode's ``recent_emails`` rows always
+        carry ``was_replied_to`` (bool) and ``has_draft`` (bool or null);
+        the dict also gains a top-level ``draft_scan`` object:
+        ``{"status": "ok"|"error"|"skipped", "scanned": N, "accounts": [...]}``.
     """
     if output_format not in {"ui", "json"}:
         return "Error: Invalid output_format. Use: ui, json"
@@ -228,6 +251,12 @@ async def inbox_dashboard(
     )
 
     if output_format == "json":
+        snapshots = annotate_rows_with_reply_state(
+            recent_emails,
+            runner=analytics.run_applescript,
+            timeout=per_call_timeout,
+            include_draft_state=include_draft_state,
+        )
         return {
             "account": selected_account,
             "include_preview": include_preview,
@@ -236,6 +265,7 @@ async def inbox_dashboard(
             "accounts": accounts_data,
             "recent_emails": recent_emails,
             "errors": [],
+            "draft_scan": build_draft_scan_status(snapshots),
         }
 
     from apple_mail_mcp import UI_AVAILABLE

@@ -67,6 +67,59 @@ here. The plugin/MCPB/marketplace versions track this file.
   handle across turns; `action="find"` with `in_reply_to` is the durable
   handle for a reply draft.
 
+## 3.11.0 - 2026-07-10
+
+Automatic reply-state annotation: every primary read and triage tool now reports
+whether an email was already answered or already has a reply draft, with no
+opt-in flag required, so agents never double-draft a reply that exists.
+
+### Added
+
+- **`was_replied_to` on every discovery row** (always present, no parameter
+  gates it): `list_inbox_emails`, `search_emails`, `get_email_by_id`,
+  `get_email_by_ids`, `get_email_thread`, `get_needs_response`,
+  `inbox_dashboard`, and `get_inbox_overview` recent rows now read Mail's
+  native `was replied to` flag inside the existing per-message AppleScript
+  property pass (measured ~15ms/message marginal, no extra round trip).
+- **`has_draft` on the same rows** (`true` / `false` / `null`; `null` means
+  the draft scan was skipped or errored, never silently false): one bounded
+  Drafts-mailbox snapshot per account per call (`DRAFT_LOOKUP=75` cap,
+  ~2s flat) correlates drafts to candidates by In-Reply-To/References header
+  match (headers read for the newest `DRAFT_SNAPSHOT_HEADER_CAP=10` drafts)
+  or by normalized-subject equality plus draft-recipient equals sender plus
+  draft date not before the email. Governed by a per-tool
+  `include_draft_state: bool = True` escape hatch; annotation is automatic
+  by default. JSON responses carry a top-level `draft_scan` status object;
+  text modes append `[REPLIED]` / `[HAS DRAFT]` markers.
+- **`core/reply_state.py`**: shared snapshot builder, correlation rule, and a
+  localized Drafts-mailbox name resolver ("Drafts", "Brouillons",
+  "Entwürfe", "Borradores"), the fallback treatment Inbox and Sent
+  mailboxes already had.
+- **`exclude_drafted: bool = False`** on `list_inbox_emails` and
+  `search_emails` alongside the existing `exclude_replied`.
+- **`include_drafted: bool = False`** on `get_needs_response`.
+
+### Changed
+
+- **`get_needs_response` now excludes already-handled mail by default**: rows
+  with `was_replied_to=true` or `has_draft=true` are skipped and reported via
+  visible `skipped_replied_count` / `skipped_drafted_count` fields.
+  `include_already_replied=True` / `include_drafted=True` restore them,
+  annotated. On a draft-scan error nothing is excluded for draft state
+  (fail-open) and `draft_scan.status` reports `"error"`. The legacy
+  `check_already_replied` Sent-header scan remains as an opt-in extra
+  verification layer.
+- **`exclude_replied` on `list_inbox_emails` / `search_emails`** now filters
+  on the native flag instead of a Sent-mailbox header scan (faster, no scan
+  cap interaction). `flag_replied` is deprecated but still accepted; the
+  canonical field is `was_replied_to`.
+- **Skills and references** (`pre-draft-verification`, `recent-first-triage`,
+  triage/drafting/management skills) now teach the row-level
+  `was_replied_to` / `has_draft` check as the primary pre-draft duplicate
+  guard, with the thread check as fallback.
+- `get_awaiting_reply` is intentionally unchanged: it tracks the opposite
+  direction (did they reply to me), for which no native Mail property exists.
+
 ## 3.10.1 - 2026-07-10
 
 ### Changed

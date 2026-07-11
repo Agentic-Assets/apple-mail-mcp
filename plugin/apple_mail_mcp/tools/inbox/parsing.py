@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from apple_mail_mcp.core.reply_state import DraftsSnapshot, reply_state_tags, resolve_has_draft
+
 _VALID_READ_FILTERS = ("all", "read", "unread")
 
 
@@ -41,14 +43,19 @@ def _read_filter_condition(read_filter: str) -> str | None:
 def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> list[dict[str, Any]]:
     """Parse '|||'-delimited AppleScript output into a list of email dicts.
 
-    Current schema (6 or 7 or 8 fields):
-        subject|||sender|||date|||read|||account|||mail_app_id[|||internet_message_id][|||content_preview]
+    Current schema (7, 8, or 9 fields):
+        subject|||sender|||date|||read|||account|||mail_app_id|||was_replied_to
+        [|||internet_message_id][|||content_preview]
 
     ``mail_app_id`` (the integer Mail.app ``id`` property) is always present
-    and emitted as ``"message_id"`` to match the ``search_emails`` record shape.
+    and emitted as ``"message_id"`` to match the ``search_emails`` record
+    shape. ``was_replied_to`` (Mail's native ``was replied to`` boolean) is
+    always present too, and no parameter gates it (see
+    ``tasks/active/reply-state-annotation/plan-2026-07-10.md``).
 
-    Extended schema when *has_message_id* is True (7 or 8 fields):
-        subject|||sender|||date|||read|||account|||mail_app_id|||internet_message_id[|||content_preview]
+    Extended schema when *has_message_id* is True (8 or 9 fields):
+        subject|||sender|||date|||read|||account|||mail_app_id|||was_replied_to
+        |||internet_message_id[|||content_preview]
 
     **Field-count validation:** the AppleScript side runs
     ``sanitize_pipe_delimited_field`` on ``messageSubject`` and
@@ -63,7 +70,7 @@ def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> l
     if not raw:
         return emails
     # Fields: subject(0) sender(1) date(2) read(3) account(4) mail_app_id(5)
-    #         [internet_message_id(6)] [content_preview(7)]
+    #         was_replied_to(6) [internet_message_id(7)] [content_preview(7 or 8)]
     # maxsplit = field_count - 1 so the LAST field (content_preview, or
     # internet_message_id when content is absent) keeps any literal ||| inside
     # it intact (content previews legitimately contain pipe sequences). The
@@ -73,7 +80,7 @@ def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> l
     # value in the mail_app_id slot (parts[5]) — the isdigit() check below
     # rejects those rows rather than risk mapping the wrong id onto a
     # downstream destructive op.
-    maxsplit = 7 if has_message_id else 6
+    maxsplit = 8 if has_message_id else 7
     for line in raw.split("\n"):
         if "|||" not in line:
             continue
@@ -94,15 +101,16 @@ def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> l
             "is_read": parts[3].strip().lower() == "true",
             "account": parts[4].strip(),
             "message_id": mail_app_id,
+            "was_replied_to": len(parts) > 6 and parts[6].strip().lower() == "true",
         }
         if has_message_id:
-            if len(parts) >= 7 and parts[6].strip():
-                item["internet_message_id"] = parts[6].strip()
+            if len(parts) >= 8 and parts[7].strip():
+                item["internet_message_id"] = parts[7].strip()
+            if len(parts) >= 9 and parts[8].strip():
+                item["content_preview"] = parts[8].strip()
+        else:
             if len(parts) >= 8 and parts[7].strip():
                 item["content_preview"] = parts[7].strip()
-        else:
-            if len(parts) >= 7 and parts[6].strip():
-                item["content_preview"] = parts[6].strip()
         emails.append(item)
     return emails
 
@@ -127,3 +135,87 @@ def _strip_count_marker(raw: str) -> tuple[str, int]:
         else:
             kept.append(line)
     return "\n".join(kept), count
+
+
+_ROW_MARKER_PREFIX = "__ROW__|||"
+
+
+def _annotate_text_rows_with_reply_state(
+    body: str,
+    *,
+    exclude_replied: bool = False,
+    exclude_drafted: bool = False,
+    draft_snapshot: DraftsSnapshot | None = None,
+) -> str:
+    """Walk ``__ROW__`` marker lines, tag/drop blocks, strip the markers.
+
+    Each ``__ROW__|||subject|||sender|||date|||internetMessageId|||wasRepliedToken``
+    marker line (emitted by ``list_scripts._build_list_inbox_text_script``)
+    precedes exactly one rendered email block, up to (not including) the
+    next blank line. The marker itself is always removed from the output.
+
+    ``was_replied_to`` comes straight from the marker's native token (no
+    Sent-mailbox scan). ``has_draft`` is computed via *draft_snapshot*
+    (``None`` when the scan was skipped or unavailable: no tag and no
+    exclusion, matching the JSON ``has_draft=null`` contract). Matching
+    blocks get a ``[REPLIED]``/``[HAS DRAFT]`` tag prefixed onto their
+    indicator line; when *exclude_replied*/*exclude_drafted* is True the
+    whole block is dropped instead.
+    """
+    lines = body.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.startswith(_ROW_MARKER_PREFIX):
+            out.append(line)
+            i += 1
+            continue
+
+        fields = line[len(_ROW_MARKER_PREFIX) :].split("|||")
+        subject = fields[0] if len(fields) > 0 else ""
+        sender = fields[1] if len(fields) > 1 else ""
+        date_text = fields[2] if len(fields) > 2 else ""
+        internet_message_id = fields[3] if len(fields) > 3 else ""
+        was_replied = len(fields) > 4 and fields[4].strip().lower() == "true"
+
+        has_draft = resolve_has_draft(
+            draft_snapshot,
+            subject=subject,
+            sender_email=sender,
+            internet_message_id=internet_message_id or None,
+            email_date=date_text or None,
+        )
+
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j >= len(lines):
+            i = j
+            continue
+        indicator_line = lines[j]
+        k = j + 1
+        while k < len(lines) and lines[k].strip() != "":
+            k += 1
+        block_end = k
+
+        if (was_replied and exclude_replied) or (has_draft and exclude_drafted):
+            i = block_end + 1 if block_end < len(lines) else block_end
+            continue
+
+        tags = reply_state_tags(was_replied, has_draft)
+        if tags:
+            tag_text = " ".join(tags)
+            if " " in indicator_line:
+                sym, rest = indicator_line.split(" ", 1)
+                indicator_line = f"{sym} {tag_text} {rest}"
+            else:
+                indicator_line = f"{indicator_line} {tag_text}"
+
+        out.extend(lines[i + 1 : j])
+        out.append(indicator_line)
+        out.extend(lines[j + 1 : block_end])
+        if block_end < len(lines):
+            out.append(lines[block_end])
+        i = block_end + 1 if block_end < len(lines) else block_end
+    return "\n".join(out)

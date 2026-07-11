@@ -1,6 +1,6 @@
 # Email Triage Guide
 
-> **Superseded for daily use:** Prefer the **`inbox-triage`** skill (`plugin/skills/inbox-triage/SKILL.md`) for the canonical read-first daily loop (`get_needs_response(check_already_replied=True, include_already_replied=False)`; `list_inbox_emails(..., exclude_replied=True)`). This guide remains as extended reference material.
+> **Superseded for daily use:** Prefer the **`inbox-triage`** skill (`plugin/skills/inbox-triage/SKILL.md`) for the canonical read-first daily loop (`get_needs_response()` excludes already-replied/already-drafted rows by default; `list_inbox_emails(..., exclude_replied=True, exclude_drafted=True)`). This guide remains as extended reference material.
 
 Email triage is the process of quickly assessing and categorizing emails to determine priority and action needed. Think of it like a hospital emergency room - not all emails need immediate attention, but you need to quickly identify which ones do.
 

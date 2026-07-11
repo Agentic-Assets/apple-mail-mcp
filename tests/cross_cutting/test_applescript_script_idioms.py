@@ -245,11 +245,7 @@ class ParseInboxRepliedIdsEdgeCasesTests(unittest.TestCase):
     def test_skips_non_INBOXHDR_lines(self):
         """Lines that do not start with INBOXHDR||| must be completely
         ignored — they may be error rows or other protocol tokens."""
-        raw = (
-            "ERROR|||something went wrong\n"
-            "INBOXHDR|||in-reply-to|||<real@example.com>\n"
-            "random noise line"
-        )
+        raw = "ERROR|||something went wrong\nINBOXHDR|||in-reply-to|||<real@example.com>\nrandom noise line"
         ids = smart_inbox_tools._parse_inbox_replied_ids(raw)
         self.assertEqual(ids, {"<real@example.com>"})
 
@@ -320,20 +316,13 @@ class ParseAwaitingReplySentRowsEdgeCasesTests(unittest.TestCase):
         self.assertEqual(rows, [])
 
     def test_skips_non_SENT_prefixed_lines(self):
-        raw = (
-            "ERROR|||some error\n"
-            "INBOXHDR|||in-reply-to|||<x@x.com>\n"
-            "SENT|||1|||<ok@x.com>|||Subj|||to@x.com|||Date"
-        )
+        raw = "ERROR|||some error\nINBOXHDR|||in-reply-to|||<x@x.com>\nSENT|||1|||<ok@x.com>|||Subj|||to@x.com|||Date"
         rows = smart_inbox_tools._parse_awaiting_reply_sent_rows(raw)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].mail_app_id, "1")
 
     def test_parses_multiple_rows(self):
-        raw = (
-            "SENT|||1|||<a@x.com>|||Alpha|||a@x.com|||Jan 1\n"
-            "SENT|||2|||<b@x.com>|||Beta|||b@x.com|||Jan 2"
-        )
+        raw = "SENT|||1|||<a@x.com>|||Alpha|||a@x.com|||Jan 1\nSENT|||2|||<b@x.com>|||Beta|||b@x.com|||Jan 2"
         rows = smart_inbox_tools._parse_awaiting_reply_sent_rows(raw)
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0].subject, "Alpha")
@@ -420,33 +409,25 @@ class InboxJsonScriptBuilderTests(unittest.TestCase):
     valid scripts that include the key idioms the parser expects."""
 
     def test_script_contains_account_reference(self):
-        script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=10, read_filter="all"
-        )
+        script = inbox_tools._build_list_inbox_json_script("Work", max_emails=10, read_filter="all")
         self.assertIn('account "Work"', script)
 
     def test_script_caps_message_count(self):
         """The script must limit message reads via an upper-bound index
         so it never tries to fetch an unbounded list."""
-        script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=25, read_filter="all"
-        )
+        script = inbox_tools._build_list_inbox_json_script("Work", max_emails=25, read_filter="all")
         self.assertIn("25", script)
 
     def test_script_emits_pipe_delimited_row_format(self):
         """The JSON script builds rows with '|||' delimiters that
         ``_parse_pipe_delimited_emails`` expects."""
-        script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, read_filter="all"
-        )
+        script = inbox_tools._build_list_inbox_json_script("Work", max_emails=5, read_filter="all")
         self.assertIn('"|||"', script)
 
     def test_script_includes_mail_app_id_read(self):
         """The mail_app_id (integer id property) must be fetched so the
         parsed dict can carry 'message_id' for targeted operations."""
-        script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, read_filter="all"
-        )
+        script = inbox_tools._build_list_inbox_json_script("Work", max_emails=5, read_filter="all")
         self.assertIn("id of aMessage", script)
 
     def test_script_with_content_includes_content_block(self):
@@ -477,9 +458,7 @@ class InboxJsonScriptBuilderTests(unittest.TestCase):
         self.assertNotIn("message id of aMessage", script)
 
     def test_script_is_complete_tell_block(self):
-        script = inbox_tools._build_list_inbox_json_script(
-            "Work", max_emails=5, read_filter="all"
-        )
+        script = inbox_tools._build_list_inbox_json_script("Work", max_emails=5, read_filter="all")
         stripped = script.strip()
         self.assertTrue(stripped.startswith('tell application "Mail"'), stripped[:60])
         self.assertTrue(stripped.endswith("end tell"), stripped[-60:])
@@ -558,21 +537,18 @@ class ParsePipeDelimitedEmailsEdgeCasesTests(unittest.TestCase):
         self.assertEqual(inbox_tools._parse_pipe_delimited_emails(""), [])
 
     def test_multiple_rows_all_parsed(self):
-        raw = (
-            "Subj 1|||a@x.com|||Date|||false|||Work|||1\n"
-            "Subj 2|||b@x.com|||Date|||true|||Work|||2"
-        )
+        raw = "Subj 1|||a@x.com|||Date|||false|||Work|||1\nSubj 2|||b@x.com|||Date|||true|||Work|||2"
         emails = inbox_tools._parse_pipe_delimited_emails(raw)
         self.assertEqual(len(emails), 2)
 
     def test_content_preview_parsed_when_has_message_id_false(self):
-        """When has_message_id=False, field 6 (index 6) is the content preview."""
-        raw = "Subject|||sender@x.com|||Date|||false|||Work|||1|||preview text here"
+        """When has_message_id=False, field 7 (after was_replied_to) is the content preview."""
+        raw = "Subject|||sender@x.com|||Date|||false|||Work|||1|||false|||preview text here"
         emails = inbox_tools._parse_pipe_delimited_emails(raw, has_message_id=False)
         self.assertEqual(emails[0]["content_preview"], "preview text here")
 
     def test_internet_message_id_parsed_when_has_message_id_true(self):
-        raw = "Subject|||sender@x.com|||Date|||false|||Work|||1|||<msg@x.com>"
+        raw = "Subject|||sender@x.com|||Date|||false|||Work|||1|||false|||<msg@x.com>"
         emails = inbox_tools._parse_pipe_delimited_emails(raw, has_message_id=True)
         self.assertEqual(emails[0]["internet_message_id"], "<msg@x.com>")
 
@@ -762,21 +738,13 @@ class EmptyMailboxEdgeCasesTests(unittest.TestCase):
     def test_get_awaiting_reply_with_empty_inbox_and_sent(self):
         """An account with no inbox/sent messages should return a graceful
         'found 0 sent email(s)' message rather than crashing."""
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=""
-        ):
-            result = smart_inbox_tools.get_awaiting_reply(
-                account="Work", days_back=7, max_results=5
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=""):
+            result = smart_inbox_tools.get_awaiting_reply(account="Work", days_back=7, max_results=5)
         self.assertIn("0 sent email(s) awaiting reply", result)
 
     def test_get_needs_response_with_empty_inbox_returns_zero_found(self):
-        with patch(
-            "apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=""
-        ):
-            result = smart_inbox_tools.get_needs_response(
-                account="Work", days_back=7, max_results=5
-            )
+        with patch("apple_mail_mcp.tools.smart_inbox.run_applescript", return_value=""):
+            result = smart_inbox_tools.get_needs_response(account="Work", days_back=7, max_results=5)
         self.assertIn("Found 0 email(s) needing response.", result)
 
     def test_get_top_senders_with_empty_mailbox_returns_graceful_result(self):
@@ -784,9 +752,7 @@ class EmptyMailboxEdgeCasesTests(unittest.TestCase):
             "apple_mail_mcp.tools.smart_inbox.run_applescript",
             return_value="TOTAL|||0\nMAILBOX_COUNT|||0",
         ):
-            result = smart_inbox_tools.get_top_senders(
-                account="Work", days_back=7, top_n=5
-            )
+            result = smart_inbox_tools.get_top_senders(account="Work", days_back=7, top_n=5)
         self.assertIn("Total emails analysed: 0", result)
 
 

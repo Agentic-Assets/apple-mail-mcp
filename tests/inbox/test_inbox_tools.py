@@ -53,8 +53,8 @@ class InboxToolTests(unittest.TestCase):
 
         def fake_run(script, timeout=120):
             captured["script"] = script
-            # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||content_preview
-            return "Subject|||sender@example.com|||Thu, Jan 1, 2026|||false|||Work|||1|||Hello | world"
+            # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||was_replied_to|||content_preview
+            return "Subject|||sender@example.com|||Thu, Jan 1, 2026|||false|||Work|||1|||false|||Hello | world"
 
         with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
             response = _run(
@@ -63,6 +63,7 @@ class InboxToolTests(unittest.TestCase):
                     max_emails=1,
                     include_content=True,
                     output_format="json",
+                    include_draft_state=False,
                 )
             )
 
@@ -70,14 +71,16 @@ class InboxToolTests(unittest.TestCase):
         self.assertEqual(response["errors"], [])
         self.assertIn("content of aMessage", captured["script"])
         self.assertEqual(response["emails"][0]["content_preview"], "Hello | world")
+        self.assertFalse(response["emails"][0]["was_replied_to"])
 
     def test_parser_preserves_delimiters_in_content_preview(self):
-        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||content_preview
+        # Schema: subject|||sender|||date|||read|||account|||mail_app_id|||was_replied_to|||content_preview
         records = inbox_tools._parse_pipe_delimited_emails(
-            "Subject|||sender@example.com|||Date|||true|||Work|||1|||Hello ||| still content"
+            "Subject|||sender@example.com|||Date|||true|||Work|||1|||true|||Hello ||| still content"
         )
 
         self.assertEqual(records[0]["content_preview"], "Hello ||| still content")
+        self.assertTrue(records[0]["was_replied_to"])
 
 
 class ListMailboxesJsonTests(unittest.TestCase):
@@ -139,7 +142,8 @@ class ListMailboxesChildCapTests(unittest.TestCase):
         # The cap_check must appear at least twice: once in the parent loop
         # and once in the child loop.
         self.assertGreaterEqual(
-            script.count("if mailboxIndex > 3 then exit repeat"), 2,
+            script.count("if mailboxIndex > 3 then exit repeat"),
+            2,
             "cap_check must fire in both parent and child loops",
         )
 
@@ -220,10 +224,12 @@ class ListInboxEmailsMessageIdTests(unittest.TestCase):
 
 class OverviewParseTests(unittest.TestCase):
     def test_parse_overview_account_collects_malformed_counts(self):
-        raw = "\n".join([
-            "HEADER|||Work|||not-a-number|||also-bad",
-            "MAILBOX|||Inbox|||bad-count",
-        ])
+        raw = "\n".join(
+            [
+                "HEADER|||Work|||not-a-number|||also-bad",
+                "MAILBOX|||Inbox|||bad-count",
+            ]
+        )
         parsed = inbox_tools._parse_overview_account(raw)
         self.assertIn("parse_errors", parsed)
         self.assertEqual(len(parsed["parse_errors"]), 2)
@@ -288,9 +294,7 @@ class ListMailboxesTextModeCapTests(unittest.TestCase):
 
     def test_json_mode_still_works_with_max_mailboxes(self):
         """JSON mode must still use max_mailboxes (regression guard)."""
-        lines = "\n".join([
-            f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(5)
-        ])
+        lines = "\n".join([f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(5)])
         with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=lines):
             raw = inbox_tools.list_mailboxes(
                 account="Work",
@@ -338,10 +342,12 @@ class GetMailboxUnreadCountsCapTests(unittest.TestCase):
     def test_truncated_marker_sets_truncated_flag(self):
         """When script emits __TRUNCATED__ marker, account dict has truthy truncation key."""
         # Simulate AppleScript output with truncation marker
-        fake_output = "\n".join([
-            "Work|||Inbox|||5",
-            "Work|||__TRUNCATED__|||100",
-        ])
+        fake_output = "\n".join(
+            [
+                "Work|||Inbox|||5",
+                "Work|||__TRUNCATED__|||100",
+            ]
+        )
         with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=fake_output):
             result = inbox_tools.get_mailbox_unread_counts(account="Work", max_mailboxes=100)
 
@@ -365,38 +371,38 @@ class GetInboxOverviewMailboxCapTests(unittest.TestCase):
 
     def test_overview_script_has_mailbox_cap(self):
         """Generated AppleScript must include a mailbox index cap."""
-        script = inbox_tools._build_overview_one_account_script(
-            "Work", include_mailboxes=True, max_mailboxes=100
-        )
+        script = inbox_tools._build_overview_one_account_script("Work", include_mailboxes=True, max_mailboxes=100)
         self.assertIn("mailboxIndex", script)
         self.assertIn("exit repeat", script)
         self.assertIn("100", script)
 
     def test_overview_custom_max_mailboxes_in_script(self):
         """Custom max_mailboxes is reflected in the generated script."""
-        script = inbox_tools._build_overview_one_account_script(
-            "Work", include_mailboxes=True, max_mailboxes=25
-        )
+        script = inbox_tools._build_overview_one_account_script("Work", include_mailboxes=True, max_mailboxes=25)
         self.assertIn("25", script)
         self.assertIn("MAILBOX_CAPPED", script)
 
     def test_overview_parse_account_handles_mailbox_capped(self):
         """Parser sets mailboxes_truncated when MAILBOX_CAPPED tag is present."""
-        raw = "\n".join([
-            "HEADER|||Work|||3|||100",
-            "MAILBOX|||Inbox|||3",
-            "MAILBOX_CAPPED|||Work|||100",
-        ])
+        raw = "\n".join(
+            [
+                "HEADER|||Work|||3|||100",
+                "MAILBOX|||Inbox|||3",
+                "MAILBOX_CAPPED|||Work|||100",
+            ]
+        )
         parsed = inbox_tools._parse_overview_account(raw)
         self.assertTrue(parsed.get("mailboxes_truncated"))
         self.assertEqual(parsed["unread"], 3)
 
     def test_overview_parse_account_no_capped_by_default(self):
         """Parser returns mailboxes_truncated=False when no MAILBOX_CAPPED tag."""
-        raw = "\n".join([
-            "HEADER|||Work|||3|||100",
-            "MAILBOX|||Inbox|||3",
-        ])
+        raw = "\n".join(
+            [
+                "HEADER|||Work|||3|||100",
+                "MAILBOX|||Inbox|||3",
+            ]
+        )
         parsed = inbox_tools._parse_overview_account(raw)
         self.assertFalse(parsed.get("mailboxes_truncated"))
 

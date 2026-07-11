@@ -392,8 +392,12 @@ class DashboardAccountScopeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["account"], "Work")
         self.assertEqual(result["accounts"], {"Work": 4})
-        self.assertEqual(result["recent_emails"], [{"subject": "Hello"}])
+        # reply-state annotation (2026-07-10, AGENTIC reply-state-annotation)
+        # adds `has_draft` to every recent-email row; the fixture row has no
+        # `account` key so no Drafts scan runs and `has_draft` stays null.
+        self.assertEqual(result["recent_emails"], [{"subject": "Hello", "has_draft": None}])
         self.assertEqual(result["errors"], [])
+        self.assertEqual(result["draft_scan"]["status"], "skipped")
 
 
 class HeavyScanGuardTests(unittest.TestCase):

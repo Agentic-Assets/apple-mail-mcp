@@ -73,10 +73,10 @@ Process this batch (read → thread-check → draft or no-action) before pulling
 ### 3. Needs your reply (only after step 2, or when user asks)
 
 ```
-get_needs_response(days_back=3, max_results=5, check_already_replied=True, include_already_replied=False, output_format="json")
+get_needs_response(days_back=3, max_results=5, output_format="json")
 ```
 
-Widen to `days_back=7` or `max_results=10` only if step 2 found nothing human-actionable. Do **not** start with `days_back=30`.
+Defaults already exclude rows with `was_replied_to=true` or `has_draft=true`, and the response reports `skipped_replied_count` / `skipped_drafted_count`. Widen with `include_already_replied=True` and/or `include_drafted=True` only when the user asks to see replied or drafted mail again; `check_already_replied=True` adds the legacy Sent-header scan as an extra verification layer. Widen to `days_back=7` or `max_results=10` only if step 2 found nothing human-actionable. Do **not** start with `days_back=30`.
 
 ### 4. Waiting on others (optional, ~1 min)
 

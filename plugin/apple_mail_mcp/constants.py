@@ -110,6 +110,10 @@ SCAN_BOUNDS = {
     # Multi-mailbox search fan-out limits.
     "MAX_MAILBOXES_PER_SEARCH": 20,
     "MAX_MAILBOXES_PER_SEARCH_ALL": 10,
+    # Reply-state Drafts snapshot: full-header reads on drafts cost ~72ms
+    # each (measured 2026-07-10), mirroring REPLIED_HEADER_READ_CAP in
+    # core/replied.py for the analogous Sent-mailbox scan.
+    "DRAFT_SNAPSHOT_HEADER_CAP": 10,
 }
 
 
@@ -118,7 +122,7 @@ SCAN_BOUNDS = {
 #
 # Centralized caps for every calendar read, write, and fan-out path. One edit
 # retunes every calendar tool. Values chosen in
-# tasks/active/apple-calendar-tools/final-plan-2026-07-10.md section 4:
+# tasks/archive/2026-07/shipped/apple-calendar-tools/final-plan-2026-07-10.md section 4:
 # Calendar.app AppleScript `whose` scans cost tracks total store size (not
 # window size), so result caps, an inner scan cap, and an aggregate per-call
 # wall-clock budget all apply together.

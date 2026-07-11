@@ -31,9 +31,6 @@ from apple_mail_mcp.core import (
     sanitize_pipe_delimited_field,
     validate_account_name,
 )
-from apple_mail_mcp.core import (
-    fetch_replied_ids as _core_fetch_replied_ids,
-)
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 
 # Re-export moved helpers and tools so the historical apple_mail_mcp.tools.inbox.<name>
@@ -75,12 +72,6 @@ from apple_mail_mcp.tools.inbox.parsing import (
     _resolve_read_filter,
     _strip_count_marker,
 )
-from apple_mail_mcp.tools.inbox.replied import (
-    _apply_replied_to_emails,
-    _filter_text_body_by_replied,
-    _normalize_message_id_token,
-    fetch_replied_ids,
-)
 from apple_mail_mcp.tools.inbox.unread_counts import get_mailbox_unread_counts
 
 __all__ = [
@@ -90,14 +81,11 @@ __all__ = [
     "SCAN_BOUNDS",
     "ToolError",
     "_VALID_READ_FILTERS",
-    "_apply_replied_to_emails",
     "_attach_warnings_to_json",
     "_build_inbox_collection_block",
     "_build_list_inbox_json_script",
     "_build_list_inbox_text_script",
     "_build_overview_one_account_script",
-    "_core_fetch_replied_ids",
-    "_filter_text_body_by_replied",
     "_format_overview",
     "_format_overview_json",
     "_list_accounts_script",
@@ -105,7 +93,6 @@ __all__ = [
     "_list_inbox_emails_text",
     "_list_mail_accounts",
     "_list_mailboxes_json",
-    "_normalize_message_id_token",
     "_overview_json_error",
     "_overview_suggestions",
     "_parse_overview_account",
@@ -124,7 +111,6 @@ __all__ = [
     "cast",
     "content_preview_script",
     "escape_applescript",
-    "fetch_replied_ids",
     "get_inbox_overview",
     "get_mailbox_unread_counts",
     "inbox_mailbox_script",

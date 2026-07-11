@@ -19,9 +19,10 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). When the user
 
 Canonical rules: [`pre-draft-verification.md`](references/pre-draft-verification.md). Summary:
 
-1. Fetch the conversation: `get_email_thread(account=..., message_id=...)`. If no id is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id`.
-2. Cross-check senders in the thread against `list_account_addresses(account=...)`. If any message in the thread was sent by one of the user's own addresses, **abort the draft** and report which message already replied (date, subject snippet), unless the user explicitly said "redraft" or "include already-replied".
-3. Only after the thread shows no user-sent message do you proceed to `reply_to_email(message_id=...)`.
+1. Check the discovery row first: `was_replied_to` and `has_draft` are always present on every read/triage discovery row (`search_emails`, `list_inbox_emails`, `get_email_by_id`, `get_email_by_ids`, `get_email_thread`, `get_needs_response`, `inbox_dashboard`, and `get_inbox_overview`). **Abort the draft** when `has_draft=true` (a matching draft already exists) or when `was_replied_to=true` with no matching draft, unless the user explicitly said "redraft", "include already-replied", or "include drafted".
+2. Fallback (row fields absent, or `has_draft=null`): fetch the conversation with `get_email_thread(account=..., message_id=...)`. If no id is known, run bounded `search_emails` or `list_inbox_emails` first, then fetch by returned `message_id`.
+3. Cross-check senders in the thread against `list_account_addresses(account=...)`. If any message in the thread was sent by one of the user's own addresses, **abort the draft** and report which message already replied (date, subject snippet), unless the user explicitly said "redraft" or "include already-replied".
+4. Only after the row/thread check shows no user-sent message and no matching draft do you proceed to `reply_to_email(message_id=...)`.
 
 Never use standalone draft creators (`compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")`) to answer an existing message. They create standalone new messages, so the original chain is not included. If a standalone draft has a `Re:` / `Fwd:` subject or quoted-thread body, the tool returns an error unless `standalone_confirmed=True`; use that override only for a truly new message whose subject happens to look threaded.
 
@@ -142,7 +143,7 @@ standalone message.
 
 ## Missed-replies queue (bounded, no Inbox-wide search)
 
-Use this workflow to find drafts that answer a message but were never sent, without an unbounded Inbox scan. It is a three-call, bounded path:
+Discovery rows now carry `has_draft` automatically, so most callers never need this workflow: check the row first, and only fall back here when `has_draft` is `null` (the draft scan was skipped or errored; check `draft_scan.status`) or absent from an older result already in hand. Use this workflow to find drafts that answer a message but were never sent, without an unbounded Inbox scan. It is a three-call, bounded path:
 
 1. `manage_drafts(action="list", limit=25)`: a bounded, Drafts-only slice (newest first). Read each returned draft's `Id` (its `draft_id`) and body snippet to shortlist candidates; do not scan beyond `limit`.
 2. `verify_draft(draft_id=..., resolve_source=True)`: an exact-id snapshot for one shortlisted draft. It returns the usual recipients, body preview, attachments, signature state, and `threading.in_reply_to`, plus a new `source` object when `resolve_source=True`. `source` resolves the draft's `In-Reply-To` header back to the SOURCE Inbox message via one bounded `search_emails(internet_message_id=...)` call under the hood, so you get the original message's numeric `message_id`, `subject`, and `sender` in the same call, instead of a second manual lookup. `resolve_source` defaults to `False`, so existing callers see no behavior change unless they opt in.

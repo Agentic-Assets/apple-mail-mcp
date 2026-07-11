@@ -36,17 +36,5 @@ class ReadFilterConditionTests(unittest.TestCase):
         self.assertIsNone(inbox_tools._read_filter_condition("all"))
 
 
-class NormalizeMessageIdTokenTests(unittest.TestCase):
-    def test_adds_missing_brackets(self):
-        self.assertEqual(inbox_tools._normalize_message_id_token("id@example.com"), "<id@example.com>")
-
-    def test_preserves_existing_brackets(self):
-        self.assertEqual(inbox_tools._normalize_message_id_token("<id@example.com>"), "<id@example.com>")
-
-    def test_blank_returns_empty(self):
-        self.assertEqual(inbox_tools._normalize_message_id_token(""), "")
-        self.assertEqual(inbox_tools._normalize_message_id_token("   "), "")
-
-
 if __name__ == "__main__":
     unittest.main()
