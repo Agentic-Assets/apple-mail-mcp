@@ -36,6 +36,7 @@ from manifest_checks.artifacts import (
     _compare_zip_members,
 )
 from manifest_checks.codex import _check_codex_plugin_contract
+from manifest_checks.cursor import _check_cursor_plugin_contract
 from manifest_checks.common import (
     _check_tool_count_claim,
     _env_truthy,
@@ -75,6 +76,7 @@ __all__ = [
     "_check_artifact_freshness",
     "_check_changelog_release_version",
     "_check_codex_plugin_contract",
+    "_check_cursor_plugin_contract",
     "_check_developer_only_skills_not_packaged",
     "_check_marketplace_contract",
     "_check_mcpb_runtime_contract",
@@ -129,6 +131,7 @@ def _public_version_checks() -> list[VersionCheck]:
     return [
         (common.ROOT / "plugin/.claude-plugin/plugin.json", "version", "Claude plugin manifest"),
         (common.ROOT / "plugin/.codex-plugin/plugin.json", "version", "Codex plugin manifest"),
+        (common.ROOT / "plugin/.cursor-plugin/plugin.json", "version", "Cursor plugin manifest"),
         (common.ROOT / ".claude-plugin/marketplace.json", "plugins[0].version", "Claude marketplace plugin"),
         (common.ROOT / "server.json", "version", "MCP server metadata"),
         (common.ROOT / "server.json", "packages[0].version", "MCP server package"),
@@ -174,6 +177,7 @@ def main() -> None:
         )
     _check_marketplace_contract(expected_version, errors)
     _check_codex_plugin_contract(expected_version, actual_count, errors)
+    _check_cursor_plugin_contract(expected_version, actual_count, errors)
 
     mcpb = json.loads((common.ROOT / "apple-mail-mcpb/manifest.json").read_text(encoding="utf-8"))
     _check_tool_count_claim(mcpb.get("description"), "mcpb manifest description", actual_count, errors)

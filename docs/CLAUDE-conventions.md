@@ -177,9 +177,9 @@ Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marke
 
 ---
 
-## Distribution channels — four install surfaces, one source
+## Distribution channels — five install surfaces, one source
 
-The repo ships from **one source tree** to **four install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/gates/build-artifacts.sh`](../tools/gates/build-artifacts.sh); Claude Code and Codex plugin installs share the checked-in `plugin/` runtime. The validator and CI tests enforce parity between them.
+The repo ships from **one source tree** to **five install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/gates/build-artifacts.sh`](../tools/gates/build-artifacts.sh); Claude Code, Codex, and Cursor plugin installs share the checked-in `plugin/` runtime but retain distinct adapters. The validator and CI tests enforce static parity, while Cursor support still requires a live client acceptance test.
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|

@@ -45,4 +45,4 @@ See [`archive/README.md`](archive/README.md).
 | [`archive/2026-05/`](archive/2026-05/) | May workstreams (whose-elimination, robustness audits, scalability hardening) |
 | [`archive/2026-06/shipped/`](archive/2026-06/shipped/) | Shipped June workstreams (Codex plugin setup, MCP registration incident, doc cleanup, agent-guidance audit, draft-verification simplification) |
 | [`archive/2026-06/issues/`](archive/2026-06/issues/) | Resolved June issue trackers and investigation notes |
-| [`archive/2026-07/shipped/`](archive/2026-07/shipped/) | Apple Calendar surface (v3.10.0), manifest-release-hardening (parked), and marketplace offline release candidate (v3.11.3, pending signed tag and client acceptance evidence) |
+| [`archive/2026-07/shipped/`](archive/2026-07/shipped/) | Apple Calendar surface (v3.10.0), manifest-release-hardening (parked), marketplace offline release candidate (v3.11.3), and Cursor marketplace source candidate (v3.11.4, pending protected tag and client acceptance evidence) |
