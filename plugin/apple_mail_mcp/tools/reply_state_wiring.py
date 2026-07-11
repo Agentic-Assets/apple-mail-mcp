@@ -54,10 +54,22 @@ def build_draft_scan_status(snapshots: dict[str, DraftsSnapshot]) -> dict[str, A
     accounts_detail: list[dict[str, Any]] = []
     errors: list[str] = []
     scanned_total = 0
+    total_drafts = 0
+    any_truncated = False
     all_ok = True
     for account, snapshot in snapshots.items():
-        accounts_detail.append({"account": account, "status": snapshot.status, "scanned": snapshot.scanned})
+        accounts_detail.append(
+            {
+                "account": account,
+                "status": snapshot.status,
+                "scanned": snapshot.scanned,
+                "total": snapshot.total,
+                "truncated": snapshot.truncated,
+            }
+        )
         scanned_total += snapshot.scanned
+        total_drafts += snapshot.total if snapshot.total is not None else snapshot.scanned
+        any_truncated = any_truncated or snapshot.truncated
         if snapshot.status != "ok":
             all_ok = False
             if snapshot.error:
@@ -66,6 +78,8 @@ def build_draft_scan_status(snapshots: dict[str, DraftsSnapshot]) -> dict[str, A
     result: dict[str, Any] = {
         "status": "ok" if all_ok else "error",
         "scanned": scanned_total,
+        "total": total_drafts,
+        "truncated": any_truncated,
         "accounts": accounts_detail,
     }
     if errors:

@@ -2173,7 +2173,10 @@ class ReplyStateAnnotationTests(unittest.TestCase):
         payload = json.loads(result)
         self.assertEqual([item["subject"] for item in payload["items"]], ["Other Topic"])
         self.assertEqual(payload["draft_scan"]["status"], "ok")
-        self.assertEqual(payload["draft_scan"]["accounts"], [{"account": "Work", "status": "ok", "scanned": 1}])
+        self.assertEqual(
+            payload["draft_scan"]["accounts"],
+            [{"account": "Work", "status": "ok", "scanned": 1, "total": 1, "truncated": False}],
+        )
         # One search call + one Drafts-snapshot call for the single account.
         self.assertEqual(len(calls), 2)
 

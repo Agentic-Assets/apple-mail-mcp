@@ -113,6 +113,7 @@ SCAN_BOUNDS = {
     # Reply-state Drafts snapshot: full-header reads on drafts cost ~72ms
     # each (measured 2026-07-10), mirroring REPLIED_HEADER_READ_CAP in
     # core/replied.py for the analogous Sent-mailbox scan.
+    "DRAFT_SNAPSHOT_CAP": 50,
     "DRAFT_SNAPSHOT_HEADER_CAP": 10,
 }
 

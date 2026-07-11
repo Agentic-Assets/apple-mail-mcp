@@ -5,6 +5,19 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.11.3 - 2026-07-11
+
+### Fixed
+
+- **Compose draft smoke verification now requires the exact persisted To
+  recipient set and uses an identity-guarded cleanup transaction.** A recipient
+  mismatch or Exchange Drafts ID drift now retains the artifact instead of
+  risking deletion of another draft.
+- **Reply-state Drafts scans stay bounded at 50 without claiming false
+  negatives.** When a capped scan omits older drafts, matching rows remain
+  `true` and nonmatches return `null` (`unknown`). The performance check now
+  scales its mailbox metadata threshold from the mailbox response envelope.
+
 ## 3.11.2 - 2026-07-11
 
 ### Fixed

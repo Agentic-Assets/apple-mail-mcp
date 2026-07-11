@@ -30,6 +30,7 @@ from apple_mail_mcp.core import (
     validate_account_name,
 )
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, READ_ONLY_TOOL_ANNOTATIONS, WRITE_TOOL_ANNOTATIONS, mcp
+from apple_mail_mcp.tools.compose.cleanup import delete_draft_if_identity_matches
 
 # Pure helpers split into leaf siblings; re-imported here so every symbol stays
 # importable as ``apple_mail_mcp.tools.compose.<name>`` (cli.py + tests rely on
@@ -213,6 +214,7 @@ __all__ = [
     "build_chunked_typing_handler",
     "compose_email",
     "create_rich_email_draft",
+    "delete_draft_if_identity_matches",
     "escape_applescript",
     "forward_email",
     "inject_preferences",

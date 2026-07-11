@@ -3380,6 +3380,35 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
                 self.assertIn('set outputText to outputText & "Draft ID: " & draftId', script)
                 self.assertNotIn("contains", script)
 
+    def test_identity_guarded_delete_refuses_drifted_or_mismatched_draft_before_delete(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "IDENTITY_MISMATCH|||91062"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            result = compose_tools.delete_draft_if_identity_matches(
+                account="Work",
+                draft_id="91061",
+                expected_subject="APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd",
+                expected_to="smoke@example.invalid",
+                expected_body_sentinel="APPLE_MAIL_MCP_BODY_SENTINEL_abcd",
+            )
+
+        payload = json.loads(result)
+        self.assertFalse(payload["deleted"])
+        self.assertEqual(payload["error"], "smoke_draft_identity_mismatch")
+        self.assertEqual(payload["draft_id"], "91062")
+        script = captured[0]
+        self.assertIn('set expectedSubject to "APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd"', script)
+        self.assertIn('set expectedBodySentinel to "APPLE_MAIL_MCP_BODY_SENTINEL_abcd"', script)
+        self.assertIn('set expectedToAddresses to {"smoke@example.invalid"}', script)
+        self.assertIn("if (count of actualToAddresses) is not (count of expectedToAddresses)", script)
+        self.assertIn("repeat with actualToAddress in actualToAddresses", script)
+        self.assertLess(script.index("if cleanupIdentityMatches then"), script.index("delete foundDraft"))
+        self.assertNotIn("subject of foundDraft &", script)
+
     def test_invalid_draft_id_is_rejected_before_applescript(self):
         with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
             result = compose_tools.manage_drafts(
