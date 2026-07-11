@@ -12,7 +12,7 @@ Start at [`../todo.md`](../todo.md) and [`../INDEX.md`](../INDEX.md).
 | [`2026-05/`](2026-05/) | May workstreams: whose-elimination (v3.2.0 capability tokens), robustness completion audits, scalability hardening notes |
 | [`2026-06/shipped/`](2026-06/shipped/) | Shipped June workstreams: Codex plugin setup, MCP tool-registration incident, doc-cleanup branch, agent-guidance audit (complete 2026-06-30), draft-verification simplification (helper module + manage_drafts builders + `draft-verify-smoke` CLI) |
 | [`2026-06/issues/`](2026-06/issues/) | Resolved June issue trackers (draft verification, reply body, manage_drafts timeouts, etc.) |
-| [`2026-07/shipped/`](2026-07/shipped/) | Apple Calendar tool surface (v3.10.0: 10 tools, hybrid AppleScript+EventKit engine, 2 skills, research/plan/9-phase reports, merged PR #70 and #71); manifest-release-hardening (v3.9.1-era version-surface hardening, parked per 2026-07-09 branch cleanup) |
+| [`2026-07/shipped/`](2026-07/shipped/) | Apple Calendar tool surface (v3.10.0: 10 tools, hybrid AppleScript+EventKit engine, 2 skills, research/plan/9-phase reports, merged PR #70 and #71); manifest-release-hardening (v3.9.1-era version-surface hardening, parked per 2026-07-09 branch cleanup); marketplace offline release candidate (v3.11.3, pending signed source tag and client acceptance evidence) |
 
 ## When archiving
 
