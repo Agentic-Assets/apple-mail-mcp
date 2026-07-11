@@ -52,14 +52,16 @@ from apple_mail_mcp.tools.smart_inbox.awaiting_reply import (
 from apple_mail_mcp.tools.smart_inbox.helpers import _normalize_message_id
 from apple_mail_mcp.tools.smart_inbox.needs_response import (
     _build_needs_response_inbox_script,
-    _classify_needs_response_rows,
     _format_needs_response_text,
     _needs_response_error,
-    _NeedsResponseRow,
     _newsletter_filter_condition,
+    get_needs_response,
+)
+from apple_mail_mcp.tools.smart_inbox.reply_state_glue import (
+    _classify_needs_response_rows,
+    _NeedsResponseRow,
     _parse_needs_response_inbox_rows,
     _priority_label,
-    get_needs_response,
 )
 from apple_mail_mcp.tools.smart_inbox.top_senders import _top_senders_error, get_top_senders
 

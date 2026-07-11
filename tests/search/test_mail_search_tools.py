@@ -70,6 +70,46 @@ def _thread_record_line(
     )
 
 
+def _record_line_ws(
+    message_id,
+    subject,
+    internet_message_id="<abc@example.com>",
+    sender="sender@example.com",
+    mailbox="INBOX",
+    account="Work",
+    is_read=False,
+    received_date="2026-03-07T10:00:00",
+    content_preview="",
+    to="",
+    cc="",
+    in_reply_to="",
+    references="",
+    bcc="",
+    was_replied_to=False,
+):
+    """Build a full 15-field row (the current shape, including the
+    ``was_replied_to`` field added by ``core.reply_state.was_replied_fragment``)."""
+    return "|||".join(
+        [
+            str(message_id),
+            internet_message_id,
+            subject,
+            sender,
+            mailbox,
+            account,
+            "true" if is_read else "false",
+            received_date,
+            content_preview,
+            to,
+            cc,
+            in_reply_to,
+            references,
+            bcc,
+            "true" if was_replied_to else "false",
+        ]
+    )
+
+
 def _run(coro):
     """Convenience: drive an async tool to completion from a sync test."""
     return asyncio.run(coro)
@@ -117,6 +157,7 @@ class SearchToolTests(unittest.TestCase):
                         offset=1,
                         limit=2,
                         max_results=None,
+                        include_draft_state=False,
                     )
                 )
             )
@@ -149,6 +190,7 @@ class SearchToolTests(unittest.TestCase):
                         read_status="unread",
                         output_format="json",
                         limit=1,
+                        include_draft_state=False,
                     )
                 )
             )
@@ -179,6 +221,7 @@ class SearchToolTests(unittest.TestCase):
                         output_format="json",
                         limit=1,
                         max_results=None,
+                        include_draft_state=False,
                     )
                 )
             )
@@ -420,6 +463,7 @@ class SearchToolTests(unittest.TestCase):
                     account="Work",
                     message_id="12345",
                     output_format="json",
+                    include_draft_state=False,
                 )
             )
 
@@ -483,6 +527,7 @@ class SearchToolTests(unittest.TestCase):
                 account="Work",
                 message_ids=["101", "bad", "202", "101", "303"],
                 output_format="json",
+                include_draft_state=False,
             )
 
         payload = json.loads(result)
@@ -560,6 +605,7 @@ class SearchToolTests(unittest.TestCase):
                 message_ids=["101"],
                 include_content=True,
                 output_format="json",
+                include_draft_state=False,
             )
 
         payload = json.loads(result)
@@ -1511,6 +1557,7 @@ class NewFieldsTests(unittest.TestCase):
                     include_content=True,
                     output_format="json",
                     limit=5,
+                    include_draft_state=False,
                 )
             )
 
@@ -1638,6 +1685,7 @@ class NewFieldsTests(unittest.TestCase):
                 account="Work",
                 message_id="12345",
                 output_format="json",
+                include_draft_state=False,
             )
 
         self.assertIn("all headers of aMessage", captured["script"])
@@ -2023,6 +2071,330 @@ class GetEmailThreadMessageIdTests(unittest.TestCase):
     def test_get_email_thread_requires_subject_or_message_id(self):
         result = search_tools.get_email_thread(account="Work", recent_days=7)
         self.assertIn("message_id or subject_keyword", result)
+
+
+class ReplyStateAnnotationTests(unittest.TestCase):
+    """15-field row parsing + has_draft/draft_scan wiring across
+    search_emails, get_email_by_id, get_email_by_ids, and get_email_thread
+    (JSON mode). See tasks/active/reply-state-annotation/plan-2026-07-10.md.
+    Pure-function coverage of the shared annotation/capping/fail-open logic
+    itself (search now routes through the same helper as list_inbox_emails /
+    inbox_dashboard, keyed by ``received_date`` via ``date_field``) lives in
+    tests/inbox/test_reply_state_wiring.py; these tests only prove each
+    search tool wires it up correctly end to end."""
+
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    @staticmethod
+    def _route_drafts(drafts_raw, other_raw):
+        """Return (fake_run, calls) routing drafts-snapshot scripts to
+        *drafts_raw* (detected via the ``"DRAFT|||"`` literal every
+        ``build_drafts_snapshot_script`` output contains) and everything
+        else to *other_raw* (str or one-arg callable)."""
+        calls: list[str] = []
+
+        def fake_run(script, timeout=None):
+            calls.append(script)
+            if '"DRAFT|||"' in script:
+                return drafts_raw
+            return other_raw(script) if callable(other_raw) else other_raw
+
+        return fake_run, calls
+
+    # ------------------------------------------------------------------
+    # Parser: 15-field was_replied_to + 14-field row tolerance
+    # ------------------------------------------------------------------
+
+    def test_parse_search_records_reads_was_replied_to_true(self):
+        from apple_mail_mcp.tools.search.records import _parse_search_records
+
+        records, _errors = _parse_search_records(_record_line_ws(1, "Subj", was_replied_to=True))
+        self.assertTrue(records[0]["was_replied_to"])
+
+    def test_parse_search_records_reads_was_replied_to_false(self):
+        from apple_mail_mcp.tools.search.records import _parse_search_records
+
+        records, _errors = _parse_search_records(_record_line_ws(1, "Subj", was_replied_to=False))
+        self.assertFalse(records[0]["was_replied_to"])
+
+    def test_parse_search_records_tolerates_14_field_row(self):
+        """An older-shaped row (pre-15th-field, e.g. a stale mock) must not
+        crash the parser; was_replied_to simply defaults to False."""
+        from apple_mail_mcp.tools.search.records import _parse_search_records
+
+        records, _errors = _parse_search_records(_thread_record_line(1, "Legacy row"))
+        self.assertEqual(len(records), 1)
+        self.assertFalse(records[0]["was_replied_to"])
+
+    def test_parse_search_records_tolerates_short_9_field_row(self):
+        from apple_mail_mcp.tools.search.records import _parse_search_records
+
+        records, _errors = _parse_search_records(_record_line(1, "Short row"))
+        self.assertEqual(len(records), 1)
+        self.assertFalse(records[0]["was_replied_to"])
+
+    # ------------------------------------------------------------------
+    # search_emails: exclude_drafted / include_draft_state / fail-open
+    # ------------------------------------------------------------------
+
+    def test_search_emails_exclude_drafted_filters_matching_records(self):
+        search_raw = "\n".join(
+            [
+                _record_line_ws(
+                    1,
+                    "Budget Update",
+                    internet_message_id="<a@example.com>",
+                    sender="alice@example.com",
+                    received_date="2026-05-01T09:00:00",
+                ),
+                _record_line_ws(
+                    2,
+                    "Other Topic",
+                    internet_message_id="<b@example.com>",
+                    sender="bob@example.com",
+                    received_date="2026-05-01T09:00:00",
+                ),
+            ]
+        )
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        fake_run, calls = self._route_drafts(drafts_raw, search_raw)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    recent_days=2.0,
+                    output_format="json",
+                    exclude_drafted=True,
+                )
+            )
+
+        payload = json.loads(result)
+        self.assertEqual([item["subject"] for item in payload["items"]], ["Other Topic"])
+        self.assertEqual(payload["draft_scan"]["status"], "ok")
+        self.assertEqual(payload["draft_scan"]["accounts"], [{"account": "Work", "status": "ok", "scanned": 1}])
+        # One search call + one Drafts-snapshot call for the single account.
+        self.assertEqual(len(calls), 2)
+
+    def test_search_emails_include_draft_state_false_skips_drafts_scan(self):
+        search_raw = _record_line_ws(1, "Something", sender="alice@example.com")
+        fake_run, calls = self._route_drafts("COUNT|||0", search_raw)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    recent_days=2.0,
+                    output_format="json",
+                    include_draft_state=False,
+                )
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["draft_scan"], {"status": "skipped", "scanned": 0, "accounts": []})
+        self.assertIsNone(payload["items"][0]["has_draft"])
+        # Only the one search call, no Drafts-snapshot call at all.
+        self.assertEqual(len(calls), 1)
+
+    def test_search_emails_draft_scan_error_fails_open(self):
+        search_raw = _record_line_ws(1, "Something", sender="alice@example.com")
+
+        def fake_run(script, timeout=None):
+            if '"DRAFT|||"' in script:
+                raise RuntimeError("AppleScript error: -1728")
+            return search_raw
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    recent_days=2.0,
+                    output_format="json",
+                    exclude_drafted=True,
+                )
+            )
+
+        payload = json.loads(result)
+        # Fail-open: a scan error never excludes anything on has_draft.
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertIsNone(payload["items"][0]["has_draft"])
+        self.assertEqual(payload["draft_scan"]["status"], "error")
+
+    def test_search_emails_text_mode_shows_has_draft_marker(self):
+        search_raw = _record_line_ws(
+            1,
+            "Budget Update",
+            internet_message_id="<a@example.com>",
+            sender="alice@example.com",
+            received_date="2026-05-01T09:00:00",
+        )
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        fake_run, _calls = self._route_drafts(drafts_raw, search_raw)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    recent_days=2.0,
+                    output_format="text",
+                )
+            )
+
+        self.assertIn("[HAS DRAFT] Budget Update", result)
+
+    # ------------------------------------------------------------------
+    # get_email_by_id / get_email_by_ids annotation
+    # ------------------------------------------------------------------
+
+    def test_get_email_by_id_annotates_has_draft_true(self):
+        record = _record_line_ws(
+            12345,
+            "Budget Update",
+            internet_message_id="<a@example.com>",
+            sender="alice@example.com",
+            received_date="2026-05-01T09:00:00",
+        )
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        fake_run, calls = self._route_drafts(drafts_raw, record)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_id(
+                account="Work",
+                message_id="12345",
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["item"]["has_draft"])
+        self.assertEqual(payload["draft_scan"]["status"], "ok")
+        self.assertEqual(len(calls), 2)
+
+    def test_get_email_by_id_include_draft_state_false_skips_scan(self):
+        record = _record_line_ws(12345, "Something")
+        fake_run, calls = self._route_drafts("COUNT|||0", record)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_id(
+                account="Work",
+                message_id="12345",
+                output_format="json",
+                include_draft_state=False,
+            )
+
+        payload = json.loads(result)
+        self.assertIsNone(payload["item"]["has_draft"])
+        self.assertEqual(payload["draft_scan"]["status"], "skipped")
+        self.assertEqual(len(calls), 1)
+
+    def test_get_email_by_ids_annotates_has_draft_across_items(self):
+        records_raw = "\n".join(
+            [
+                _record_line_ws(
+                    101,
+                    "Budget Update",
+                    internet_message_id="<a@example.com>",
+                    sender="alice@example.com",
+                    received_date="2026-05-01T09:00:00",
+                ),
+                _record_line_ws(
+                    202,
+                    "Other Topic",
+                    internet_message_id="<b@example.com>",
+                    sender="bob@example.com",
+                    received_date="2026-05-01T09:00:00",
+                ),
+            ]
+        )
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        fake_run, calls = self._route_drafts(drafts_raw, records_raw)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_by_ids(
+                account="Work",
+                message_ids=["101", "202"],
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        has_draft_by_subject = {item["subject"]: item["has_draft"] for item in payload["items"]}
+        self.assertEqual(has_draft_by_subject, {"Budget Update": True, "Other Topic": False})
+        self.assertEqual(payload["draft_scan"]["status"], "ok")
+        # One by-ids chunk call + one Drafts-snapshot call for "Work".
+        self.assertEqual(len(calls), 2)
+
+    # ------------------------------------------------------------------
+    # get_email_thread: JSON-mode annotation, text-mode native marker only
+    # ------------------------------------------------------------------
+
+    def test_get_email_thread_json_annotates_has_draft(self):
+        thread_line = _thread_record_line(
+            401,
+            "Re: Budget Review",
+            internet_message_id="<reply@example.com>",
+            sender="alice@example.com",
+            received_date="2026-05-01T09:00:00",
+        )
+        drafts_raw = "DRAFT|||Budget Review|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        fake_run, calls = self._route_drafts(drafts_raw, "THREAD_STRATEGY|||subject\n" + thread_line)
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_thread(
+                account="Work",
+                subject_keyword="Budget Review",
+                max_messages=10,
+                recent_days=7,
+                output_format="json",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["items"][0]["has_draft"])
+        self.assertEqual(payload["draft_scan"]["status"], "ok")
+        # One thread-listing call + one Drafts-snapshot call.
+        self.assertEqual(len(calls), 2)
+
+    def test_get_email_thread_text_mode_never_calls_drafts_scan(self):
+        """Thread text output is rendered entirely inside AppleScript (no
+        parsed-record pass-through), so has_draft/draft_scan are JSON-only
+        for this tool; text mode must never fire the extra Drafts-scan call."""
+        calls: list[str] = []
+
+        def fake_run(script, timeout=None):
+            calls.append(script)
+            return "EMAIL THREAD VIEW"
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            result = search_tools.get_email_thread(
+                account="Work",
+                subject_keyword="Budget Review",
+                max_messages=10,
+                recent_days=7,
+                output_format="text",
+            )
+
+        self.assertIn("EMAIL THREAD VIEW", result)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn('"DRAFT|||"', calls[0])
+
+    def test_get_email_thread_text_mode_shows_native_replied_marker(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return "REPLIED_LINE"
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            search_tools.get_email_thread(
+                account="Work",
+                subject_keyword="Budget Review",
+                max_messages=10,
+                recent_days=7,
+            )
+
+        # The display loop reads the native was-replied property and only
+        # needs a wasRepliedToken check, no extra AppleScript round trip.
+        self.assertIn("was replied to of aMessage", captured["script"])
+        self.assertIn('if wasRepliedToken is "true" then set repliedMarker to "[REPLIED] "', captured["script"])
 
 
 if __name__ == "__main__":

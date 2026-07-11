@@ -94,7 +94,7 @@ Pattern: identify candidates with `search_emails()`, preview the count and sampl
 Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 minute scan** only, use the **`inbox-triage`** skill instead.
 
 1. Get overview: `get_inbox_overview()` to see unread counts, recent messages, and suggested actions.
-2. Surface priorities: `get_needs_response(days_back=2, max_results=20, output_format="json")` for likely replies. Use each row's numeric `message_id` for downstream reads, replies, moves, and status updates; keep `internet_message_id` only for replied-header correlation. Optionally use `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
+2. Surface priorities: `get_needs_response(days_back=2, max_results=20, output_format="json")` for likely replies; defaults already exclude rows with `was_replied_to=true` or `has_draft=true` and report `skipped_replied_count` / `skipped_drafted_count`. Use each row's numeric `message_id` for downstream reads, replies, moves, and status updates; keep `internet_message_id` only for replied-header correlation. Optionally use `get_awaiting_reply(days_back=7)` for follow-ups you sent. Use keyword `search_emails` only when the user names a topic.
 3. Drill down: after list/search returns a `message_id`, use `get_email_by_id(account="...", message_id=...)` for full content; do not re-search by subject.
 4. Decide per message using the four-option rule: respond, defer, file, or delete.
    - For responses, defer to **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail.
@@ -154,7 +154,7 @@ Mindset:
 |------|------|-------|
 | Inbox snapshot | `get_inbox_overview()` | Always the first call |
 | Daily 5-min scan | `inbox-triage` skill | Uses needs-response + list, not full cleanup |
-| Likely need reply | `get_needs_response(days_back=2, output_format="json")` | Fast subject-only by default; JSON `message_id` is the numeric Mail id for actions |
+| Likely need reply | `get_needs_response(days_back=2, output_format="json")` | Fast subject-only by default; excludes already-replied/already-drafted rows unless `include_already_replied=True` / `include_drafted=True`; JSON `message_id` is the numeric Mail id for actions |
 | Follow-ups you sent | `get_awaiting_reply(days_back=7)` | Optional daily check |
 | Full dashboard | `inbox_dashboard()` | Heavier, richer view |
 | Find a specific email | `search_emails(subject_keyword="...")` | Defaults to last 48 hours |

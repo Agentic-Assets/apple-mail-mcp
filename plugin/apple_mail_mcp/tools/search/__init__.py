@@ -49,7 +49,6 @@ from apple_mail_mcp.tools.search.dispatch import (
     _search_mail_records,
     _search_mail_records_sync,
     _search_one_account,
-    fetch_replied_ids,
 )
 from apple_mail_mcp.tools.search.emails import search_emails
 from apple_mail_mcp.tools.search.records import (
@@ -119,7 +118,6 @@ __all__ = [
     "compute_scan_upper_bound",
     "datetime",
     "escape_applescript",
-    "fetch_replied_ids",
     "get_email_by_id",
     "get_email_by_ids",
     "get_email_thread",

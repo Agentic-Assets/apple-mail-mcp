@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "Apple Mail MCP",
-  "version": "3.10.1",
+  "version": "3.11.0",
   "description": "Natural language interface for Apple Mail and Apple Calendar with 41 tools: email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, draft verification, attachments, Mail rules advising, bounded export, security-hardened destructive operations, bounded calendar reads, conflict-checked event creation, availability search, and gated calendar management. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
@@ -155,7 +155,7 @@
     },
     {
       "name": "get_needs_response",
-      "description": "Unread emails that likely need a response. Filters out newsletters/automated senders, assigns priority hints."
+      "description": "Unread emails that likely need a response. Filters out newsletters/automated senders, assigns priority hints, and excludes already-replied and already-drafted mail by default."
     },
     {
       "name": "get_top_senders",

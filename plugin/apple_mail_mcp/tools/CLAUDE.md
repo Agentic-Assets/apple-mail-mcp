@@ -5,7 +5,7 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 | Module | # | Purpose / tools |
 |--------|---|-----------------|
-| `inbox/list_emails.py` | 1 | Listing: `list_inbox_emails` (async per-account dispatch; `parsing.py`/`replied.py`/`list_scripts.py` leaves) |
+| `inbox/list_emails.py` | 1 | Listing: `list_inbox_emails` (async per-account dispatch; `parsing.py`/`list_scripts.py` leaves) |
 | `inbox/unread_counts.py` | 1 | Unread totals: `get_mailbox_unread_counts` |
 | `inbox/accounts.py` | 2 | Account enumeration: `list_accounts`, `list_account_addresses` |
 | `inbox/mailboxes.py` | 1 | Folder listing: `list_mailboxes` |
@@ -102,6 +102,8 @@ When in doubt, copy the pattern from `search/emails.py`'s per-message loop — i
 
 Normalized dict JSON: `get_statistics`, `get_inbox_overview`, `list_inbox_emails`, `list_mailboxes`, `get_needs_response`, `get_awaiting_reply`, and `get_top_senders`.
 
+Per-email rows on `list_inbox_emails`, `search_emails`, `get_email_by_id`, `get_email_by_ids`, `get_email_thread`, `get_needs_response`, `inbox_dashboard`, and `get_inbox_overview` recent rows also carry `was_replied_to` / `has_draft`, and each response carries a top-level `draft_scan` status object; docstrings on the individual tools are the source of truth for exact field shapes.
+
 `reply_to_email(output_format="json")` is a compose contract for verified `mode="draft"` / `mode="open"` only. It returns reply artifact metadata including `draft_id`, `verified_draft_id`, `exact_id_verified`, `attachment_status`, `attachment_count`, `attachments_applied`, and verification status fields. Effective `mode="send"` with JSON is rejected before mutation because sent replies do not produce a verifiable Drafts artifact.
 
 ## Agent-facing selection
@@ -123,7 +125,7 @@ Do not match outgoing rich drafts by subject — `_save_new_compose_window_as_dr
 
 ## Module size
 
-Every tool surface is now a split-by-domain package under the **600 LOC** budget; the `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` packages are the worked examples (search: `emails.py`, `by_id.py`, `thread.py`, plus `records.py`/`script.py`/`dispatch.py` leaves; inbox: `list_emails.py`, `unread_counts.py`, `accounts.py`, `mailboxes.py`, `overview.py`, plus `parsing.py`/`replied.py`/`list_scripts.py` leaves; manage: `move.py`, `attachments.py`, `status.py`, `trash.py`, `mailbox.py`, `sync.py`, plus the shared `helpers.py` leaf; analytics: `attachments.py`, `statistics.py`, `export.py`, `export_helpers.py`, `full_export.py`, `dashboard.py`, plus the pure `statistics_parsing.py` leaf; smart_inbox: `awaiting_reply.py`, `needs_response.py`, `top_senders.py`, plus the pure `helpers.py` leaf), each file under budget, linked through the package `__init__.py` facade. CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer the same domain split over reviving single-file monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
+Every tool surface is now a split-by-domain package under the **600 LOC** budget; the `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` packages are the worked examples (search: `emails.py`, `by_id.py`, `thread.py`, plus `records.py`/`script.py`/`dispatch.py` leaves; inbox: `list_emails.py`, `unread_counts.py`, `accounts.py`, `mailboxes.py`, `overview.py`, plus `parsing.py`/`list_scripts.py` leaves; manage: `move.py`, `attachments.py`, `status.py`, `trash.py`, `mailbox.py`, `sync.py`, plus the shared `helpers.py` leaf; analytics: `attachments.py`, `statistics.py`, `export.py`, `export_helpers.py`, `full_export.py`, `dashboard.py`, plus the pure `statistics_parsing.py` leaf; smart_inbox: `awaiting_reply.py`, `needs_response.py`, `top_senders.py`, plus the pure `helpers.py` leaf), each file under budget, linked through the package `__init__.py` facade. CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer the same domain split over reviving single-file monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
 
 ## Related
 

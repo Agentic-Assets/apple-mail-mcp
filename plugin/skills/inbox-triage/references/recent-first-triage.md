@@ -47,3 +47,4 @@ For each message, in **recency order**:
 - **Reply after one message is chosen:** `email-drafting` + `pre-draft-verification.md`.
 - **Navigation / tool choice:** `apple-mail-operator`.
 - **Paper/R&R mail with attachments:** `research-project-tracking.md` after triage identifies actionable research work.
+- **Skip already-handled rows:** do not draft anything in the current batch flagged `was_replied_to=true` or `has_draft=true`; see `pre-draft-verification.md`.

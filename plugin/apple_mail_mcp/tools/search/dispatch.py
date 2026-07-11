@@ -1,29 +1,27 @@
-"""Account-list, single/multi-account fan-out, sync bridge, and replied-id probe.
+"""Account-list, single/multi-account fan-out, and sync bridge.
 
 Calls to ``run_applescript`` are routed through the ``search`` package facade so
 existing ``patch('...tools.search.run_applescript')`` test seams keep firing.
 ``asyncio`` is imported plainly: tests patch ``...tools.search.asyncio.to_thread``
 on the shared module object, which this module honors via the same import.
+
+The legacy Sent-mailbox ``fetch_replied_ids`` probe that used to live here was
+removed once ``search_emails`` switched to Mail's native ``was_replied_to``
+property (read in the same per-message pass, no second AppleScript round
+trip; see ``core.reply_state.was_replied_fragment`` and
+``tasks/active/reply-state-annotation/plan-2026-07-10.md``); it had no other
+callers in this package. ``smart_inbox.get_needs_response`` and
+``inbox.list_inbox_emails`` keep their own copies for the opt-in Sent-scan
+paths those tools still support.
 """
 
 import asyncio
 from typing import Any
 
 from apple_mail_mcp.core import AppleScriptTimeout
-from apple_mail_mcp.core import fetch_replied_ids as _core_fetch_replied_ids
 from apple_mail_mcp.tools import search
 from apple_mail_mcp.tools.search.records import _parse_search_records, _search_error_detail
 from apple_mail_mcp.tools.search.script import _build_search_script, _list_accounts_script
-
-
-def fetch_replied_ids(account: str, sent_cap: int = 200, timeout: int | None = 60) -> set[str]:
-    """Fetch replied Message-ID set using this module's ``run_applescript``.
-
-    Wraps the core helper so tests that patch
-    ``apple_mail_mcp.tools.search.run_applescript`` also cover the
-    Sent-mailbox probe.
-    """
-    return _core_fetch_replied_ids(account, sent_cap=sent_cap, timeout=timeout, runner=search.run_applescript)
 
 
 def _list_mail_accounts(timeout: int | None = 30) -> list[str]:

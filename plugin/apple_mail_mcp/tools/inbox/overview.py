@@ -12,8 +12,10 @@ from apple_mail_mcp.core import (
     inbox_mailbox_script,
     inject_preferences,
 )
+from apple_mail_mcp.core.reply_state import DraftsSnapshot, reply_state_tags, was_replied_fragment
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import inbox
+from apple_mail_mcp.tools.reply_state_wiring import annotate_rows_with_reply_state, build_draft_scan_status
 
 
 def _build_overview_one_account_script(
@@ -30,9 +32,13 @@ def _build_overview_one_account_script(
         accountName|||unreadCount|||totalCount
         MAILBOX|||name|||unreadCount
         MAILBOX|||name/subName|||subUnread
-        RECENT|||subject|||sender|||date|||read
+        RECENT|||subject|||sender|||date|||read|||wasRepliedToken
         MAILBOX_CAPPED|||accountName|||cap
         ...
+
+    ``wasRepliedToken`` is Mail's native ``was replied to`` property, read
+    unconditionally in the same per-message pass (no new AppleScript round
+    trip; see ``core.reply_state.was_replied_fragment``).
 
     A1: caps recent-message enumeration to 10 via
     `messages 1 thru 10 of inboxMailbox`.
@@ -56,7 +62,8 @@ def _build_overview_one_account_script(
                         set messageSender to sender of aMessage
                         set messageDate to date received of aMessage
                         set messageRead to read status of aMessage
-                        set end of resultLines to "RECENT|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead
+                        {was_replied_fragment()}
+                        set end of resultLines to "RECENT|||" & messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & wasRepliedToken
                     end try
                 end repeat
         """
@@ -182,6 +189,7 @@ def _parse_overview_account(raw: str) -> dict[str, Any]:
                     "sender": parts[2],
                     "date": parts[3],
                     "is_read": parts[4].strip().lower() == "true",
+                    "was_replied_to": len(parts) > 5 and parts[5].strip().lower() == "true",
                 }
             )
         elif tag == "FATAL" and len(parts) >= 2:
@@ -267,8 +275,10 @@ def _format_overview(
                 break
             display_count += 1
             indicator = "✓" if r["is_read"] else "✉"
+            tags = reply_state_tags(r.get("was_replied_to"), r.get("has_draft"))
+            tag_text = f" {' '.join(tags)}" if tags else ""
             lines.append("")
-            lines.append(f"{indicator} {r['subject']}")
+            lines.append(f"{indicator}{tag_text} {r['subject']}")
             if not compact:
                 lines.append(f"   Account: {name}")
             lines.append(f"   From: {r['sender']}")
@@ -330,6 +340,9 @@ def _overview_suggestions(total_unread: int) -> list[str]:
     ]
 
 
+_SKIPPED_DRAFT_SCAN: dict[str, Any] = {"status": "skipped", "scanned": 0, "accounts": []}
+
+
 def _overview_json_error(
     error: str,
     *,
@@ -340,6 +353,7 @@ def _overview_json_error(
     max_recent: int = 10,
     message: str | None = None,
     errors: list[str] | None = None,
+    draft_scan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "error": error,
@@ -352,6 +366,7 @@ def _overview_json_error(
         "accounts": [],
         "suggestions": [],
         "errors": errors or [],
+        "draft_scan": draft_scan if draft_scan is not None else dict(_SKIPPED_DRAFT_SCAN),
     }
     if account is not None:
         payload["account"] = account
@@ -369,8 +384,14 @@ def _format_overview_json(
     include_recent: bool = True,
     include_suggestions: bool = True,
     max_recent: int = 10,
+    draft_scan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return structured overview payload for JSON mode."""
+    """Return structured overview payload for JSON mode.
+
+    ``recent`` items already carry ``was_replied_to``/``has_draft`` when the
+    caller pre-annotated them via ``annotate_rows_with_reply_state``; this
+    only threads the aggregate *draft_scan* onto the top-level payload.
+    """
     total_unread = 0
     account_rows: list[dict[str, Any]] = []
     for acct in accounts:
@@ -399,6 +420,7 @@ def _format_overview_json(
         "accounts": account_rows,
         "suggestions": _overview_suggestions(total_unread) if include_suggestions else [],
         "errors": errors,
+        "draft_scan": draft_scan if draft_scan is not None else dict(_SKIPPED_DRAFT_SCAN),
     }
     if account is not None:
         payload["account"] = account
@@ -416,6 +438,7 @@ async def get_inbox_overview(
     max_recent: int = 10,
     max_mailboxes: int = 100,
     timeout: int | None = None,
+    include_draft_state: bool = True,
 ) -> str | dict[str, Any]:
     """
     Get a comprehensive overview of your email inbox status across all accounts.
@@ -441,11 +464,21 @@ async def get_inbox_overview(
             timeout from sheer property-read volume.
         timeout: Optional per-account AppleScript timeout in seconds
             (default: 180s).
+        include_draft_state: When True (default), correlate each recent row
+            against a bounded per-account Drafts snapshot and populate
+            ``has_draft`` (JSON: true/false/null; text: ``[HAS DRAFT]``).
+            ``was_replied_to`` is always present regardless (native
+            property, no extra call). False skips the Drafts scan: JSON's
+            ``draft_scan.status`` becomes ``"skipped"``, ``has_draft`` null.
 
     Returns:
         Comprehensive overview including unread counts, optional mailbox
         structure, recent preview, and optional AI suggestions. JSON mode
-        returns a structured dict.
+        returns a structured dict whose recent-email rows always carry
+        ``was_replied_to`` (bool) and ``has_draft`` (bool or null), plus a
+        top-level ``draft_scan`` object: ``{"status": "ok"|"error"|
+        "skipped", "scanned": N, "accounts": [...]}``. Text mode tags
+        matching recent lines with ``[REPLIED]``/``[HAS DRAFT]``.
     """
     if output_format not in {"text", "compact", "json"}:
         return "Error: Invalid output_format. Use: text, compact, json"
@@ -522,6 +555,24 @@ async def get_inbox_overview(
             errors.extend(parsed_acct["parse_errors"])
         parsed.append(parsed_acct)
 
+    # has_draft correlation runs one account at a time (each `parsed` entry
+    # already scopes its own "recent" rows to one account), sharing a single
+    # snapshot cache so a repeated account across calls is never re-scanned.
+    draft_timeout = timeout if timeout is not None else 60
+    snapshots: dict[str, DraftsSnapshot] = {}
+    for parsed_acct_row in parsed:
+        if parsed_acct_row.get("error"):
+            continue
+        snapshots = annotate_rows_with_reply_state(
+            parsed_acct_row.get("recent", []),
+            runner=inbox.run_applescript,
+            timeout=draft_timeout,
+            include_draft_state=include_draft_state,
+            account=parsed_acct_row.get("account"),
+            snapshots=snapshots,
+        )
+    draft_scan = build_draft_scan_status(snapshots)
+
     if output_format == "json":
         return _format_overview_json(
             parsed,
@@ -531,6 +582,7 @@ async def get_inbox_overview(
             include_recent=include_recent,
             include_suggestions=include_suggestions,
             max_recent=max_recent,
+            draft_scan=draft_scan,
         )
 
     return _format_overview(
