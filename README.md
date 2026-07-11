@@ -179,13 +179,13 @@ Prefer `--scope user` for personal machine setup. Project-scope marketplace
 entries can write an absolute local path into `.claude/settings.json`, which is
 usually not what you want to commit.
 
-`claude plugin details apple-mail@Agentic-Assets` should report version `3.9.1`
+`claude plugin details apple-mail@Agentic-Assets` should report version `3.11.3`
 and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
 replace `VERSION` or the path below if the details output shows a different
 install path:
 
 ```bash
-VERSION=3.9.1
+VERSION=3.11.3
 .venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
   --arg "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION/start_mcp.sh" \
