@@ -63,18 +63,13 @@ When executing [`reference/apple-mail-plugin-robustness-goal-2026-05-22.md`](ref
 
 ## Active workstreams
 
-| Folder | Role |
-|--------|------|
-| [`active/native-reply/`](active/native-reply/) | Native reply ship (v3.8.0) + live TO-TEST handoff |
-| [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 selector retirement planning and audits |
-| [`active/agent-guidance-audit/`](active/agent-guidance-audit/) | Skills/docs/training-surface audit |
-| [`active/draft-verification-simplification/`](active/draft-verification-simplification/) | Compose decomposition recommendations |
-| [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf/consolidation phase plan |
+The canonical list lives in [`INDEX.md`](INDEX.md) § Active workstreams (single source; do not duplicate it here). The forward roadmap is [`reference/roadmap-2026-07-10.md`](reference/roadmap-2026-07-10.md).
 
 ## Reference files
 
 | File | Role |
 |------|------|
+| [`reference/roadmap-2026-07-10.md`](reference/roadmap-2026-07-10.md) | Forward roadmap (new tools/skills, enhancements, hardening, refusals) |
 | [`reference/id-first-refactor-spec.md`](reference/id-first-refactor-spec.md) | Shipped ID-first design (v3.7.0) |
 | [`reference/apple-mail-plugin-robustness-goal-2026-05-22.md`](reference/apple-mail-plugin-robustness-goal-2026-05-22.md) | Active robustness goal |
 | [`reference/robustness-backlog-2026-05-22.md`](reference/robustness-backlog-2026-05-22.md) | Backlog sidecar |
