@@ -99,6 +99,29 @@ draft verification, and honest threading contracts.
   quoted original the payload carries `body_needle_only_in_quote: true` and an
   `expected_body_only_in_quote` warning instead of a pass.
 
+### Known limitations (found in the 2026-07-10 live verification, fail closed)
+
+- **Accented and composed characters can corrupt during native typing.**
+  Observed live: "Renée" saved as "Renae" (System Events keystroke layer or
+  Mail autocorrect; smart quotes, em dashes, and ellipsis typed correctly).
+  The full-body verifier catches this and returns `REPLY_BODY_MISMATCH`
+  naming the artifact instead of silently saving a corrupted draft. Until the
+  typing-fidelity follow-up ships, prefer ASCII spellings in `reply_body` on
+  the native path.
+- **The automatic retype engages only when Mail exposes the compose draft id
+  and the verifier resolves the same id.** On Exchange, post-save id capture
+  can fail or drift, in which case the tool skips the delete-and-retype (it
+  never deletes a draft it cannot prove it created) and returns
+  `REPLY_BODY_MISMATCH` with the suspect id for manual cleanup.
+- **A focus steal landing mid-keystroke can corrupt the typed body without
+  tripping `REPLY_BODY_TYPING_INTERRUPTED`** (the per-chunk guard checks
+  before each chunk, not during one). Verification still fails closed with
+  `REPLY_BODY_MISMATCH`; the caller deletes the named artifact and retries.
+- **`verify_draft`'s `body_preview` is capped at 5000 characters** (a
+  pre-existing cap, unchanged here), so `expected_body_contains` needles for
+  replies longer than that must target the body prefix, not the tail.
+  `reply_to_email`'s internal full-body verifier has no such cap.
+
 ## 3.11.0 - 2026-07-10
 
 Automatic reply-state annotation: every primary read and triage tool now reports

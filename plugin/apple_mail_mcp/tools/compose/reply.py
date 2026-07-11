@@ -133,7 +133,12 @@ def reply_to_email(
             focus before typing starts returns ``REPLY_WINDOW_FOCUS_FAILED`` or
             ``REPLY_SUBJECT_GUARD_MISMATCH``, and losing it mid-typing returns
             ``REPLY_BODY_TYPING_INTERRUPTED`` with the partially typed compose
-            window already discarded. When False, compose the
+            window already discarded. Known limitation: accented or composed
+            characters may corrupt during typing (observed live: "Renée" saved
+            as "Renae"); the full-body verifier catches this and returns
+            ``REPLY_BODY_MISMATCH`` instead of saving silently, so prefer ASCII
+            spellings in ``reply_body`` until the typing-fidelity follow-up
+            ships. When False, compose the
             reply through the object model with no window (headless/bulk-safe, no
             Accessibility needed); the quote and signature are flattened to plain
             text. ``native_format=False`` is gated: it returns
