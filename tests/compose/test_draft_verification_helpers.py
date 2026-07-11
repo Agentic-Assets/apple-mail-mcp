@@ -102,11 +102,37 @@ def test_build_verify_draft_payload_reports_unexpected_signature_and_quote():
     assert payload["warnings"] == ["signature_unexpected", "quoted_original_unexpected"]
 
 
-def test_body_above_quote_splits_at_first_wrote_occurrence():
+def test_body_above_quote_splits_at_apple_mail_attribution():
     region, has_boundary = _body_above_quote("New text here. On Monday, Ann wrote: old text also wrote: again")
 
     assert has_boundary is True
-    assert region == "New text here. On Monday, Ann "
+    assert region == "New text here. "
+
+
+def test_body_above_quote_ignores_authored_wrote_prose_before_apple_mail_attribution():
+    region, has_boundary = _body_above_quote("As Keynes wrote: prices will adjust. On Tue, Ann wrote: original message")
+
+    assert has_boundary is True
+    assert region == "As Keynes wrote: prices will adjust. "
+
+
+def test_body_above_quote_uses_whole_body_for_bare_wrote_prose():
+    body_preview = "As Keynes wrote: prices will adjust."
+
+    region, has_boundary = _body_above_quote(body_preview)
+
+    assert has_boundary is False
+    assert region == body_preview
+
+
+def test_body_above_quote_splits_at_outlook_header_block():
+    region, has_boundary = _body_above_quote(
+        "My reply. From: Ann Example <ann@example.com> Sent: Tuesday, July 7, 2026 9:00 AM "
+        "To: Bob Example <bob@example.com> Subject: Project update Original message"
+    )
+
+    assert has_boundary is True
+    assert region == "My reply. "
 
 
 def test_body_above_quote_returns_full_text_when_no_boundary_present():
@@ -145,6 +171,19 @@ def test_build_verify_draft_payload_body_needle_found_above_quote_boundary():
         **_base_payload_kwargs(
             body_preview="Thanks, confirmed for Tuesday. On Monday, Ann wrote: confirmed the original plan",
             expected_body_contains="confirmed",
+        )
+    )
+
+    assert payload["body_contains_expected"] is True
+    assert "body_needle_only_in_quote" not in payload
+    assert payload["warnings"] == []
+
+
+def test_build_verify_draft_payload_preserves_authored_wrote_prose_above_quote():
+    payload = _build_verify_draft_payload(
+        **_base_payload_kwargs(
+            body_preview="As Keynes wrote: prices will adjust. On Tue, Ann wrote: original message",
+            expected_body_contains="prices will adjust",
         )
     )
 

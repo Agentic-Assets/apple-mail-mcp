@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from apple_mail_mcp.core import inbox_mailbox_script
 from apple_mail_mcp.tools.compose.constants import TYPING_CHUNK_SIZE, TYPING_INTER_CHUNK_DELAY
 from apple_mail_mcp.tools.compose.lookup_scripts import _compose_signature_script
+from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
+    _native_reply_draft_resolver_handlers_applescript,
+    _native_reply_draft_resolver_script,
+    _native_reply_draft_resolver_setup_script,
+)
 from apple_mail_mcp.tools.compose.typing_scripts import build_chunked_typing_handler
 
 
@@ -210,25 +215,28 @@ tell application "Mail"
 def _native_reply_post_action(mode: str) -> str:
     """Return the post-keystroke Mail action for the windowed native reply path.
 
-    draft: save, then close the reply window quietly (one draft remains; the
-    auto-created shell is reused by ``save``, so no dedupe is needed). open: save
-    and leave the window up for review. send: send (the window closes itself).
+    draft: save; the caller resolves a persisted Drafts ID and then closes the
+    reply window quietly (one draft remains; the auto-created shell is reused
+    by ``save``, so no dedupe is needed). open: save and leave the window up
+    for review. send: send (the window closes itself).
     """
     if mode == "send":
         return "send replyMessage\n        delay 0.5"
     if mode == "open":
         return "save replyMessage\n        delay 0.8\n        activate"
-    return (
-        "save replyMessage\n"
-        "        delay 1.0\n"
-        "        try\n"
-        "            close (every window whose name is replySubject) saving no\n"
-        "        end try\n"
-        "        try\n"
-        "            if derivedReplySubject is not replySubject then "
-        "close (every window whose name is derivedReplySubject) saving no\n"
-        "        end try"
-    )
+    return "save replyMessage\n        delay 1.0"
+
+
+def _native_reply_draft_window_close_script() -> str:
+    """Return the quiet close used only after native Drafts resolution."""
+    return """
+        try
+            close (every window whose name is replySubject) saving no
+        end try
+        try
+            if derivedReplySubject is not replySubject then close (every window whose name is derivedReplySubject) saving no
+        end try
+    """
 
 
 def _native_reply_subject_helpers_applescript() -> str:
@@ -355,6 +363,10 @@ def _build_reply_native_window_applescript(
         has_attachments=has_attachments,
     )
     post_action = _native_reply_post_action(mode)
+    draft_resolver_handlers = _native_reply_draft_resolver_handlers_applescript()
+    draft_resolver_setup_script = _native_reply_draft_resolver_setup_script() if mode != "send" else ""
+    draft_resolver_script = _native_reply_draft_resolver_script() if mode != "send" else ""
+    draft_window_close_script = _native_reply_draft_window_close_script() if mode == "draft" else ""
     subject_helpers = _native_reply_subject_helpers_applescript()
     typing_handler = build_chunked_typing_handler(
         chunk_size=TYPING_CHUNK_SIZE,
@@ -363,10 +375,13 @@ def _build_reply_native_window_applescript(
     return f'''
 {subject_helpers}
 {typing_handler}
+{draft_resolver_handlers}
 set bodyTempPath to "{body_temp_path}"
 set derivedReplySubject to ""
 set replySubject to ""
 set replyMessage to missing value
+set replyDraftId to ""
+set replyDraftRfcMessageId to ""
 set quotedNeedle to ""
 set didType to false
 set typingInterruptedDetail to ""
@@ -383,6 +398,8 @@ try
             {cleanup_script}
             return "{not_found_message}"
         end if
+
+        {draft_resolver_setup_script}
 
         set sourceSubject to subject of foundMessage as string
         if sourceSubject starts with "Re:" or sourceSubject starts with "RE:" or sourceSubject starts with "re:" then
@@ -529,10 +546,21 @@ try
     tell application "Mail"
         {post_action}
 
+        -- Mail's outgoing-message ID is not a Drafts ID on every account.
+        -- Resolve only a uniquely new, header-linked persisted Drafts message
+        -- from a complete bounded snapshot. Ambiguity, cap truncation, indexing
+        -- lag, or an AppleScript failure leaves this empty, which disables the
+        -- exact-ID-only delete/retype path safely.
+        {draft_resolver_script}
+
+        {draft_window_close_script}
+
         set outputText to "{header_text}" & return & return
         set outputText to outputText & "{success_text}" & return
         set outputText to outputText & "To: native reply recipients" & return
         set outputText to outputText & "Subject: " & replySubject & return
+        if replyDraftId is not "" then set outputText to outputText & "Draft ID: " & replyDraftId & return
+        if replyDraftId is not "" then set outputText to outputText & "Draft Identity: " & replyDraftId & "|||" & replyDraftRfcMessageId & "|||" & sourceRfcMessageId & return
         if quotedNeedle is not "" then set outputText to outputText & "Quote Needle: " & quotedNeedle & return
         {extra_output_lines}
 

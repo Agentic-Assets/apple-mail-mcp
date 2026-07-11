@@ -31,6 +31,7 @@ from apple_mail_mcp.tools.compose.payload import (
     _compose_sender_script,
     _strip_cdata_wrappers,
 )
+from apple_mail_mcp.tools.compose.reply_identity import native_reply_draft_identity_from_output
 from apple_mail_mcp.tools.compose.reply_runner import (
     _delete_reply_artifact,
     _native_reply_abort_response,
@@ -402,7 +403,12 @@ def reply_to_email(
 
         mode_text = "opened" if effective_mode == "open" else "created"
         reply_subject = _extract_output_field(current_result, "Subject")
-        draft_id = _extract_output_field(current_result, "Draft ID")
+        native_draft_identity = native_reply_draft_identity_from_output(current_result) if native_format else None
+        draft_id = (
+            native_draft_identity.draft_id
+            if native_draft_identity
+            else (None if native_format else _extract_output_field(current_result, "Draft ID"))
+        )
         quoted_needle = _extract_output_field(current_result, "Quote Needle")
         # The native window inherits Mail's own default reply signature (with logo),
         # whose rich text we never set and cannot reliably substring-match. Only
@@ -427,6 +433,7 @@ def reply_to_email(
                 reply_subject or "",
                 reply_body,
                 draft_id=draft_id,
+                native_draft_identity=native_draft_identity,
                 quoted_needle=quoted_needle,
                 expected_attachment_count=len(validated_paths) if validated_paths else None,
                 expected_attachment_names=[Path(path).name for path in validated_paths],
@@ -454,6 +461,7 @@ def reply_to_email(
                 and placement_fail
                 and bool(artifact_id)
                 and bool(draft_id)
+                and native_draft_identity is not None
                 and artifact_id == draft_id
             )
             if not can_retry:
@@ -466,7 +474,13 @@ def reply_to_email(
                 )
 
             assert artifact_id is not None  # can_retry required a truthy artifact_id
-            deleted = _delete_reply_artifact(account, artifact_id, timeout=timeout)
+            assert native_draft_identity is not None  # can_retry required a persisted identity capsule
+            deleted = _delete_reply_artifact(
+                account,
+                artifact_id,
+                identity=native_draft_identity,
+                timeout=timeout,
+            )
             stale_artifact_id = None if deleted else artifact_id
             retyped = True
 
@@ -483,7 +497,8 @@ def reply_to_email(
             if mode_plan.success_text not in current_result:
                 return current_result
             reply_subject = _extract_output_field(current_result, "Subject")
-            draft_id = _extract_output_field(current_result, "Draft ID")
+            native_draft_identity = native_reply_draft_identity_from_output(current_result)
+            draft_id = native_draft_identity.draft_id if native_draft_identity else None
             quoted_needle = _extract_output_field(current_result, "Quote Needle")
 
         assert verification is not None  # loop always runs at least once
@@ -494,6 +509,9 @@ def reply_to_email(
                     reply_subject=reply_subject,
                     draft_id=draft_id,
                     verification=verification,
+                    captured_draft_id_source=(
+                        "persisted_header_identity" if native_draft_identity else "mail_returned"
+                    ),
                     retyped=retyped,
                     stale_artifact_id=stale_artifact_id,
                 )

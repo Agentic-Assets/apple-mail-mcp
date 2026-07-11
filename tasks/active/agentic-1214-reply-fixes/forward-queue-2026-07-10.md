@@ -41,3 +41,18 @@ below fails closed today (structured error, no silent bad draft, no send).
 7. **AGENTIC-1192 item 3 (Archive-reply lookup gap)** stays with the
    id-first-search-retirement lane per the triage report; `reply_to_email`
    lookup is Inbox-only today.
+
+## Update 2026-07-11: v3.11.2 review remediation
+
+1. **Bounded persisted-identity availability** (robustness, confidence:
+   verified limitation). The safe native resolver requires the complete Drafts
+   mailbox to fit the 75-message cap. The live Exchange account had 233
+   Drafts, so it correctly withheld the identity capsule and automatic retry.
+   Evaluate a separately reviewed bounded-recent-slice protocol or a higher
+   dedicated snapshot cap only if it can retain the same uniqueness proof and
+   does not reintroduce destructive fallback.
+2. **Identity-resolution observability** (hardening, confidence: verified
+   gap). Add a privacy-safe status reason for cap, count drift, no new draft,
+   ambiguous candidate, missing RFC ID, and header mismatch. Operator-facing
+   output should reveal why automatic cleanup was unavailable without exposing
+   message content or raw header values.

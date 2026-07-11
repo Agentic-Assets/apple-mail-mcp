@@ -9,6 +9,10 @@ from apple_mail_mcp.applescript_snippets import sanitize_field_handler, text_off
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript
 from apple_mail_mcp.tools import compose
 from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
+from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
+    _native_reply_draft_resolver_handlers_applescript,
+)
+from apple_mail_mcp.tools.compose.reply_identity import NativeReplyDraftIdentity
 from apple_mail_mcp.tools.compose.verification import (
     _first_non_empty_line,
     _format_forward_verification_lines,
@@ -49,6 +53,7 @@ def _verify_saved_reply_draft(
     reply_body: str,
     *,
     draft_id: str | None = None,
+    native_draft_identity: NativeReplyDraftIdentity | None = None,
     quoted_needle: str | None = None,
     expected_attachment_count: int | None = None,
     expected_attachment_names: list[str] | None = None,
@@ -70,6 +75,13 @@ def _verify_saved_reply_draft(
     safe_account = escape_applescript(account)
     safe_reply_subject = escape_applescript(reply_subject)
     safe_draft_id = escape_applescript(draft_id or "")
+    safe_draft_rfc_message_id = escape_applescript(
+        native_draft_identity.draft_rfc_message_id if native_draft_identity else ""
+    )
+    safe_source_rfc_message_id = escape_applescript(
+        native_draft_identity.source_rfc_message_id if native_draft_identity else ""
+    )
+    require_native_identity = "true" if native_draft_identity else "false"
     safe_quoted_needle = escape_applescript(_first_non_empty_line(quoted_needle or ""))
     expected_attachment_names = expected_attachment_names or []
     expected_attachment_names_script = (
@@ -83,6 +95,7 @@ def _verify_saved_reply_draft(
     verification_timeout = 60 if timeout is None else max(30, min(timeout, 120))
     sanitize_script = sanitize_field_handler(include_attachment_row_delimiter=True)
     text_offset_script = text_offset_handler()
+    resolver_handlers = _native_reply_draft_resolver_handlers_applescript()
 
     with compose.tempfile.NamedTemporaryFile(
         mode="w",
@@ -98,6 +111,8 @@ def _verify_saved_reply_draft(
     {sanitize_script}
 
     {text_offset_script}
+
+    {resolver_handlers}
 
     on foldPair(theText, fromText, toText)
         if fromText is "" then return theText
@@ -340,11 +355,25 @@ def _verify_saved_reply_draft(
         return "BODY_MISSING|" & draftId
     end verifyReplyDraft
 
+    on identityMatches(draftMessage, expectedDraftRfcMessageId, expectedSourceRfcMessageId)
+        try
+            if (message id of draftMessage as string) is not expectedDraftRfcMessageId then return false
+            set inReplyToResult to my draftInReplyTo(draftMessage)
+            if item 1 of inReplyToResult is false then return false
+            return my headerHasExactRfcToken(item 2 of inReplyToResult, expectedSourceRfcMessageId)
+        on error
+            return false
+        end try
+    end identityMatches
+
     end using terms from
 
     tell application "Mail"
         set targetAccount to account "{safe_account}"
         set targetDraftIdText to "{safe_draft_id}"
+        set requireNativeIdentity to {require_native_identity}
+        set expectedDraftRfcMessageId to "{safe_draft_rfc_message_id}"
+        set expectedSourceRfcMessageId to "{safe_source_rfc_message_id}"
         set fullReplyBody to do shell script "cat " & quoted form of "{verify_body_temp_path}"
         set quotedNeedle to "{safe_quoted_needle}"
         set expectedAttachmentCount to {expected_attachment_count_value}
@@ -365,11 +394,19 @@ def _verify_saved_reply_draft(
                         set targetDrafts to every message of draftsMailbox whose id is targetDraftId
                         if (count of targetDrafts) > 0 then
                             set exactDraft to item 1 of targetDrafts
+                            if requireNativeIdentity then
+                                if (my identityMatches(exactDraft, expectedDraftRfcMessageId, expectedSourceRfcMessageId)) is false then
+                                    return "IDENTITY_UNAVAILABLE"
+                                end if
+                            end if
                             set exactResult to my verifyReplyDraft(exactDraft, fullReplyBody, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
                             return exactResult
                         end if
+                        if requireNativeIdentity then return "IDENTITY_UNAVAILABLE"
                     end try
                 end if
+
+                if requireNativeIdentity then return "IDENTITY_UNAVAILABLE"
 
                 set totalDrafts to count of messages of draftsMailbox
                 set headEnd to totalDrafts

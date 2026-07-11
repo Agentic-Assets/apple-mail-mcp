@@ -78,6 +78,8 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
             status="body_after_quote",
             body_missing_artifact_id=artifact_id,
         )
+    if status == "IDENTITY_UNAVAILABLE":
+        return _ReplyDraftVerification(ok=False, status="identity_unavailable")
     return _ReplyDraftVerification(ok=False, status="not_found")
 
 
@@ -107,7 +109,7 @@ def _format_reply_verification_lines(
         lines.append(f"Verified Draft ID: {verified_id}")
     if verification.ok and fallback_draft_id and verified_id and verified_id != fallback_draft_id:
         lines.append(
-            "Warning: saved draft was verified by bounded Drafts fallback, not by the exact Draft ID returned by Mail"
+            "Warning: saved draft was verified by bounded Drafts fallback, not by the exact Draft ID from the compose result"
         )
     if verification.status == "found":
         lines.append("Body Verification: full body matched above quote (case-sensitive)")
@@ -144,6 +146,7 @@ def _reply_success_payload(
     reply_subject: str | None,
     draft_id: str | None,
     verification: _ReplyDraftVerification,
+    captured_draft_id_source: str = "mail_returned",
     retyped: bool = False,
     stale_artifact_id: str | None = None,
 ) -> dict[str, Any]:
@@ -151,7 +154,7 @@ def _reply_success_payload(
     verified_id = verification.matched_artifact_id or draft_id
     response_draft_id = draft_id or verified_id
     if draft_id:
-        draft_id_source = "mail_returned"
+        draft_id_source = captured_draft_id_source
     elif verified_id:
         draft_id_source = "verification_fallback"
     else:

@@ -101,9 +101,11 @@ def verify_draft(
 
     Args:
         expected_body_contains: Checked against the body ABOVE the quoted
-            original only, when a quote boundary (the first ``"wrote:"`` in
-            the body preview) is present. A needle that appears only inside
-            the quoted original below that boundary sets
+            original only, when the flattened preview contains a reliable
+            Apple Mail attribution (``On <date>, ... wrote:``), an Outlook
+            header block, or an Outlook original-message separator. A bare
+            ``"wrote:"`` in ordinary prose is not a quote boundary. A needle
+            that appears only inside the quoted original below that boundary sets
             ``body_contains_expected=False`` and adds
             ``body_needle_only_in_quote=True`` to the JSON payload, so a
             reply whose new text was truncated cannot false-pass this check

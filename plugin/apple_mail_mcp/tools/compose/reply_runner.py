@@ -18,6 +18,10 @@ from apple_mail_mcp.tools.compose.constants import (
     TYPING_INTER_CHUNK_DELAY,
     TYPING_PER_CHUNK_OVERHEAD_SECONDS,
 )
+from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
+    _native_reply_draft_resolver_handlers_applescript,
+)
+from apple_mail_mcp.tools.compose.reply_identity import NativeReplyDraftIdentity
 from apple_mail_mcp.tools.compose.saved_draft_checks import _verify_saved_reply_draft
 from apple_mail_mcp.tools.compose.verification import _extract_output_field
 
@@ -80,7 +84,13 @@ def _native_reply_effective_timeout(reply_body: str, timeout: int | None) -> tup
     return effective, None
 
 
-def _delete_reply_artifact(account: str, draft_id: str, *, timeout: int | None) -> bool:
+def _delete_reply_artifact(
+    account: str,
+    draft_id: str,
+    *,
+    identity: NativeReplyDraftIdentity,
+    timeout: int | None,
+) -> bool:
     """Best-effort delete of a stray reply-draft artifact by exact Drafts id.
 
     Returns True only when Mail confirmed the delete (``DELETED|id``). Returns
@@ -91,18 +101,27 @@ def _delete_reply_artifact(account: str, draft_id: str, *, timeout: int | None) 
     assumed success here could otherwise leave a truncated duplicate behind.
     """
     normalized = normalize_message_ids([draft_id])
-    if not normalized:
+    if not normalized or normalized[0] != identity.draft_id:
         return False
     numeric_id = normalized[0]
     safe_account = escape_applescript(account)
+    safe_draft_rfc_message_id = escape_applescript(identity.draft_rfc_message_id)
+    safe_source_rfc_message_id = escape_applescript(identity.source_rfc_message_id)
+    resolver_handlers = _native_reply_draft_resolver_handlers_applescript()
     script = f'''
+{resolver_handlers}
 tell application "Mail"
     try
         set targetAccount to account "{safe_account}"
         set draftsMailbox to mailbox "Drafts" of targetAccount
         set targetDrafts to every message of draftsMailbox whose id is {numeric_id}
         if (count of targetDrafts) > 0 then
-            delete (item 1 of targetDrafts)
+            set targetDraft to item 1 of targetDrafts
+            if (message id of targetDraft as string) is not "{safe_draft_rfc_message_id}" then return "NOT_IDENTITY|{numeric_id}"
+            set inReplyToResult to my draftInReplyTo(targetDraft)
+            if item 1 of inReplyToResult is false then return "NOT_IDENTITY|{numeric_id}"
+            if (my headerHasExactRfcToken(item 2 of inReplyToResult, "{safe_source_rfc_message_id}")) is false then return "NOT_IDENTITY|{numeric_id}"
+            delete targetDraft
             return "DELETED|{numeric_id}"
         end if
         return "NOT_FOUND|{numeric_id}"

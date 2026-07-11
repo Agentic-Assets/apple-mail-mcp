@@ -12,6 +12,7 @@ from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools.compose import constants as compose_constants
 from apple_mail_mcp.tools.compose import reply_runner
+from apple_mail_mcp.tools.compose.reply_identity import NativeReplyDraftIdentity
 
 
 def _make_subprocess_result(returncode=0, stdout=b"", stderr=b""):
@@ -55,6 +56,20 @@ def _main_reply_script(scripts):
     return reply_scripts[0]
 
 
+def _assert_native_saved_draft_id_contract(testcase, script, *, quiet_close: bool):
+    """Assert native output resolves an exact Drafts identity before quiet close."""
+    capture = script.index("set replyDraftIdentity to my persistedReplyDraftIdentity")
+    output = script.index('set outputText to outputText & "Draft ID: " & replyDraftId', capture)
+    save = script.rfind("save replyMessage", 0, capture)
+    testcase.assertGreater(save, -1)
+    testcase.assertLess(save, capture)
+    if quiet_close:
+        close = script.index("close (every window whose name is replySubject) saving no", capture)
+        testcase.assertLess(close, output)
+    else:
+        testcase.assertNotIn("close (every window whose name is replySubject) saving no", script[capture:output])
+
+
 def _save_draft_script(scripts):
     """Return the save-as-draft script, skipping the sender/snapshot probes."""
     save_scripts = [script for script in scripts if "save targetMessage" in script]
@@ -68,8 +83,11 @@ def _saved_reply_draft_output(
     to="Sender <sender@example.com>",
     subject="Re: Test",
     draft_id=None,
+    draft_identity=None,
     quote_needle=None,
 ):
+    if draft_id is not None and draft_identity is None:
+        draft_identity = f"{draft_id}|||<draft-{draft_id}@example.com>|||<source@example.com>"
     lines = [
         "SAVING REPLY AS DRAFT",
         "",
@@ -79,6 +97,8 @@ def _saved_reply_draft_output(
     ]
     if draft_id is not None:
         lines.append(f"Draft ID: {draft_id}")
+    if draft_identity is not None:
+        lines.append(f"Draft Identity: {draft_identity}")
     if quote_needle is not None:
         lines.append(f"Quote Needle: {quote_needle}")
     return "\n".join(lines) + "\n"
@@ -1127,7 +1147,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["subject"], "Re: Test")
         self.assertEqual(payload["draft_id"], "84053")
         self.assertEqual(payload["captured_draft_id"], "84053")
-        self.assertEqual(payload["draft_id_source"], "mail_returned")
+        self.assertEqual(payload["draft_id_source"], "persisted_header_identity")
         self.assertEqual(payload["verified_draft_id"], "84053")
         self.assertEqual(payload["verification_status"], "found")
         self.assertTrue(payload["exact_id_verified"])
@@ -1556,10 +1576,119 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn("messages 1 thru headEnd of draftsMailbox", verifier_script)
         _assert_full_body_verifier_shape(self, verifier_script)
         self.assertIn('if "Re: Test" is "" or draftSubject is "Re: Test" then', verifier_script)
-        self.assertIn(
-            "my replyBodyAboveQuoteStatus(draftContent, fullReplyBody, quotedNeedle)", verifier_script
-        )
+        self.assertIn("my replyBodyAboveQuoteStatus(draftContent, fullReplyBody, quotedNeedle)", verifier_script)
         self.assertIn('return "BODY_MISSING|" & bodyMissingDraftId', verifier_script)
+
+    def test_native_reply_scripts_capture_saved_draft_id_only_for_draft_and_open(self):
+        """Draft/open expose an exact ID before draft mode closes its window.
+
+        The retry path may delete only the full Drafts identity capsule emitted
+        by the compose script. Keep this test at the generator boundary,
+        instead of merely fabricating that output from ``run_applescript``, so
+        it catches a future removal or reordering of the AppleScript contract.
+        """
+        for mode in ("draft", "open", "send"):
+            with self.subTest(mode=mode):
+                captured = []
+
+                def fake_run(script, timeout=120, captured=captured):
+                    captured.append(script)
+                    return ""
+
+                with (
+                    patch.object(compose_tools._server, "READ_ONLY", False),
+                    patch.object(compose_tools._server, "DRAFT_SAFE", False),
+                    patch(
+                        "apple_mail_mcp.tools.compose.run_applescript",
+                        side_effect=fake_run,
+                    ),
+                ):
+                    compose_tools.reply_to_email(
+                        account="Work",
+                        message_id="12345",
+                        reply_body="Reply body",
+                        mode=mode,
+                    )
+
+                script = _main_reply_script(captured)
+                if mode == "send":
+                    self.assertIn("send replyMessage", script)
+                    self.assertNotIn("set replyDraftIdentity to my persistedReplyDraftIdentity", script)
+                else:
+                    self.assertIn("set sourceRfcMessageId to my sourceRfcMessageIdFor(foundMessage)", script)
+                    self.assertIn("set preSaveDraftSnapshot to my fullDraftRfcSnapshot(draftsMailbox, 75)", script)
+                    self.assertIn("set candidateDraftId to id of aDraft as string", script)
+                    self.assertIn("if my headerHasExactRfcToken(item 2 of inReplyToResult, sourceMessageId)", script)
+                    self.assertIn("if (count of matchingDraftIdentities) is 1 then", script)
+                    self.assertIn('if postSaveDraftCount is not (preSaveDraftCount + 1) then return ""', script)
+                    self.assertIn("if totalDrafts > draftCap then return missing value", script)
+                    self.assertIn("repeat with identityAttempt from 1 to 3", script)
+                    self.assertNotIn("set replyDraftId to id of replyMessage as string", script)
+                    _assert_ordered(
+                        self,
+                        script,
+                        "set preSaveDraftSnapshot to my fullDraftRfcSnapshot",
+                        "save replyMessage",
+                        "set replyDraftIdentity to my persistedReplyDraftIdentity",
+                    )
+                    _assert_native_saved_draft_id_contract(self, script, quiet_close=mode == "draft")
+                    self.assertIn('"Draft Identity: " & replyDraftId & "|||"', script)
+
+    def test_native_identity_capsule_verifier_refuses_subject_fallback_on_drift(self):
+        """A native capsule permits only immediate exact-ID identity verification."""
+        captured = []
+        identity = NativeReplyDraftIdentity(
+            draft_id="91061",
+            draft_rfc_message_id="<draft-91061@example.com>",
+            source_rfc_message_id="<source@example.com>",
+        )
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "IDENTITY_UNAVAILABLE"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            verification = compose_tools._verify_saved_reply_draft(
+                "Work",
+                "Re: Test",
+                "Reply body",
+                draft_id=identity.draft_id,
+                native_draft_identity=identity,
+            )
+
+        self.assertFalse(verification.ok)
+        self.assertEqual(verification.status, "identity_unavailable")
+        script = captured[0]
+        self.assertIn("set requireNativeIdentity to true", script)
+        self.assertIn('if requireNativeIdentity then return "IDENTITY_UNAVAILABLE"', script)
+        self.assertIn('set expectedDraftRfcMessageId to "<draft-91061@example.com>"', script)
+        self.assertIn('set expectedSourceRfcMessageId to "<source@example.com>"', script)
+
+    def test_native_identity_capsule_delete_refuses_rfc_or_thread_drift(self):
+        """Retry cleanup does not delete a matching numeric ID after identity drift."""
+        captured = []
+        identity = NativeReplyDraftIdentity(
+            draft_id="91061",
+            draft_rfc_message_id="<draft-91061@example.com>",
+            source_rfc_message_id="<source@example.com>",
+        )
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "NOT_IDENTITY|91061"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            deleted = reply_runner._delete_reply_artifact(
+                "Work",
+                "91061",
+                identity=identity,
+                timeout=None,
+            )
+
+        self.assertFalse(deleted)
+        script = captured[0]
+        self.assertIn('if (message id of targetDraft as string) is not "<draft-91061@example.com>"', script)
+        self.assertIn('my headerHasExactRfcToken(item 2 of inReplyToResult, "<source@example.com>")', script)
 
     def test_reply_draft_verifier_falls_back_when_exact_id_is_not_yet_resolvable(self):
         captured = []
@@ -2314,10 +2443,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                         "GUARD_ABORT_SUBJECT",
                         "Subject: Re: Placeholder: Equire CRE Demo",
                         "DerivedSubject: RE:  Re: Placeholder: Equire CRE Demo",
-                        (
-                            "Detail: could not focus reply window "
-                            "(mailFront=Re: Other Thread seFront=Re: Other Thread)"
-                        ),
+                        ("Detail: could not focus reply window (mailFront=Re: Other Thread seFront=Re: Other Thread)"),
                     ]
                 )
             if 'set targetDraftIdText to ""' in script:
@@ -2574,12 +2700,16 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
             if "reply foundMessage" in script:
                 compose_calls["count"] += 1
                 draft_id = "91061" if compose_calls["count"] == 1 else "91062"
-                return _saved_reply_draft_output(to="native reply recipients", draft_id=draft_id)
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id=draft_id,
+                    draft_identity=f"{draft_id}|||<draft-{draft_id}@example.com>|||<source@example.com>",
+                )
             if 'set targetDraftIdText to "91061"' in script:
                 return "BODY_MISSING|91061"
             if 'set targetDraftIdText to "91062"' in script:
                 return "BODY_MISSING|91062"
-            if "delete (item 1 of targetDrafts)" in script:
+            if "delete targetDraft" in script:
                 delete_scripts.append(script)
                 return "DELETED|91061"
             return "ok"
@@ -2604,18 +2734,27 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
 
     def test_native_reply_body_mismatch_retype_succeeds(self):
         # Same delete-and-retype path as above, but the second attempt verifies.
+        # Assert the generated native script itself resolves and emits the exact
+        # persisted Drafts ID that this mocked Mail result represents. Without that
+        # contract, a mocked ``Draft ID`` response could make this retry pass
+        # while the real plugin has no safe delete target.
         compose_calls = {"count": 0}
 
         def fake_run(script, timeout=120):
             if "reply foundMessage" in script:
                 compose_calls["count"] += 1
+                _assert_native_saved_draft_id_contract(self, script, quiet_close=True)
                 draft_id = "91061" if compose_calls["count"] == 1 else "91062"
-                return _saved_reply_draft_output(to="native reply recipients", draft_id=draft_id)
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id=draft_id,
+                    draft_identity=f"{draft_id}|||<draft-{draft_id}@example.com>|||<source@example.com>",
+                )
             if 'set targetDraftIdText to "91061"' in script:
                 return "BODY_MISSING|91061"
             if 'set targetDraftIdText to "91062"' in script:
                 return "FOUND|91062|not_requested|not_requested"
-            if "delete (item 1 of targetDrafts)" in script:
+            if "delete targetDraft" in script:
                 return "DELETED|91061"
             return "ok"
 
@@ -2638,19 +2777,22 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(payload["draft_id"], "91062")
         self.assertEqual(compose_calls["count"], 2)
 
-    def test_native_reply_no_artifact_id_does_not_retry(self):
-        # A NOT_FOUND verification carries no artifact id, so there is nothing to
-        # delete: the retry never fires and the pre-existing no-id error path runs.
+    def test_native_reply_ambiguous_persisted_drafts_id_omits_id_and_does_not_retry(self):
+        # A zero/multiple-candidate persisted-Drafts resolver emits no Draft ID.
+        # The bounded verifier can still report a suspected artifact, but without
+        # a script-proven exact ID this path must never delete or retype it.
         compose_calls = {"count": 0}
 
         def fake_run(script, timeout=120):
             if "reply foundMessage" in script:
                 compose_calls["count"] += 1
+                self.assertIn("if (count of matchingDraftIdentities) is 1 then", script)
+                self.assertIn("if my headerHasExactRfcToken(item 2 of inReplyToResult, sourceMessageId)", script)
                 return _saved_reply_draft_output(to="native reply recipients")
-            if "set targetDraftIdText" in script:
-                return "NOT_FOUND"
-            if "delete (item 1 of targetDrafts)" in script:
-                raise AssertionError("delete must not run when no artifact id is known")
+            if 'set targetDraftIdText to ""' in script:
+                return "BODY_MISSING|91061"
+            if "delete targetDraft" in script:
+                raise AssertionError("ambiguity must not trigger exact-id deletion")
             return "ok"
 
         with patch(
@@ -2661,29 +2803,32 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 account="Work",
                 message_id="12345",
                 reply_body="Reply body",
+                output_format="json",
             )
 
-        self.assertIn("Mail did not verify it", result)
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_BODY_MISMATCH")
+        self.assertFalse(payload["remediation"]["retyped"])
         self.assertEqual(compose_calls["count"], 1)
 
     def test_native_reply_retry_skipped_when_mismatch_artifact_differs_from_draft_id(self):
-        # AGENTIC-1214 defect 2: the verifier's subject-scan fallback can report
-        # a mismatching artifact id that is NOT the draft Mail just created for
-        # this compose call (e.g. a pre-existing same-subject draft surfaced
-        # under Exchange eventual-consistency lag). The retry must only ever
-        # delete an artifact whose id matches the compose-reported draft_id, so
-        # when the verifier's reported id (55555) differs from draft_id
-        # (91061), no delete/retype may happen and the normal REPLY_BODY_MISMATCH
-        # failure (naming the suspect id) must be returned instead.
+        # Native identity capsules now suppress subject fallback entirely, but
+        # keep this parser-level defense: a malformed or unexpected verifier
+        # response whose artifact id differs from the capsule's Drafts id must
+        # never delete or retype any draft.
         compose_calls = {"count": 0}
 
         def fake_run(script, timeout=120):
             if "reply foundMessage" in script:
                 compose_calls["count"] += 1
-                return _saved_reply_draft_output(to="native reply recipients", draft_id="91061")
+                return _saved_reply_draft_output(
+                    to="native reply recipients",
+                    draft_id="91061",
+                    draft_identity="91061|||<draft-91061@example.com>|||<source@example.com>",
+                )
             if 'set targetDraftIdText to "91061"' in script:
                 return "BODY_MISSING|55555"
-            if "delete (item 1 of targetDrafts)" in script:
+            if "delete targetDraft" in script:
                 raise AssertionError("retry must not delete when artifact id differs from compose draft id")
             return "ok"
 

@@ -5,6 +5,29 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.11.2 - 2026-07-11
+
+### Fixed
+
+- **Native reply verification now uses a persisted, header-linked Drafts
+  identity.** `reply_to_email` never treats Mail's transient outgoing-message
+  id as a Drafts id. After saving, it takes a complete bounded Drafts snapshot,
+  requires exactly one new persisted message, and requires that message's RFC
+  `Message-ID` and `In-Reply-To` link it to the source. Only then does it emit
+  `Draft ID` plus the internal identity capsule, verify that exact artifact, or
+  permit an automatic delete-and-retype. The verifier and deletion path both
+  revalidate the capsule. Cap limits, indexing delay, ambiguity, or identity
+  drift fail closed: fallback may report an artifact, but never authorizes
+  deletion or retyping.
+- **`verify_draft(expected_body_contains=...)` no longer mistakes ordinary
+  authored `wrote:` prose for quoted text.** Quote scoping now recognizes an
+  Apple Mail `On <date>, ... wrote:` attribution, Outlook's structured header
+  block, or the Outlook original-message separator. If none is present, the
+  expectation checks the whole body preview.
+- **Native reply AppleScript is now explicitly compiled in the test suite.**
+  This covers the helper-prefixed native builder and its focus-guarded chunked
+  typer, which generic builder discovery does not select.
+
 ## 3.11.1 - 2026-07-10
 
 AGENTIC-1214 reply drafting correctness: chunked native typing, full-body

@@ -1,8 +1,26 @@
 """Pure helpers for Apple Mail Drafts verification payloads."""
 
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+_APPLE_QUOTE_ATTRIBUTION = re.compile(
+    r"(?<!\w)(?i:on)\s+"
+    r"(?i:(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+    r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|"
+    r"\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|"
+    r"\d{1,4}(?:[/-]\d{1,4}){1,2}))\b.{0,500}?\b(?i:wrote):"
+)
+_ORIGINAL_MESSAGE_SEPARATOR = re.compile(r"-----\s*original message\s*-----", re.IGNORECASE)
+_OUTLOOK_QUOTE_HEADERS = re.compile(
+    r"(?<!\w)(?i:from):\s+\S.{0,1000}?"
+    r"(?<!\w)(?i:sent|date):\s+\S.{0,1000}?"
+    r"(?<!\w)(?i:to|cc):\s+\S.{0,1000}?"
+    r"(?<!\w)(?i:subject):"
+)
 
 
 def _parse_expected_attachments(expected_attachments: str | list[str] | None) -> list[str]:
@@ -47,24 +65,24 @@ def _normalize_attachment_rows(raw_rows: str) -> list[dict[str, Any]]:
 
 
 def _body_above_quote(body_preview: str) -> tuple[str, bool]:
-    """Split ``body_preview`` at the earliest quote-attribution boundary.
+    """Return the authored region before a reliable flattened quote boundary.
 
-    Returns ``(region, has_quote_boundary)``. The boundary is the first
-    occurrence of the bare substring ``"wrote:"`` in ``body_preview``, the
-    same needle the internal saved-draft verifier uses (see
-    ``saved_draft_checks.py``'s ``quoted_needle="wrote:"``). ``body_preview``
-    has already had its line breaks flattened to single spaces and been
-    truncated to 5000 characters by the AppleScript verifier before this
-    function ever sees it, so there is no per-line text to match against;
-    this looks for the needle anywhere in the flattened string and never
-    fetches more text than it was given. When no boundary is found, the
-    full ``body_preview`` is returned unchanged with ``has_quote_boundary``
-    ``False`` so callers can fall back to whole-body semantics.
+    ``body_preview`` has already had line breaks flattened to spaces and is
+    capped at 5000 characters by the AppleScript verifier. Bare ``"wrote:"``
+    is therefore not enough to identify a quote: it can appear in ordinary
+    prose. Recognize only established Apple Mail attributions (``On <date>,
+    ... wrote:``), Outlook's structured header block, or its original-message
+    separator. If none is present, return the full preview so callers retain
+    whole-body behavior instead of rejecting valid authored text.
     """
-    boundary = body_preview.find("wrote:")
-    if boundary == -1:
+    boundaries = [
+        match.start()
+        for pattern in (_APPLE_QUOTE_ATTRIBUTION, _ORIGINAL_MESSAGE_SEPARATOR, _OUTLOOK_QUOTE_HEADERS)
+        if (match := pattern.search(body_preview)) is not None
+    ]
+    if not boundaries:
         return body_preview, False
-    return body_preview[:boundary], True
+    return body_preview[: min(boundaries)], True
 
 
 def _build_source_resolution(
@@ -125,8 +143,7 @@ def _build_verify_draft_payload(
     body_needle_only_in_quote = False
     if expected_body_contains is not None:
         above_quote, has_quote_boundary = _body_above_quote(body_preview)
-        search_region = above_quote if has_quote_boundary else body_preview
-        body_contains_expected = expected_body_contains in search_region
+        body_contains_expected = expected_body_contains in above_quote
         if not body_contains_expected:
             if has_quote_boundary and expected_body_contains in body_preview:
                 body_needle_only_in_quote = True

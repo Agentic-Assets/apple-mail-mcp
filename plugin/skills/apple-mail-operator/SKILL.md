@@ -67,7 +67,7 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 - Prefer `search_emails(mailboxes=["INBOX", "Sent", ...])` to scan a few named folders over whole-profile fan-out on large Exchange/Gmail accounts. It returns a structured per-folder error for any missing or slow mailbox instead of failing the call.
 - After `list_inbox_emails` or `search_emails` returns `message_id`, always drill with `get_email_by_id` rather than fuzzy re-search. `message_id` is always present in both text and JSON output from `list_inbox_emails`, so use it directly for follow-up actions.
 - On Exchange, **subject-only** `search_emails` may return empty while the message is visible in overview; use sender search or offset pagination (`exchange-account-patterns.md`).
-- **Never verify drafts with `search_emails`.** Drafts are unsent `outgoing message` objects with a null received date, so the date-filtered search is both slow and silently drops them. For troubleshooting, use `verify_draft(draft_id=...)` or `verify_drafts(draft_ids=[...])` for exact readiness checks, `manage_drafts(action="list", subject_contains="...")` for bounded newest-first discovery, `manage_drafts(action="find", in_reply_to="...")` for bounded header lookup, or `get_email_by_id(account=..., message_id=..., mailbox="Drafts")` for exact raw message fetches. Route draft lifecycle actions through `email-drafting`. `reply_to_email` verifies its own saved artifact before success: exact Drafts id first, bounded newest-Drafts fallback, the full `reply_body` matched case-sensitively above the quoted original, with one automatic retry on a placement mismatch.
+- **Never verify drafts with `search_emails`.** Drafts are unsent `outgoing message` objects with a null received date, so the date-filtered search is both slow and silently drops them. For troubleshooting, use `verify_draft(draft_id=...)` or `verify_drafts(draft_ids=[...])` for exact readiness checks, `manage_drafts(action="list", subject_contains="...")` for bounded newest-first discovery, `manage_drafts(action="find", in_reply_to="...")` for bounded header lookup, or `get_email_by_id(account=..., message_id=..., mailbox="Drafts")` for exact raw message fetches. Route draft lifecycle actions through `email-drafting`. `reply_to_email` verifies its own saved artifact before success: for native draft/open replies, a retryable Draft ID exists only after a complete bounded Drafts snapshot proves exactly one new persisted RFC `Message-ID` whose `In-Reply-To` links to the source. The verifier and deletion path revalidate that identity. A cap limit, delayed indexing, ambiguity, or drift disables automatic cleanup; newest-Drafts fallback is diagnostic only.
 - **Draft ids drift on Exchange.** Numeric `draft_id`s from server accounts are reassigned on sync, even between two `manage_drafts(action="list")` calls with no writes in between. Re-resolve with a fresh `list`/`find` call immediately before acting on a `draft_id`; never reuse one cached from an earlier turn. `manage_drafts(action="find", in_reply_to=...)` is the durable handle for a reply draft.
 
 ## Operator Safety Patterns
@@ -77,7 +77,7 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 | No accidental sends | Keep `--draft-safe`; require explicit user confirmation before any send attempt |
 | Quiet bulk drafts | Default `mode="draft"` on compose tools; do not leave unsaved compose windows |
 | Review each draft in Mail | Use `mode="open"` (saves first, then leaves window open); for rich `.eml`, `review_in_mail=True` |
-| Reply to a known message | Use `reply_to_email(message_id=...)`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and **error out** on `Re:`/`Fwd:` subjects or quoted-thread bodies unless you explicitly pass `standalone_confirmed=True` (use that override only for a confirmed new message that happens to start with `Re:`) |
+| Reply to a known message | Use `reply_to_email(message_id=...)`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and **error out** on `Re:`/`Fwd:` subjects or quoted-thread bodies unless `standalone_confirmed=True` is explicitly passed. Use that override only for a confirmed new message that happens to start with `Re:`. |
 | Read-only auditing | Mention `--read-only` server flag; removes send-facing compose registrations |
 | Destructive moves/deletes | Defer to `email-archive-cleanup` or `email-management`; never bury trash/delete actions inside troubleshooting |
 
@@ -87,17 +87,17 @@ If `mcp__apple-mail__*` tools are absent from the client tool list, stop and fix
 
 - `get_inbox_overview` is timing out or returning partial JSON with `errors` on a large inbox.
 - The user asks for a visual or one-glance summary ("show me what my inbox looks like", "give me the dashboard").
-- You need consolidated unread + recent + suggested-action data without paying three separate AppleScript round-trips.
+- Choose it for consolidated unread, recent, and suggested-action data without three separate AppleScript round-trips.
 
 It is heavier than a compact `get_inbox_overview` on small inboxes, so keep `get_inbox_overview(output_format="compact", ...)` as the daily-loop default. Escalate to `inbox_dashboard()` as the rescue path.
 
 ## Reply drafting handoff
 
-This skill covers read/search navigation, not compose. When the user wants to reply after you have a `message_id`, load **`email-drafting`** and call `reply_to_email(message_id=..., reply_body=..., mode="draft")`.
+This skill covers read/search navigation, not compose. For a reply request after discovery returns a `message_id`, load **`email-drafting`** and call `reply_to_email(message_id=..., reply_body=..., mode="draft")`.
 
 - **Default path:** `native_format=True` (Mail's native reply window, colored quote bar, logo signature). Requires Mail focus and Accessibility permission for the host process; the body types in small focus-guarded chunks, never one keystroke of the whole body.
 - **On `REPLY_WINDOW_FOCUS_FAILED`, `REPLY_SUBJECT_GUARD_MISMATCH`, or `REPLY_BODY_TYPING_INTERRUPTED`:** no draft with a partial body was left and no email was sent. Retry with Mail visible and unfocused elsewhere. Do not switch off native formatting (the windowless `native_format=False` path is gated: `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True`, which agents must never set). If focus still cannot be acquired, stop and report the blocker.
-- **On `REPLY_BODY_MISMATCH`:** the saved body did not match `reply_body` above the quote after one automatic retype; inspect the named artifact id with `verify_draft` and delete it before retrying.
+- **On `REPLY_BODY_MISMATCH`:** inspect the named artifact id with `verify_draft` before cleanup. Delete only an artifact whose exact id is proven to be the draft under review; a fallback-discovered same-subject draft is not proof and must never be deleted automatically.
 - **Never** substitute `compose_email`, `create_rich_email_draft`, or `manage_drafts(action="create")` for in-thread replies. Collect ids via `search_emails` / `list_inbox_emails`; never pass `subject_keyword` to `reply_to_email`.
 
 Full pre-draft verification, standalone-draft guards, and post-draft checks live in **`email-drafting`**.
