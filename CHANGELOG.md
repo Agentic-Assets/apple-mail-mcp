@@ -17,6 +17,25 @@ here. The plugin/MCPB/marketplace versions track this file.
   negatives.** When a capped scan omits older drafts, matching rows remain
   `true` and nonmatches return `null` (`unknown`). The performance check now
   scales its mailbox metadata threshold from the mailbox response envelope.
+- **Identity-guarded cleanup no longer refuses to delete a verified smoke
+  draft whose recipient list contains duplicates.** The delete transaction
+  now proves exact recipient-set equality by mutual containment instead of a
+  count comparison that mismatched against the deduplicated expected list.
+- **A Drafts snapshot with an unreadable mailbox-wide total now fails open.**
+  A missing `TOTAL` marker is treated as a truncated scan, so nonmatches
+  report `null` (`unknown`) rather than a definitive `false`.
+- **Every `draft_scan` producer now emits the same envelope.** `total` and
+  `truncated` appear on `get_needs_response`, the inbox skipped/error paths,
+  and the empty-scan early return, matching the annotated list/search
+  responses; skill references and conventions docs describe the three-state
+  `has_draft` semantics including truncation.
+- **The identity-guarded delete AppleScript is covered by the osacompile
+  parse gate.** The script moved into a discoverable `_script()` builder, and
+  an account-resolution failure now returns the helper's structured JSON
+  error shape instead of a raw string.
+- **Recipient normalization is unified on one casefolding helper** shared by
+  draft verification, the smoke CLI's exact-set check, and the cleanup
+  identity literal, so Unicode addresses compare identically at every stage.
 
 ## 3.11.2 - 2026-07-11
 

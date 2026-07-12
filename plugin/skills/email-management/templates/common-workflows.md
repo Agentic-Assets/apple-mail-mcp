@@ -347,7 +347,9 @@ search_emails(
 # 2. Check the row before drafting: was_replied_to/has_draft are on every
 #    discovery row. Abort if has_draft=true, or was_replied_to=true with no
 #    matching draft. Thread check below is a fallback for extra certainty
-#    or when has_draft is null.
+#    or when has_draft is null; the thread only shows sent replies, so on a
+#    null row also run manage_drafts(action="find", ...) per
+#    pre-draft-verification.md before drafting.
 get_email_thread(
     account="Work",
     message_id="<message_id from search>"
@@ -386,7 +388,9 @@ search_emails(
 # 2. Check the row before drafting: was_replied_to/has_draft are on every
 #    discovery row. Abort if has_draft=true, or was_replied_to=true with no
 #    matching draft. Thread check below is a fallback for extra certainty
-#    or when has_draft is null.
+#    or when has_draft is null; the thread only shows sent replies, so on a
+#    null row also run manage_drafts(action="find", ...) per
+#    pre-draft-verification.md before drafting.
 get_email_thread(
     account="Work",
     message_id="<message_id from search>"

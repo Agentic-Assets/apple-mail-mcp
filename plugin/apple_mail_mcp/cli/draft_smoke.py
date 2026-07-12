@@ -1,7 +1,8 @@
 """draft-verify-smoke pipeline: pure helpers plus the command handler.
 
-Lazy tool imports (``manage_drafts``, ``verify_draft``, ``list_account_addresses``)
-stay inside the functions so the tests' source-patch seams keep working.
+Lazy tool imports (``manage_drafts``, ``verify_draft``,
+``delete_draft_if_identity_matches``, ``list_account_addresses``) stay inside
+the functions so the tests' source-patch seams keep working.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from apple_mail_mcp.cli.formatting import _parse_tool_result, _print_result, _result_is_error
+from apple_mail_mcp.tools.draft_verification import _split_csv_addresses
 
 
 def _extract_draft_ids(text: str) -> list[str]:
@@ -30,7 +32,7 @@ def _extract_draft_ids(text: str) -> list[str]:
 
 def _normalized_recipient_set(value: str) -> set[str]:
     """Normalize a comma-delimited recipient field for smoke identity checks."""
-    return {item.strip().casefold() for item in value.split(",") if item.strip()}
+    return set(_split_csv_addresses(value))
 
 
 def _draft_verification_passed(value: Any, *, expected_to: str) -> bool:
@@ -40,15 +42,16 @@ def _draft_verification_passed(value: Any, *, expected_to: str) -> bool:
     if parsed.get("found") is not True:
         return False
     warnings = set(parsed.get("warnings") or [])
-    checks = parsed.get("checks")
-    if isinstance(checks, dict) and checks.get("to_matches_expected") is False:
-        return False
     recipients = parsed.get("recipients")
     if not isinstance(recipients, dict) or not isinstance(recipients.get("to"), str):
         return False
+    # Exact-set equality is the recipient gate. It is strictly stronger than
+    # verify_draft's own subset-only ``to_matches_expected`` / ``to_mismatch``
+    # signals (a missing OR an extra recipient makes the sets differ), so those
+    # do not need a redundant branch here.
     if _normalized_recipient_set(recipients["to"]) != _normalized_recipient_set(expected_to):
         return False
-    return not {"subject_mismatch", "expected_body_missing", "to_mismatch"} & warnings and not parsed.get("error")
+    return not {"subject_mismatch", "expected_body_missing"} & warnings and not parsed.get("error")
 
 
 def _smoke_verification_evidence(value: Any) -> dict[str, Any]:

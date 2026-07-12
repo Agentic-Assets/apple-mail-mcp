@@ -2157,7 +2157,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
                 ),
             ]
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, search_raw)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2195,7 +2195,10 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             )
 
         payload = json.loads(result)
-        self.assertEqual(payload["draft_scan"], {"status": "skipped", "scanned": 0, "accounts": []})
+        self.assertEqual(
+            payload["draft_scan"],
+            {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []},
+        )
         self.assertIsNone(payload["items"][0]["has_draft"])
         # Only the one search call, no Drafts-snapshot call at all.
         self.assertEqual(len(calls), 1)
@@ -2232,7 +2235,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             sender="alice@example.com",
             received_date="2026-05-01T09:00:00",
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, _calls = self._route_drafts(drafts_raw, search_raw)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2258,7 +2261,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             sender="alice@example.com",
             received_date="2026-05-01T09:00:00",
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, record)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2309,7 +2312,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
                 ),
             ]
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, records_raw)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2338,7 +2341,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             sender="alice@example.com",
             received_date="2026-05-01T09:00:00",
         )
-        drafts_raw = "DRAFT|||Budget Review|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Budget Review|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, "THREAD_STRATEGY|||subject\n" + thread_line)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):

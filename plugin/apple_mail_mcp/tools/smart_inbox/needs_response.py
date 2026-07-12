@@ -346,7 +346,8 @@ def get_needs_response(
         "days_back", "max_results", "high_priority": [...],
         "normal_priority": [...], "skipped_replied_count",
         "skipped_drafted_count", "draft_scan": {"status", "scanned",
-        "accounts", "error"?}, "errors"}`` depending on *output_format*.
+        "total", "truncated", "accounts", "error"?}, "errors"}``
+        depending on *output_format*.
         Each entry in ``high_priority``/``normal_priority`` carries
         ``was_replied_to`` (bool) and ``has_draft`` (bool or ``null``).
     """
@@ -459,13 +460,23 @@ def get_needs_response(
             timeout=drafts_timeout,
         )
 
+    # ``draft_scan`` carries the same uniform envelope keys as
+    # ``reply_state_wiring.build_draft_scan_status`` (status, scanned, total,
+    # truncated, accounts): ``total`` falls back to ``scanned`` when the
+    # snapshot's mailbox-wide total is unknown, and ``truncated`` mirrors the
+    # single snapshot's own fail-open flag. The ``accounts`` value stays a
+    # bare account-name list here (this tool scans exactly one account), which
+    # is the shape its JSON contract pins.
     draft_scan: dict[str, Any]
     if drafts_snapshot is None:
-        draft_scan = {"status": "skipped", "scanned": 0, "accounts": []}
+        draft_scan = {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []}
     else:
+        snapshot_total = drafts_snapshot.total if drafts_snapshot.total is not None else drafts_snapshot.scanned
         draft_scan = {
             "status": drafts_snapshot.status,
             "scanned": drafts_snapshot.scanned,
+            "total": snapshot_total,
+            "truncated": drafts_snapshot.truncated,
             "accounts": [account],
         }
         if drafts_snapshot.status == "error" and drafts_snapshot.error:

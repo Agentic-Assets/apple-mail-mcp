@@ -35,10 +35,16 @@ def _parse_expected_attachments(expected_attachments: str | list[str] | None) ->
 
 
 def _split_csv_addresses(value: str | None) -> list[str]:
-    """Return lowercase addresses from a comma-separated expected-recipient string."""
+    """Return casefolded addresses from a comma-separated recipient string.
+
+    The one shared normalization for recipient-identity comparisons
+    (verify_draft containment checks, the smoke CLI's exact-set check, and
+    the identity-guarded cleanup literal); casefold so Unicode addresses
+    compare the same everywhere.
+    """
     if not value:
         return []
-    return [item.strip().lower() for item in value.split(",") if item.strip()]
+    return [item.strip().casefold() for item in value.split(",") if item.strip()]
 
 
 def _csv_contains_all(actual: str, expected: list[str]) -> bool | None:

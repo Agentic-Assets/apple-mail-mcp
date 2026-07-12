@@ -257,8 +257,16 @@ class _DraftRow:
     header_blob: str
 
 
-def _parse_drafts_snapshot_output(raw: str) -> tuple[list[_DraftRow], int, int]:
-    """Parse rows plus scanned-window and mailbox-wide Drafts counts."""
+def _parse_drafts_snapshot_output(raw: str) -> tuple[list[_DraftRow], int, int | None]:
+    """Parse rows plus scanned-window and mailbox-wide Drafts counts.
+
+    The third element is the mailbox-wide ``TOTAL|||`` count as a true
+    ``int | None``: ``None`` when the snapshot omitted (or emitted an
+    unparseable) ``TOTAL|||`` line. It is never coalesced to ``scanned`` —
+    an unknown mailbox-wide total must stay unknown so callers fail open
+    (treat the scan as truncated) rather than silently assuming the scan
+    was complete.
+    """
     rows: list[_DraftRow] = []
     scanned = 0
     total: int | None = None
@@ -290,7 +298,7 @@ def _parse_drafts_snapshot_output(raw: str) -> tuple[list[_DraftRow], int, int]:
                 total = None
     if scanned == 0 and rows:
         scanned = len(rows)
-    return rows, scanned, scanned if total is None else total
+    return rows, scanned, total
 
 
 def normalize_thread_subject(subject: str) -> str:
@@ -363,8 +371,19 @@ class DraftsSnapshot:
 
     @property
     def truncated(self) -> bool:
-        """Whether the bounded scan omitted older Drafts rows."""
-        return self.total is not None and self.total > self.scanned
+        """Whether an ``"ok"`` scan may have omitted an older matching draft.
+
+        True when the scan ran (``status == "ok"``) and either the
+        mailbox-wide total is unknown (``total is None``) or it exceeds the
+        scanned window (``total > scanned``). An ok scan with an unknown
+        total counts as truncated so nonmatches fail open (unknown rather
+        than definitively ``False``), matching this module's fail-open
+        philosophy. ``"error"`` / ``"skipped"`` snapshots return ``False``
+        here because their ``status`` already carries the fail-open signal
+        and ``resolve_has_draft`` short-circuits on it before ever reading
+        ``truncated``.
+        """
+        return self.status == "ok" and (self.total is None or self.total > self.scanned)
 
     def matches(
         self,
@@ -488,7 +507,11 @@ def resolve_has_draft(
     open: a skipped or errored scan never reports ``False``). A matched row
     remains ``True`` even from a truncated scan. A nonmatch from a truncated
     scan is ``None``, because the matching draft may be outside the capped
-    window. Every reply-state annotation call site
+    window. A scan counts as truncated when the mailbox-wide total exceeds
+    the scanned window *or* when that total is unknown (``total is None``,
+    e.g. a snapshot that omitted its ``TOTAL|||`` line): unknown scan
+    quality fails open rather than reporting a definitive ``False``. Every
+    reply-state annotation call site
     (``tools.reply_state_wiring.annotate_rows_with_reply_state``,
     ``tools.inbox.parsing._annotate_text_rows_with_reply_state``,
     ``tools.smart_inbox.reply_state_glue._classify_needs_response_rows``)

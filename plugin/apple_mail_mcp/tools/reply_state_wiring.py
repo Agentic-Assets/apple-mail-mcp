@@ -41,15 +41,18 @@ MAX_DRAFT_SNAPSHOT_ACCOUNTS = 5
 def build_draft_scan_status(snapshots: dict[str, DraftsSnapshot]) -> dict[str, Any]:
     """Aggregate per-account Drafts snapshots into a top-level ``draft_scan`` object.
 
-    Returns ``{"status": "skipped", "scanned": 0, "accounts": []}`` when
-    *snapshots* is empty (no account ever needed a Drafts scan: either
-    ``include_draft_state=False`` or no row carried a resolvable account).
-    Otherwise ``status`` is ``"ok"`` only when every scanned account came
-    back ``"ok"``; any ``"error"`` account flips the overall status to
-    ``"error"`` and its message is folded into a combined ``"error"`` key.
+    Returns ``{"status": "skipped", "scanned": 0, "total": 0,
+    "truncated": False, "accounts": []}`` when *snapshots* is empty (no
+    account ever needed a Drafts scan: either ``include_draft_state=False``
+    or no row carried a resolvable account). Otherwise ``status`` is
+    ``"ok"`` only when every scanned account came back ``"ok"``; any
+    ``"error"`` account flips the overall status to ``"error"`` and its
+    message is folded into a combined ``"error"`` key. Every envelope
+    carries the same ``total`` / ``truncated`` keys as the per-account
+    rows, so the ``draft_scan`` shape is uniform across producers.
     """
     if not snapshots:
-        return {"status": "skipped", "scanned": 0, "accounts": []}
+        return {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []}
 
     accounts_detail: list[dict[str, Any]] = []
     errors: list[str] = []

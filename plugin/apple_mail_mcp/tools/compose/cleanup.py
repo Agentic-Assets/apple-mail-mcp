@@ -7,51 +7,56 @@ import json
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, normalize_message_ids
 from apple_mail_mcp.tools import compose
 from apple_mail_mcp.tools.compose.helpers import _resolve_account
+from apple_mail_mcp.tools.draft_verification import _split_csv_addresses
 
 
 def _expected_recipient_literal(expected_to: str) -> str | None:
-    """Return an AppleScript list literal for non-empty expected recipients."""
-    values = list(dict.fromkeys(item.strip().lower() for item in expected_to.split(",") if item.strip()))
+    """Return an AppleScript list literal for non-empty expected recipients.
+
+    Normalizes through the shared ``_split_csv_addresses`` helper (casefold,
+    the one recipient-identity normalization used by verify_draft and the smoke
+    CLI), then applies an ordered, case-insensitive dedupe before building the
+    literal so ``--to "a@x.com, A@x.com"`` collapses to a single expected
+    address.
+    """
+    values = list(dict.fromkeys(_split_csv_addresses(expected_to)))
     if not values:
         return None
     return "{" + ", ".join(f'"{escape_applescript(value)}"' for value in values) + "}"
 
 
-def delete_draft_if_identity_matches(
+def delete_draft_if_identity_matches_script(
     *,
-    account: str | None,
-    draft_id: str,
-    expected_subject: str,
-    expected_to: str,
-    expected_body_sentinel: str,
-    timeout: int | None = None,
+    safe_account: str = "Test Account",
+    numeric_id: str = "0",
+    safe_subject: str = "SMOKE_SUBJECT",
+    expected_to_literal: str = '{"smoke@example.invalid"}',
+    safe_body_sentinel: str = "SMOKE_SENTINEL",
+    effective_timeout: int = 120,
 ) -> str:
-    """Delete one smoke draft only after atomic, in-Drafts identity validation.
+    """Return the atomic identity-guarded Drafts delete script.
 
-    This is intentionally an internal helper, not a ``manage_drafts`` action.
-    Generic delete callers retain their established exact-id behavior, while the
-    smoke path is protected from Exchange Drafts numeric-id reassignment by
-    checking its generated subject, requested recipients, and body sentinel in
-    the same AppleScript transaction that performs the delete.
+    Takes the already-escaped account/subject/body-sentinel strings, a validated
+    numeric draft id, and the pre-built AppleScript recipient list literal, and
+    returns the full ``tell application "Mail"`` transaction that verifies the
+    smoke draft's identity and deletes it only on an exact match.
+
+    Recipient identity is proven by mutual containment (expected is a subset of
+    actual AND actual is a subset of expected, both under ``ignoring case``),
+    which is exact set equality and robust to duplicate recipients on either
+    side: a missing recipient fails the first loop, an extra recipient fails the
+    second, and duplicates pass both. There is deliberately no count-equality
+    gate, because ``compose_email`` adds one ``to recipient`` per comma-split
+    address without deduping while the expected literal is deduped, so the raw
+    counts can differ for an identical recipient set. The body-sentinel check is
+    a deliberate part of the identity guard and is retained.
+
+    All parameters default to compile-safe sample values so the builder is
+    callable with no arguments, satisfying the osacompile discovery contract
+    (functions whose name ends in ``_script`` and whose output starts with
+    ``tell application "Mail"`` are parse-checked).
     """
-    account, account_error = _resolve_account(account, timeout=timeout)
-    if account_error:
-        return account_error
-    assert account is not None
-
-    normalized_ids = normalize_message_ids([draft_id])
-    if not normalized_ids:
-        return json.dumps({"deleted": False, "error": "invalid_draft_id"})
-    expected_to_literal = _expected_recipient_literal(expected_to)
-    if not expected_subject or not expected_to_literal or not expected_body_sentinel:
-        return json.dumps({"deleted": False, "error": "incomplete_smoke_draft_identity"})
-
-    numeric_id = normalized_ids[0]
-    safe_account = escape_applescript(account)
-    safe_subject = escape_applescript(expected_subject)
-    safe_body_sentinel = escape_applescript(expected_body_sentinel)
-    effective_timeout = timeout if timeout is not None else 120
-    script = f'''
+    return f'''
     tell application "Mail"
         with timeout of {effective_timeout} seconds
             try
@@ -81,7 +86,6 @@ def delete_draft_if_identity_matches(
                         end try
                     end repeat
                 end try
-                if (count of actualToAddresses) is not (count of expectedToAddresses) then set cleanupIdentityMatches to false
 
                 repeat with expectedToAddress in expectedToAddresses
                     set expectedRecipientFound to false
@@ -125,6 +129,50 @@ def delete_draft_if_identity_matches(
         end timeout
     end tell
     '''
+
+
+def delete_draft_if_identity_matches(
+    *,
+    account: str | None,
+    draft_id: str,
+    expected_subject: str,
+    expected_to: str,
+    expected_body_sentinel: str,
+    timeout: int | None = None,
+) -> str:
+    """Delete one smoke draft only after atomic, in-Drafts identity validation.
+
+    This is intentionally an internal helper, not a ``manage_drafts`` action.
+    Generic delete callers retain their established exact-id behavior, while the
+    smoke path is protected from Exchange Drafts numeric-id reassignment by
+    checking its generated subject, requested recipients, and body sentinel in
+    the same AppleScript transaction that performs the delete.
+    """
+    account, account_error = _resolve_account(account, timeout=timeout)
+    if account_error:
+        return json.dumps({"deleted": False, "error": "account_resolution_failed", "detail": account_error})
+    assert account is not None
+
+    normalized_ids = normalize_message_ids([draft_id])
+    if not normalized_ids:
+        return json.dumps({"deleted": False, "error": "invalid_draft_id"})
+    expected_to_literal = _expected_recipient_literal(expected_to)
+    if not expected_subject or not expected_to_literal or not expected_body_sentinel:
+        return json.dumps({"deleted": False, "error": "incomplete_smoke_draft_identity"})
+
+    numeric_id = normalized_ids[0]
+    safe_account = escape_applescript(account)
+    safe_subject = escape_applescript(expected_subject)
+    safe_body_sentinel = escape_applescript(expected_body_sentinel)
+    effective_timeout = timeout if timeout is not None else 120
+    script = delete_draft_if_identity_matches_script(
+        safe_account=safe_account,
+        numeric_id=numeric_id,
+        safe_subject=safe_subject,
+        expected_to_literal=expected_to_literal,
+        safe_body_sentinel=safe_body_sentinel,
+        effective_timeout=effective_timeout,
+    )
     try:
         raw = compose.run_applescript(script, timeout=effective_timeout).strip()
     except AppleScriptTimeout:
