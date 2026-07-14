@@ -144,13 +144,16 @@ def _build_search_script(
     if mailboxes:
         # Explicit mailbox list: look up each named folder, degrade gracefully
         # if a name doesn't exist (emits ERROR_MAILBOX instead of hard failure).
+        # Reuse the shared resolver so Sent display names get the same
+        # account-scoped top-level fallback as the singular parameter.
         mailbox_lookups = "\n".join(
             f"""                try
-                    set end of searchMailboxes to mailbox "{escape_applescript(mb)}" of targetAccount
+                    {build_mailbox_ref(mb, account_var="targetAccount", var_name=f"searchMailbox{index}")}
+                    set end of searchMailboxes to searchMailbox{index}
                 on error
                     set end of recordLines to "ERROR_MAILBOX|||{escape_applescript(mb)}|||mailbox not found"
                 end try"""
-            for mb in mailboxes
+            for index, mb in enumerate(mailboxes)
         )
         mailbox_script = f"""
                 set searchMailboxes to {{}}
