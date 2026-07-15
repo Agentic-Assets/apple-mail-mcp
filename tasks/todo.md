@@ -2,13 +2,13 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; CI enforces).
 
-**Current branch:** `fix/agentic-1277-compose-draft-recipient-verification` (off `main` @ v3.11.2).
+**Current branch:** `chore/consolidate-active-branches-20260715` (off `main` @ v3.11.2).
 
 **Most recent workstream:** [`tasks/archive/2026-07/shipped/agentic-1277-compose-draft-verification/`](archive/2026-07/shipped/agentic-1277-compose-draft-verification/). v3.11.3 now verifies the standalone compose smoke against the exact persisted To-recipient set and only performs identity-guarded cleanup. AGENTIC-1191's bounded Inbox path now caps Drafts at 50, reports truncated draft-state knowledge as `null`, and uses the mailbox response envelope for the perf threshold.
 
 **Already shipped:** AGENTIC-1214 merged in v3.11.2. It added chunked, focus-guarded native reply typing; full-body verification above the quote; persisted header-linked Drafts identity; safe artifact cleanup; quote-boundary verification; and the `CREATE_CANNOT_THREAD` refusal for standalone draft creation with `in_reply_to`. Its closeout is archived under [`archive/2026-07/shipped/agentic-1214-reply-fixes/`](archive/2026-07/shipped/agentic-1214-reply-fixes/).
 
-**Next action:** the xhigh code-review fixes are landed, gated, and live-verified on this branch (closeout: [`active/branch-review-v3.11.3/closeout-2026-07-11.md`](active/branch-review-v3.11.3/closeout-2026-07-11.md); deferred items: [`forward-queue-2026-07-11.md`](active/branch-review-v3.11.3/forward-queue-2026-07-11.md), three need Cayman decisions). Branch is pushed and the checkout returned to `main`. Keep AGENTIC-781's human-operated native-reply checks open; AGENTIC-1192, AGENTIC-995, and AGENTIC-996 remain distinct backlog work. No PR is authorized for this repo; merge needs Cayman's explicit phrase.
+**Next action:** review the combined v3.11.5 PR, then merge only after Cayman's literal approval phrase. Closeout: [`active/v3.11.5-consolidated-release/closeout-2026-07-15.md`](active/v3.11.5-consolidated-release/closeout-2026-07-15.md). Forward queue: [`active/v3.11.5-consolidated-release/forward-queue-2026-07-15.md`](active/v3.11.5-consolidated-release/forward-queue-2026-07-15.md). After merge, create the signed annotated source tag and run the central marketplace promotion and admission workflow. Keep AGENTIC-781's human-operated native-reply checks open; AGENTIC-1192, AGENTIC-995, and AGENTIC-996 remain distinct backlog work.
 
 **Main state:** `main` @ **v3.11.2** (AGENTIC-1214 native reply hardening, PR #75; automatic reply-state annotation, PR #73; tasks roadmap refresh, PR #74; v3.10.1 archive human-sender screen, PR #72).
 
