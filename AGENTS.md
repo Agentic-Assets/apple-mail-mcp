@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**41 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code, Codex, and Cursor plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. Cursor uses its distinct plugin-local adapter and remains pending live client acceptance. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**41 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code, Codex, and Cursor plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. Cursor uses its distinct plugin-local adapter; local Cursor Agent acceptance has passed, while Cursor marketplace/UI admission remains a separate distribution check. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
 ## Distribution channels (five install surfaces from one source tree)
 
@@ -12,7 +12,7 @@ A single `plugin/` runtime serves Claude Code, Codex, and Cursor plugin installs
 | `apple-mail.plugin` | Claude Desktop **Cowork → Customize → Add plugin → Upload plugin** | Byte-identical copy of the `.zip`, `.plugin` extension is what the Cowork UI accepts |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop chat extension via "Add Custom Plugin" / "Install from file" | DXT bundle (`mcpb pack`), `manifest.json` at zip root |
 | `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace (`codex plugin add apple-mail@apple-mail-mcp`) | GitHub marketplace checkout points at shared `./plugin` runtime with `plugin/.mcp.json` |
-| `plugin/.cursor-plugin/plugin.json` + `plugin/mcp.json` | Cursor plugin and local MCP adapter | Separate draft-safe Cursor adapter; static validation is not Cursor client acceptance evidence |
+| `plugin/.cursor-plugin/plugin.json` + `plugin/mcp.json` | Cursor plugin and local MCP adapter | Separate draft-safe Cursor adapter; local Cursor Agent acceptance passed, while marketplace/UI admission remains separate |
 
 If you change distribution, version, or filenames: re-run `bash tools/gates/dev-check.sh release` and verify `tests/infra/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and CI tests treat that as a hard error.
 

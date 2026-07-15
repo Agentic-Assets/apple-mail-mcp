@@ -179,7 +179,7 @@ Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marke
 
 ## Distribution channels — five install surfaces, one source
 
-The repo ships from **one source tree** to **five install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/gates/build-artifacts.sh`](../tools/gates/build-artifacts.sh); Claude Code, Codex, and Cursor plugin installs share the checked-in `plugin/` runtime but retain distinct adapters. The validator and CI tests enforce static parity, while Cursor support still requires a live client acceptance test.
+The repo ships from **one source tree** to **five install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/gates/build-artifacts.sh`](../tools/gates/build-artifacts.sh); Claude Code, Codex, and Cursor plugin installs share the checked-in `plugin/` runtime but retain distinct adapters. The validator and local tests enforce static parity. Local Cursor Agent acceptance has passed; Cursor marketplace/UI admission remains a separate distribution check.
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|
@@ -187,6 +187,7 @@ The repo ships from **one source tree** to **five install surfaces**. Claude Des
 | `apple-mail.plugin` | Claude Desktop **Cowork** | Customize → Add plugin → **Upload plugin**. The Cowork UI accepts the `.plugin` extension; without it the upload silently fails. |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
 | `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@apple-mail-mcp`; local checkouts are maintainer/offline only |
+| `plugin/.cursor-plugin/plugin.json` + `plugin/mcp.json` | Cursor plugin adapter | Cursor resolves `/bin/bash ${CURSOR_PLUGIN_ROOT}/start_mcp.sh --draft-safe`; local Cursor Agent acceptance passed, while marketplace/UI admission remains separate |
 
 **`.zip` and `.plugin` must be byte-identical** — `tools/gates/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validators/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/infra/test_validate_manifests.py::test_plugin_file_parity_*`.
 

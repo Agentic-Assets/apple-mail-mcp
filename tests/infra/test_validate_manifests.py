@@ -114,8 +114,10 @@ class ValidateManifestsTests(unittest.TestCase):
                         "mcpServers": {
                             "apple-mail": {
                                 "command": "/bin/bash",
-                                "args": ["./start_mcp.sh", "--draft-safe"],
-                                "cwd": ".",
+                                "args": [
+                                    "${CURSOR_PLUGIN_ROOT}/start_mcp.sh",
+                                    "--draft-safe",
+                                ],
                             }
                         }
                     }
@@ -135,7 +137,11 @@ class ValidateManifestsTests(unittest.TestCase):
                     json.dumps(
                         {
                             "mcpServers": {
-                                "apple-mail": {"command": "/bin/bash", "args": ["${CLAUDE_PLUGIN_ROOT}/start_mcp.sh"]}
+                                "apple-mail": {
+                                    "command": "/bin/bash",
+                                    "args": ["${CLAUDE_PLUGIN_ROOT}/start_mcp.sh"],
+                                    "cwd": ".",
+                                }
                             }
                         }
                     ),
@@ -145,9 +151,19 @@ class ValidateManifestsTests(unittest.TestCase):
             finally:
                 validate_manifests.ROOT = original_root
 
-        self.assertIn("plugin/mcp.json mcpServers.apple-mail.args: first arg must be ./start_mcp.sh", errors)
+        self.assertIn(
+            "plugin/mcp.json mcpServers.apple-mail.args: first arg must be ${CURSOR_PLUGIN_ROOT}/start_mcp.sh",
+            errors,
+        )
         self.assertIn("plugin/mcp.json mcpServers.apple-mail.args: missing --draft-safe", errors)
-        self.assertIn("plugin/mcp.json mcpServers.apple-mail.cwd: got 'None', expected '.'", errors)
+        self.assertIn(
+            "plugin/mcp.json mcpServers.apple-mail: must not use ${CLAUDE_PLUGIN_ROOT} in Cursor launcher fields",
+            errors,
+        )
+        self.assertIn(
+            "plugin/mcp.json mcpServers.apple-mail.cwd: omit cwd for Cursor plugins",
+            errors,
+        )
 
     def test_changelog_release_version_requires_matching_latest_release_heading(self):
         with tempfile.TemporaryDirectory() as tmp:

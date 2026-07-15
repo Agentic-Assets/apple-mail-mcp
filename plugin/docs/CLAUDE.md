@@ -14,7 +14,7 @@ Plugin/MCP/skill changes: delegate implementation to subagents when available an
 | `.codex-plugin/plugin.json` | Codex plugin manifest: interface metadata, `skills: "./skills"`, `mcpServers: "./.mcp.json"` |
 | `.mcp.json` | Codex MCP config launching `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."` |
 | `.cursor-plugin/plugin.json` | Cursor plugin manifest pointing to `mcp.json` |
-| `mcp.json` | Cursor MCP config launching `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."` |
+| `mcp.json` | Cursor MCP config launching `/bin/bash ${CURSOR_PLUGIN_ROOT}/start_mcp.sh --draft-safe` |
 | `start_mcp.sh` | Self-healing offline venv bootstrap (see below) + `fastmcp` import verify, then exec server |
 | `apple_mail_mcp.py` | Thin entry shim → `apple_mail_mcp.__main__.main()` |
 | `requirements.lock` + `wheelhouse/` | Hash-locked runtime deps installed into `plugin/venv/` (not root `.venv/`) |
@@ -24,10 +24,14 @@ Plugin/MCP/skill changes: delegate implementation to subagents when available an
 ```
 Claude Code → /bin/bash ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
 Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
-Cursor     → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
+Cursor     → /bin/bash ${CURSOR_PLUGIN_ROOT}/start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
 ```
 
-`${CLAUDE_PLUGIN_ROOT}` resolves to this `plugin/` directory for Claude Code. Codex 0.133.0 does **not** expand `${CLAUDE_PLUGIN_ROOT}` inside argv; keep Codex `.mcp.json` on the `cwd: "."` + `./start_mcp.sh` contract unless a runtime smoke proves a new Codex launcher shape.
+`${CLAUDE_PLUGIN_ROOT}` resolves to this `plugin/` directory for Claude Code,
+and `${CURSOR_PLUGIN_ROOT}` resolves to the installed plugin root for Cursor.
+Codex 0.133.0 does **not** expand either host variable inside argv; keep Codex
+`.mcp.json` on the `cwd: "."` + `./start_mcp.sh` contract unless a runtime
+smoke proves a new Codex launcher shape.
 
 `plugin.json` passes **`--draft-safe`** to `start_mcp.sh` by default so send tools stay blocked in shared agent workspaces. Override in user MCP config only when intentional.
 

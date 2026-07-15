@@ -180,7 +180,7 @@ replace `VERSION` or the path below if the details output shows a different
 install path:
 
 ```bash
-VERSION=3.11.5
+VERSION=3.11.6
 .venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
   --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/$VERSION/start_mcp.sh" \
@@ -652,7 +652,7 @@ apple-mail-mcp/
 │   ├── .codex-plugin/
 │   │   └── plugin.json        # Codex plugin manifest
 │   ├── .cursor-plugin/
-│   │   └── plugin.json        # Cursor plugin manifest (live acceptance pending)
+│   │   └── plugin.json        # Cursor plugin manifest (local Agent acceptance passed)
 │   ├── .claude-plugin/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
