@@ -1,0 +1,44 @@
+# Disabled 2026-07-15 by repository policy: all CI-equivalent checks run locally
+# before commit and push. This timestamped file preserves the former hosted
+# workflow for audit and rollback, but its location prevents GitHub from running it.
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pytest
+
+      - name: Lint (ruff, warn-only baseline)
+        run: ruff check plugin/ tools/ tests/ || echo "warning: ruff baseline has pre-existing UP0xx modernization issues — non-blocking until dedicated sweep PR"
+        continue-on-error: true
+
+      - name: Validate manifests
+        run: bash tools/gates/validate_manifests.sh
+
+      - name: Validate tasks layout
+        run: python tools/validators/validate_tasks_layout.py
+
+      - name: Module line budget (600 LOC warn)
+        run: python tools/validators/check_module_line_budget.py
+
+      - name: Run tests
+        run: pytest tests/ -q -rw

@@ -1,6 +1,6 @@
 """Optional EventKit read fast path (PyObjC), guarded and never prompting.
 
-This module always imports cleanly without PyObjC installed (CI runs on
+This module always imports cleanly without PyObjC installed (pure-Python tests run on
 Ubuntu). The EventKit engine activates only when the ``EventKit`` and
 ``Foundation`` modules import AND ``authorizationStatusForEntityType_``
 already reports full access, a synchronous, non-prompting read verified in

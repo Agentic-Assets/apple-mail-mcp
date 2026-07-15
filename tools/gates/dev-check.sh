@@ -34,6 +34,7 @@ fi
 
 run_manifests() {
   bash tools/gates/validate_manifests.sh
+  "$PY" tools/validators/validate_marketplace_payload.py
 }
 
 run_module_line_budget() {

@@ -33,6 +33,7 @@ An MCP server that gives AI assistants full access to Apple Mail and Apple Calen
 | [`plugin/skills/CLAUDE.md`](plugin/skills/CLAUDE.md) | Skill authoring |
 | [`tests/CLAUDE.md`](tests/CLAUDE.md) | Test layout & AppleScript mocks |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | Manifest validation scripts |
+| [`tools/marketplace_identity.json`](tools/marketplace_identity.json) | Central marketplace identity, standalone compatibility identity, and promotion ownership |
 | [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index + plugin skill map |
 | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) | Phase plans & backlog |
 | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) | Desktop bundle build |
@@ -60,34 +61,49 @@ payload currently requires Apple Silicon (macOS arm64) and Python 3.13 because
 its bundled, hash-locked wheelhouse is platform-specific and never downloads
 packages at startup.
 
-### Claude Code Plugin (Recommended)
+### Agentic Assets Marketplace (Recommended)
+
+Agentic Assets users should register the central
+[`Agentic-Assets/Agentic-Assets-Marketplace`](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace)
+repository. Apple Mail keeps the same primary selector across supported
+marketplace clients: `apple-mail@agentic-assets`.
+
+#### Claude Code
 
 One install: MCP server (41 tools) and **eleven** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
-claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
-claude plugin marketplace update apple-mail-mcp
-claude plugin install apple-mail@apple-mail-mcp --scope user
+claude plugin marketplace add Agentic-Assets/Agentic-Assets-Marketplace --scope user
+claude plugin marketplace update agentic-assets
+claude plugin install apple-mail@agentic-assets --scope user
 ```
 
-The GitHub-backed marketplace source lets Claude Code refresh the marketplace
-and keep auto-update tied to the repository.
+The GitHub-backed central marketplace lets Claude Code refresh Apple Mail and
+other Agentic Assets plugins from one source.
 
 Then restart Claude Code.
 
-### Codex Desktop / CLI Plugin
+#### Codex Desktop / CLI
 
-Codex registers the GitHub marketplace repo, then reads `.agents/plugins/marketplace.json` inside that checkout. That manifest points at the shared `plugin/` runtime and `plugin/.codex-plugin/plugin.json`.
+Codex registers the central GitHub marketplace repository and resolves the
+same Apple Mail selector:
 
 ```bash
-codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
-codex plugin add apple-mail@apple-mail-mcp
+codex plugin marketplace add https://github.com/Agentic-Assets/Agentic-Assets-Marketplace.git
+codex plugin add apple-mail@agentic-assets
 ```
 
-The checked-in marketplace still points at `./plugin` inside the GitHub repo,
-but the installed marketplace source is the Git remote, not your local clone.
-That gives the CLIs a refreshable source and, where the client supports it,
-keeps marketplace auto-update tied to GitHub.
+The central marketplace contains a self-contained promoted Apple Mail payload
+under `plugins/apple-mail/`. This development repository remains the source of
+truth. Releases enter the marketplace only as immutable, allowlisted snapshots
+from signed source tags. The marketplace repository owns promotion policy,
+evidence, and attestations.
+
+The root `.claude-plugin/marketplace.json` and
+`.agents/plugins/marketplace.json` files in this repository deliberately keep
+the standalone compatibility identity `apple-mail-mcp` and selector
+`apple-mail@apple-mail-mcp`. They support public and maintainer development
+workflows and must not be renamed to `agentic-assets`.
 
 MCP-only fallback, still draft-safe:
 
@@ -103,11 +119,33 @@ Restart Codex Desktop or start a fresh Codex CLI session after installing.
 
 ### Refresh another Mac / second computer
 
-Use this when another computer has an older Apple Mail plugin install, stale
-marketplace cache, or you want to prove both Codex and Claude Code are using the
-same current GitHub-backed marketplace source.
+#### Primary Agentic Assets users
 
-On a machine with this repo checked out, the maintained one-shot refresh is:
+Use the central refresh helper for an existing `agentic-assets` registration or
+a fresh central install. It preflights both client registrations, refuses a
+same-name marketplace from any other source, and never removes marketplaces,
+plugins, caches, or user data.
+
+```bash
+# Read-only source and payload preflight
+bash tools/gates/refresh-central-marketplace.sh --check
+
+# Install or refresh apple-mail@agentic-assets in Claude Code and Codex
+bash tools/gates/refresh-central-marketplace.sh
+```
+
+Restart Claude Code and Codex after the helper succeeds so both clients reload
+the MCP schemas. The helper proves the Claude Code and Codex registrations and
+runtime bootstrap only. It does not claim Cursor marketplace/UI admission.
+
+#### Maintainer standalone compatibility
+
+Use the direct-source compatibility helper when another computer has an older
+standalone Apple Mail development install or stale `apple-mail-mcp` cache. It
+verifies this repository's compatibility identity, not the primary central
+marketplace.
+
+On a machine with this repo checked out, the guarded compatibility refresh is:
 
 ```bash
 bash tools/gates/refresh-local-plugins.sh
@@ -129,7 +167,7 @@ cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp
 git switch main && git pull --ff-only
 ```
 
-2. Refresh both plugin clients with the guarded helper:
+2. Refresh both plugin clients with the guarded compatibility helper:
 
 ```bash
 bash tools/gates/refresh-local-plugins.sh
@@ -226,7 +264,11 @@ zip -rq -X -D ../apple-mail-plugin.zip . \
 
 **Important:** Apple Mail MCP requires **macOS Mail.app** on the host Mac (`start_mcp.sh` → AppleScript). Cowork's Linux VM cannot run Mail directly; the plugin MCP server must execute on your Mac host. If tools fail after upload, use the **Claude Code CLI** install or the **Desktop `.mcpb`** path below instead.
 
-GitHub marketplace URL (when Cowork sync works): `Agentic-Assets/apple-mail-mcp`
+If Cowork's marketplace sync becomes available, use the primary marketplace
+`Agentic-Assets/Agentic-Assets-Marketplace` and selector
+`apple-mail@agentic-assets`. The direct `apple-mail.plugin` upload remains the
+tested compatibility fallback. Do not register this source repository as the
+primary Agentic Assets marketplace.
 
 ### Other Install Methods
 

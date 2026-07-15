@@ -1,6 +1,6 @@
 # tests/ — pytest suite
 
-Mocked unit tests for the Apple Mail MCP server. The collected-test count is single-sourced in [`../tools/expected_test_count.txt`](../tools/expected_test_count.txt) (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest tests/ --collect-only`. CI runs on Ubuntu with no Mail.app; every test mocks AppleScript or tests pure Python.
+Mocked unit tests for the Apple Mail MCP server. The collected-test count is single-sourced in [`../tools/expected_test_count.txt`](../tools/expected_test_count.txt) (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest tests/ --collect-only`. Local CI-equivalent gates run without Mail.app; every test mocks AppleScript or tests pure Python.
 
 New tests and perf gates: delegate to a **`shell`** or **`generalPurpose`** subagent when available and permitted; parent runs the relevant suite after merge. See root [`CLAUDE.md`](../CLAUDE.md), Agent orchestration section.
 
@@ -50,7 +50,7 @@ Autouse fixture `_pass_through_known_test_accounts` patches `validate_account_na
 **600 LOC** soft target on `plugin/apple_mail_mcp/` and `tools/` (test modules are not budgeted). Enforced by:
 
 - `tests/infra/test_module_line_budget.py` — warn on oversize production modules; fail on baseline regression
-- `tools/validators/check_module_line_budget.py` — standalone report (also invoked by `dev-check.sh` and CI)
+- `tools/validators/check_module_line_budget.py` — standalone report (also invoked by `dev-check.sh` and the local hooks)
 - Baseline: `tests/fixtures/module_line_budget/baseline.json` (empty `modules` after v3.9.1 decomposition; regression gate still blocks growth if entries are reintroduced)
 
 ```bash
@@ -60,9 +60,14 @@ python3 tools/validators/check_module_line_budget.py --write-baseline tests/fixt
 
 Full rules: [`docs/CLAUDE-conventions.md`](../docs/CLAUDE-conventions.md) § Module line budget.
 
-## CI vs live Mail
+## Local gates vs live Mail
 
-`.github/workflows/ci.yml`: `validate_manifests.sh` + `pytest tests/ -q`. Live verification: [`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md). Local hook: [`tools/gates/pre-commit-validate.sh`](../tools/gates/pre-commit-validate.sh).
+GitHub-hosted Actions are disabled. Install the checked-in hooks with
+`bash tools/gates/install-git-hooks.sh`, verify
+`git config --get core.hooksPath` returns `.githooks`, and use
+[`tools/gates/pre-commit-validate.sh`](../tools/gates/pre-commit-validate.sh)
+plus the release-sensitive pre-push gate. Live verification:
+[`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md).
 
 ## Related
 

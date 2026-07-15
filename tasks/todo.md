@@ -1,16 +1,18 @@
 # Active Pointer: apple-mail-mcp
 
-**Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; CI enforces).
+**Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; local gates enforce).
 
-**Current branch:** `fix/cursor-plugin-root-path` (off `main` @ v3.11.5).
+**Current branch:** `chore/central-marketplace-source-contract` (isolated worktree from `main` @ v3.11.6).
 
-**Most recent workstream:** [`tasks/active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/). The patch gives Cursor an explicit `${CURSOR_PLUGIN_ROOT}` launcher, keeps the Codex adapter independent, passes the full local release gate, and has live 41-tool Cursor Agent acceptance.
+**Active implementation:** [`tasks/active/central-marketplace-source-contract/`](active/central-marketplace-source-contract/). Follow the checked to-do list in [`phase-plan-2026-07-15.md`](active/central-marketplace-source-contract/phase-plan-2026-07-15.md): publish the source-owned payload and signed-release contracts, make the central catalog the primary Agentic Assets install path, retain the source catalog as an explicit compatibility lane, add local blockers, run the full release gate, and stop before merge without fresh Cayman approval.
+
+**Most recent shipped workstream:** [`tasks/active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/). Its explicit `${CURSOR_PLUGIN_ROOT}` launcher is on `main` at v3.11.6, the Codex adapter remains independent, the full local release gate passed, and live 41-tool Cursor Agent acceptance passed. Cursor marketplace/UI admission remains unverified.
 
 **Already shipped:** AGENTIC-1214 merged in v3.11.2. It added chunked, focus-guarded native reply typing; full-body verification above the quote; persisted header-linked Drafts identity; safe artifact cleanup; quote-boundary verification; and the `CREATE_CANNOT_THREAD` refusal for standalone draft creation with `in_reply_to`. Its closeout is archived under [`archive/2026-07/shipped/agentic-1214-reply-fixes/`](archive/2026-07/shipped/agentic-1214-reply-fixes/).
 
-**Next action:** authorize and review the v3.11.6 Cursor adapter PR, then merge only after Cayman's new literal approval phrase. Closeout: [`active/v3.11.6-cursor-adapter/closeout-2026-07-15.md`](active/v3.11.6-cursor-adapter/closeout-2026-07-15.md). Forward queue: [`active/v3.11.6-cursor-adapter/forward-queue-2026-07-15.md`](active/v3.11.6-cursor-adapter/forward-queue-2026-07-15.md). After merge, create the signed annotated tag and regenerate central marketplace promotion and admission from that exact release. Keep AGENTIC-781's human-operated native-reply checks open; AGENTIC-1192, AGENTIC-995, and AGENTIC-996 remain distinct backlog work.
+**Next action:** finish adversarial review and local release verification for the central marketplace source-contract branch, install and read back the checked-in local blockers, then open its review PR. Do not merge without Cayman's new literal approval phrase. After that contract merges, the first future release must create a signed annotated tag with the new payload bindings before central marketplace promotion and admission. Keep AGENTIC-781's human-operated native-reply checks open; AGENTIC-1192, AGENTIC-995, and AGENTIC-996 remain distinct backlog work.
 
-**Main state:** `main` @ **v3.11.5** (`673f75b`; consolidated offline runtime, Cursor adapter, sent-mailbox and compose-recipient verification work; signed immutable tag published).
+**Main state:** `main` @ **v3.11.6** (`04f9d60`; explicit Cursor plugin-root adapter plus the consolidated offline runtime, sent-mailbox, and compose-recipient verification work).
 
 **Roadmap:** [`reference/roadmap-2026-07-10.md`](reference/roadmap-2026-07-10.md): new tools, new skills, enhancements, hardening backlog, and documented macOS refusals. Next three builds: port `get_email_source` forward, add junk + colored-flag actions to `update_email_status`, then the typed-`AppleScriptError` error-contract pass.
 

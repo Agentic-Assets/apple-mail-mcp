@@ -45,12 +45,18 @@ fi
 
 TMP_HOME="$(mktemp -d)"
 trap 'rm -rf "$TMP_HOME"' EXIT
-CODEX_MARKETPLACE_NAME="apple-mail-mcp"
+IFS=$'\t' read -r CODEX_MARKETPLACE_NAME CODEX_PLUGIN_SELECTOR < <("$SMOKE_PYTHON" - <<'PY'
+import json
+
+identity = json.load(open("tools/marketplace_identity.json", encoding="utf-8"))
+standalone = identity["standalone_compatibility"]
+print(standalone["marketplace_id"], standalone["selector"], sep="\t")
+PY
+)
 # Release candidates must be tested from the checkout that built the artifacts.
 # Set APPLE_MAIL_CODEX_MARKETPLACE_SOURCE explicitly only when checking a
 # published marketplace snapshot.
 CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-$ROOT}"
-CODEX_PLUGIN_SELECTOR="apple-mail@${CODEX_MARKETPLACE_NAME}"
 
 "$SMOKE_PYTHON" tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \

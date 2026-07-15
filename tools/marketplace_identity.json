@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "plugin": {
+    "id": "apple-mail",
+    "source_repository": "https://github.com/Agentic-Assets/apple-mail-mcp",
+    "source_payload": "plugin"
+  },
+  "primary_marketplace": {
+    "display_name": "Agentic Assets",
+    "id": "agentic-assets",
+    "repository": "https://github.com/Agentic-Assets/Agentic-Assets-Marketplace",
+    "selector": "apple-mail@agentic-assets",
+    "payload_destination": "plugins/apple-mail"
+  },
+  "promotion": {
+    "source_ref": "immutable-signed-tag",
+    "source_repository_allowlist_required": true,
+    "payload_edit_policy": "promote-only",
+    "policy_owner": "marketplace",
+    "evidence_owner": "marketplace",
+    "attestation_owner": "marketplace"
+  },
+  "standalone_compatibility": {
+    "purpose": "development-public-standalone-compatibility",
+    "marketplace_id": "apple-mail-mcp",
+    "selector": "apple-mail@apple-mail-mcp",
+    "manifests": [
+      ".claude-plugin/marketplace.json",
+      ".agents/plugins/marketplace.json"
+    ],
+    "rename": false
+  }
+}

@@ -896,7 +896,9 @@ class ValidateManifestsTests(unittest.TestCase):
             script,
         )
         self.assertIn('codex plugin marketplace add "$CODEX_MARKETPLACE_SOURCE"', script)
-        self.assertIn('CODEX_PLUGIN_SELECTOR="apple-mail@${CODEX_MARKETPLACE_NAME}"', script)
+        self.assertIn('tools/marketplace_identity.json', script)
+        self.assertIn('standalone["marketplace_id"]', script)
+        self.assertIn('standalone["selector"]', script)
         self.assertIn('codex plugin add "$CODEX_PLUGIN_SELECTOR"', script)
         self.assertIn(
             'codex plugin list --marketplace "$CODEX_MARKETPLACE_NAME" | grep -F "$CODEX_PLUGIN_SELECTOR"',
@@ -922,8 +924,9 @@ class ValidateManifestsTests(unittest.TestCase):
     def test_refresh_helper_is_fail_closed_and_never_mutates_shared_marketplace(self):
         script = (ROOT / "tools" / "gates" / "refresh-local-plugins.sh").read_text(encoding="utf-8")
 
-        self.assertIn('MARKETPLACE_NAME="apple-mail-mcp"', script)
-        self.assertIn('PLUGIN_SELECTOR="apple-mail@${MARKETPLACE_NAME}"', script)
+        self.assertIn('tools/marketplace_identity.json', script)
+        self.assertIn('standalone["marketplace_id"]', script)
+        self.assertIn('standalone["selector"]', script)
         self.assertNotIn("LEGACY_MARKETPLACES", script)
         self.assertNotIn("legacy_marketplace", script)
         self.assertNotIn("claude plugin uninstall", script)

@@ -25,7 +25,7 @@ def _pass_through_known_test_accounts(monkeypatch):
 
     # account_not_found_json (used by JSON error paths in inbox/search) and
     # cli._mailbox_count both shell out to osascript. Stub them so the suite
-    # is robust to a hung or absent Mail.app — CI runs on Ubuntu with no
+    # is robust to a hung or absent Mail.app — local pure-Python test runs have no
     # osascript, and locally Mail can hang for unrelated reasons.
     monkeypatch.setattr(
         "apple_mail_mcp.core.list_mail_account_names",

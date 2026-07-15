@@ -2,19 +2,36 @@
 
 Navigation hub for **apple-mail-mcp**: one Python MCP server (**41 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code, Codex, and Cursor plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. Cursor uses its distinct plugin-local adapter; local Cursor Agent acceptance has passed, while Cursor marketplace/UI admission remains a separate distribution check. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
+## Marketplace identity boundary
+
+[`tools/marketplace_identity.json`](tools/marketplace_identity.json) is the
+machine-readable source-repository contract. The primary Agentic Assets
+marketplace is `Agentic-Assets/Agentic-Assets-Marketplace`, with marketplace ID
+`agentic-assets`, selector `apple-mail@agentic-assets`, and promoted payload
+destination `plugins/apple-mail`. This repository owns the editable `plugin/`
+source. The marketplace admits only immutable, allowlisted payload snapshots
+from signed source tags and owns promotion policy, evidence, and attestations.
+
+The root `.claude-plugin/marketplace.json` and
+`.agents/plugins/marketplace.json` remain standalone development/public
+compatibility catalogs named `apple-mail-mcp`, with selector
+`apple-mail@apple-mail-mcp`. Never rename those catalogs to `agentic-assets`.
+Keep client-specific schemas separate, and do not infer marketplace/UI support
+from a static manifest or local adapter test.
+
 ## Distribution channels (five install surfaces from one source tree)
 
 A single `plugin/` runtime serves Claude Code, Codex, and Cursor plugin installs; `bash tools/gates/build-artifacts.sh` emits the Claude Desktop upload artifacts. Drift between manifests and artifacts has caused real installer failures; `tools/validators/validate_manifests.py` enforces parity and the release gate refuses to ship with any artifact missing or stale.
 
 | Surface | Install target | Format |
 |---------|----------------|--------|
-| `apple-mail-plugin.zip` | Claude Code plugin marketplace (`claude plugin install apple-mail@apple-mail-mcp`) | Plain zip, `.claude-plugin/plugin.json` at zip root; register `Agentic-Assets/apple-mail-mcp` marketplace first |
+| `apple-mail-plugin.zip` | Claude Code standalone compatibility marketplace (`claude plugin install apple-mail@apple-mail-mcp`) | Plain zip, `.claude-plugin/plugin.json` at zip root; the central marketplace promotes the corresponding payload separately |
 | `apple-mail.plugin` | Claude Desktop **Cowork → Customize → Add plugin → Upload plugin** | Byte-identical copy of the `.zip`, `.plugin` extension is what the Cowork UI accepts |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop chat extension via "Add Custom Plugin" / "Install from file" | DXT bundle (`mcpb pack`), `manifest.json` at zip root |
-| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace (`codex plugin add apple-mail@apple-mail-mcp`) | GitHub marketplace checkout points at shared `./plugin` runtime with `plugin/.mcp.json` |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI standalone compatibility marketplace (`codex plugin add apple-mail@apple-mail-mcp`) | GitHub marketplace checkout points at shared `./plugin` runtime with `plugin/.mcp.json` |
 | `plugin/.cursor-plugin/plugin.json` + `plugin/mcp.json` | Cursor plugin and local MCP adapter | Separate draft-safe Cursor adapter; local Cursor Agent acceptance passed, while marketplace/UI admission remains separate |
 
-If you change distribution, version, or filenames: re-run `bash tools/gates/dev-check.sh release` and verify `tests/infra/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and CI tests treat that as a hard error.
+If you change distribution, version, or filenames: re-run `bash tools/gates/dev-check.sh release` and verify `tests/infra/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and local release tests treat that as a hard error.
 
 ## Agent orchestration (required)
 
@@ -40,7 +57,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 
 **Run `code-simplifier:code-simplifier` regularly** — after any non-trivial change to tools, backend, helpers, or tests. Especially after refactors that touched many sites (e.g. capability-token / structured-error / bounded-scan work). Behavior must be preserved; the simplifier collapses duplication, drops dead branches, and tightens names. Trigger it as part of every "ready to ship" pass alongside `plugin-validator` and `skill-reviewer`, and any time a file grows past ~600 LOC or a helper sprouts >3 near-copies.
 
-**Module line budget (automated):** CI, pre-commit, `dev-check.sh`, and `validate_manifests.py` warn on modules over **600 LOC** in `plugin/apple_mail_mcp/` and `tools/`, and **fail** if a tracked file grows past its baseline (`tests/fixtures/module_line_budget/baseline.json`). Detail: [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) § Module line budget · [`tools/CLAUDE.md`](tools/CLAUDE.md) § `check_module_line_budget.py`.
+**Module line budget (automated):** the local hooks, `dev-check.sh`, and `validate_manifests.py` warn on modules over **600 LOC** in `plugin/apple_mail_mcp/` and `tools/`, and **fail** if a tracked file grows past its baseline (`tests/fixtures/module_line_budget/baseline.json`). Detail: [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) § Module line budget · [`tools/CLAUDE.md`](tools/CLAUDE.md) § `check_module_line_budget.py`.
 
 ## When working in…
 
