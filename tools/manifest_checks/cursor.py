@@ -3,11 +3,40 @@
 from __future__ import annotations
 
 from manifest_checks import common
-from manifest_checks.codex import _check_codex_mcp_launcher_contract, _read_json_contract
-from manifest_checks.common import _check_tool_count_claim
+from manifest_checks.common import _check_tool_count_claim, _read_json_contract
 
 CURSOR_MANIFEST_LABEL = "plugin/.cursor-plugin/plugin.json"
 CURSOR_MCP_LABEL = "plugin/mcp.json"
+
+
+def _check_cursor_mcp_launcher_contract(
+    server: object,
+    label: str,
+    errors: list[str],
+) -> None:
+    """Validate Cursor's plugin-root-aware stdio launcher."""
+    if not isinstance(server, dict):
+        errors.append(f"{label}: missing mcpServers.apple-mail")
+        return
+    if server.get("command") != "/bin/bash":
+        errors.append(f"{label} mcpServers.apple-mail.command: expected /bin/bash")
+
+    args = server.get("args")
+    if not isinstance(args, list):
+        errors.append(f"{label} mcpServers.apple-mail.args: expected list")
+        return
+    expected_launcher = "${CURSOR_PLUGIN_ROOT}/start_mcp.sh"
+    if not args or args[0] != expected_launcher:
+        errors.append(f"{label} mcpServers.apple-mail.args: first arg must be {expected_launcher}")
+    if "--draft-safe" not in args:
+        errors.append(f"{label} mcpServers.apple-mail.args: missing --draft-safe")
+
+    if "cwd" in server:
+        errors.append(f"{label} mcpServers.apple-mail.cwd: omit cwd for Cursor plugins")
+
+    values = [server.get("command"), *args, server.get("cwd")]
+    if any(isinstance(value, str) and "${CLAUDE_PLUGIN_ROOT}" in value for value in values):
+        errors.append(f"{label} mcpServers.apple-mail: must not use ${{CLAUDE_PLUGIN_ROOT}} in Cursor launcher fields")
 
 
 def _check_cursor_plugin_contract(
@@ -24,9 +53,7 @@ def _check_cursor_plugin_contract(
     mcp_path = common.ROOT / CURSOR_MCP_LABEL
     if manifest is not None:
         if manifest.get("name") != "apple-mail":
-            errors.append(
-                f"{CURSOR_MANIFEST_LABEL} name: got '{manifest.get('name')}', expected 'apple-mail'"
-            )
+            errors.append(f"{CURSOR_MANIFEST_LABEL} name: got '{manifest.get('name')}', expected 'apple-mail'")
         if manifest.get("version") != expected_version:
             errors.append(
                 f"{CURSOR_MANIFEST_LABEL} version: got '{manifest.get('version')}', expected '{expected_version}'"
@@ -46,4 +73,8 @@ def _check_cursor_plugin_contract(
     if not isinstance(servers, dict):
         errors.append(f"{CURSOR_MCP_LABEL} mcpServers: expected object")
         return
-    _check_codex_mcp_launcher_contract(servers.get("apple-mail"), CURSOR_MCP_LABEL, errors)
+    _check_cursor_mcp_launcher_contract(
+        servers.get("apple-mail"),
+        CURSOR_MCP_LABEL,
+        errors,
+    )

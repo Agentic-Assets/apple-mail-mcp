@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.11.6 - 2026-07-15
+
+- Fix the Cursor adapter to resolve `start_mcp.sh` from
+  `${CURSOR_PLUGIN_ROOT}` while preserving the draft-safe launch flag.
+- Validate Cursor and Codex launcher contracts independently so a relative
+  Codex path cannot mask an invalid Cursor installation path.
+
 ## 3.11.5 - 2026-07-15
 
 - Integrate the offline runtime and Cursor adapter with exact-recipient draft

@@ -22,3 +22,14 @@ Candidate work surfaced during consolidation. This is a menu, not a roadmap.
   PRs #76 and #77, plus the two marketplace feature branches, remain useful provenance until the combined PR lands. Close or delete their remote branches only after `main` contains the consolidated merge.
 - **Add shellcheck when approved** (priority: low; confidence: tooling gap)
   Shell syntax and behavioral tests passed, but `shellcheck` was unavailable locally. Treat it as an optional local tool addition that requires maintainer approval under the repository lint policy.
+
+## Resolution update (2026-07-15)
+
+- The v3.11.5 consolidation merged as `673f75b`, the four superseded remote
+  branches were removed, and the signed immutable `v3.11.5` tag was published.
+- Isolated Codex and Claude installs, a local Cursor Agent session, and the
+  read-only macOS Mail quick check passed against the staged marketplace
+  payload. The central Cursor marketplace import itself was not proven.
+- A follow-up v3.11.6 patch now makes Cursor's plugin-root path explicit. The
+  active release and marketplace queue has moved to
+  [`../v3.11.6-cursor-adapter/`](../v3.11.6-cursor-adapter/).

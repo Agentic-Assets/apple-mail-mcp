@@ -89,6 +89,22 @@ def _json_field(path: Path, dotted: str):
     return cur
 
 
+def _read_json_contract(path: Path, label: str, errors: list[str]) -> dict | None:
+    """Read a manifest object while collecting stable validation errors."""
+    if not path.exists():
+        errors.append(f"{label}: missing {path.relative_to(ROOT).as_posix()}")
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        errors.append(f"{label}: invalid JSON at line {exc.lineno}: {exc.msg}")
+        return None
+    if not isinstance(data, dict):
+        errors.append(f"{label}: expected JSON object")
+        return None
+    return data
+
+
 def _check_tool_count_claim(text: str | None, source: str, actual: int, errors: list[str]) -> None:
     match = re.search(r"(\d+)\s+(?:MCP\s+)?tools?\b", text or "", re.I)
     if not match:

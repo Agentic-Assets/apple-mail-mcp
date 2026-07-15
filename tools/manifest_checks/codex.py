@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from manifest_checks import common
@@ -14,6 +13,7 @@ from manifest_checks.common import (
     CODEX_REQUIRED_FIELDS,
     DIRECT_SOURCE_MARKETPLACE_NAME,
     _check_tool_count_claim,
+    _read_json_contract,
 )
 
 
@@ -61,21 +61,6 @@ def _check_codex_mcp_launcher_contract(
         errors.append(
             f"{label} mcpServers.apple-mail: must not contain literal ${{CLAUDE_PLUGIN_ROOT}} in Codex launcher fields"
         )
-
-
-def _read_json_contract(path: Path, label: str, errors: list[str]) -> dict | None:
-    if not path.exists():
-        errors.append(f"{label}: missing {path.relative_to(common.ROOT).as_posix()}")
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        errors.append(f"{label}: invalid JSON at line {exc.lineno}: {exc.msg}")
-        return None
-    if not isinstance(data, dict):
-        errors.append(f"{label}: expected JSON object")
-        return None
-    return data
 
 
 def _check_codex_plugin_contract(

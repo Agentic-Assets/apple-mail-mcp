@@ -2,15 +2,15 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; CI enforces).
 
-**Current branch:** `chore/consolidate-active-branches-20260715` (off `main` @ v3.11.2).
+**Current branch:** `fix/cursor-plugin-root-path` (off `main` @ v3.11.5).
 
-**Most recent workstream:** [`tasks/archive/2026-07/shipped/agentic-1277-compose-draft-verification/`](archive/2026-07/shipped/agentic-1277-compose-draft-verification/). v3.11.3 now verifies the standalone compose smoke against the exact persisted To-recipient set and only performs identity-guarded cleanup. AGENTIC-1191's bounded Inbox path now caps Drafts at 50, reports truncated draft-state knowledge as `null`, and uses the mailbox response envelope for the perf threshold.
+**Most recent workstream:** [`tasks/active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/). The patch gives Cursor an explicit `${CURSOR_PLUGIN_ROOT}` launcher, keeps the Codex adapter independent, passes the full local release gate, and has live 41-tool Cursor Agent acceptance.
 
 **Already shipped:** AGENTIC-1214 merged in v3.11.2. It added chunked, focus-guarded native reply typing; full-body verification above the quote; persisted header-linked Drafts identity; safe artifact cleanup; quote-boundary verification; and the `CREATE_CANNOT_THREAD` refusal for standalone draft creation with `in_reply_to`. Its closeout is archived under [`archive/2026-07/shipped/agentic-1214-reply-fixes/`](archive/2026-07/shipped/agentic-1214-reply-fixes/).
 
-**Next action:** review the combined v3.11.5 PR, then merge only after Cayman's literal approval phrase. Closeout: [`active/v3.11.5-consolidated-release/closeout-2026-07-15.md`](active/v3.11.5-consolidated-release/closeout-2026-07-15.md). Forward queue: [`active/v3.11.5-consolidated-release/forward-queue-2026-07-15.md`](active/v3.11.5-consolidated-release/forward-queue-2026-07-15.md). After merge, create the signed annotated source tag and run the central marketplace promotion and admission workflow. Keep AGENTIC-781's human-operated native-reply checks open; AGENTIC-1192, AGENTIC-995, and AGENTIC-996 remain distinct backlog work.
+**Next action:** authorize and review the v3.11.6 Cursor adapter PR, then merge only after Cayman's new literal approval phrase. Closeout: [`active/v3.11.6-cursor-adapter/closeout-2026-07-15.md`](active/v3.11.6-cursor-adapter/closeout-2026-07-15.md). Forward queue: [`active/v3.11.6-cursor-adapter/forward-queue-2026-07-15.md`](active/v3.11.6-cursor-adapter/forward-queue-2026-07-15.md). After merge, create the signed annotated tag and regenerate central marketplace promotion and admission from that exact release. Keep AGENTIC-781's human-operated native-reply checks open; AGENTIC-1192, AGENTIC-995, and AGENTIC-996 remain distinct backlog work.
 
-**Main state:** `main` @ **v3.11.2** (AGENTIC-1214 native reply hardening, PR #75; automatic reply-state annotation, PR #73; tasks roadmap refresh, PR #74; v3.10.1 archive human-sender screen, PR #72).
+**Main state:** `main` @ **v3.11.5** (`673f75b`; consolidated offline runtime, Cursor adapter, sent-mailbox and compose-recipient verification work; signed immutable tag published).
 
 **Roadmap:** [`reference/roadmap-2026-07-10.md`](reference/roadmap-2026-07-10.md): new tools, new skills, enhancements, hardening backlog, and documented macOS refusals. Next three builds: port `get_email_source` forward, add junk + colored-flag actions to `update_email_status`, then the typed-`AppleScriptError` error-contract pass.
 
