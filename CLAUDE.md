@@ -1,17 +1,18 @@
 # CLAUDE.md
 
-Navigation hub for **apple-mail-mcp**: one Python MCP server (**41 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code + Codex plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
+Navigation hub for **apple-mail-mcp**: one Python MCP server (**41 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code, Codex, and Cursor plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. Cursor uses its distinct plugin-local adapter and remains pending live client acceptance. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
-## Distribution channels (four install surfaces from one source tree)
+## Distribution channels (five install surfaces from one source tree)
 
-A single `plugin/` runtime serves Claude Code and Codex plugin installs; `bash tools/gates/build-artifacts.sh` emits the Claude Desktop upload artifacts. Drift between manifests and artifacts has caused real installer failures; `tools/validators/validate_manifests.py` enforces parity and the release gate refuses to ship with any artifact missing or stale.
+A single `plugin/` runtime serves Claude Code, Codex, and Cursor plugin installs; `bash tools/gates/build-artifacts.sh` emits the Claude Desktop upload artifacts. Drift between manifests and artifacts has caused real installer failures; `tools/validators/validate_manifests.py` enforces parity and the release gate refuses to ship with any artifact missing or stale.
 
 | Surface | Install target | Format |
 |---------|----------------|--------|
-| `apple-mail-plugin.zip` | Claude Code plugin marketplace (`claude plugin install apple-mail@Agentic-Assets`) | Plain zip, `.claude-plugin/plugin.json` at zip root; register `Agentic-Assets/apple-mail-mcp` marketplace first |
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace (`claude plugin install apple-mail@apple-mail-mcp`) | Plain zip, `.claude-plugin/plugin.json` at zip root; register `Agentic-Assets/apple-mail-mcp` marketplace first |
 | `apple-mail.plugin` | Claude Desktop **Cowork → Customize → Add plugin → Upload plugin** | Byte-identical copy of the `.zip`, `.plugin` extension is what the Cowork UI accepts |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop chat extension via "Add Custom Plugin" / "Install from file" | DXT bundle (`mcpb pack`), `manifest.json` at zip root |
-| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace (`codex plugin add apple-mail@Agentic-Assets`) | GitHub marketplace checkout points at shared `./plugin` runtime with `plugin/.mcp.json` |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace (`codex plugin add apple-mail@apple-mail-mcp`) | GitHub marketplace checkout points at shared `./plugin` runtime with `plugin/.mcp.json` |
+| `plugin/.cursor-plugin/plugin.json` + `plugin/mcp.json` | Cursor plugin and local MCP adapter | Separate draft-safe Cursor adapter; static validation is not Cursor client acceptance evidence |
 
 If you change distribution, version, or filenames: re-run `bash tools/gates/dev-check.sh release` and verify `tests/infra/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and CI tests treat that as a hard error.
 
@@ -57,6 +58,7 @@ Do not solo large plugin or perf workstreams without at least one plugin-dev exp
 | MCPB bundle build | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) |
 | Claude Code marketplace manifest | [`.claude-plugin/CLAUDE.md`](.claude-plugin/CLAUDE.md) |
 | Codex Desktop/CLI plugin surface | [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json) · [`plugin/.codex-plugin/plugin.json`](plugin/.codex-plugin/plugin.json) · [`plugin/.mcp.json`](plugin/.mcp.json) |
+| Cursor plugin surface | [`plugin/.cursor-plugin/plugin.json`](plugin/.cursor-plugin/plugin.json) · [`plugin/mcp.json`](plugin/mcp.json) |
 
 ## Architecture (prose)
 
@@ -84,6 +86,7 @@ fails unless `CHANGELOG.md` has a `## {version} - YYYY-MM-DD` heading matching
 - `pyproject.toml` → `[project].version`
 - `plugin/.claude-plugin/plugin.json` → `version`
 - `plugin/.codex-plugin/plugin.json` → `version`
+- `plugin/.cursor-plugin/plugin.json` → `version`
 - `.claude-plugin/marketplace.json` → `plugins[0].version` (not `metadata.version`)
 - `server.json` → top-level + `packages[0].version`
 - `apple-mail-mcpb/manifest.json` → `version`
@@ -92,7 +95,7 @@ Sync tool-count claims in manifests with `find plugin/apple_mail_mcp/tools -name
 
 ## Related folders
 
-`plugin/apple_mail_mcp/` (source of truth) · `plugin/` (shared Claude Code + Codex plugin runtime) · `.claude-plugin/` (Claude Code marketplace) · `.agents/plugins/` (Codex marketplace) · `apple-mail-mcpb/` · `tests/` · `tools/` · `docs/` · `tasks/`
+`plugin/apple_mail_mcp/` (source of truth) · `plugin/` (shared Claude Code, Codex, and Cursor plugin runtime) · `.claude-plugin/` (Claude Code marketplace) · `.agents/plugins/` (Codex marketplace) · `apple-mail-mcpb/` · `tests/` · `tools/` · `docs/` · `tasks/`
 
 **Repo agent skills:** Add under `.agents/skills/<name>/`; symlink `.claude/skills/<name>` → `../../.agents/skills/<name>` (not `.cursor/skills/`). Commit and push after adding or moving skills.
 **Post-change ship:** Invoke `finalize-apple-mail-mcp` to sync docs, CLAUDE.md, manifests, then commit and push when the user asks.

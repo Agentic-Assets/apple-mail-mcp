@@ -34,8 +34,6 @@ from apple_mail_mcp.tools.reply_state_wiring import (
     build_draft_scan_status,
 )
 
-_SKIPPED_DRAFT_SCAN: dict[str, Any] = {"status": "skipped", "scanned": 0, "accounts": []}
-
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 @inject_preferences
@@ -491,17 +489,17 @@ async def _list_inbox_emails_json(
                 include_message_id,
             )
         except AppleScriptTimeout:
-            return {"emails": [], "errors": [account], "draft_scan": dict(_SKIPPED_DRAFT_SCAN)}
+            return {"emails": [], "errors": [account], "draft_scan": build_draft_scan_status({})}
         emails = _parse_pipe_delimited_emails(raw, has_message_id=include_message_id)
         errors = []
     else:
         try:
             accounts = await asyncio.to_thread(inbox._list_mail_accounts, timeout)
         except AppleScriptTimeout:
-            return {"emails": [], "errors": ["__account_listing__"], "draft_scan": dict(_SKIPPED_DRAFT_SCAN)}
+            return {"emails": [], "errors": ["__account_listing__"], "draft_scan": build_draft_scan_status({})}
 
         if not accounts:
-            return {"emails": [], "errors": [], "draft_scan": dict(_SKIPPED_DRAFT_SCAN)}
+            return {"emails": [], "errors": [], "draft_scan": build_draft_scan_status({})}
 
         async def run_one(acct: str) -> tuple[str, str | AppleScriptTimeout]:
             try:

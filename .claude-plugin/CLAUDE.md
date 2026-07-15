@@ -20,7 +20,7 @@ Codex Desktop/CLI uses a separate marketplace file at [`../.agents/plugins/marke
 
 Claude Code rejects the install with *"conflicting manifests: both plugin.json and marketplace entry specify components"* when both manifests declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` and `strict` is not `true` on the marketplace entry.
 
-This repo keeps **all** component specs (only `mcpServers` today) in `plugin/.claude-plugin/plugin.json`. The marketplace entry stays metadata-only: `name`, `displayName`, `description`, `version`, `author`, `homepage`, `repository`, `category`, `keywords`, `source`, `strict: false`. Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them here.
+This repo keeps **all** component specs (only `mcpServers` today) in `plugin/.claude-plugin/plugin.json`. The marketplace entry stays metadata-only and keeps `strict: true`, matching Claude's strict default and the plugin manifest's component declaration. Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them here.
 
 The check lives in `tools/manifest_checks/install_contracts.py::_check_marketplace_contract` (entry point `tools/validators/validate_manifests.py`; regression tests in `tests/infra/test_validate_manifests.py`: `test_marketplace_contract_rejects_dual_component_declarations` and `test_marketplace_contract_allows_dual_components_when_strict_true`). If a future change needs component fields in the marketplace entry, set `"strict": true` in the same edit so installs keep working.
 
@@ -36,12 +36,12 @@ The check lives in `tools/manifest_checks/install_contracts.py::_check_marketpla
 ```bash
 # From GitHub (users)
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
-claude plugin marketplace update Agentic-Assets
-claude plugin install apple-mail@Agentic-Assets --scope user
+claude plugin marketplace update apple-mail-mcp
+claude plugin install apple-mail@apple-mail-mcp --scope user
 
 # From repo checkout (maintainer/offline)
 claude plugin marketplace add .
-claude plugin install apple-mail@Agentic-Assets
+claude plugin install apple-mail@apple-mail-mcp
 ```
 
 Installs the MCP server (41 tools, **`--draft-safe`** by default) plus **eleven** auto-discovered workflow skills under `plugin/skills/`; see [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md).
@@ -50,10 +50,10 @@ Codex users install through the sibling Codex marketplace:
 
 ```bash
 codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
-codex plugin add apple-mail@Agentic-Assets
+codex plugin add apple-mail@apple-mail-mcp
 ```
 
-For a local checkout, use `codex plugin marketplace add .` before the same `codex plugin add apple-mail@Agentic-Assets` command.
+For a local checkout, use `codex plugin marketplace add .` before the same `codex plugin add apple-mail@apple-mail-mcp` command. The shared `agentic-assets` marketplace ID belongs to [`Agentic-Assets/Agentic-Assets-Marketplace`](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace), which can list both Apple Mail and Corbis without a source collision.
 
 After edits: `plugin-dev:plugin-validator` when available + `tools/gates/validate_manifests.sh` (+ `plugin-dev:skill-reviewer` when skills change).
 

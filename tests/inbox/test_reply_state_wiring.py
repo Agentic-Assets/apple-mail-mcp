@@ -29,15 +29,21 @@ def _drafts_runner(responses: dict[str, str], calls: list[str] | None = None):
         for account, raw in responses.items():
             if f'account "{account}"' in script:
                 return raw
-        return "COUNT|||0"
+        return "COUNT|||0\nTOTAL|||0"
 
     return runner
 
 
 class BuildDraftScanStatusTests(unittest.TestCase):
     def test_empty_snapshots_is_skipped(self):
+        # The empty-snapshots early return carries the same uniform envelope
+        # keys (total, truncated) as the non-empty path, so every draft_scan
+        # producer emits an identical key set.
         status = build_draft_scan_status({})
-        self.assertEqual(status, {"status": "skipped", "scanned": 0, "accounts": []})
+        self.assertEqual(
+            status,
+            {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []},
+        )
 
     def test_all_ok_snapshots_aggregate_scanned_counts(self):
         snapshots = {
@@ -87,16 +93,18 @@ class AnnotateRowsWithReplyStateTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_matching_draft_sets_has_draft_true(self):
-        raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         rows = [{"account": "Work", "subject": "Budget", "sender": "alice@example.com", "date": None}]
         annotate_rows_with_reply_state(rows, runner=_drafts_runner({"Work": raw}), timeout=30, include_draft_state=True)
         self.assertTrue(rows[0]["has_draft"])
 
     def test_non_matching_draft_sets_has_draft_false(self):
-        raw = "DRAFT|||Something else|||bob@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        # Complete scan (TOTAL == COUNT) => a nonmatch is a definitive False,
+        # not a fail-open None.
+        raw = "DRAFT|||Something else|||bob@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         rows = [{"account": "Work", "subject": "Budget", "sender": "alice@example.com", "date": None}]
         annotate_rows_with_reply_state(rows, runner=_drafts_runner({"Work": raw}), timeout=30, include_draft_state=True)
-        self.assertFalse(rows[0]["has_draft"])
+        self.assertIs(rows[0]["has_draft"], False)
 
     def test_errored_scan_sets_has_draft_null_not_false(self):
         rows = [{"account": "Work", "subject": "Budget", "sender": "alice@example.com", "date": None}]
@@ -109,7 +117,7 @@ class AnnotateRowsWithReplyStateTests(unittest.TestCase):
         self.assertIsNone(rows[0]["has_draft"])
 
     def test_account_override_ignores_row_account_field(self):
-        raw = "DRAFT|||Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        raw = "DRAFT|||Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         rows = [{"subject": "Budget", "sender": "alice@example.com", "date": None}]  # no "account" key
         annotate_rows_with_reply_state(
             rows, runner=_drafts_runner({"Work": raw}), timeout=30, include_draft_state=True, account="Work"
@@ -120,7 +128,7 @@ class AnnotateRowsWithReplyStateTests(unittest.TestCase):
         calls: list[str] = []
         accounts = [f"Acct{i}" for i in range(6)]
         rows = [{"account": a, "subject": "x", "sender": "y@z.com", "date": None} for a in accounts]
-        responses = {a: "COUNT|||0" for a in accounts}
+        responses = {a: "COUNT|||0\nTOTAL|||0" for a in accounts}
         cache = annotate_rows_with_reply_state(
             rows, runner=_drafts_runner(responses, calls), timeout=30, include_draft_state=True
         )
@@ -136,7 +144,7 @@ class AnnotateRowsWithReplyStateTests(unittest.TestCase):
 
     def test_shared_snapshot_cache_reused_across_calls(self):
         calls: list[str] = []
-        runner = _drafts_runner({"Work": "COUNT|||0"}, calls)
+        runner = _drafts_runner({"Work": "COUNT|||0\nTOTAL|||0"}, calls)
         cache: dict[str, DraftsSnapshot] = {}
         annotate_rows_with_reply_state(
             [{"account": "Work", "subject": "a", "sender": "b@c.com", "date": None}],
@@ -158,7 +166,7 @@ class AnnotateRowsWithReplyStateTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_null_internet_message_id_falls_back_to_subject_sender(self):
-        raw = "DRAFT|||Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        raw = "DRAFT|||Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         rows = [
             {
                 "account": "Work",

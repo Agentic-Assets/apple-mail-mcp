@@ -8,11 +8,11 @@ from pathlib import Path
 from manifest_checks import common
 from manifest_checks.common import (
     AGENTIC_ASSETS_MARKETPLACE_DISPLAY_NAME,
-    AGENTIC_ASSETS_MARKETPLACE_NAME,
     CODEX_MANIFEST_LABEL,
     CODEX_MARKETPLACE_LABEL,
     CODEX_MCP_LABEL,
     CODEX_REQUIRED_FIELDS,
+    DIRECT_SOURCE_MARKETPLACE_NAME,
     _check_tool_count_claim,
 )
 
@@ -87,12 +87,12 @@ def _check_codex_plugin_contract(
     market_label = CODEX_MARKETPLACE_LABEL
     market = _read_json_contract(common.ROOT / market_label, market_label, errors)
     if market is not None:
-        if market.get("name") != AGENTIC_ASSETS_MARKETPLACE_NAME:
+        if market.get("name") != DIRECT_SOURCE_MARKETPLACE_NAME:
             _append_mismatch(
                 errors,
                 f"{market_label} name",
                 market.get("name"),
-                AGENTIC_ASSETS_MARKETPLACE_NAME,
+                DIRECT_SOURCE_MARKETPLACE_NAME,
             )
         interface = market.get("interface") or {}
         if not isinstance(interface, dict):

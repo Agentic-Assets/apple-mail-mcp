@@ -1,7 +1,8 @@
 """draft-verify-smoke pipeline: pure helpers plus the command handler.
 
-Lazy tool imports (``manage_drafts``, ``verify_draft``, ``list_account_addresses``)
-stay inside the functions so the tests' source-patch seams keep working.
+Lazy tool imports (``manage_drafts``, ``verify_draft``,
+``delete_draft_if_identity_matches``, ``list_account_addresses``) stay inside
+the functions so the tests' source-patch seams keep working.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from apple_mail_mcp.cli.formatting import _parse_tool_result, _print_result, _result_is_error
+from apple_mail_mcp.tools.draft_verification import _split_csv_addresses
 
 
 def _extract_draft_ids(text: str) -> list[str]:
@@ -28,23 +30,50 @@ def _extract_draft_ids(text: str) -> list[str]:
     return ids
 
 
-def _draft_verification_passed(value: Any) -> bool:
+def _normalized_recipient_set(value: str) -> set[str]:
+    """Normalize a comma-delimited recipient field for smoke identity checks."""
+    return set(_split_csv_addresses(value))
+
+
+def _draft_verification_passed(value: Any, *, expected_to: str) -> bool:
     parsed = _parse_tool_result(value)
     if not isinstance(parsed, dict):
         return False
     if parsed.get("found") is not True:
         return False
     warnings = set(parsed.get("warnings") or [])
+    recipients = parsed.get("recipients")
+    if not isinstance(recipients, dict) or not isinstance(recipients.get("to"), str):
+        return False
+    # Exact-set equality is the recipient gate. It is strictly stronger than
+    # verify_draft's own subset-only ``to_matches_expected`` / ``to_mismatch``
+    # signals (a missing OR an extra recipient makes the sets differ), so those
+    # do not need a redundant branch here.
+    if _normalized_recipient_set(recipients["to"]) != _normalized_recipient_set(expected_to):
+        return False
     return not {"subject_mismatch", "expected_body_missing"} & warnings and not parsed.get("error")
+
+
+def _smoke_verification_evidence(value: Any) -> dict[str, Any]:
+    """Return the relevant verification status without draft-content disclosure."""
+    parsed = _parse_tool_result(value)
+    if not isinstance(parsed, dict):
+        return {"result_parseable": False}
+
+    evidence: dict[str, Any] = {
+        "result_parseable": True,
+        "found": parsed.get("found") is True,
+        "warnings": list(parsed.get("warnings") or []),
+    }
+    checks = parsed.get("checks")
+    if isinstance(checks, dict) and "to_matches_expected" in checks:
+        evidence["to_matches_expected"] = checks["to_matches_expected"]
+    return evidence
 
 
 def _draft_cleanup_confirmed(value: Any) -> bool:
     parsed = _parse_tool_result(value)
-    if not isinstance(parsed, dict):
-        return False
-    if parsed.get("found") is False:
-        return True
-    return "draft_not_found" in (parsed.get("warnings") or [])
+    return isinstance(parsed, dict) and parsed.get("deleted") is True and parsed.get("confirmed") is True
 
 
 def _resolve_draft_smoke_from_address(
@@ -78,6 +107,7 @@ def _verify_smoke_candidates(
     *,
     account: str,
     subject: str,
+    expected_to: str,
     body_sentinel: str,
     candidate_ids: list[str],
     tool_timeout: int,
@@ -89,12 +119,13 @@ def _verify_smoke_candidates(
         verify_result = verify_draft(
             account=account,
             draft_id=draft_id,
+            expected_to=expected_to,
             expected_subject=subject,
             expected_body_contains=body_sentinel,
             timeout=tool_timeout,
         )
         last_verify_result = _parse_tool_result(verify_result)
-        if _draft_verification_passed(verify_result):
+        if _draft_verification_passed(verify_result, expected_to=expected_to):
             verified_ids.append(draft_id)
     return verified_ids, last_verify_result
 
@@ -128,6 +159,7 @@ def _poll_for_verified_smoke_draft(
     *,
     account: str,
     subject: str,
+    expected_to: str,
     body_sentinel: str,
     list_limit: int,
     tool_timeout: int,
@@ -156,6 +188,7 @@ def _poll_for_verified_smoke_draft(
             verified_ids, last_verify_result = _verify_smoke_candidates(
                 account=account,
                 subject=subject,
+                expected_to=expected_to,
                 body_sentinel=body_sentinel,
                 candidate_ids=candidate_ids,
                 tool_timeout=tool_timeout,
@@ -176,33 +209,31 @@ def _cleanup_smoke_draft(
     *,
     account: str,
     draft_id: str,
+    subject: str,
+    expected_to: str,
+    body_sentinel: str,
     tool_timeout: int,
-    manage_drafts: Callable[..., Any],
-    verify_draft: Callable[..., Any],
+    delete_draft_if_identity_matches: Callable[..., Any],
     payload: dict[str, Any],
 ) -> None:
-    delete_result = manage_drafts(
+    delete_result = delete_draft_if_identity_matches(
         account=account,
-        action="delete",
         draft_id=draft_id,
+        expected_subject=subject,
+        expected_to=expected_to,
+        expected_body_sentinel=body_sentinel,
         timeout=tool_timeout,
     )
     payload["cleanup"]["delete_result"] = _parse_tool_result(delete_result)
     if _result_is_error(delete_result):
         _append_stage_error(payload, "cleanup_delete", _parse_tool_result(delete_result))
-    confirm_result = verify_draft(
-        account=account,
-        draft_id=draft_id,
-        timeout=tool_timeout,
-    )
-    payload["cleanup"]["confirmation"] = _parse_tool_result(confirm_result)
-    payload["cleanup"]["confirmed"] = _draft_cleanup_confirmed(confirm_result)
+    payload["cleanup"]["confirmed"] = _draft_cleanup_confirmed(delete_result)
     if not payload["cleanup"]["confirmed"]:
-        _append_stage_error(payload, "cleanup_confirm", _parse_tool_result(confirm_result))
+        _append_stage_error(payload, "cleanup_confirm", _parse_tool_result(delete_result))
 
 
 def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
-    from apple_mail_mcp.tools.compose import manage_drafts, verify_draft
+    from apple_mail_mcp.tools.compose import delete_draft_if_identity_matches, manage_drafts, verify_draft
 
     token = uuid4().hex[:8]
     subject = f"APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_{int(time.time())}_{token}"
@@ -217,6 +248,7 @@ def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
         "ok": False,
         "account": args.account,
         "from_address": None,
+        "expected_to": args.to,
         "subject": subject,
         "created_draft_id_provisional": None,
         "persisted_draft_id": None,
@@ -225,6 +257,11 @@ def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
         "cleanup": {"requested": bool(args.cleanup), "confirmed": False, "skipped": bool(args.leave_draft)},
         "errors": [],
     }
+    if not _normalized_recipient_set(args.to):
+        _append_stage_error(payload, "recipient", "empty_recipient_set")
+        _print_result(payload, json_mode=args.json)
+        return 2
+
     from_address, from_error = _resolve_draft_smoke_from_address(
         account=args.account,
         explicit_from_address=args.from_address,
@@ -254,6 +291,7 @@ def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
     persisted_id, candidate_ids, last_verify_result = _poll_for_verified_smoke_draft(
         account=args.account,
         subject=subject,
+        expected_to=args.to,
         body_sentinel=body_sentinel,
         list_limit=list_limit,
         tool_timeout=tool_timeout,
@@ -273,19 +311,19 @@ def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
             "verify",
             "no_verified_persisted_draft",
             candidate_ids=candidate_ids,
-            last_result=last_verify_result,
+            last_verification=_smoke_verification_evidence(last_verify_result),
         )
-        if args.cleanup and len(candidate_ids) == 1:
-            payload["persisted_draft_id"] = candidate_ids[0]
 
     cleanup_draft_id = payload["persisted_draft_id"]
     if args.cleanup and cleanup_draft_id:
         _cleanup_smoke_draft(
             account=args.account,
             draft_id=str(cleanup_draft_id),
+            subject=subject,
+            expected_to=args.to,
+            body_sentinel=body_sentinel,
             tool_timeout=tool_timeout,
-            manage_drafts=manage_drafts,
-            verify_draft=verify_draft,
+            delete_draft_if_identity_matches=delete_draft_if_identity_matches,
             payload=payload,
         )
 

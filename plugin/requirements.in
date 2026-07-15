@@ -1,0 +1,4 @@
+# Runtime dependencies for the self-contained plugin payload.
+# Regenerate requirements.lock and wheelhouse with tools/gates/build-wheelhouse.sh.
+fastmcp==3.4.1
+mcp-ui-server==1.0.0

@@ -32,7 +32,7 @@ def _fake_runner(main_raw: str, draft_raw: str | None = None, calls: list[str] |
         if calls is not None:
             calls.append(script)
         if "draftsMailbox" in script:
-            return draft_raw if draft_raw is not None else "COUNT|||0"
+            return draft_raw if draft_raw is not None else "COUNT|||0\nTOTAL|||0"
         return main_raw
 
     return runner
@@ -91,7 +91,7 @@ class ListInboxWasRepliedAlwaysPresentTests(unittest.TestCase):
 class ListInboxHasDraftTests(unittest.TestCase):
     def test_json_has_draft_true_for_matching_draft(self):
         main_raw = "Budget|||alice@example.com|||Date|||false|||Work|||101|||false"
-        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
             side_effect=_fake_runner(main_raw, draft_raw),
@@ -110,7 +110,7 @@ class ListInboxHasDraftTests(unittest.TestCase):
             "\n"
             "__COUNT__|||1\n"
         )
-        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
             side_effect=_fake_runner(main_raw, draft_raw),
@@ -124,7 +124,7 @@ class ListInboxHasDraftTests(unittest.TestCase):
             "Budget|||alice@example.com|||Date|||false|||Work|||101|||false\n"
             "Other|||bob@example.com|||Date|||false|||Work|||102|||false"
         )
-        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
             side_effect=_fake_runner(main_raw, draft_raw),
@@ -195,7 +195,7 @@ class ListInboxMultiAccountDraftCapTests(unittest.TestCase):
         def fake_run(script: str, timeout: int | None = None) -> str:
             if "draftsMailbox" in script:
                 draft_calls.append(script)
-                return "COUNT|||0"
+                return "COUNT|||0\nTOTAL|||0"
             for acct in accounts:
                 if f'account "{acct}"' in script:
                     return f"Subj|||sender@x.com|||Date|||false|||{acct}|||1|||false"

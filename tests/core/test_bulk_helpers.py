@@ -73,6 +73,13 @@ def test_mailbox_ref_custom():
     assert '"Archive"' in script
 
 
+def test_mailbox_ref_sent_mail_uses_account_scoped_fallback():
+    script = build_mailbox_ref("Sent Mail")
+    assert 'mailbox "Sent Mail" of targetAccount' in script
+    assert "every mailbox of targetAccount" in script
+    assert script.index('mailbox "Sent Mail" of targetAccount') < script.index("every mailbox of targetAccount")
+
+
 def test_mailbox_ref_nested():
     script = build_mailbox_ref("Projects/2024")
     assert '"2024"' in script

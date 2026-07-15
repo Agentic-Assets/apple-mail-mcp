@@ -45,8 +45,11 @@ fi
 
 TMP_HOME="$(mktemp -d)"
 trap 'rm -rf "$TMP_HOME"' EXIT
-CODEX_MARKETPLACE_NAME="Agentic-Assets"
-CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-https://github.com/Agentic-Assets/apple-mail-mcp.git}"
+CODEX_MARKETPLACE_NAME="apple-mail-mcp"
+# Release candidates must be tested from the checkout that built the artifacts.
+# Set APPLE_MAIL_CODEX_MARKETPLACE_SOURCE explicitly only when checking a
+# published marketplace snapshot.
+CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-$ROOT}"
 CODEX_PLUGIN_SELECTOR="apple-mail@${CODEX_MARKETPLACE_NAME}"
 
 "$SMOKE_PYTHON" tools/probes/mcp_tool_smoke.py \
@@ -60,7 +63,7 @@ export CODEX_HOME="$TMP_HOME"
 
 codex plugin marketplace add "$CODEX_MARKETPLACE_SOURCE"
 codex plugin add "$CODEX_PLUGIN_SELECTOR"
-codex plugin list --marketplace Agentic-Assets | grep -F "apple-mail@Agentic-Assets" >/dev/null
+codex plugin list --marketplace "$CODEX_MARKETPLACE_NAME" | grep -F "$CODEX_PLUGIN_SELECTOR" >/dev/null
 
 SERVER_JSON="$TMP_HOME/apple-mail-mcp-server.json"
 codex mcp get apple-mail --json > "$SERVER_JSON"

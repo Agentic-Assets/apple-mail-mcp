@@ -49,7 +49,13 @@ def _mailbox_count(account: str) -> int:
 
     raw = list_mailboxes(account=account, include_counts=False, output_format="json")
     parsed = _parse_tool_result(_await_if_coro(raw))
-    return len(parsed) if isinstance(parsed, list) else 0
+    if isinstance(parsed, list):
+        return len(parsed)
+    if isinstance(parsed, dict):
+        returned = parsed.get("returned")
+        if isinstance(returned, int) and returned >= 0:
+            return returned
+    return 0
 
 
 def _resolve_test_account(explicit: str | None) -> tuple[str | None, str | None]:

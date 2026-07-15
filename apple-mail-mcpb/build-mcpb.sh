@@ -48,12 +48,18 @@ fi
 cp "${SOURCE_DIR}/apple_mail_mcp.py" "${BUILD_DIR}/"
 chmod +x "${BUILD_DIR}/apple_mail_mcp.py"
 
-# Copy requirements.txt
+# Copy offline dependency inputs.
 if [ ! -f "${SOURCE_DIR}/requirements.txt" ]; then
     echo -e "  ${RED}✗${NC} requirements.txt not found: ${SOURCE_DIR}/requirements.txt"
     exit 1
 fi
 cp "${SOURCE_DIR}/requirements.txt" "${BUILD_DIR}/"
+if [ ! -f "${SOURCE_DIR}/requirements.lock" ] || [ ! -d "${SOURCE_DIR}/wheelhouse" ]; then
+    echo -e "  ${RED}✗${NC} Offline dependency payload is missing (requirements.lock or wheelhouse)"
+    exit 1
+fi
+cp "${SOURCE_DIR}/requirements.lock" "${BUILD_DIR}/"
+cp -R "${SOURCE_DIR}/wheelhouse" "${BUILD_DIR}/"
 
 # Copy startup wrapper script
 echo -e "\n${YELLOW}Step 4: Copying startup wrapper script...${NC}"
@@ -115,8 +121,8 @@ Portable Apple Mail MCP server for Claude Desktop **plus** a mirrored **`skills/
 | Path | Role |
 |------|------|
 | `apple_mail_mcp/` + `apple_mail_mcp.py` | FastMCP tool implementation (**41 tools**) |
-| `start_mcp.sh` | Creates `venv/`, installs `requirements.txt`, execs Python entry |
-| `requirements.txt` | Runtime Python dependencies |
+| `start_mcp.sh` | Creates `venv/`, installs only bundled hash-checked wheels, execs Python entry |
+| `requirements.lock` + `wheelhouse/` | Offline runtime dependency payload for macOS arm64 CPython 3.13 |
 | `ui/` | MCP Apps dashboard helpers for `inbox_dashboard` |
 | `skills/` | Bundled Claude Code skills (`SKILL.md` per subdirectory) |
 
@@ -229,5 +235,5 @@ echo -e "  ${YELLOW}unzip -q \"${OUTPUT_FILE}\" -d /tmp/am-mcp${NC}"
 echo -e "  ${YELLOW}mkdir -p \"$HOME/.claude/skills\"${NC}"
 echo -e "  ${YELLOW}cp -a /tmp/am-mcp/skills/. \"$HOME/.claude/skills/\"${NC}"
 echo -e "\n${GREEN}What ships:${NC}"
-echo -e "  FastMCP server with ${GREEN}29${NC} tools + mirrored plugin workflow skills/"
+echo -e "  FastMCP server with ${GREEN}41${NC} tools + mirrored plugin workflow skills/"
 echo -e "\nUpstream docs: https://github.com/Agentic-Assets/apple-mail-mcp#readme"

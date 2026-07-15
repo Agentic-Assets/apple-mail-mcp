@@ -1747,7 +1747,7 @@ class NewFieldsTests(unittest.TestCase):
 
     def test_search_emails_mailboxes_param_targets_named_folders(self):
         """mailboxes=['Archive','Sent'] must produce a script that looks up
-        those specific folders and does NOT use `every mailbox` enumeration."""
+        those specific folders and does not use the `All` search path."""
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -1768,7 +1768,51 @@ class NewFieldsTests(unittest.TestCase):
         script = captured["script"]
         self.assertIn('mailbox "Archive" of targetAccount', script)
         self.assertIn('mailbox "Sent" of targetAccount', script)
-        self.assertNotIn("every mailbox of targetAccount", script)
+        self.assertNotIn("set searchMailboxes to every mailbox of targetAccount", script)
+
+    def test_search_emails_sent_mail_uses_account_scoped_fallback_for_singular_param(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailbox="Sent Mail",
+                    output_format="json",
+                    limit=5,
+                    date_from="2026-01-01",
+                )
+            )
+
+        script = captured["script"]
+        self.assertIn('mailbox "Sent Mail" of targetAccount', script)
+        self.assertIn("every mailbox of targetAccount", script)
+
+    def test_search_emails_sent_mail_uses_account_scoped_fallback_for_mailboxes_param(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailboxes=["Sent Mail"],
+                    output_format="json",
+                    limit=5,
+                    date_from="2026-01-01",
+                )
+            )
+
+        script = captured["script"]
+        self.assertIn('mailbox "Sent Mail" of targetAccount', script)
+        self.assertIn("every mailbox of targetAccount", script)
 
     # ------------------------------------------------------------------
     # FIX #5b: All path isolates per-mailbox failures (partial results).
@@ -2157,7 +2201,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
                 ),
             ]
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, search_raw)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2173,7 +2217,10 @@ class ReplyStateAnnotationTests(unittest.TestCase):
         payload = json.loads(result)
         self.assertEqual([item["subject"] for item in payload["items"]], ["Other Topic"])
         self.assertEqual(payload["draft_scan"]["status"], "ok")
-        self.assertEqual(payload["draft_scan"]["accounts"], [{"account": "Work", "status": "ok", "scanned": 1}])
+        self.assertEqual(
+            payload["draft_scan"]["accounts"],
+            [{"account": "Work", "status": "ok", "scanned": 1, "total": 1, "truncated": False}],
+        )
         # One search call + one Drafts-snapshot call for the single account.
         self.assertEqual(len(calls), 2)
 
@@ -2192,7 +2239,10 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             )
 
         payload = json.loads(result)
-        self.assertEqual(payload["draft_scan"], {"status": "skipped", "scanned": 0, "accounts": []})
+        self.assertEqual(
+            payload["draft_scan"],
+            {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []},
+        )
         self.assertIsNone(payload["items"][0]["has_draft"])
         # Only the one search call, no Drafts-snapshot call at all.
         self.assertEqual(len(calls), 1)
@@ -2229,7 +2279,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             sender="alice@example.com",
             received_date="2026-05-01T09:00:00",
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, _calls = self._route_drafts(drafts_raw, search_raw)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2255,7 +2305,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             sender="alice@example.com",
             received_date="2026-05-01T09:00:00",
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, record)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2306,7 +2356,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
                 ),
             ]
         )
-        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Re: Budget Update|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, records_raw)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
@@ -2335,7 +2385,7 @@ class ReplyStateAnnotationTests(unittest.TestCase):
             sender="alice@example.com",
             received_date="2026-05-01T09:00:00",
         )
-        drafts_raw = "DRAFT|||Budget Review|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1"
+        drafts_raw = "DRAFT|||Budget Review|||alice@example.com|||2026-05-01T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         fake_run, calls = self._route_drafts(drafts_raw, "THREAD_STRATEGY|||subject\n" + thread_line)
 
         with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):

@@ -33,7 +33,7 @@ def _overview_payload(replied_token: str) -> str:
 def _fake_runner(overview_raw: str, draft_raw: str | None = None):
     def runner(script: str, timeout: int | None = None) -> str:
         if "draftsMailbox" in script:
-            return draft_raw if draft_raw is not None else "COUNT|||0"
+            return draft_raw if draft_raw is not None else "COUNT|||0\nTOTAL|||0"
         return overview_raw
 
     return runner
@@ -79,7 +79,7 @@ class OverviewWasRepliedTests(unittest.TestCase):
 
 class OverviewHasDraftTests(unittest.TestCase):
     def test_json_has_draft_true_for_matching_draft(self):
-        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
             side_effect=_fake_runner(_overview_payload("false"), draft_raw),
@@ -91,7 +91,7 @@ class OverviewHasDraftTests(unittest.TestCase):
         self.assertEqual(result["draft_scan"]["status"], "ok")
 
     def test_text_mode_tags_has_draft(self):
-        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1"
+        draft_raw = "DRAFT|||Re: Budget|||alice@example.com|||2026-07-09T10:00:00|||\nCOUNT|||1\nTOTAL|||1"
         with patch(
             "apple_mail_mcp.tools.inbox.run_applescript",
             side_effect=_fake_runner(_overview_payload("false"), draft_raw),

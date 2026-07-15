@@ -51,7 +51,7 @@ Destructive and bulk mutation tools default to **exact `message_ids`** from a pr
 - Lists longer than `MAX_WHOSE_IDS` (50) → `code: WHOSE_ID_LIST_TOO_LARGE`; chunk with `bounded_scan.iter_id_chunks`.
 - Filter paths still honor `recent_days` defaults and refuse unbounded scans with `UNBOUNDED_SCAN_REQUIRED` when no date window is set.
 
-Agent workflow: **search/list -> collect numeric `message_id` -> mutate by ids**. `get_needs_response(output_format="json")` also returns numeric Apple Mail `message_id` for downstream reads, replies, moves, and status updates, plus `internet_message_id` for Sent-header correlation only. Every row from the primary read/triage tools also carries `was_replied_to` (bool) and `has_draft` (true/false/null) for downstream skip-if-handled logic, plus a top-level `draft_scan` status object on the response. Prefer `sender_exact="person@example.com"`, `sender_domain="example.com"`, or `internet_message_id="<id@example.com>"` over fuzzy `sender="..."` when the exact address, domain, or Message-ID is known. `export_emails(scope="filtered" | "thread" | "correspondent")` follows the same pattern internally: bounded discovery first, then exact message-id export. Use `scope="correspondent"` with `email_address=` when an agent needs incoming plus Sent-side history for one person. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk/date or full-text campaigns.
+Agent workflow: **search/list -> collect numeric `message_id` -> mutate by ids**. `get_needs_response(output_format="json")` also returns numeric Apple Mail `message_id` for downstream reads, replies, moves, and status updates, plus `internet_message_id` for Sent-header correlation only. Every row from the primary read/triage tools also carries `was_replied_to` (bool) and `has_draft` (true/false/null) for downstream skip-if-handled logic, plus a top-level `draft_scan` object (`status`, `scanned`, `total`, `truncated`, and `accounts[]` with per-account `status`/`scanned`/`total`/`truncated`) on the response. `has_draft=true` is trustworthy even from a truncated scan; `false` means the scan completed with no match; `null` means unknown (scan skipped, errored, or the bounded 50-draft-per-account scan truncated without a match, i.e. `draft_scan.truncated`), never a confirmed absence. Prefer `sender_exact="person@example.com"`, `sender_domain="example.com"`, or `internet_message_id="<id@example.com>"` over fuzzy `sender="..."` when the exact address, domain, or Message-ID is known. `export_emails(scope="filtered" | "thread" | "correspondent")` follows the same pattern internally: bounded discovery first, then exact message-id export. Use `scope="correspondent"` with `email_address=` when an agent needs incoming plus Sent-side history for one person. Reserve `allow_filter_scan=True` and `allow_body_scan=True` for rare, operator-approved bulk/date or full-text campaigns.
 
 ### Centralized scan caps (`SCAN_BOUNDS`, v3.7.1)
 
@@ -177,16 +177,16 @@ Tool-count claims drift. Description fields in Claude/Codex `plugin.json`, marke
 
 ---
 
-## Distribution channels — four install surfaces, one source
+## Distribution channels — five install surfaces, one source
 
-The repo ships from **one source tree** to **four install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/gates/build-artifacts.sh`](../tools/gates/build-artifacts.sh); Claude Code and Codex plugin installs share the checked-in `plugin/` runtime. The validator and CI tests enforce parity between them.
+The repo ships from **one source tree** to **five install surfaces**. Claude Desktop artifacts rebuild in one shot via [`tools/gates/build-artifacts.sh`](../tools/gates/build-artifacts.sh); Claude Code, Codex, and Cursor plugin installs share the checked-in `plugin/` runtime but retain distinct adapters. The validator and CI tests enforce static parity, while Cursor support still requires a live client acceptance test.
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|
-| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update Agentic-Assets`, then `claude plugin install apple-mail@Agentic-Assets --scope user` (uses `.claude-plugin/marketplace.json`) |
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update apple-mail-mcp`, then `claude plugin install apple-mail@apple-mail-mcp --scope user` (uses `.claude-plugin/marketplace.json`) |
 | `apple-mail.plugin` | Claude Desktop **Cowork** | Customize → Add plugin → **Upload plugin**. The Cowork UI accepts the `.plugin` extension; without it the upload silently fails. |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
-| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@Agentic-Assets`; local checkouts are maintainer/offline only |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@apple-mail-mcp`; local checkouts are maintainer/offline only |
 
 **`.zip` and `.plugin` must be byte-identical** — `tools/gates/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validators/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/infra/test_validate_manifests.py::test_plugin_file_parity_*`.
 
@@ -202,7 +202,7 @@ The repo ships from **one source tree** to **four install surfaces**. Claude Des
 
 Claude Code rejects the install with *"conflicting manifests: both plugin.json and marketplace entry specify components"* when both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while `strict` is not `true` on the marketplace entry.
 
-Rule for this repo: **all component declarations live in `plugin/.claude-plugin/plugin.json`** (today: only `mcpServers`). The marketplace entry is metadata-only (`name`, `displayName`, `description`, `version`, `author`, `source`, `keywords`, `strict: false`). Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them in marketplace.json. If a future change truly needs marketplace-side components, set `"strict": true` in the same edit.
+Rule for this repo: **all component declarations live in `plugin/.claude-plugin/plugin.json`** (today: only `mcpServers`). The marketplace entry is metadata-only and uses `strict: true`, matching Claude's strict default and the plugin manifest's component declaration. Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them in marketplace.json.
 
 The guard lives in `tools/validators/validate_manifests.py::_check_marketplace_contract`; regression tests `test_marketplace_contract_rejects_dual_component_declarations` / `..._allows_dual_components_when_strict_true` lock it in. Also see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json".
 
@@ -296,6 +296,6 @@ Detail: [`tools/CLAUDE.md`](../tools/CLAUDE.md) § `check_module_line_budget.py`
 ## Platform constraints
 
 - **macOS only.** Tests mock `subprocess.run` — see `tests/cross_cutting/test_modernization_3_1_5.py` and `tests/search/test_mail_search_tools.py` (patch with `side_effect` capturing script via `kwargs["input"]`).
-- **Python 3.10+** per `pyproject.toml`. `start_mcp.sh` gates 3.10+ (prefers 3.12+); mcpb embedded README must stay in sync.
+- **Python runtime split.** The PyPI/server package supports Python 3.10+ per `pyproject.toml`. The self-contained Claude, Codex, Cursor, and MCPB payload currently requires Apple Silicon (macOS arm64) with Python 3.13 because `start_mcp.sh` installs only its bundled platform-specific wheelhouse. The MCPB embedded README must stay in sync.
 - **Permissions**: Mail.app must be configured; Automation + Mail Data Access granted to the terminal/IDE. Surface clear errors; don't retry blindly.
 - **Async**: `asyncio.to_thread` for `run_applescript` in worker threads. Don't make `run_applescript` itself async.

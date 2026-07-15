@@ -1,6 +1,6 @@
 # plugin/ — shared plugin install surface
 
-**Shared Claude Code + Codex install surface** — registers the MCP server, ships skills, bootstraps user-local venv. Tool logic lives in `apple_mail_mcp/`; see root `CLAUDE.md` for server architecture.
+**Shared Claude Code, Codex, and Cursor install surface** — registers the MCP server, ships skills, bootstraps user-local venv. Tool logic lives in `apple_mail_mcp/`; see root `CLAUDE.md` for server architecture.
 
 ## Agent orchestration
 
@@ -13,15 +13,18 @@ Plugin/MCP/skill changes: delegate implementation to subagents when available an
 | `.claude-plugin/plugin.json` | Plugin manifest: `mcpServers` (includes `--draft-safe` in server args by default), keywords, version |
 | `.codex-plugin/plugin.json` | Codex plugin manifest: interface metadata, `skills: "./skills"`, `mcpServers: "./.mcp.json"` |
 | `.mcp.json` | Codex MCP config launching `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."` |
-| `start_mcp.sh` | Self-healing venv bootstrap (see below) + `fastmcp` import verify, then exec server |
+| `.cursor-plugin/plugin.json` | Cursor plugin manifest pointing to `mcp.json` |
+| `mcp.json` | Cursor MCP config launching `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."` |
+| `start_mcp.sh` | Self-healing offline venv bootstrap (see below) + `fastmcp` import verify, then exec server |
 | `apple_mail_mcp.py` | Thin entry shim → `apple_mail_mcp.__main__.main()` |
-| `requirements.txt` | Runtime deps installed into `plugin/venv/` (not root `.venv/`) |
+| `requirements.lock` + `wheelhouse/` | Hash-locked runtime deps installed into `plugin/venv/` (not root `.venv/`) |
 
 ## MCP wiring
 
 ```
 Claude Code → /bin/bash ${CLAUDE_PLUGIN_ROOT}/start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
 Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
+Cursor     → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/venv/bin/python3 apple_mail_mcp.py
 ```
 
 `${CLAUDE_PLUGIN_ROOT}` resolves to this `plugin/` directory for Claude Code. Codex 0.133.0 does **not** expand `${CLAUDE_PLUGIN_ROOT}` inside argv; keep Codex `.mcp.json` on the `cwd: "."` + `./start_mcp.sh` contract unless a runtime smoke proves a new Codex launcher shape.
@@ -30,7 +33,7 @@ Codex      → cwd=<installed plugin root> /bin/bash ./start_mcp.sh → plugin/v
 
 ## Venv self-healing (`start_mcp.sh`)
 
-The plugin venv at `plugin/venv/` is **self-healing** — no manual rebuild when Homebrew or system Python upgrades break the interpreter symlink.
+The plugin venv at `plugin/venv/` is **self-healing** — no manual rebuild when Homebrew or system Python upgrades break the interpreter symlink. The offline release matrix is macOS arm64 with CPython 3.13; a missing compatible interpreter fails closed instead of downloading packages.
 
 | Flag | Behavior |
 |------|----------|
@@ -39,7 +42,7 @@ The plugin venv at `plugin/venv/` is **self-healing** — no manual rebuild when
 
 Repair triggers: dangling `venv/bin/python3` (Python removed/upgraded), missing venv, or stale/missing dependencies after a one-pass `pip install -r requirements.txt`. Logs go to stderr (`[Apple Mail MCP] …`) for Claude Desktop / Code logs.
 
-Fresh-install test: remove `plugin/venv/` and run `./start_mcp.sh --doctor` from `plugin/`.
+Fresh-install test: run `bash tools/gates/verify-offline-runtime.sh plugin` or unpack a release artifact and run the same command against it.
 
 ## Subfolders
 
@@ -49,13 +52,14 @@ Fresh-install test: remove `plugin/venv/` and run `./start_mcp.sh --doctor` from
 
 ## Related distribution shapes
 
-- **`../../.claude-plugin/marketplace.json`** — Top-level Claude Code marketplace manifest (`name`: `Agentic-Assets`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update Agentic-Assets`, then `claude plugin install apple-mail@Agentic-Assets --scope user`
-- **`../../.agents/plugins/marketplace.json`** — Top-level Codex marketplace manifest (`name`: `Agentic-Assets`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@Agentic-Assets`
+- **`../../.claude-plugin/marketplace.json`** — Top-level Claude Code direct-source marketplace manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update apple-mail-mcp`, then `claude plugin install apple-mail@apple-mail-mcp --scope user`
+- **`../../.agents/plugins/marketplace.json`** — Top-level Codex direct-source marketplace manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@apple-mail-mcp`
 - **`../../apple-mail-mcpb/`** — Claude Desktop `.mcpb` bundle build (separate manifest)
 
 ## When to change what
 
 - **Manifest edits** (`plugin.json`, marketplace, mcpb, Codex `.mcp.json`): bump version in all versioned files (see root `CLAUDE.md`); keep `.agents/plugins/marketplace.json` pointed at `./plugin` and `plugin/.mcp.json` draft-safe unless intentionally changing send semantics; run **`plugin-dev:plugin-validator`** before merge when available.
+- **Cursor adapter edits** (`.cursor-plugin/plugin.json`, `mcp.json`): retain the separate local launcher contract and do not claim Cursor support until a live client acceptance test passes.
 - **Launcher / deps**: edit `start_mcp.sh`, `requirements.txt`, or `pyproject.toml`; keep plugin and PyPI dependencies/packages aligned (`mcp-ui-server`, `plugin/ui`); test fresh venv by removing `plugin/venv/`; run `bash tools/gates/dev-check.sh release`.
 - **New MCP tools**: implement under `apple_mail_mcp/tools/` and register in `apple_mail_mcp/__init__.py` — not in this wrapper layer.
 - **New user entry points**: add skills under `skills/` only. Do not restore `commands/`; release validation fails if the retired legacy command directory reappears.

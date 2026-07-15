@@ -340,9 +340,6 @@ def _overview_suggestions(total_unread: int) -> list[str]:
     ]
 
 
-_SKIPPED_DRAFT_SCAN: dict[str, Any] = {"status": "skipped", "scanned": 0, "accounts": []}
-
-
 def _overview_json_error(
     error: str,
     *,
@@ -366,7 +363,7 @@ def _overview_json_error(
         "accounts": [],
         "suggestions": [],
         "errors": errors or [],
-        "draft_scan": draft_scan if draft_scan is not None else dict(_SKIPPED_DRAFT_SCAN),
+        "draft_scan": draft_scan if draft_scan is not None else build_draft_scan_status({}),
     }
     if account is not None:
         payload["account"] = account
@@ -420,7 +417,7 @@ def _format_overview_json(
         "accounts": account_rows,
         "suggestions": _overview_suggestions(total_unread) if include_suggestions else [],
         "errors": errors,
-        "draft_scan": draft_scan if draft_scan is not None else dict(_SKIPPED_DRAFT_SCAN),
+        "draft_scan": draft_scan if draft_scan is not None else build_draft_scan_status({}),
     }
     if account is not None:
         payload["account"] = account

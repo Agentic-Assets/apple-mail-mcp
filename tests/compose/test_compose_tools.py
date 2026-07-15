@@ -3380,6 +3380,158 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
                 self.assertIn('set outputText to outputText & "Draft ID: " & draftId', script)
                 self.assertNotIn("contains", script)
 
+    def test_identity_guarded_delete_refuses_drifted_or_mismatched_draft_before_delete(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "IDENTITY_MISMATCH|||91062"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            result = compose_tools.delete_draft_if_identity_matches(
+                account="Work",
+                draft_id="91061",
+                expected_subject="APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd",
+                expected_to="smoke@example.invalid",
+                expected_body_sentinel="APPLE_MAIL_MCP_BODY_SENTINEL_abcd",
+            )
+
+        payload = json.loads(result)
+        self.assertFalse(payload["deleted"])
+        self.assertEqual(payload["error"], "smoke_draft_identity_mismatch")
+        self.assertEqual(payload["draft_id"], "91062")
+        script = captured[0]
+        self.assertIn('set expectedSubject to "APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd"', script)
+        self.assertIn('set expectedBodySentinel to "APPLE_MAIL_MCP_BODY_SENTINEL_abcd"', script)
+        self.assertIn('set expectedToAddresses to {"smoke@example.invalid"}', script)
+        # FIX 1: the raw count-equality gate is gone. manage.py adds one
+        # `to recipient` per comma-split address without deduping, so an actual
+        # draft can carry more recipients than the deduped expected literal for
+        # an identical set; the count gate wrongly orphaned such drafts.
+        self.assertNotIn("(count of actualToAddresses) is not (count of expectedToAddresses)", script)
+        # Both mutual-containment directions remain (exact set equality, robust
+        # to duplicates on either side).
+        self.assertIn("repeat with expectedToAddress in expectedToAddresses", script)
+        self.assertIn("repeat with actualToAddress in actualToAddresses", script)
+        self.assertLess(script.index("if cleanupIdentityMatches then"), script.index("delete foundDraft"))
+        self.assertLess(script.index("delete foundDraft"), script.index("set remainingDrafts to every message"))
+        self.assertIn("repeat with readbackAttempt from 1 to 3", script)
+        self.assertIn("if (count of remainingDrafts) is 0 then", script)
+        self.assertLess(
+            script.index("if (count of remainingDrafts) is 0 then"),
+            script.index('return "DELETED_CONFIRMED|||" & currentDraftId'),
+        )
+        self.assertLess(
+            script.index('return "DELETED_CONFIRMED|||" & currentDraftId'),
+            script.index('return "DELETE_UNCONFIRMED|||" & currentDraftId'),
+        )
+        self.assertNotIn("cleanupReadbackConfirmed", script)
+        self.assertNotIn("subject of foundDraft &", script)
+
+    def test_identity_guarded_delete_dedupes_expected_recipients_without_count_gate(self):
+        captured: list[str] = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "DELETED_CONFIRMED|||91061"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            result = compose_tools.delete_draft_if_identity_matches(
+                account="Work",
+                draft_id="91061",
+                expected_subject="APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd",
+                expected_to="smoke@example.invalid, SMOKE@example.invalid",
+                expected_body_sentinel="APPLE_MAIL_MCP_BODY_SENTINEL_abcd",
+            )
+
+        payload = json.loads(result)
+        self.assertTrue(payload["deleted"])
+        self.assertTrue(payload["confirmed"])
+        script = captured[0]
+        # Casefolded, order-preserving dedupe collapses the duplicate address to
+        # a single-element literal.
+        self.assertIn('set expectedToAddresses to {"smoke@example.invalid"}', script)
+        self.assertNotIn("(count of actualToAddresses) is not (count of expectedToAddresses)", script)
+
+    def test_identity_guarded_delete_fails_closed_when_exact_id_remains_after_delete(self):
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            return_value="DELETE_UNCONFIRMED|||91061",
+        ):
+            result = compose_tools.delete_draft_if_identity_matches(
+                account="Work",
+                draft_id="91061",
+                expected_subject="APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd",
+                expected_to="smoke@example.invalid",
+                expected_body_sentinel="APPLE_MAIL_MCP_BODY_SENTINEL_abcd",
+            )
+
+        payload = json.loads(result)
+        self.assertFalse(payload["deleted"])
+        self.assertFalse(payload["confirmed"])
+        self.assertTrue(payload["delete_issued"])
+        self.assertEqual(payload["draft_id"], "91061")
+        self.assertEqual(payload["error"], "smoke_draft_cleanup_unconfirmed")
+
+    def test_expected_recipient_literal_dedupes_case_insensitively(self):
+        from apple_mail_mcp.tools.compose import cleanup
+
+        literal = cleanup._expected_recipient_literal("smoke@example.invalid, SMOKE@example.invalid")
+        self.assertEqual(literal, '{"smoke@example.invalid"}')
+        # Distinct addresses are preserved in order, both casefolded.
+        two = cleanup._expected_recipient_literal("Beta@Example.com, alpha@example.com")
+        self.assertEqual(two, '{"beta@example.com", "alpha@example.com"}')
+        self.assertIsNone(cleanup._expected_recipient_literal("  ,  "))
+
+    def test_identity_guarded_delete_reports_account_resolution_failure_as_json(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.delete_draft_if_identity_matches(
+                account="Missing",
+                draft_id="91061",
+                expected_subject="APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd",
+                expected_to="smoke@example.invalid",
+                expected_body_sentinel="APPLE_MAIL_MCP_BODY_SENTINEL_abcd",
+            )
+
+        mock_run.assert_not_called()
+        payload = json.loads(result)
+        self.assertFalse(payload["deleted"])
+        self.assertEqual(payload["error"], "account_resolution_failed")
+        self.assertIn("account_not_found", payload["detail"])
+        # FIX 3: the smoke path's error detection still flags this consistent
+        # JSON shape as a cleanup error and never reports the cleanup confirmed.
+        from apple_mail_mcp.cli.draft_smoke import _draft_cleanup_confirmed
+        from apple_mail_mcp.cli.formatting import _result_is_error
+
+        self.assertTrue(_result_is_error(result))
+        self.assertFalse(_draft_cleanup_confirmed(result))
+
+    def test_identity_guarded_delete_script_builder_is_discovered_and_compiles(self):
+        import importlib.util
+
+        from apple_mail_mcp.tools.compose import cleanup
+
+        # Load the shared osacompile discovery/parse harness by path so this
+        # assertion uses the suite's own collection mechanism regardless of how
+        # pytest names the test packages.
+        compile_path = Path(__file__).resolve().parents[1] / "cross_cutting" / "test_applescript_builders_compile.py"
+        spec = importlib.util.spec_from_file_location("_amm_delete_builder_compile_probe", compile_path)
+        assert spec is not None and spec.loader is not None
+        compile_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(compile_mod)
+
+        builders = dict(compile_mod._collect_full_script_builders(cleanup))
+        # The extracted builder conforms to the osacompile discovery contract
+        # (name ends in `_script`, output starts with `tell application "Mail"`,
+        # callable with sample kwargs) so the parse gate covers it.
+        self.assertIn("delete_draft_if_identity_matches_script", builders)
+
+        if not compile_mod._OSACOMPILE_AVAILABLE:
+            self.skipTest("osacompile not available on this platform")
+        script = cleanup.delete_draft_if_identity_matches_script()
+        ok, err = compile_mod._osacompile_check(script)
+        self.assertTrue(ok, err)
+
     def test_invalid_draft_id_is_rejected_before_applescript(self):
         with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
             result = compose_tools.manage_drafts(

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-apple-mail"
-version = "3.11.2"
+version = "3.11.5"
 description = "MCP server giving AI assistants full access to Apple Mail - read, search, compose, organize & analyze emails"
 readme = "README.md"
 license = "MIT"
@@ -36,7 +36,7 @@ classifiers = [
     "Topic :: Communications :: Email",
 ]
 dependencies = [
-    "fastmcp>=3.1.0,<4",
+    "fastmcp==3.4.1",
     "mcp-ui-server==1.0.0",
 ]
 

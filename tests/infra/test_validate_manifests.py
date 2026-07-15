@@ -42,6 +42,7 @@ class ValidateManifestsTests(unittest.TestCase):
             [
                 ("plugin/.claude-plugin/plugin.json", "version", "Claude plugin manifest"),
                 ("plugin/.codex-plugin/plugin.json", "version", "Codex plugin manifest"),
+                ("plugin/.cursor-plugin/plugin.json", "version", "Cursor plugin manifest"),
                 (".claude-plugin/marketplace.json", "plugins[0].version", "Claude marketplace plugin"),
                 ("server.json", "version", "MCP server metadata"),
                 ("server.json", "packages[0].version", "MCP server package"),
@@ -54,6 +55,7 @@ class ValidateManifestsTests(unittest.TestCase):
             root = Path(tmp)
             (root / "plugin/.claude-plugin").mkdir(parents=True)
             (root / "plugin/.codex-plugin").mkdir(parents=True)
+            (root / "plugin/.cursor-plugin").mkdir(parents=True)
             (root / ".claude-plugin").mkdir()
             (root / "apple-mail-mcpb").mkdir()
             (root / "plugin/.claude-plugin/plugin.json").write_text(
@@ -62,6 +64,10 @@ class ValidateManifestsTests(unittest.TestCase):
             )
             (root / "plugin/.codex-plugin/plugin.json").write_text(
                 json.dumps({"version": "0.0.0"}),
+                encoding="utf-8",
+            )
+            (root / "plugin/.cursor-plugin/plugin.json").write_text(
+                json.dumps({"version": "3.9.1"}),
                 encoding="utf-8",
             )
             (root / ".claude-plugin/marketplace.json").write_text(
@@ -86,6 +92,62 @@ class ValidateManifestsTests(unittest.TestCase):
                 validate_manifests.ROOT = original_root
 
         self.assertEqual(errors, ["Codex plugin manifest: got '0.0.0', expected '3.9.1'"])
+
+    def test_cursor_plugin_contract_requires_a_distinct_draft_safe_adapter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "plugin/.cursor-plugin").mkdir(parents=True)
+            (root / "plugin/.cursor-plugin/plugin.json").write_text(
+                json.dumps(
+                    {
+                        "name": "apple-mail",
+                        "version": "3.11.4",
+                        "description": "Cursor adapter with 41 MCP tools.",
+                        "mcpServers": "./mcp.json",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "plugin/mcp.json").write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "apple-mail": {
+                                "command": "/bin/bash",
+                                "args": ["./start_mcp.sh", "--draft-safe"],
+                                "cwd": ".",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            errors: list[str] = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_cursor_plugin_contract("3.11.4", 41, errors)
+                self.assertEqual(errors, [])
+
+                errors.clear()
+                (root / "plugin/mcp.json").write_text(
+                    json.dumps(
+                        {
+                            "mcpServers": {
+                                "apple-mail": {"command": "/bin/bash", "args": ["${CLAUDE_PLUGIN_ROOT}/start_mcp.sh"]}
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                validate_manifests._check_cursor_plugin_contract("3.11.4", 41, errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertIn("plugin/mcp.json mcpServers.apple-mail.args: first arg must be ./start_mcp.sh", errors)
+        self.assertIn("plugin/mcp.json mcpServers.apple-mail.args: missing --draft-safe", errors)
+        self.assertIn("plugin/mcp.json mcpServers.apple-mail.cwd: got 'None', expected '.'", errors)
 
     def test_changelog_release_version_requires_matching_latest_release_heading(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -473,7 +535,8 @@ class ValidateManifestsTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
-                ".claude-plugin/marketplace.json name: got 'None', expected 'Agentic-Assets'",
+                ".claude-plugin/marketplace.json name: got 'None', expected 'apple-mail-mcp'",
+                "marketplace.json plugins[0].strict: expected true (plugin.json declares components and Claude marketplaces default to strict mode)",
                 "marketplace.json plugins[0].source: path must start with ./ (got plugin)",
                 "marketplace.json plugins[0].name: got 'wrong-name', expected plugin.json name 'missing'",
                 "marketplace.json plugins[0].version: got '2.0.0', expected '1.0.0'",
@@ -502,7 +565,7 @@ class ValidateManifestsTests(unittest.TestCase):
         if strict:
             market_entry["strict"] = True
         (marketplace / "marketplace.json").write_text(
-            json.dumps({"plugins": [market_entry]}),
+            json.dumps({"name": "apple-mail-mcp", "plugins": [market_entry]}),
             encoding="utf-8",
         )
         skill_dir = root / "plugin/skills/op"
@@ -580,7 +643,7 @@ class ValidateManifestsTests(unittest.TestCase):
         conflict_errors = [e for e in errors if "conflict with plugin.json" in e]
         self.assertEqual(conflict_errors, [])
 
-    def test_marketplace_contract_allows_components_only_in_plugin_json(self):
+    def test_marketplace_contract_requires_strict_true_with_components_only_in_plugin_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_dual_manifest_fixture(
@@ -598,8 +661,13 @@ class ValidateManifestsTests(unittest.TestCase):
             finally:
                 validate_manifests.ROOT = original_root
 
-        conflict_errors = [e for e in errors if "conflict with plugin.json" in e]
-        self.assertEqual(conflict_errors, [])
+        self.assertEqual(
+            errors,
+            [
+                "marketplace.json plugins[0].strict: expected true "
+                "(plugin.json declares components and Claude marketplaces default to strict mode)"
+            ],
+        )
 
     def test_codex_plugin_contract_rejects_manifest_marketplace_and_mcp_drift(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -654,7 +722,7 @@ class ValidateManifestsTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
-                ".agents/plugins/marketplace.json name: got 'wrong-marketplace', expected 'Agentic-Assets'",
+                ".agents/plugins/marketplace.json name: got 'wrong-marketplace', expected 'apple-mail-mcp'",
                 ".agents/plugins/marketplace.json interface.displayName: got 'Wrong', expected 'Agentic Assets'",
                 ".agents/plugins/marketplace.json plugins[0].name: got 'wrong-plugin', expected 'apple-mail'",
                 ".agents/plugins/marketplace.json plugins[0].source: expected {'source': 'local', 'path': './plugin'}",
@@ -682,7 +750,7 @@ class ValidateManifestsTests(unittest.TestCase):
             self._write_codex_plugin_fixture(
                 root,
                 marketplace={
-                    "name": "Agentic-Assets",
+                    "name": "apple-mail-mcp",
                     "interface": {"displayName": "Agentic Assets"},
                     "plugins": [
                         {
@@ -750,7 +818,7 @@ class ValidateManifestsTests(unittest.TestCase):
             self._write_codex_plugin_fixture(
                 root,
                 marketplace={
-                    "name": "Agentic-Assets",
+                    "name": "apple-mail-mcp",
                     "interface": {"displayName": "Agentic Assets"},
                     "plugins": [
                         {
@@ -808,14 +876,14 @@ class ValidateManifestsTests(unittest.TestCase):
 
         self.assertIn('export CODEX_HOME="$TMP_HOME"', script)
         self.assertIn(
-            'CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-https://github.com/Agentic-Assets/apple-mail-mcp.git}"',
+            'CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-$ROOT}"',
             script,
         )
         self.assertIn('codex plugin marketplace add "$CODEX_MARKETPLACE_SOURCE"', script)
         self.assertIn('CODEX_PLUGIN_SELECTOR="apple-mail@${CODEX_MARKETPLACE_NAME}"', script)
         self.assertIn('codex plugin add "$CODEX_PLUGIN_SELECTOR"', script)
         self.assertIn(
-            'codex plugin list --marketplace Agentic-Assets | grep -F "apple-mail@Agentic-Assets"',
+            'codex plugin list --marketplace "$CODEX_MARKETPLACE_NAME" | grep -F "$CODEX_PLUGIN_SELECTOR"',
             script,
         )
         self.assertIn("codex mcp get apple-mail --json", script)
@@ -834,6 +902,28 @@ class ValidateManifestsTests(unittest.TestCase):
             "get_inbox_overview",
         ):
             self.assertIn(tool, script)
+
+    def test_refresh_helper_is_fail_closed_and_never_mutates_shared_marketplace(self):
+        script = (ROOT / "tools" / "gates" / "refresh-local-plugins.sh").read_text(encoding="utf-8")
+
+        self.assertIn('MARKETPLACE_NAME="apple-mail-mcp"', script)
+        self.assertIn('PLUGIN_SELECTOR="apple-mail@${MARKETPLACE_NAME}"', script)
+        self.assertNotIn("LEGACY_MARKETPLACES", script)
+        self.assertNotIn("legacy_marketplace", script)
+        self.assertNotIn("claude plugin uninstall", script)
+        self.assertNotIn("codex plugin remove", script)
+        self.assertNotIn("claude plugin marketplace remove", script)
+        self.assertNotIn("codex plugin marketplace remove", script)
+        self.assertNotIn("git pull", script)
+        self.assertNotIn('rm -rf "${CLAUDE_CACHE}', script)
+        self.assertNotIn('rm -rf "${CODEX_CACHE}', script)
+        self.assertNotIn("|| true", script)
+        self.assertIn('codex plugin marketplace upgrade "$MARKETPLACE_NAME"', script)
+        self.assertIn('codex_payload.get("installed"', script)
+        self.assertIn("codex mcp get apple-mail --json", script)
+        self.assertIn('[command, *args, "--doctor"]', script)
+
+        self.assertIn("target runtime bootstrap failed", script)
 
     def test_claude_plugin_contract_rejects_legacy_commands_directory(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -25,7 +25,7 @@ MARKETPLACE_COMPONENT_FIELDS = ("commands", "agents", "skills", "hooks", "mcpSer
 CODEX_MARKETPLACE_LABEL = ".agents/plugins/marketplace.json"
 CODEX_MANIFEST_LABEL = "plugin/.codex-plugin/plugin.json"
 CODEX_MCP_LABEL = "plugin/.mcp.json"
-AGENTIC_ASSETS_MARKETPLACE_NAME = "Agentic-Assets"
+DIRECT_SOURCE_MARKETPLACE_NAME = "apple-mail-mcp"
 AGENTIC_ASSETS_MARKETPLACE_DISPLAY_NAME = "Agentic Assets"
 CODEX_REQUIRED_FIELDS = (
     "name",
@@ -68,9 +68,7 @@ TOOL_COUNT_CLAIM_PATTERNS = (
 )
 
 
-MODULE_LINE_BUDGET_BASELINE = (
-    ROOT / "tests" / "fixtures" / "module_line_budget" / "baseline.json"
-)
+MODULE_LINE_BUDGET_BASELINE = ROOT / "tests" / "fixtures" / "module_line_budget" / "baseline.json"
 
 
 def _fail(msg: str) -> None:

@@ -21,7 +21,9 @@ set -e
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 VENV_DIR="${SCRIPT_DIR}/venv"
-REQUIREMENTS="${SCRIPT_DIR}/requirements.txt"
+REQUIREMENTS_LOCK="${SCRIPT_DIR}/requirements.lock"
+WHEELHOUSE="${SCRIPT_DIR}/wheelhouse"
+LOCK_MARKER="${VENV_DIR}/.requirements.lock.sha256"
 PYTHON_SCRIPT="${SCRIPT_DIR}/apple_mail_mcp.py"
 
 # Function to log to stderr (visible in Claude Desktop / Claude Code logs)
@@ -39,22 +41,23 @@ for arg in "$@"; do
     esac
 done
 
-# Find a usable interpreter to BUILD the venv with. Prefer specific, well
-# supported minor versions (best wheel coverage) over the generic "python3",
-# which may point at a brand-new release that lacks prebuilt wheels.
+# This self-contained release carries hash-checked wheels for macOS arm64 and
+# CPython 3.13. Other plugin channels may use their documented installation
+# path, but this offline payload must fail closed rather than downloading.
 find_python() {
-    for candidate in python3.12 python3.13 python3.11 python3.10 python3; do
-        if command -v "${candidate}" >/dev/null 2>&1; then
-            version="$("${candidate}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)" || continue
-            major="${version%%.*}"
-            minor="${version#*.}"
-            if [ "${major}" -gt 3 ] || { [ "${major}" -eq 3 ] && [ "${minor}" -ge 10 ]; }; then
-                command -v "${candidate}"
-                return 0
-            fi
-        fi
-    done
+    if command -v python3.13 >/dev/null 2>&1; then
+        command -v python3.13
+        return 0
+    fi
     return 1
+}
+
+lock_sha256() {
+    shasum -a 256 "${REQUIREMENTS_LOCK}" | awk '{print $1}'
+}
+
+offline_payload_ok() {
+    [ -f "${REQUIREMENTS_LOCK}" ] && [ -d "${WHEELHOUSE}" ] && [ -n "$(find "${WHEELHOUSE}" -maxdepth 1 -name '*.whl' -print -quit)" ]
 }
 
 # A venv is healthy only if its interpreter EXECUTES. A dangling symlink (the
@@ -65,31 +68,36 @@ venv_python_ok() {
     "${VENV_DIR}/bin/python3" -c 'import sys' >/dev/null 2>&1
 }
 
-fastmcp_import_ok() {
-    "${VENV_DIR}/bin/python3" -c "import fastmcp" >/dev/null 2>&1
+venv_matches_lock() {
+    [ -f "${LOCK_MARKER}" ] && [ "$(cat "${LOCK_MARKER}")" = "$(lock_sha256)" ]
 }
 
 create_venv() {
     local python_bin
     python_bin="$(find_python || true)"
     if [ -z "${python_bin}" ]; then
-        log_error "ERROR: Python 3.10+ not found. Install Python 3.12 (e.g. 'brew install python@3.12')."
+        log_error "ERROR: This offline Apple Mail payload requires Python 3.13 on macOS arm64. Install it with 'brew install python@3.13'."
+        exit 1
+    fi
+
+    if ! offline_payload_ok; then
+        log_error "ERROR: Offline payload is incomplete (requirements.lock or wheelhouse missing). Reinstall the approved release."
         exit 1
     fi
 
     log_error "Creating virtual environment with ${python_bin}..."
     "${python_bin}" -m venv "${VENV_DIR}" 2>&1 | while IFS= read -r line; do log_error "$line"; done
 
-    log_error "Upgrading pip and installing dependencies..."
-    "${VENV_DIR}/bin/python3" -m pip install --quiet --upgrade pip 2>&1 | while IFS= read -r line; do log_error "$line"; done
-    "${VENV_DIR}/bin/python3" -m pip install --quiet -r "${REQUIREMENTS}" 2>&1 | while IFS= read -r line; do log_error "$line"; done
+    log_error "Installing hash-checked dependencies from the bundled wheelhouse..."
+    "${VENV_DIR}/bin/python3" -m pip install --quiet --no-index --find-links "${WHEELHOUSE}" --require-hashes -r "${REQUIREMENTS_LOCK}" 2>&1 | while IFS= read -r line; do log_error "$line"; done
+    lock_sha256 > "${LOCK_MARKER}"
 }
 
 # Guarantee a healthy venv with importable dependencies, rebuilding as needed.
 ensure_venv() {
-    if ! venv_python_ok; then
+    if ! venv_python_ok || ! venv_matches_lock; then
         if [ -e "${VENV_DIR}" ]; then
-            log_error "Virtualenv interpreter missing or broken (Python removed/upgraded?); rebuilding from scratch..."
+            log_error "Virtualenv is missing, broken, or does not match the approved offline lock; rebuilding from scratch..."
             rm -rf "${VENV_DIR}"
         else
             log_error "Virtual environment not found. Creating on first run..."
@@ -97,14 +105,8 @@ ensure_venv() {
         create_venv
     fi
 
-    # Interpreter is fine but dependencies may be missing/stale: one repair pass.
-    if ! fastmcp_import_ok; then
-        log_error "fastmcp not importable; reinstalling dependencies once..."
-        "${VENV_DIR}/bin/python3" -m pip install --quiet -r "${REQUIREMENTS}" 2>&1 | while IFS= read -r line; do log_error "$line"; done
-    fi
-
-    if ! fastmcp_import_ok; then
-        log_error "ERROR: fastmcp is still not importable after reinstall. Remove ${VENV_DIR} and restart; check requirements.txt and network access."
+    if ! "${VENV_DIR}/bin/python3" -c "import fastmcp" >/dev/null 2>&1; then
+        log_error "ERROR: fastmcp is not importable from the bundled offline payload. Reinstall the approved release."
         exit 1
     fi
 }
