@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.11.3 - 2026-07-11
+
+- Add a hash-locked offline wheelhouse for the macOS arm64 CPython 3.13 plugin release channel.
+- Make the plugin launcher fail closed instead of downloading runtime dependencies.
+
 All notable changes to **apple-mail-mcp** (PyPI: `mcp-apple-mail`) are documented
 here. The plugin/MCPB/marketplace versions track this file.
 

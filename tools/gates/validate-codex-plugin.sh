@@ -46,7 +46,10 @@ fi
 TMP_HOME="$(mktemp -d)"
 trap 'rm -rf "$TMP_HOME"' EXIT
 CODEX_MARKETPLACE_NAME="Agentic-Assets"
-CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-https://github.com/Agentic-Assets/apple-mail-mcp.git}"
+# Release candidates must be tested from the checkout that built the artifacts.
+# Set APPLE_MAIL_CODEX_MARKETPLACE_SOURCE explicitly only when checking a
+# published marketplace snapshot.
+CODEX_MARKETPLACE_SOURCE="${APPLE_MAIL_CODEX_MARKETPLACE_SOURCE:-$ROOT}"
 CODEX_PLUGIN_SELECTOR="apple-mail@${CODEX_MARKETPLACE_NAME}"
 
 "$SMOKE_PYTHON" tools/probes/mcp_tool_smoke.py \

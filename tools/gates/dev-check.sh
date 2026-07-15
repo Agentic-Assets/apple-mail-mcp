@@ -166,6 +166,8 @@ case "$TIER" in
     run_pytest
     run_test_count_check
     run_wrapper
+    bash tools/gates/verify-offline-runtime.sh apple-mail-plugin.zip
+    bash tools/gates/verify-offline-runtime.sh "apple-mail-mcp-v$("$PY" -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])').mcpb"
     ;;
   *)
     echo "Usage: bash tools/gates/dev-check.sh [default|surface|manifest|lint|live|release|all]" >&2
