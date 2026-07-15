@@ -417,7 +417,7 @@ class AppleMailCliTests(unittest.TestCase):
         mock_drafts.assert_not_called()
         mock_verify.assert_not_called()
 
-    def test_draft_verify_smoke_success_uses_persisted_id_and_deletes_exact_id(self):
+    def test_draft_verify_smoke_success_uses_persisted_id_and_atomic_identity_cleanup(self):
         manage_calls = []
         verify_calls = []
 
@@ -427,21 +427,23 @@ class AppleMailCliTests(unittest.TestCase):
                 return "Draft created\nDraft ID: 111\n"
             if kwargs["action"] == "list":
                 return "DRAFT EMAILS\n   Id: 222   To: apple-mail-mcp-smoke@example.invalid\n"
-            if kwargs["action"] == "delete":
-                return "Draft deleted"
             raise AssertionError(kwargs)
 
         def fake_verify(**kwargs):
             verify_calls.append(kwargs)
             if kwargs["draft_id"] == "222" and "expected_subject" in kwargs:
-                return json.dumps({"found": True, "warnings": []})
-            if kwargs["draft_id"] == "222":
-                return json.dumps({"found": False, "warnings": ["draft_not_found"]})
+                return json.dumps(
+                    {"found": True, "recipients": {"to": "apple-mail-mcp-smoke@example.invalid"}, "warnings": []}
+                )
             return json.dumps({"found": False})
 
         with (
             patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+            patch(
+                "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
+                return_value=json.dumps({"deleted": True, "draft_id": "333"}),
+            ) as mock_delete,
             patch("time.sleep"),
             patch("builtins.print") as mock_print,
         ):
@@ -461,11 +463,53 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(payload["created_draft_id_provisional"], "111")
         self.assertEqual(payload["persisted_draft_id"], "222")
         self.assertEqual(manage_calls[0]["from_address"], "work@example.com")
-        self.assertEqual(manage_calls[2]["action"], "delete")
-        self.assertEqual(manage_calls[2]["draft_id"], "222")
-        self.assertNotIn("draft_subject", manage_calls[2])
+        self.assertEqual([call["action"] for call in manage_calls], ["create", "list"])
+        self.assertEqual(mock_delete.call_args.kwargs["draft_id"], "222")
+        self.assertEqual(mock_delete.call_args.kwargs["expected_to"], "apple-mail-mcp-smoke@example.invalid")
+        self.assertEqual(mock_delete.call_args.kwargs["expected_subject"], payload["subject"])
+        self.assertNotIn("draft_subject", mock_delete.call_args.kwargs)
         self.assertEqual(verify_calls[0]["draft_id"], "222")
-        self.assertEqual(verify_calls[1]["draft_id"], "222")
+        self.assertEqual(verify_calls[0]["expected_to"], "apple-mail-mcp-smoke@example.invalid")
+        self.assertEqual(len(verify_calls), 1)
+
+    def test_draft_verify_smoke_recipient_mismatch_fails_with_safe_evidence(self):
+        def fake_manage(**kwargs):
+            if kwargs["action"] == "create":
+                return "Draft created"
+            if kwargs["action"] == "list":
+                return "Id: 888"
+            raise AssertionError(kwargs)
+
+        with (
+            patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
+            patch(
+                "apple_mail_mcp.tools.compose.verify_draft",
+                return_value=json.dumps(
+                    {
+                        "found": True,
+                        "recipients": {"to": "unexpected@example.com"},
+                        "body_preview": "private draft body",
+                        "checks": {"to_matches_expected": False},
+                        "warnings": ["to_mismatch"],
+                    }
+                ),
+            ) as mock_verify,
+            patch("builtins.print") as mock_print,
+        ):
+            code = cli.main(
+                self._draft_verify_smoke_args("--leave-draft", "--poll-timeout", "0.01", "--poll-interval", "0.01")
+            )
+
+        self.assertEqual(code, 1)
+        self.assertGreaterEqual(mock_verify.call_count, 1)
+        self.assertEqual(mock_verify.call_args.kwargs["expected_to"], "apple-mail-mcp-smoke@example.invalid")
+        payload = self._printed_json_payload(mock_print)
+        self.assertEqual(payload["expected_to"], "apple-mail-mcp-smoke@example.invalid")
+        evidence = payload["errors"][-1]["last_verification"]
+        self.assertEqual(evidence["to_matches_expected"], False)
+        self.assertEqual(evidence["warnings"], ["to_mismatch"])
+        self.assertNotIn("unexpected@example.com", json.dumps(payload))
+        self.assertNotIn("private draft body", json.dumps(payload))
 
     def test_draft_verify_smoke_polls_until_list_returns_candidate(self):
         manage_calls = []
@@ -478,18 +522,22 @@ class AppleMailCliTests(unittest.TestCase):
                 return "Found 0 draft(s)"
             if kwargs["action"] == "list":
                 return "Id: 333   To: smoke@example.invalid"
-            if kwargs["action"] == "delete":
-                return "Draft deleted"
             raise AssertionError(kwargs)
 
         def fake_verify(**kwargs):
             if "expected_subject" in kwargs:
-                return json.dumps({"found": True, "warnings": []})
-            return json.dumps({"found": False, "warnings": ["draft_not_found"]})
+                return json.dumps(
+                    {"found": True, "recipients": {"to": "apple-mail-mcp-smoke@example.invalid"}, "warnings": []}
+                )
+            return json.dumps({"found": False})
 
         with (
             patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+            patch(
+                "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
+                return_value=json.dumps({"deleted": True, "draft_id": "333"}),
+            ),
             patch("time.sleep"),
             patch("builtins.print") as mock_print,
         ):
@@ -540,7 +588,7 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertFalse(any(call["action"] == "delete" for call in manage_calls))
         mock_verify.assert_not_called()
 
-    def test_draft_verify_smoke_cleans_single_unverified_candidate_but_fails(self):
+    def test_draft_verify_smoke_retains_single_unverified_candidate_without_delete(self):
         manage_calls = []
         verify_calls = []
 
@@ -550,8 +598,6 @@ class AppleMailCliTests(unittest.TestCase):
                 return "Draft created"
             if kwargs["action"] == "list":
                 return "Id: 777   To: smoke@example.invalid"
-            if kwargs["action"] == "delete":
-                return "Draft deleted"
             raise AssertionError(kwargs)
 
         def fake_verify(**kwargs):
@@ -565,19 +611,59 @@ class AppleMailCliTests(unittest.TestCase):
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
             patch("builtins.print") as mock_print,
         ):
-            code = cli.main(self._draft_verify_smoke_args("--cleanup"))
+            code = cli.main(
+                self._draft_verify_smoke_args("--cleanup", "--poll-timeout", "0.01", "--poll-interval", "0.01")
+            )
 
         self.assertEqual(code, 1)
         payload = self._printed_json_payload(mock_print)
         self.assertFalse(payload["ok"])
         self.assertFalse(payload["verified"])
-        self.assertEqual(payload["persisted_draft_id"], "777")
-        self.assertTrue(payload["cleanup"]["confirmed"])
+        self.assertIsNone(payload["persisted_draft_id"])
+        self.assertFalse(payload["cleanup"]["confirmed"])
+        self.assertEqual(payload["errors"][-1]["candidate_ids"], ["777"])
         delete_calls = [call for call in manage_calls if call["action"] == "delete"]
-        self.assertEqual(len(delete_calls), 1)
-        self.assertEqual(delete_calls[0]["draft_id"], "777")
+        self.assertEqual(delete_calls, [])
         self.assertEqual(verify_calls[0]["draft_id"], "777")
-        self.assertEqual(verify_calls[1]["draft_id"], "777")
+
+    def test_draft_verify_smoke_extra_recipient_with_cleanup_never_deletes(self):
+        manage_calls = []
+
+        def fake_manage(**kwargs):
+            manage_calls.append(kwargs)
+            if kwargs["action"] == "create":
+                return "Draft created"
+            if kwargs["action"] == "list":
+                return "Id: 777"
+            raise AssertionError(kwargs)
+
+        with (
+            patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
+            patch(
+                "apple_mail_mcp.tools.compose.verify_draft",
+                return_value=json.dumps(
+                    {
+                        "found": True,
+                        "recipients": {"to": "apple-mail-mcp-smoke@example.invalid, unexpected@example.com"},
+                        "checks": {"to_matches_expected": True},
+                        "warnings": [],
+                    }
+                ),
+            ) as mock_verify,
+            patch("apple_mail_mcp.tools.compose.delete_draft_if_identity_matches") as mock_delete,
+            patch("builtins.print") as mock_print,
+        ):
+            code = cli.main(
+                self._draft_verify_smoke_args("--cleanup", "--poll-timeout", "0.01", "--poll-interval", "0.01")
+            )
+
+        self.assertEqual(code, 1)
+        self.assertGreaterEqual(mock_verify.call_count, 1)
+        mock_delete.assert_not_called()
+        self.assertFalse(any(call["action"] == "delete" for call in manage_calls))
+        payload = self._printed_json_payload(mock_print)
+        self.assertEqual(payload["errors"][-1]["candidate_ids"], ["777"])
+        self.assertIsNone(payload["persisted_draft_id"])
 
     def test_draft_verify_smoke_leave_draft_skips_delete(self):
         manage_calls = []
@@ -593,7 +679,10 @@ class AppleMailCliTests(unittest.TestCase):
         with (
             patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
             patch(
-                "apple_mail_mcp.tools.compose.verify_draft", return_value=json.dumps({"found": True, "warnings": []})
+                "apple_mail_mcp.tools.compose.verify_draft",
+                return_value=json.dumps(
+                    {"found": True, "recipients": {"to": "apple-mail-mcp-smoke@example.invalid"}, "warnings": []}
+                ),
             ),
             patch("builtins.print") as mock_print,
         ):
@@ -604,22 +693,28 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertTrue(payload["cleanup"]["skipped"])
         self.assertFalse(any(call["action"] == "delete" for call in manage_calls))
 
-    def test_draft_verify_smoke_cleanup_failure_returns_retained_id(self):
+    def test_draft_verify_smoke_cleanup_identity_failure_returns_retained_id(self):
         def fake_manage(**kwargs):
             if kwargs["action"] == "create":
                 return "Draft created"
             if kwargs["action"] == "list":
                 return "Id: 555   To: smoke@example.invalid"
-            if kwargs["action"] == "delete":
-                return "Draft deleted"
             raise AssertionError(kwargs)
-
-        def fake_verify(**kwargs):
-            return json.dumps({"found": True, "warnings": []})
 
         with (
             patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
-            patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+            patch(
+                "apple_mail_mcp.tools.compose.verify_draft",
+                return_value=json.dumps(
+                    {"found": True, "recipients": {"to": "apple-mail-mcp-smoke@example.invalid"}, "warnings": []}
+                ),
+            ),
+            patch(
+                "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
+                return_value=json.dumps(
+                    {"deleted": False, "draft_id": "999", "error": "smoke_draft_identity_mismatch"}
+                ),
+            ),
             patch("builtins.print") as mock_print,
         ):
             code = cli.main(self._draft_verify_smoke_args("--cleanup"))
@@ -654,19 +749,23 @@ class AppleMailCliTests(unittest.TestCase):
                 return "Draft created"
             if kwargs["action"] == "list":
                 return "Id: 666   To: smoke@example.invalid"
-            if kwargs["action"] == "delete":
-                return "Draft deleted"
             raise AssertionError(kwargs)
 
         def fake_verify(**kwargs):
             if "expected_subject" in kwargs:
-                return json.dumps({"found": True, "warnings": []})
-            return json.dumps({"found": False, "warnings": ["draft_not_found"]})
+                return json.dumps(
+                    {"found": True, "recipients": {"to": "apple-mail-mcp-smoke@example.invalid"}, "warnings": []}
+                )
+            return json.dumps({"found": False})
 
         with (
             patch("apple_mail_mcp.tools.inbox.list_account_addresses", return_value={"Work": ["one@example.com"]}),
             patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
+            patch(
+                "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
+                return_value=json.dumps({"deleted": True, "draft_id": "333"}),
+            ),
             patch("builtins.print"),
         ):
             code = cli.main(["draft-verify-smoke", "--account", "Work", "--cleanup", "--json"])

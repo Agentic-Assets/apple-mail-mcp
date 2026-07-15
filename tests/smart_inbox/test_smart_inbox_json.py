@@ -286,6 +286,7 @@ class GetNeedsResponseReplyStateTests(unittest.TestCase):
             "DRAFT|||Re: Drafted item|||carol@example.com|||2026-07-08T10:00:00|||",
             "DRAFT|||Re: Both signals|||dave@example.com|||2026-07-07T12:00:00|||",
             "COUNT|||2",
+            "TOTAL|||2",
         ]
     )
 
@@ -305,7 +306,7 @@ class GetNeedsResponseReplyStateTests(unittest.TestCase):
             if "draftsMailbox" in script:
                 if drafts_calls is not None:
                     drafts_calls.append(script)
-                return drafts if drafts is not None else "COUNT|||0"
+                return drafts if drafts is not None else "COUNT|||0\nTOTAL|||0"
             if "sentMailbox" in script:
                 return sent if sent is not None else ""
             return inbox if inbox is not None else ""
@@ -326,10 +327,15 @@ class GetNeedsResponseReplyStateTests(unittest.TestCase):
         self.assertEqual(result["skipped_drafted_count"], 2)
         self.assertEqual(result["draft_scan"]["status"], "ok")
         self.assertEqual(result["draft_scan"]["scanned"], 2)
+        # Uniform envelope keys: a complete scan (TOTAL == COUNT) reports
+        # total and truncated=False alongside status/scanned/accounts.
+        self.assertEqual(result["draft_scan"]["total"], 2)
+        self.assertFalse(result["draft_scan"]["truncated"])
         self.assertEqual(result["draft_scan"]["accounts"], ["Work"])
         kept = all_entries[0]
         self.assertFalse(kept["was_replied_to"])
-        self.assertFalse(kept["has_draft"])
+        # Complete scan => a nonmatch is a definitive False, not fail-open None.
+        self.assertIs(kept["has_draft"], False)
 
     def test_include_already_replied_restores_replied_rows_but_not_drafted(self):
         runner = self._dispatch_runner(inbox=self.INBOX_RAW, drafts=self.DRAFTS_RAW)
@@ -391,7 +397,10 @@ class GetNeedsResponseReplyStateTests(unittest.TestCase):
         self.assertEqual(subjects, {"Keep me", "Drafted item"})
         self.assertEqual(result["skipped_drafted_count"], 0)
         self.assertEqual(result["skipped_replied_count"], 2)
-        self.assertEqual(result["draft_scan"], {"status": "skipped", "scanned": 0, "accounts": []})
+        self.assertEqual(
+            result["draft_scan"],
+            {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []},
+        )
         for entry in all_entries:
             self.assertIsNone(entry["has_draft"])
 
@@ -491,8 +500,12 @@ class GetNeedsResponseReplyStateTests(unittest.TestCase):
         self.assertEqual(result["skipped_drafted_count"], 0)
         # No candidates at all: the Drafts snapshot is never fetched
         # (lazy fetch), so the scan is reported as skipped rather than
-        # "ok" with zero scanned.
-        self.assertEqual(result["draft_scan"], {"status": "skipped", "scanned": 0, "accounts": []})
+        # "ok" with zero scanned. The skipped envelope still carries the
+        # uniform total/truncated keys.
+        self.assertEqual(
+            result["draft_scan"],
+            {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []},
+        )
 
 
 class GetAwaitingReplyJsonTests(unittest.TestCase):

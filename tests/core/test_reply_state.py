@@ -28,6 +28,7 @@ from apple_mail_mcp.core.reply_state import (
     drafts_mailbox_block,
     fetch_drafts_snapshot,
     normalize_thread_subject,
+    resolve_has_draft,
     was_replied_fragment,
 )
 
@@ -198,9 +199,12 @@ class ParseDraftsSnapshotOutputTests(unittest.TestCase):
             "DRAFT|||Hello|||bob@example.com|||2026-07-08T09:00:00|||\n"
             "COUNT|||2"
         )
-        rows, scanned = _parse_drafts_snapshot_output(raw)
+        rows, scanned, total = _parse_drafts_snapshot_output(raw)
         self.assertEqual(len(rows), 2)
         self.assertEqual(scanned, 2)
+        # No TOTAL||| line => mailbox-wide total is unknown (None), never
+        # coalesced to scanned.
+        self.assertIsNone(total)
         self.assertEqual(rows[0].subject, "Re: Budget")
         self.assertEqual(rows[0].first_to_recipient, "alice@example.com")
         self.assertEqual(rows[0].date_text, "2026-07-09T10:00:00")
@@ -208,40 +212,66 @@ class ParseDraftsSnapshotOutputTests(unittest.TestCase):
 
     def test_malformed_row_is_skipped(self):
         raw = "DRAFT|||only two fields\nDRAFT|||Hello|||bob@example.com|||2026-07-08T09:00:00|||\nCOUNT|||1"
-        rows, scanned = _parse_drafts_snapshot_output(raw)
+        rows, scanned, total = _parse_drafts_snapshot_output(raw)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].subject, "Hello")
         self.assertEqual(scanned, 1)
+        self.assertIsNone(total)
 
     def test_empty_output_returns_empty(self):
-        rows, scanned = _parse_drafts_snapshot_output("")
+        rows, scanned, total = _parse_drafts_snapshot_output("")
         self.assertEqual(rows, [])
         self.assertEqual(scanned, 0)
+        self.assertIsNone(total)
 
     def test_count_only_output_no_rows(self):
-        rows, scanned = _parse_drafts_snapshot_output("COUNT|||0")
+        rows, scanned, total = _parse_drafts_snapshot_output("COUNT|||0")
         self.assertEqual(rows, [])
         self.assertEqual(scanned, 0)
+        self.assertIsNone(total)
+
+    def test_missing_total_line_returns_none_total(self):
+        # A COUNT|||-only snapshot (no TOTAL||| line) reports the mailbox-wide
+        # total as unknown (None). The parser never coalesces a missing TOTAL
+        # into scanned; unknown scan quality must stay unknown so callers fail
+        # open (treat the scan as truncated) instead of assuming completeness.
+        raw = "DRAFT|||Hello|||bob@example.com|||2026-07-08T09:00:00|||\nCOUNT|||1"
+        rows, scanned, total = _parse_drafts_snapshot_output(raw)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(scanned, 1)
+        self.assertIsNone(total)
+
+    def test_total_above_cap_marks_snapshot_as_truncated(self):
+        raw = "DRAFT|||Hello|||bob@example.com|||2026-07-08T09:00:00|||\nCOUNT|||1\nTOTAL|||51"
+
+        rows, scanned, total = _parse_drafts_snapshot_output(raw)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(scanned, 1)
+        self.assertEqual(total, 51)
 
     def test_non_numeric_count_falls_back_to_row_count(self):
         raw = "DRAFT|||Hello|||bob@example.com|||2026-07-08T09:00:00|||\nCOUNT|||not-a-number"
-        rows, scanned = _parse_drafts_snapshot_output(raw)
+        rows, scanned, total = _parse_drafts_snapshot_output(raw)
         self.assertEqual(len(rows), 1)
         self.assertEqual(scanned, 1)
+        self.assertIsNone(total)
 
     def test_missing_count_line_falls_back_to_row_count(self):
         raw = "DRAFT|||Hello|||bob@example.com|||2026-07-08T09:00:00|||"
-        rows, scanned = _parse_drafts_snapshot_output(raw)
+        rows, scanned, total = _parse_drafts_snapshot_output(raw)
         self.assertEqual(len(rows), 1)
         self.assertEqual(scanned, 1)
+        self.assertIsNone(total)
 
     def test_blank_fallback_row_parses_to_empty_fields(self):
         raw = "DRAFT|||" + "" + "|||" + "" + "|||" + "" + "|||" + ""
-        rows, scanned = _parse_drafts_snapshot_output(raw)
+        rows, scanned, total = _parse_drafts_snapshot_output(raw)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].subject, "")
         self.assertEqual(rows[0].first_to_recipient, "")
         self.assertEqual(scanned, 1)
+        self.assertIsNone(total)
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +566,80 @@ class DraftsSnapshotMatchesTests(unittest.TestCase):
             snapshot.matches(subject="", sender_email="alice@example.com", internet_message_id=None, email_date=None)
         )
 
+    def test_truncated_snapshot_preserves_found_match(self):
+        snapshot = DraftsSnapshot(
+            status="ok",
+            scanned=1,
+            total=51,
+            account="Work",
+            rows=(_DraftRow("Project", "alice@example.com", "", ""),),
+        )
+
+        self.assertTrue(
+            resolve_has_draft(
+                snapshot,
+                subject="Project",
+                sender_email="alice@example.com",
+                internet_message_id=None,
+                email_date=None,
+            )
+        )
+
+    def test_truncated_snapshot_returns_unknown_for_nonmatch_beyond_cap(self):
+        snapshot = DraftsSnapshot(status="ok", scanned=50, total=51, account="Work")
+
+        self.assertIsNone(
+            resolve_has_draft(
+                snapshot,
+                subject="Not in first fifty",
+                sender_email="alice@example.com",
+                internet_message_id=None,
+                email_date=None,
+            )
+        )
+
+    def test_ok_snapshot_with_unknown_total_is_truncated_and_fails_open(self):
+        # An ``ok`` scan whose mailbox-wide total is unknown (total=None,
+        # e.g. a snapshot that omitted its TOTAL||| line) counts as
+        # truncated, so a nonmatch fails open to None rather than a
+        # definitive False.
+        snapshot = DraftsSnapshot(status="ok", scanned=5, total=None, account="Work")
+        self.assertTrue(snapshot.truncated)
+        self.assertIsNone(
+            resolve_has_draft(
+                snapshot,
+                subject="Unknown scan quality",
+                sender_email="alice@example.com",
+                internet_message_id=None,
+                email_date=None,
+            )
+        )
+
+    def test_complete_ok_snapshot_reports_definitive_false_for_nonmatch(self):
+        # total == scanned => the scan saw the whole mailbox, so a nonmatch
+        # is a definitive False (not truncated, no fail-open).
+        snapshot = DraftsSnapshot(status="ok", scanned=3, total=3, account="Work")
+        self.assertFalse(snapshot.truncated)
+        self.assertIs(
+            resolve_has_draft(
+                snapshot,
+                subject="Nothing matches",
+                sender_email="alice@example.com",
+                internet_message_id=None,
+                email_date=None,
+            ),
+            False,
+        )
+
+    def test_error_snapshot_is_not_truncated(self):
+        # An error/skipped snapshot is never "truncated": its status already
+        # carries the fail-open signal and resolve_has_draft short-circuits
+        # on status before ever consulting truncated.
+        error_snapshot = DraftsSnapshot(status="error", scanned=0, total=None, account="Work", error="boom")
+        skipped_snapshot = DraftsSnapshot(status="skipped", scanned=0, total=None, account="Work")
+        self.assertFalse(error_snapshot.truncated)
+        self.assertFalse(skipped_snapshot.truncated)
+
 
 # ---------------------------------------------------------------------------
 # fetch_drafts_snapshot
@@ -608,7 +712,7 @@ class FetchDraftsSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot.scanned, 0)
         self.assertEqual(snapshot.rows, ())
 
-    def test_default_caps_used_when_none(self):
+    def test_default_reply_state_caps_use_fifty_draft_ceiling(self):
         captured: dict[str, str] = {}
 
         def _runner(script, timeout=60):
@@ -616,7 +720,8 @@ class FetchDraftsSnapshotTests(unittest.TestCase):
             return "COUNT|||0"
 
         fetch_drafts_snapshot(account="Work", runner=_runner, timeout=30)
-        self.assertIn(str(SCAN_BOUNDS["DRAFT_LOOKUP"]), captured["script"])
+        self.assertEqual(SCAN_BOUNDS["DRAFT_SNAPSHOT_CAP"], 50)
+        self.assertIn("if headEnd > 50 then set headEnd to 50", captured["script"])
         self.assertIn(f"headerReadCap to {SCAN_BOUNDS['DRAFT_SNAPSHOT_HEADER_CAP']}", captured["script"])
 
     def test_explicit_caps_override_defaults(self):

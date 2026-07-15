@@ -129,7 +129,9 @@ def build_drafts_snapshot_script(account_name: str, drafts_cap: int, header_cap:
     fields cannot be read still emits a (blank-field) ``DRAFT|||`` row
     rather than being dropped, so the trailing ``COUNT|||<n>`` line always
     equals the number of ``DRAFT|||`` rows emitted, and a partially-broken
-    draft never silently shrinks the reported scan count.
+    draft never silently shrinks the reported scan count. ``TOTAL|||<n>``
+    reports the mailbox-wide count separately, allowing callers to treat a
+    capped nonmatch as unknown instead of a false negative.
     """
     safe_account = escape_applescript(account_name)
     sanitize_script = sanitize_field_handler()
@@ -175,7 +177,7 @@ def build_drafts_snapshot_script(account_name: str, drafts_cap: int, header_cap:
             set targetAccount to account "{safe_account}"
             {drafts_resolve_script}
             if draftsMailbox is missing value then
-                return "COUNT|||0"
+                return "COUNT|||0" & linefeed & "TOTAL|||0"
             end if
 
             set totalDrafts to count of messages of draftsMailbox
@@ -234,7 +236,7 @@ def build_drafts_snapshot_script(account_name: str, drafts_cap: int, header_cap:
             set AppleScript's text item delimiters to linefeed
             set draftLinesText to outputLines as string
             set AppleScript's text item delimiters to ""
-            return draftLinesText & linefeed & "COUNT|||" & (count of outputLines)
+            return draftLinesText & linefeed & "COUNT|||" & (count of outputLines) & linefeed & "TOTAL|||" & totalDrafts
         on error errMsg
             return "ERROR|||" & errMsg
         end try
@@ -255,10 +257,19 @@ class _DraftRow:
     header_blob: str
 
 
-def _parse_drafts_snapshot_output(raw: str) -> tuple[list[_DraftRow], int]:
-    """Parse ``build_drafts_snapshot_script`` output into rows + a scanned count."""
+def _parse_drafts_snapshot_output(raw: str) -> tuple[list[_DraftRow], int, int | None]:
+    """Parse rows plus scanned-window and mailbox-wide Drafts counts.
+
+    The third element is the mailbox-wide ``TOTAL|||`` count as a true
+    ``int | None``: ``None`` when the snapshot omitted (or emitted an
+    unparseable) ``TOTAL|||`` line. It is never coalesced to ``scanned`` —
+    an unknown mailbox-wide total must stay unknown so callers fail open
+    (treat the scan as truncated) rather than silently assuming the scan
+    was complete.
+    """
     rows: list[_DraftRow] = []
     scanned = 0
+    total: int | None = None
     for line in raw.splitlines():
         if line.startswith("DRAFT|||"):
             parts = line.split("|||", 4)
@@ -279,9 +290,15 @@ def _parse_drafts_snapshot_output(raw: str) -> tuple[list[_DraftRow], int]:
                 scanned = int(count_text.strip())
             except ValueError:
                 scanned = len(rows)
+        elif line.startswith("TOTAL|||"):
+            _, total_text = line.split("|||", 1)
+            try:
+                total = int(total_text.strip())
+            except ValueError:
+                total = None
     if scanned == 0 and rows:
         scanned = len(rows)
-    return rows, scanned
+    return rows, scanned, total
 
 
 def normalize_thread_subject(subject: str) -> str:
@@ -348,8 +365,25 @@ class DraftsSnapshot:
     status: Literal["ok", "error", "skipped"]
     scanned: int
     account: str
+    total: int | None = None
     error: str | None = None
     rows: tuple[_DraftRow, ...] = field(default_factory=tuple)
+
+    @property
+    def truncated(self) -> bool:
+        """Whether an ``"ok"`` scan may have omitted an older matching draft.
+
+        True when the scan ran (``status == "ok"``) and either the
+        mailbox-wide total is unknown (``total is None``) or it exceeds the
+        scanned window (``total > scanned``). An ok scan with an unknown
+        total counts as truncated so nonmatches fail open (unknown rather
+        than definitively ``False``), matching this module's fail-open
+        philosophy. ``"error"`` / ``"skipped"`` snapshots return ``False``
+        here because their ``status`` already carries the fail-open signal
+        and ``resolve_has_draft`` short-circuits on it before ever reading
+        ``truncated``.
+        """
+        return self.status == "ok" and (self.total is None or self.total > self.scanned)
 
     def matches(
         self,
@@ -412,7 +446,7 @@ def fetch_drafts_snapshot(
     module attribute (not imported directly), so
     ``patch('apple_mail_mcp.core.run_applescript')`` reaches this function
     the same way it reaches ``fetch_replied_ids``. *drafts_cap* /
-    *header_cap* default to ``SCAN_BOUNDS["DRAFT_LOOKUP"]`` /
+    *header_cap* default to ``SCAN_BOUNDS["DRAFT_SNAPSHOT_CAP"]`` /
     ``SCAN_BOUNDS["DRAFT_SNAPSHOT_HEADER_CAP"]`` when omitted.
 
     Never raises: every failure (missing account, timeout, AppleScript
@@ -423,7 +457,7 @@ def fetch_drafts_snapshot(
     if not account:
         return DraftsSnapshot(status="skipped", scanned=0, account=account or "", error="no account provided")
 
-    effective_drafts_cap = drafts_cap if drafts_cap is not None else SCAN_BOUNDS["DRAFT_LOOKUP"]
+    effective_drafts_cap = drafts_cap if drafts_cap is not None else SCAN_BOUNDS["DRAFT_SNAPSHOT_CAP"]
     effective_header_cap = header_cap if header_cap is not None else SCAN_BOUNDS["DRAFT_SNAPSHOT_HEADER_CAP"]
 
     script = build_drafts_snapshot_script(
@@ -450,8 +484,8 @@ def fetch_drafts_snapshot(
         message = raw.split("|||", 1)[1] if "|||" in raw else raw
         return DraftsSnapshot(status="error", scanned=0, account=account, error=message)
 
-    rows, scanned = _parse_drafts_snapshot_output(raw)
-    return DraftsSnapshot(status="ok", scanned=scanned, account=account, rows=tuple(rows))
+    rows, scanned, total = _parse_drafts_snapshot_output(raw)
+    return DraftsSnapshot(status="ok", scanned=scanned, total=total, account=account, rows=tuple(rows))
 
 
 # ---------------------------------------------------------------------------
@@ -470,8 +504,14 @@ def resolve_has_draft(
     """Return ``has_draft`` for one candidate against *snapshot*.
 
     ``None`` when *snapshot* is missing or did not come back ``"ok"`` (fail
-    open: a skipped or errored scan never reports ``False``). Otherwise
-    ``snapshot.matches(...)``. Every reply-state annotation call site
+    open: a skipped or errored scan never reports ``False``). A matched row
+    remains ``True`` even from a truncated scan. A nonmatch from a truncated
+    scan is ``None``, because the matching draft may be outside the capped
+    window. A scan counts as truncated when the mailbox-wide total exceeds
+    the scanned window *or* when that total is unknown (``total is None``,
+    e.g. a snapshot that omitted its ``TOTAL|||`` line): unknown scan
+    quality fails open rather than reporting a definitive ``False``. Every
+    reply-state annotation call site
     (``tools.reply_state_wiring.annotate_rows_with_reply_state``,
     ``tools.inbox.parsing._annotate_text_rows_with_reply_state``,
     ``tools.smart_inbox.reply_state_glue._classify_needs_response_rows``)
@@ -479,12 +519,15 @@ def resolve_has_draft(
     """
     if snapshot is None or snapshot.status != "ok":
         return None
-    return snapshot.matches(
+    matched = snapshot.matches(
         subject=subject,
         sender_email=sender_email,
         internet_message_id=internet_message_id,
         email_date=email_date,
     )
+    if matched:
+        return True
+    return None if snapshot.truncated else False
 
 
 def reply_state_tags(was_replied: bool | None, has_draft: bool | None) -> list[str]:

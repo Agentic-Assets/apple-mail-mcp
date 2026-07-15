@@ -41,23 +41,38 @@ MAX_DRAFT_SNAPSHOT_ACCOUNTS = 5
 def build_draft_scan_status(snapshots: dict[str, DraftsSnapshot]) -> dict[str, Any]:
     """Aggregate per-account Drafts snapshots into a top-level ``draft_scan`` object.
 
-    Returns ``{"status": "skipped", "scanned": 0, "accounts": []}`` when
-    *snapshots* is empty (no account ever needed a Drafts scan: either
-    ``include_draft_state=False`` or no row carried a resolvable account).
-    Otherwise ``status`` is ``"ok"`` only when every scanned account came
-    back ``"ok"``; any ``"error"`` account flips the overall status to
-    ``"error"`` and its message is folded into a combined ``"error"`` key.
+    Returns ``{"status": "skipped", "scanned": 0, "total": 0,
+    "truncated": False, "accounts": []}`` when *snapshots* is empty (no
+    account ever needed a Drafts scan: either ``include_draft_state=False``
+    or no row carried a resolvable account). Otherwise ``status`` is
+    ``"ok"`` only when every scanned account came back ``"ok"``; any
+    ``"error"`` account flips the overall status to ``"error"`` and its
+    message is folded into a combined ``"error"`` key. Every envelope
+    carries the same ``total`` / ``truncated`` keys as the per-account
+    rows, so the ``draft_scan`` shape is uniform across producers.
     """
     if not snapshots:
-        return {"status": "skipped", "scanned": 0, "accounts": []}
+        return {"status": "skipped", "scanned": 0, "total": 0, "truncated": False, "accounts": []}
 
     accounts_detail: list[dict[str, Any]] = []
     errors: list[str] = []
     scanned_total = 0
+    total_drafts = 0
+    any_truncated = False
     all_ok = True
     for account, snapshot in snapshots.items():
-        accounts_detail.append({"account": account, "status": snapshot.status, "scanned": snapshot.scanned})
+        accounts_detail.append(
+            {
+                "account": account,
+                "status": snapshot.status,
+                "scanned": snapshot.scanned,
+                "total": snapshot.total,
+                "truncated": snapshot.truncated,
+            }
+        )
         scanned_total += snapshot.scanned
+        total_drafts += snapshot.total if snapshot.total is not None else snapshot.scanned
+        any_truncated = any_truncated or snapshot.truncated
         if snapshot.status != "ok":
             all_ok = False
             if snapshot.error:
@@ -66,6 +81,8 @@ def build_draft_scan_status(snapshots: dict[str, DraftsSnapshot]) -> dict[str, A
     result: dict[str, Any] = {
         "status": "ok" if all_ok else "error",
         "scanned": scanned_total,
+        "total": total_drafts,
+        "truncated": any_truncated,
         "accounts": accounts_detail,
     }
     if errors:

@@ -17,10 +17,10 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
-| [`active/agentic-1214-reply-fixes/`](active/agentic-1214-reply-fixes/) | AGENTIC-1214: native reply body truncation/ALL-CAPS fix, full-body draft verification, persisted header-linked Drafts retry safety, `verify_draft` quote-boundary behavior, and `manage_drafts` create+`in_reply_to` contract | Review fixes implemented on `fix/agentic-1214-reply-body-truncation`; focused/full gates, release proof, and draft-mode live verification in progress |
 | [`active/native-reply/`](active/native-reply/) | Native-format reply drafts (v3.8.0 ship + live TO-TEST) | Shipped; live verification pending (needs Cayman at the machine) |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 fuzzy-selector retirement, metadata-index spike, `allow_filter_scan` decision | Decision brief awaiting sign-off; follow-up branches not started |
 | [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate | Module split shipped (v3.9.1); perf/FTS stalled since 2026-05-27; confirm resume vs archive |
+| [`active/branch-review-v3.11.3/`](active/branch-review-v3.11.3/) | xhigh code review of the v3.11.3 branch vs main: 10-finder synthesis, fix plan, forward queue | Fixes in progress on the branch; archive with the branch closeout |
 
 ## Reference
 
@@ -45,4 +45,7 @@ See [`archive/README.md`](archive/README.md).
 | [`archive/2026-05/`](archive/2026-05/) | May workstreams (whose-elimination, robustness audits, scalability hardening) |
 | [`archive/2026-06/shipped/`](archive/2026-06/shipped/) | Shipped June workstreams (Codex plugin setup, MCP registration incident, doc cleanup, agent-guidance audit, draft-verification simplification) |
 | [`archive/2026-06/issues/`](archive/2026-06/issues/) | Resolved June issue trackers and investigation notes |
-| [`archive/2026-07/shipped/`](archive/2026-07/shipped/) | Apple Calendar surface (v3.10.0), manifest-release-hardening (parked), marketplace offline release candidate (v3.11.3), and Cursor marketplace source candidate (v3.11.4, pending protected tag and client acceptance evidence) |
+| [`archive/2026-07/shipped/`](archive/2026-07/shipped/) | Apple Calendar surface (v3.10.0), manifest-release-hardening (parked), marketplace offline release candidate (v3.11.3), and Cursor marketplace source candidate (v3.11.4) |
+| [`archive/2026-07/shipped/agentic-1277-compose-draft-verification/`](archive/2026-07/shipped/agentic-1277-compose-draft-verification/) | Compose-smoke identity verification and bounded reply-state performance hardening, integrated for v3.11.5 |
+| [`archive/2026-07/shipped/reply-state-annotation/`](archive/2026-07/shipped/reply-state-annotation/) | Automatic reply-state annotation, shipped in v3.11.0 (PR #73) |
+| [`archive/2026-07/shipped/agentic-1214-reply-fixes/`](archive/2026-07/shipped/agentic-1214-reply-fixes/) | Native-reply hardening, shipped in v3.11.2 (PR #75) |

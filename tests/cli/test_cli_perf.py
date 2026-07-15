@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from apple_mail_mcp import cli
+from apple_mail_mcp.cli import perf
 
 
 class PerfThresholdTests(unittest.TestCase):
@@ -97,6 +98,22 @@ class PerfThresholdTests(unittest.TestCase):
 
 
 class PerfBatteryTests(unittest.TestCase):
+    def test_metadata_threshold_uses_returned_count_from_capped_envelope(self):
+        payload = {
+            "mailboxes": [{"name": "Inbox"}] * 100,
+            "total": 194,
+            "returned": 100,
+            "truncated": True,
+        }
+        with (
+            patch("apple_mail_mcp.tools.inbox.list_mailboxes", return_value=json.dumps(payload)),
+            patch.object(cli, "_mailbox_count", new=perf._mailbox_count),
+        ):
+            cases = cli.build_perf_cases("Work", quick=True)
+
+        metadata_case = next(case for case in cases if case.name == "metadata")
+        self.assertEqual(metadata_case.threshold_ms, cli.metadata_threshold_ms(100))
+
     def test_build_perf_cases_quick_subset(self):
         with patch.object(cli, "_mailbox_count", return_value=9):
             cases = cli.build_perf_cases("Work", quick=True)
