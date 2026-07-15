@@ -73,7 +73,7 @@ def _smoke_verification_evidence(value: Any) -> dict[str, Any]:
 
 def _draft_cleanup_confirmed(value: Any) -> bool:
     parsed = _parse_tool_result(value)
-    return isinstance(parsed, dict) and parsed.get("deleted") is True
+    return isinstance(parsed, dict) and parsed.get("deleted") is True and parsed.get("confirmed") is True
 
 
 def _resolve_draft_smoke_from_address(
@@ -257,6 +257,11 @@ def _cmd_draft_verify_smoke(args: argparse.Namespace) -> int:
         "cleanup": {"requested": bool(args.cleanup), "confirmed": False, "skipped": bool(args.leave_draft)},
         "errors": [],
     }
+    if not _normalized_recipient_set(args.to):
+        _append_stage_error(payload, "recipient", "empty_recipient_set")
+        _print_result(payload, json_mode=args.json)
+        return 2
+
     from_address, from_error = _resolve_draft_smoke_from_address(
         account=args.account,
         explicit_from_address=args.from_address,

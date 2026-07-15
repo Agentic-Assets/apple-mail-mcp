@@ -22,8 +22,8 @@ plugin/skills/email-management/
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
-claude plugin marketplace update Agentic-Assets
-claude plugin install apple-mail@Agentic-Assets --scope user
+claude plugin marketplace update apple-mail-mcp
+claude plugin install apple-mail@apple-mail-mcp --scope user
 ```
 
 All eleven skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
@@ -32,7 +32,7 @@ All eleven skills under `plugin/skills/` load automatically. Legacy slash comman
 
 ```bash
 codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
-codex plugin add apple-mail@Agentic-Assets
+codex plugin add apple-mail@apple-mail-mcp
 ```
 
 ## Install (standalone copy)

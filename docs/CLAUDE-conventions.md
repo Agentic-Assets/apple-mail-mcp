@@ -183,10 +183,10 @@ The repo ships from **one source tree** to **five install surfaces**. Claude Des
 
 | Artifact | Target | How users install |
 |----------|--------|-------------------|
-| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update Agentic-Assets`, then `claude plugin install apple-mail@Agentic-Assets --scope user` (uses `.claude-plugin/marketplace.json`) |
+| `apple-mail-plugin.zip` | Claude Code plugin marketplace | `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update apple-mail-mcp`, then `claude plugin install apple-mail@apple-mail-mcp --scope user` (uses `.claude-plugin/marketplace.json`) |
 | `apple-mail.plugin` | Claude Desktop **Cowork** | Customize → Add plugin → **Upload plugin**. The Cowork UI accepts the `.plugin` extension; without it the upload silently fails. |
 | `apple-mail-mcp-v{VERSION}.mcpb` | Claude Desktop **chat extension** | "Add Custom Plugin" / "Install from file" (DXT bundle built with `mcpb pack`) |
-| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@Agentic-Assets`; local checkouts are maintainer/offline only |
+| `.agents/plugins/marketplace.json` + `plugin/.codex-plugin/plugin.json` | Codex Desktop/CLI plugin marketplace | `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@apple-mail-mcp`; local checkouts are maintainer/offline only |
 
 **`.zip` and `.plugin` must be byte-identical** — `tools/gates/build-artifacts.sh` copies the canonical zip to the `.plugin` name so they cannot drift. `tools/validators/validate_manifests.py::_check_plugin_file_parity` rejects any divergence and `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS=1` promotes a missing `.plugin` to a hard error. Regression coverage: `tests/infra/test_validate_manifests.py::test_plugin_file_parity_*`.
 
@@ -202,7 +202,7 @@ The repo ships from **one source tree** to **five install surfaces**. Claude Des
 
 Claude Code rejects the install with *"conflicting manifests: both plugin.json and marketplace entry specify components"* when both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while `strict` is not `true` on the marketplace entry.
 
-Rule for this repo: **all component declarations live in `plugin/.claude-plugin/plugin.json`** (today: only `mcpServers`). The marketplace entry is metadata-only (`name`, `displayName`, `description`, `version`, `author`, `source`, `keywords`, `strict: false`). Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them in marketplace.json. If a future change truly needs marketplace-side components, set `"strict": true` in the same edit.
+Rule for this repo: **all component declarations live in `plugin/.claude-plugin/plugin.json`** (today: only `mcpServers`). The marketplace entry is metadata-only and uses `strict: true`, matching Claude's strict default and the plugin manifest's component declaration. Skills auto-discover from `plugin/skills/<name>/SKILL.md` — do not re-list them in marketplace.json.
 
 The guard lives in `tools/validators/validate_manifests.py::_check_marketplace_contract`; regression tests `test_marketplace_contract_rejects_dual_component_declarations` / `..._allows_dual_components_when_strict_true` lock it in. Also see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json".
 
@@ -296,6 +296,6 @@ Detail: [`tools/CLAUDE.md`](../tools/CLAUDE.md) § `check_module_line_budget.py`
 ## Platform constraints
 
 - **macOS only.** Tests mock `subprocess.run` — see `tests/cross_cutting/test_modernization_3_1_5.py` and `tests/search/test_mail_search_tools.py` (patch with `side_effect` capturing script via `kwargs["input"]`).
-- **Python 3.10+** per `pyproject.toml`. `start_mcp.sh` gates 3.10+ (prefers 3.12+); mcpb embedded README must stay in sync.
+- **Python runtime split.** The PyPI/server package supports Python 3.10+ per `pyproject.toml`. The self-contained Claude, Codex, Cursor, and MCPB payload currently requires Apple Silicon (macOS arm64) with Python 3.13 because `start_mcp.sh` installs only its bundled platform-specific wheelhouse. The MCPB embedded README must stay in sync.
 - **Permissions**: Mail.app must be configured; Automation + Mail Data Access granted to the terminal/IDE. Surface clear errors; don't retry blindly.
 - **Async**: `asyncio.to_thread` for `run_applescript` in worker threads. Don't make `run_applescript` itself async.

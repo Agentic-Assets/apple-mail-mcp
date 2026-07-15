@@ -54,7 +54,11 @@ Track bugs and feature work in the [Apple Mail MCP](https://linear.app/agenticas
 
 ## Quick Install
 
-**Prerequisites:** macOS with Apple Mail configured, Python 3.10+
+**Prerequisites:** macOS with Apple Mail configured. The PyPI/server install
+supports Python 3.10+. The self-contained Claude, Codex, and Cursor plugin
+payload currently requires Apple Silicon (macOS arm64) and Python 3.13 because
+its bundled, hash-locked wheelhouse is platform-specific and never downloads
+packages at startup.
 
 ### Claude Code Plugin (Recommended)
 
@@ -62,8 +66,8 @@ One install: MCP server (41 tools) and **eleven** bundled workflow skills under 
 
 ```bash
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
-claude plugin marketplace update Agentic-Assets
-claude plugin install apple-mail@Agentic-Assets --scope user
+claude plugin marketplace update apple-mail-mcp
+claude plugin install apple-mail@apple-mail-mcp --scope user
 ```
 
 The GitHub-backed marketplace source lets Claude Code refresh the marketplace
@@ -77,7 +81,7 @@ Codex registers the GitHub marketplace repo, then reads `.agents/plugins/marketp
 
 ```bash
 codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
-codex plugin add apple-mail@Agentic-Assets
+codex plugin add apple-mail@apple-mail-mcp
 ```
 
 The checked-in marketplace still points at `./plugin` inside the GitHub repo,
@@ -109,14 +113,14 @@ On a machine with this repo checked out, the maintained one-shot refresh is:
 bash tools/gates/refresh-local-plugins.sh
 ```
 
-That script migrates legacy `apple-mail@apple-mail-mcp` / `apple-mail-mcp`
-marketplace registrations to `apple-mail@Agentic-Assets`, prunes stale cache
-dirs, and prints installed versions. Restart Codex Desktop, Claude Code, and
-Cursor when it finishes.
-
-Manual steps below mirror the same migration. Lines that reference
-`apple-mail@apple-mail-mcp` or `marketplace remove apple-mail-mcp` are
-**legacy cleanup only** for upgrades from the old marketplace slug.
+The script validates the checkout, verifies that the lowercase direct-source
+identity `apple-mail-mcp` points to this repository, installs and verifies
+`apple-mail@apple-mail-mcp` in both clients, and leaves every other marketplace
+and plugin registration untouched. It does not pull Git or delete client caches
+directly. If the target identity belongs to another repository, it refuses
+without changing any registration. The shared `agentic-assets` identity belongs
+to the separate [Agentic Assets Marketplace](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace),
+which can catalog Apple Mail and Corbis without a source collision.
 
 1. Get the current code:
 
@@ -125,14 +129,10 @@ cd ~/Documents/GitHub/agentic-assets/apple-mail-mcp
 git switch main && git pull --ff-only
 ```
 
-2. Refresh Codex from the GitHub marketplace source:
+2. Refresh both plugin clients with the guarded helper:
 
 ```bash
-codex plugin remove apple-mail@apple-mail-mcp || true
-codex plugin marketplace remove apple-mail-mcp || true
-codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
-codex plugin remove apple-mail@Agentic-Assets || true
-codex plugin add apple-mail@Agentic-Assets
+bash tools/gates/refresh-local-plugins.sh
 codex mcp get apple-mail --json
 ```
 
@@ -164,33 +164,28 @@ python3 -m venv .venv
   --required-tool get_inbox_overview
 ```
 
-3. Refresh Claude Code from the GitHub marketplace source:
+3. Verify the Claude Code registration:
 
 ```bash
-claude plugin uninstall apple-mail@apple-mail-mcp --scope user --keep-data -y || true
-claude plugin marketplace remove apple-mail-mcp || true
-claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
-claude plugin marketplace update Agentic-Assets
-claude plugin install apple-mail@Agentic-Assets --scope user
-claude plugin details apple-mail@Agentic-Assets
+claude plugin details apple-mail@apple-mail-mcp
 ```
 
 Prefer `--scope user` for personal machine setup. Project-scope marketplace
 entries can write an absolute local path into `.claude/settings.json`, which is
 usually not what you want to commit.
 
-`claude plugin details apple-mail@Agentic-Assets` should report version `3.11.4`
+`claude plugin details apple-mail@apple-mail-mcp` should report the current version
 and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
 replace `VERSION` or the path below if the details output shows a different
 install path:
 
 ```bash
-VERSION=3.11.4
+VERSION=3.11.5
 .venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
-  --arg "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION/start_mcp.sh" \
+  --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/$VERSION/start_mcp.sh" \
   --arg=--draft-safe \
-  --cwd "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION" \
+  --cwd "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/$VERSION" \
   --expect-count 41 \
   --required-tool reply_to_email \
   --required-tool compose_email \
@@ -626,7 +621,8 @@ The plugin MCP server starts with **`--draft-safe`** by default for both Claude 
 ## Requirements
 
 - macOS with Apple Mail configured
-- Python 3.10+
+- Python 3.10+ for the PyPI/server package
+- Apple Silicon (macOS arm64) and Python 3.13 for the self-contained Claude, Codex, Cursor, and MCPB plugin payload
 - `fastmcp>=3.1.0,<4` and `mcp-ui-server==1.0.0` for the MCP Apps dashboard
 - Claude Desktop, Codex Desktop/CLI, or any MCP-compatible client
 - Mail.app permissions: Automation + Mail Data Access (grant in **System Settings > Privacy & Security > Automation**)

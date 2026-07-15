@@ -101,8 +101,8 @@ That smoke installs the plugin into a temporary `CODEX_HOME`, reads `codex mcp g
 
 Skips Claude marketplace `metadata.version` (1.0.0) and Codex marketplace release versioning because `.agents/plugins/marketplace.json` is install routing metadata — see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).
 
-**User install contract:** marketplace slug `Agentic-Assets`, plugin selector
-`apple-mail@Agentic-Assets`. Canonical commands live in [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) and root [`README.md`](../README.md). To refresh an existing Mac after `git pull`, run [`gates/refresh-local-plugins.sh`](gates/refresh-local-plugins.sh) (migrates legacy `apple-mail-mcp` marketplace registrations).
+**Direct-source install contract:** marketplace slug `apple-mail-mcp`, plugin selector
+`apple-mail@apple-mail-mcp`. The shared `agentic-assets` identity belongs to [`Agentic-Assets/Agentic-Assets-Marketplace`](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace), not this source repo. Canonical commands live in [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) and root [`README.md`](../README.md). To refresh an existing Mac, run [`gates/refresh-local-plugins.sh`](gates/refresh-local-plugins.sh). It preflights sources, installs and verifies the lowercase target, and never removes or changes the separate shared marketplace; a conflicting direct-source registration fails closed.
 
 ## check_wrapper_surface.py
 

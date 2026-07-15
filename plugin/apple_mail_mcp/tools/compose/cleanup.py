@@ -120,7 +120,18 @@ def delete_draft_if_identity_matches_script(
 
                 if cleanupIdentityMatches then
                     delete foundDraft
-                    return "DELETED|||" & currentDraftId
+                    -- Mail's delete command returning without error only proves
+                    -- that deletion was issued. Re-read the exact Drafts id so
+                    -- Exchange/IMAP lag fails closed instead of being reported
+                    -- as confirmed cleanup.
+                    repeat with readbackAttempt from 1 to 3
+                        delay 0.5
+                        set remainingDrafts to every message of draftsMailbox whose id is {numeric_id}
+                        if (count of remainingDrafts) is 0 then
+                            return "DELETED_CONFIRMED|||" & currentDraftId
+                        end if
+                    end repeat
+                    return "DELETE_UNCONFIRMED|||" & currentDraftId
                 end if
                 return "IDENTITY_MISMATCH|||" & currentDraftId
             on error errMsg
@@ -178,8 +189,24 @@ def delete_draft_if_identity_matches(
     except AppleScriptTimeout:
         return json.dumps({"deleted": False, "error": "smoke_draft_cleanup_timeout"})
 
-    if raw.startswith("DELETED|||"):
-        return json.dumps({"deleted": True, "draft_id": raw.split("|||", 1)[1].strip()})
+    if raw.startswith("DELETED_CONFIRMED|||"):
+        return json.dumps(
+            {
+                "deleted": True,
+                "confirmed": True,
+                "draft_id": raw.split("|||", 1)[1].strip(),
+            }
+        )
+    if raw.startswith("DELETE_UNCONFIRMED|||"):
+        return json.dumps(
+            {
+                "deleted": False,
+                "confirmed": False,
+                "delete_issued": True,
+                "draft_id": raw.split("|||", 1)[1].strip(),
+                "error": "smoke_draft_cleanup_unconfirmed",
+            }
+        )
     if raw.startswith("IDENTITY_MISMATCH|||"):
         return json.dumps(
             {

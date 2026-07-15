@@ -442,7 +442,7 @@ class AppleMailCliTests(unittest.TestCase):
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
             patch(
                 "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
-                return_value=json.dumps({"deleted": True, "draft_id": "333"}),
+                return_value=json.dumps({"deleted": True, "confirmed": True, "draft_id": "333"}),
             ) as mock_delete,
             patch("time.sleep"),
             patch("builtins.print") as mock_print,
@@ -536,7 +536,7 @@ class AppleMailCliTests(unittest.TestCase):
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
             patch(
                 "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
-                return_value=json.dumps({"deleted": True, "draft_id": "333"}),
+                return_value=json.dumps({"deleted": True, "confirmed": True, "draft_id": "333"}),
             ),
             patch("time.sleep"),
             patch("builtins.print") as mock_print,
@@ -587,6 +587,23 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertFalse(any(call["action"] == "delete" for call in manage_calls))
         mock_verify.assert_not_called()
+
+    def test_draft_verify_smoke_rejects_empty_recipient_set_before_create(self):
+        with (
+            patch("apple_mail_mcp.tools.inbox.list_account_addresses") as mock_addresses,
+            patch("apple_mail_mcp.tools.compose.manage_drafts") as mock_drafts,
+            patch("apple_mail_mcp.tools.compose.verify_draft") as mock_verify,
+            patch("builtins.print") as mock_print,
+        ):
+            code = cli.main(self._draft_verify_smoke_args("--leave-draft", "--to", " ,  "))
+
+        self.assertEqual(code, 2)
+        mock_addresses.assert_not_called()
+        mock_drafts.assert_not_called()
+        mock_verify.assert_not_called()
+        payload = self._printed_json_payload(mock_print)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"], [{"stage": "recipient", "detail": "empty_recipient_set"}])
 
     def test_draft_verify_smoke_retains_single_unverified_candidate_without_delete(self):
         manage_calls = []
@@ -724,6 +741,44 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(payload["persisted_draft_id"], "555")
         self.assertFalse(payload["cleanup"]["confirmed"])
 
+    def test_draft_verify_smoke_delete_issued_without_readback_proof_is_not_confirmed(self):
+        def fake_manage(**kwargs):
+            if kwargs["action"] == "create":
+                return "Draft created"
+            if kwargs["action"] == "list":
+                return "Id: 555   To: smoke@example.invalid"
+            raise AssertionError(kwargs)
+
+        with (
+            patch("apple_mail_mcp.tools.compose.manage_drafts", side_effect=fake_manage),
+            patch(
+                "apple_mail_mcp.tools.compose.verify_draft",
+                return_value=json.dumps(
+                    {"found": True, "recipients": {"to": "apple-mail-mcp-smoke@example.invalid"}, "warnings": []}
+                ),
+            ),
+            patch(
+                "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
+                return_value=json.dumps(
+                    {
+                        "deleted": False,
+                        "confirmed": False,
+                        "delete_issued": True,
+                        "draft_id": "555",
+                        "error": "smoke_draft_cleanup_unconfirmed",
+                    }
+                ),
+            ),
+            patch("builtins.print") as mock_print,
+        ):
+            code = cli.main(self._draft_verify_smoke_args("--cleanup"))
+
+        self.assertEqual(code, 1)
+        payload = self._printed_json_payload(mock_print)
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["cleanup"]["confirmed"])
+        self.assertTrue(payload["cleanup"]["delete_result"]["delete_issued"])
+
     def test_draft_verify_smoke_requires_from_address_for_multi_alias_account(self):
         with (
             patch(
@@ -764,7 +819,7 @@ class AppleMailCliTests(unittest.TestCase):
             patch("apple_mail_mcp.tools.compose.verify_draft", side_effect=fake_verify),
             patch(
                 "apple_mail_mcp.tools.compose.delete_draft_if_identity_matches",
-                return_value=json.dumps({"deleted": True, "draft_id": "333"}),
+                return_value=json.dumps({"deleted": True, "confirmed": True, "draft_id": "333"}),
             ),
             patch("builtins.print"),
         ):

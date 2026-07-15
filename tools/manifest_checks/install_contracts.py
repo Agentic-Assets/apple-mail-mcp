@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from manifest_checks import common
-from manifest_checks.common import AGENTIC_ASSETS_MARKETPLACE_NAME, MARKETPLACE_COMPONENT_FIELDS
+from manifest_checks.common import DIRECT_SOURCE_MARKETPLACE_NAME, MARKETPLACE_COMPONENT_FIELDS
 
 
 def _check_mcp_launcher_contract(
@@ -163,16 +163,22 @@ def _check_mcpb_runtime_contract(mcpb: dict, errors: list[str]) -> None:
 def _check_marketplace_contract(expected_version: str, errors: list[str]) -> None:
     """Ensure marketplace source and skill pointers resolve to the plugin."""
     market = json.loads((common.ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
-    if market.get("name") != AGENTIC_ASSETS_MARKETPLACE_NAME:
+    if market.get("name") != DIRECT_SOURCE_MARKETPLACE_NAME:
         errors.append(
             ".claude-plugin/marketplace.json name: got "
-            f"'{market.get('name')}', expected '{AGENTIC_ASSETS_MARKETPLACE_NAME}'"
+            f"'{market.get('name')}', expected '{DIRECT_SOURCE_MARKETPLACE_NAME}'"
         )
     plugins = market.get("plugins") or []
     if not plugins:
         errors.append("marketplace.json: missing plugins[0]")
         return
     plugin_ref = plugins[0]
+
+    if plugin_ref.get("strict") is not True:
+        errors.append(
+            "marketplace.json plugins[0].strict: expected true "
+            "(plugin.json declares components and Claude marketplaces default to strict mode)"
+        )
 
     source = plugin_ref.get("source")
     source_path: Path | None = None
@@ -215,7 +221,7 @@ def _check_marketplace_contract(expected_version: str, errors: list[str]) -> Non
     if source_manifest is not None:
         market_components = [f for f in MARKETPLACE_COMPONENT_FIELDS if plugin_ref.get(f)]
         plugin_components = [f for f in MARKETPLACE_COMPONENT_FIELDS if source_manifest.get(f)]
-        if market_components and plugin_components and not plugin_ref.get("strict"):
+        if market_components and plugin_components and plugin_ref.get("strict") is not True:
             errors.append(
                 "marketplace.json plugins[0]: component fields "
                 f"{market_components} conflict with plugin.json "

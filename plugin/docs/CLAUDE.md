@@ -52,8 +52,8 @@ Fresh-install test: run `bash tools/gates/verify-offline-runtime.sh plugin` or u
 
 ## Related distribution shapes
 
-- **`../../.claude-plugin/marketplace.json`** — Top-level Claude Code marketplace manifest (`name`: `Agentic-Assets`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update Agentic-Assets`, then `claude plugin install apple-mail@Agentic-Assets --scope user`
-- **`../../.agents/plugins/marketplace.json`** — Top-level Codex marketplace manifest (`name`: `Agentic-Assets`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@Agentic-Assets`
+- **`../../.claude-plugin/marketplace.json`** — Top-level Claude Code direct-source marketplace manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update apple-mail-mcp`, then `claude plugin install apple-mail@apple-mail-mcp --scope user`
+- **`../../.agents/plugins/marketplace.json`** — Top-level Codex direct-source marketplace manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@apple-mail-mcp`
 - **`../../apple-mail-mcpb/`** — Claude Desktop `.mcpb` bundle build (separate manifest)
 
 ## When to change what

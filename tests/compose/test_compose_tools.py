@@ -3414,6 +3414,18 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
         self.assertIn("repeat with expectedToAddress in expectedToAddresses", script)
         self.assertIn("repeat with actualToAddress in actualToAddresses", script)
         self.assertLess(script.index("if cleanupIdentityMatches then"), script.index("delete foundDraft"))
+        self.assertLess(script.index("delete foundDraft"), script.index("set remainingDrafts to every message"))
+        self.assertIn("repeat with readbackAttempt from 1 to 3", script)
+        self.assertIn("if (count of remainingDrafts) is 0 then", script)
+        self.assertLess(
+            script.index("if (count of remainingDrafts) is 0 then"),
+            script.index('return "DELETED_CONFIRMED|||" & currentDraftId'),
+        )
+        self.assertLess(
+            script.index('return "DELETED_CONFIRMED|||" & currentDraftId'),
+            script.index('return "DELETE_UNCONFIRMED|||" & currentDraftId'),
+        )
+        self.assertNotIn("cleanupReadbackConfirmed", script)
         self.assertNotIn("subject of foundDraft &", script)
 
     def test_identity_guarded_delete_dedupes_expected_recipients_without_count_gate(self):
@@ -3421,7 +3433,7 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
 
         def fake_run(script, timeout=120):
             captured.append(script)
-            return "DELETED|||91061"
+            return "DELETED_CONFIRMED|||91061"
 
         with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
             result = compose_tools.delete_draft_if_identity_matches(
@@ -3434,11 +3446,32 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
 
         payload = json.loads(result)
         self.assertTrue(payload["deleted"])
+        self.assertTrue(payload["confirmed"])
         script = captured[0]
         # Casefolded, order-preserving dedupe collapses the duplicate address to
         # a single-element literal.
         self.assertIn('set expectedToAddresses to {"smoke@example.invalid"}', script)
         self.assertNotIn("(count of actualToAddresses) is not (count of expectedToAddresses)", script)
+
+    def test_identity_guarded_delete_fails_closed_when_exact_id_remains_after_delete(self):
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            return_value="DELETE_UNCONFIRMED|||91061",
+        ):
+            result = compose_tools.delete_draft_if_identity_matches(
+                account="Work",
+                draft_id="91061",
+                expected_subject="APPLE_MAIL_MCP_DRAFT_VERIFY_SMOKE_1_abcd",
+                expected_to="smoke@example.invalid",
+                expected_body_sentinel="APPLE_MAIL_MCP_BODY_SENTINEL_abcd",
+            )
+
+        payload = json.loads(result)
+        self.assertFalse(payload["deleted"])
+        self.assertFalse(payload["confirmed"])
+        self.assertTrue(payload["delete_issued"])
+        self.assertEqual(payload["draft_id"], "91061")
+        self.assertEqual(payload["error"], "smoke_draft_cleanup_unconfirmed")
 
     def test_expected_recipient_literal_dedupes_case_insensitively(self):
         from apple_mail_mcp.tools.compose import cleanup
