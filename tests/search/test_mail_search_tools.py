@@ -1747,7 +1747,7 @@ class NewFieldsTests(unittest.TestCase):
 
     def test_search_emails_mailboxes_param_targets_named_folders(self):
         """mailboxes=['Archive','Sent'] must produce a script that looks up
-        those specific folders and does NOT use `every mailbox` enumeration."""
+        those specific folders and does not use the `All` search path."""
         captured = {}
 
         def fake_run(script, timeout=120):
@@ -1768,7 +1768,51 @@ class NewFieldsTests(unittest.TestCase):
         script = captured["script"]
         self.assertIn('mailbox "Archive" of targetAccount', script)
         self.assertIn('mailbox "Sent" of targetAccount', script)
-        self.assertNotIn("every mailbox of targetAccount", script)
+        self.assertNotIn("set searchMailboxes to every mailbox of targetAccount", script)
+
+    def test_search_emails_sent_mail_uses_account_scoped_fallback_for_singular_param(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailbox="Sent Mail",
+                    output_format="json",
+                    limit=5,
+                    date_from="2026-01-01",
+                )
+            )
+
+        script = captured["script"]
+        self.assertIn('mailbox "Sent Mail" of targetAccount', script)
+        self.assertIn("every mailbox of targetAccount", script)
+
+    def test_search_emails_sent_mail_uses_account_scoped_fallback_for_mailboxes_param(self):
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            self._run(
+                search_tools.search_emails(
+                    account="Work",
+                    mailboxes=["Sent Mail"],
+                    output_format="json",
+                    limit=5,
+                    date_from="2026-01-01",
+                )
+            )
+
+        script = captured["script"]
+        self.assertIn('mailbox "Sent Mail" of targetAccount', script)
+        self.assertIn("every mailbox of targetAccount", script)
 
     # ------------------------------------------------------------------
     # FIX #5b: All path isolates per-mailbox failures (partial results).

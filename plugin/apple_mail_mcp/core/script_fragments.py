@@ -27,6 +27,16 @@ INBOX_NAMES = [
     "受信トレイ",  # Japanese
 ]
 
+# Some providers display Sent as a top-level mailbox (for example, "Sent
+# Mail") but do not resolve that display name through ``mailbox <name> of
+# account``.
+SENT_MAILBOX_NAMES = {
+    "sent",
+    "sent items",
+    "sent mail",
+    "sent messages",
+}
+
 
 def inbox_mailbox_script(var_name: str = "inboxMailbox", account_var: str = "anAccount") -> str:
     """Return AppleScript snippet to resolve the inbox mailbox.
@@ -94,11 +104,12 @@ def build_mailbox_ref(
     account_var: str = "targetAccount",
     var_name: str = "targetMailbox",
 ) -> str:
-    """Return AppleScript snippet to resolve a mailbox by name with INBOX fallback.
+    """Return AppleScript snippet to resolve a mailbox by name with system-folder fallbacks.
 
     Handles:
     - Normal mailbox names (e.g. "Archive")
     - INBOX / Inbox case variation
+    - Sent mailbox display names via account-scoped top-level enumeration
     - Nested mailbox paths using "/" separator (e.g. "Projects/2024")
 
     The resulting variable *var_name* will hold the resolved mailbox reference.
@@ -128,6 +139,30 @@ def build_mailbox_ref(
             if {var_name} is missing value then
                 error "Mailbox not found: {escaped} (no localized inbox match)"
             end if"""
+
+    # Some provider-specific Sent folders are returned by ``every mailbox``
+    # but reject a direct named lookup. Try the requested name first so a
+    # user-created mailbox with one of these names still wins, then match the
+    # exact display name within the requested account only.
+    if mailbox.casefold() in SENT_MAILBOX_NAMES:
+        return f'''set {var_name} to missing value
+            try
+                set {var_name} to mailbox "{escaped}" of {account_var}
+            on error
+                try
+                    repeat with __sentMailboxCandidate in every mailbox of {account_var}
+                        if (name of __sentMailboxCandidate as string) is "{escaped}" then
+                            set {var_name} to __sentMailboxCandidate
+                            exit repeat
+                        end if
+                    end repeat
+                    if {var_name} is missing value then
+                        error "Sent mailbox is unavailable in account"
+                    end if
+                on error
+                    error "Mailbox not found: {escaped}"
+                end try
+            end try'''
 
     return f'''try
                 set {var_name} to mailbox "{escaped}" of {account_var}
