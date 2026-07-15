@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.11.4 - 2026-07-11
+
+- Add separate Cursor plugin and local MCP adapters to the offline release payload.
+- Keep the Cursor launcher draft-safe and version-synchronized with the Claude and Codex adapters.
+
 ## 3.11.3 - 2026-07-11
 
 - Add a hash-locked offline wheelhouse for the macOS arm64 CPython 3.13 plugin release channel.

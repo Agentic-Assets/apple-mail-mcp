@@ -71,7 +71,7 @@ The individual checks live in the sibling `manifest_checks/` package (`common.py
 
 Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].name`):
 
-1. **Version sync** — Claude/Codex `plugin.json`, Claude marketplace `plugins[0].version`, `server.json` (×2), `apple-mail-mcpb/manifest.json`
+1. **Version sync** — Claude/Codex/Cursor `plugin.json`, Claude marketplace `plugins[0].version`, `server.json` (×2), `apple-mail-mcpb/manifest.json`
 2. **Tool count claims**: descriptions must match a recursive scan of `plugin/apple_mail_mcp/tools/` for `^@mcp.tool` (package-nested tools such as `compose/` count toward **41**)
 3. **MCPB name parity** — `@mcp.tool` names ↔ `apple-mail-mcpb/manifest.json` `tools[]`
 4. **Install contracts** — Claude plugin `mcpServers`, Codex `.mcp.json`, marketplace `source`/skills, MCPB `server` config, `server.json` package metadata, and PyPI package deps/packages must point at the shipped runtime
@@ -82,6 +82,7 @@ Enforces (source of truth: `pyproject.toml` `[project].version` and `[project].n
 9. **Plugin/.plugin byte parity** — `apple-mail.plugin` must exist alongside `apple-mail-plugin.zip` and be byte-identical. The `.plugin` extension is the canonical Cowork "Add plugin → Upload plugin" artifact; drifting bytes break the Cowork upload silently. Always rebuild via `tools/gates/build-artifacts.sh`, which copies the canonical zip to the `.plugin` name.
 10. **Marketplace ↔ plugin.json component conflict** — fails if both `.claude-plugin/marketplace.json plugins[0]` and `plugin/.claude-plugin/plugin.json` declare any of `commands`, `agents`, `skills`, `hooks`, `mcpServers` while marketplace `strict` is not `true`. Mirrors the Claude Code "conflicting manifests" install error. See [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) § "Components live in plugin.json" for the rule and escape hatch.
 11. **Codex plugin surface** — `.agents/plugins/marketplace.json` must point at `./plugin`; `plugin/.codex-plugin/plugin.json` must expose `skills: "./skills"` and `mcpServers: "./.mcp.json"`; `plugin/.mcp.json` must launch `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."`.
+12. **Cursor plugin surface** — `plugin/.cursor-plugin/plugin.json` must point at `./mcp.json`; `plugin/mcp.json` must launch `/bin/bash ./start_mcp.sh --draft-safe` with `cwd: "."`. This is a static adapter check, not live Cursor acceptance proof.
 12. **Stale distribution artifacts** — fails if repo root contains `apple-mail-mcp-v*.mcpb` files other than the current `pyproject.toml` version; run `tools/gates/build-artifacts.sh` to prune and rebuild.
 13. **Module line budget** — warns on modules over **600 LOC** in `plugin/apple_mail_mcp/` and `tools/` (not `tests/`); **fails** on baseline regression (`tests/fixtures/module_line_budget/baseline.json`, currently empty after v3.9.1). Covered by `tests/infra/test_module_line_budget.py` and `validators/check_module_line_budget.py`.
 

@@ -179,13 +179,13 @@ Prefer `--scope user` for personal machine setup. Project-scope marketplace
 entries can write an absolute local path into `.claude/settings.json`, which is
 usually not what you want to commit.
 
-`claude plugin details apple-mail@Agentic-Assets` should report version `3.11.3`
+`claude plugin details apple-mail@Agentic-Assets` should report version `3.11.4`
 and `MCP servers (1) apple-mail`. To smoke the installed Claude cache directly,
 replace `VERSION` or the path below if the details output shows a different
 install path:
 
 ```bash
-VERSION=3.11.3
+VERSION=3.11.4
 .venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
   --arg "$HOME/.claude/plugins/cache/Agentic-Assets/apple-mail/$VERSION/start_mcp.sh" \
@@ -652,12 +652,15 @@ apple-mail-mcp/
 │       └── marketplace.json   # Codex Desktop/CLI marketplace entry
 ├── .claude-plugin/
 │   └── marketplace.json       # Claude Code marketplace manifest
-├── plugin/                    # Shared Claude Code + Codex plugin runtime
+├── plugin/                    # Shared Claude Code, Codex, and Cursor plugin runtime
 │   ├── .codex-plugin/
 │   │   └── plugin.json        # Codex plugin manifest
+│   ├── .cursor-plugin/
+│   │   └── plugin.json        # Cursor plugin manifest (live acceptance pending)
 │   ├── .claude-plugin/
 │   │   └── plugin.json        # Claude Code plugin manifest
 │   ├── .mcp.json              # Codex MCP config
+│   ├── mcp.json                # Cursor MCP config
 │   ├── skills/                # bundled workflow skills (see plugin/skills/CLAUDE.md)
 │   ├── apple_mail_mcp/        # Python MCP server package (41 tools)
 │   ├── apple_mail_mcp.py      # Entry point

@@ -12,7 +12,7 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 | Doc | Audience | Purpose |
 |-----|----------|---------|
 | [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md) | Coding agents, maintainers | Live Mail verification via repo `.venv/bin/apple-mail` CLI |
-| [`CLAUDE-conventions.md`](CLAUDE-conventions.md) | All agents editing Python/tools/skills | Deep rules: perf, escaping, versioning, skill authoring, plugin-dev agents, **distribution channels** (four install surfaces) |
+| [`CLAUDE-conventions.md`](CLAUDE-conventions.md) | All agents editing Python/tools/skills | Deep rules: perf, escaping, versioning, skill authoring, plugin-dev agents, **distribution channels** (five install surfaces) |
 
 ## Who reads what
 
@@ -20,7 +20,7 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 **Verifying against real Mail.app** → [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md): setup, permissions, `quick-check` / `perf-test` batteries, safe probes, MCP env vars (`DEFAULT_MAIL_ACCOUNT`, `DEFAULT_MAIL_SIGNATURE`, `USER_EMAIL_PREFERENCES`).
 
-**Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Codex routing lives in [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json), and [`../plugin/.mcp.json`](../plugin/.mcp.json). Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
+**Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Codex routing lives in [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json), and [`../plugin/.mcp.json`](../plugin/.mcp.json). Cursor routing lives in [`../plugin/.cursor-plugin/plugin.json`](../plugin/.cursor-plugin/plugin.json) and [`../plugin/mcp.json`](../plugin/mcp.json); treat it as pending until live client acceptance. Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
 
 **Planning / backlog** → [`tasks/CLAUDE.md`](../tasks/CLAUDE.md) (read § Agent requirements) and [`tasks/todo.md`](../tasks/todo.md).
 

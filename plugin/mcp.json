@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "apple-mail": {
+      "command": "/bin/bash",
+      "args": [
+        "./start_mcp.sh",
+        "--draft-safe"
+      ],
+      "cwd": "."
+    }
+  }
+}

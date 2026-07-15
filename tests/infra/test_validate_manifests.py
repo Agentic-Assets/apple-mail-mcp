@@ -42,6 +42,7 @@ class ValidateManifestsTests(unittest.TestCase):
             [
                 ("plugin/.claude-plugin/plugin.json", "version", "Claude plugin manifest"),
                 ("plugin/.codex-plugin/plugin.json", "version", "Codex plugin manifest"),
+                ("plugin/.cursor-plugin/plugin.json", "version", "Cursor plugin manifest"),
                 (".claude-plugin/marketplace.json", "plugins[0].version", "Claude marketplace plugin"),
                 ("server.json", "version", "MCP server metadata"),
                 ("server.json", "packages[0].version", "MCP server package"),
@@ -54,6 +55,7 @@ class ValidateManifestsTests(unittest.TestCase):
             root = Path(tmp)
             (root / "plugin/.claude-plugin").mkdir(parents=True)
             (root / "plugin/.codex-plugin").mkdir(parents=True)
+            (root / "plugin/.cursor-plugin").mkdir(parents=True)
             (root / ".claude-plugin").mkdir()
             (root / "apple-mail-mcpb").mkdir()
             (root / "plugin/.claude-plugin/plugin.json").write_text(
@@ -62,6 +64,10 @@ class ValidateManifestsTests(unittest.TestCase):
             )
             (root / "plugin/.codex-plugin/plugin.json").write_text(
                 json.dumps({"version": "0.0.0"}),
+                encoding="utf-8",
+            )
+            (root / "plugin/.cursor-plugin/plugin.json").write_text(
+                json.dumps({"version": "3.9.1"}),
                 encoding="utf-8",
             )
             (root / ".claude-plugin/marketplace.json").write_text(
@@ -86,6 +92,56 @@ class ValidateManifestsTests(unittest.TestCase):
                 validate_manifests.ROOT = original_root
 
         self.assertEqual(errors, ["Codex plugin manifest: got '0.0.0', expected '3.9.1'"])
+
+    def test_cursor_plugin_contract_requires_a_distinct_draft_safe_adapter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "plugin/.cursor-plugin").mkdir(parents=True)
+            (root / "plugin/.cursor-plugin/plugin.json").write_text(
+                json.dumps(
+                    {
+                        "name": "apple-mail",
+                        "version": "3.11.4",
+                        "description": "Cursor adapter with 41 MCP tools.",
+                        "mcpServers": "./mcp.json",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "plugin/mcp.json").write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "apple-mail": {
+                                "command": "/bin/bash",
+                                "args": ["./start_mcp.sh", "--draft-safe"],
+                                "cwd": ".",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            errors: list[str] = []
+            original_root = validate_manifests.ROOT
+            validate_manifests.ROOT = root
+            try:
+                validate_manifests._check_cursor_plugin_contract("3.11.4", 41, errors)
+                self.assertEqual(errors, [])
+
+                errors.clear()
+                (root / "plugin/mcp.json").write_text(
+                    json.dumps({"mcpServers": {"apple-mail": {"command": "/bin/bash", "args": ["${CLAUDE_PLUGIN_ROOT}/start_mcp.sh"]}}}),
+                    encoding="utf-8",
+                )
+                validate_manifests._check_cursor_plugin_contract("3.11.4", 41, errors)
+            finally:
+                validate_manifests.ROOT = original_root
+
+        self.assertIn("plugin/mcp.json mcpServers.apple-mail.args: first arg must be ./start_mcp.sh", errors)
+        self.assertIn("plugin/mcp.json mcpServers.apple-mail.args: missing --draft-safe", errors)
+        self.assertIn("plugin/mcp.json mcpServers.apple-mail.cwd: got 'None', expected '.'", errors)
 
     def test_changelog_release_version_requires_matching_latest_release_heading(self):
         with tempfile.TemporaryDirectory() as tmp:
