@@ -32,7 +32,7 @@ client evidence, attestations, and rollback.
       release gates.
 - [x] Run an independent adversarial review and resolve all P0-P2 findings.
 - [x] Write a branch closeout and separate forward queue.
-- [ ] Commit and push the feature branch. Do not merge without a new literal
+- [x] Commit and push the feature branch. Do not merge without a new literal
       `Cayman approved this merge` authorization.
 
 ## Verification path
