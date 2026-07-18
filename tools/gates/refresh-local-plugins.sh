@@ -7,10 +7,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 VERSION="$(python3 -c "import json; print(json.load(open('plugin/.claude-plugin/plugin.json'))['version'])")"
-MARKETPLACE_NAME="apple-mail-mcp"
-PLUGIN_SELECTOR="apple-mail@${MARKETPLACE_NAME}"
-GITHUB_REPO="Agentic-Assets/apple-mail-mcp"
-GITHUB_REPO_URL="https://github.com/${GITHUB_REPO}.git"
+IFS=$'\t' read -r MARKETPLACE_NAME PLUGIN_SELECTOR GITHUB_REPO_URL < <(python3 - <<'PY'
+import json
+
+identity = json.load(open("tools/marketplace_identity.json", encoding="utf-8"))
+standalone = identity["standalone_compatibility"]
+print(
+    standalone["marketplace_id"],
+    standalone["selector"],
+    identity["plugin"]["source_repository"].rstrip("/") + ".git",
+    sep="\t",
+)
+PY
+)
+GITHUB_REPO="${GITHUB_REPO_URL#https://github.com/}"
+GITHUB_REPO="${GITHUB_REPO%.git}"
 
 for command_name in python3 claude codex; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -27,15 +38,15 @@ trap 'rm -rf "$STATE_DIR"' EXIT
 claude plugin marketplace list --json >"$STATE_DIR/claude-marketplaces.json"
 codex plugin marketplace list --json >"$STATE_DIR/codex-marketplaces.json"
 
-python3 - "$STATE_DIR" "$GITHUB_REPO" "$GITHUB_REPO_URL" <<'PY'
+python3 - "$STATE_DIR" "$MARKETPLACE_NAME" "$GITHUB_REPO" "$GITHUB_REPO_URL" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 state = Path(sys.argv[1])
-repo = sys.argv[2]
-repo_url = sys.argv[3]
-target = "apple-mail-mcp"
+target = sys.argv[2]
+repo = sys.argv[3]
+repo_url = sys.argv[4]
 
 claude_markets = json.loads((state / "claude-marketplaces.json").read_text())
 codex_payload = json.loads((state / "codex-marketplaces.json").read_text())
@@ -67,9 +78,9 @@ if problems:
     raise SystemExit(1)
 PY
 
-if python3 - "$STATE_DIR/claude-marketplaces.json" <<'PY'
+if python3 - "$STATE_DIR/claude-marketplaces.json" "$MARKETPLACE_NAME" <<'PY'
 import json, sys
-raise SystemExit(0 if any(x.get("name") == "apple-mail-mcp" for x in json.load(open(sys.argv[1]))) else 1)
+raise SystemExit(0 if any(x.get("name") == sys.argv[2] for x in json.load(open(sys.argv[1]))) else 1)
 PY
 then
   claude plugin marketplace update "$MARKETPLACE_NAME"
@@ -84,10 +95,10 @@ else
   claude plugin install "$PLUGIN_SELECTOR" --scope user
 fi
 
-if python3 - "$STATE_DIR/codex-marketplaces.json" <<'PY'
+if python3 - "$STATE_DIR/codex-marketplaces.json" "$MARKETPLACE_NAME" <<'PY'
 import json, sys
 payload = json.load(open(sys.argv[1]))
-raise SystemExit(0 if any(x.get("name") == "apple-mail-mcp" for x in payload.get("marketplaces", [])) else 1)
+raise SystemExit(0 if any(x.get("name") == sys.argv[2] for x in payload.get("marketplaces", [])) else 1)
 PY
 then
   codex plugin marketplace upgrade "$MARKETPLACE_NAME"

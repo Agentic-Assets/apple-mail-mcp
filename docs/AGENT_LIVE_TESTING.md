@@ -321,7 +321,7 @@ Output is redacted by default: counts and char lengths only; account names, subj
 
 ## Unit tests vs live Mail
 
-CI runs mocked pytest + manifest validation + **module line budget** (600 LOC warn, baseline regression fail):
+Local CI-equivalent gates run mocked pytest + manifest validation + **module line budget** (600 LOC warn, baseline regression fail):
 
 ```bash
 bash tools/gates/validate_manifests.sh
@@ -331,10 +331,11 @@ python3 tools/validators/check_module_line_budget.py
 
 Detail: [`CLAUDE-conventions.md`](CLAUDE-conventions.md) § Module line budget.
 
-Optional local hook (manifest drift + pytest; wrapper check when staged MCP tool files change):
+Required checked-in hooks (manifest drift + pytest; wrapper check when staged MCP tool files change):
 
 ```bash
-bash tools/gates/install-git-hooks.sh   # once per clone
+bash tools/gates/install-git-hooks.sh   # every local or cloud checkout
+test "$(git config --get core.hooksPath)" = ".githooks"
 bash tools/gates/dev-check.sh             # manual equivalent
 bash tools/gates/dev-check.sh surface     # always include wrapper check
 ```

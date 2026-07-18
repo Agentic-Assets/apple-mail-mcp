@@ -18,12 +18,12 @@ plugin/skills/email-management/
 └── templates/               # search patterns, common workflow snippets
 ```
 
-## Install (Claude Code plugin, recommended)
+## Install from Agentic Assets Marketplace (recommended)
 
 ```bash
-claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
-claude plugin marketplace update apple-mail-mcp
-claude plugin install apple-mail@apple-mail-mcp --scope user
+claude plugin marketplace add Agentic-Assets/Agentic-Assets-Marketplace --scope user
+claude plugin marketplace update agentic-assets
+claude plugin install apple-mail@agentic-assets --scope user
 ```
 
 All eleven skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
@@ -31,9 +31,17 @@ All eleven skills under `plugin/skills/` load automatically. Legacy slash comman
 ## Install (Codex Desktop / CLI plugin)
 
 ```bash
-codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
-codex plugin add apple-mail@apple-mail-mcp
+codex plugin marketplace add https://github.com/Agentic-Assets/Agentic-Assets-Marketplace.git
+codex plugin add apple-mail@agentic-assets
 ```
+
+The central marketplace contains an immutable promoted snapshot from an
+allowlisted, signed Apple Mail source tag. This repository remains the editable
+source of truth; the marketplace owns promotion policy, evidence, and
+attestations. Maintainers may still register this source repository's standalone
+compatibility catalogs as `apple-mail-mcp` and install
+`apple-mail@apple-mail-mcp`, but that is not the primary Agentic Assets user
+path.
 
 ## Install (standalone copy)
 

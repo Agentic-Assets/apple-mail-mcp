@@ -2,7 +2,7 @@
 
 Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for the current state and next action.
 
-**Agents:** placement rules are mandatory — read [`CLAUDE.md`](CLAUDE.md) § Agent requirements before creating or moving files here. CI enforces layout via `tools/validators/validate_tasks_layout.py`.
+**Agents:** placement rules are mandatory — read [`CLAUDE.md`](CLAUDE.md) § Agent requirements before creating or moving files here. Local gates enforce layout via `tools/validators/validate_tasks_layout.py`.
 
 ## Layout
 
@@ -22,7 +22,8 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 | [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate | Module split shipped (v3.9.1); perf/FTS stalled since 2026-05-27; confirm resume vs archive |
 | [`active/branch-review-v3.11.3/`](active/branch-review-v3.11.3/) | xhigh code review of the v3.11.3 branch vs main: 10-finder synthesis, fix plan, forward queue | Fixes in progress on the branch; archive with the branch closeout |
 | [`active/v3.11.5-consolidated-release/`](active/v3.11.5-consolidated-release/) | Four-branch consolidation, cross-client marketplace hardening, and local release proof | Merged and tagged; central marketplace admission superseded by v3.11.6 |
-| [`active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/) | Explicit Cursor plugin-root launcher and host-specific validator | Locally verified; branch push and founder-gated review pending |
+| [`active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/) | Explicit Cursor plugin-root launcher and host-specific validator | Shipped on `main` in v3.11.6; local 41-tool Cursor Agent acceptance passed; marketplace/UI admission unverified |
+| [`active/central-marketplace-source-contract/`](active/central-marketplace-source-contract/) | Source payload, identity, signed-tag, and local-gate contract for the shared multi-plugin marketplace | Implementation in progress on `chore/central-marketplace-source-contract` |
 
 ## Reference
 

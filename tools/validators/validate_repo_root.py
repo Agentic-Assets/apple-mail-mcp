@@ -39,8 +39,10 @@ ALLOWED_ROOT_DIRS = frozenset(
     {
         "apple-mail-mcpb",
         "archive",
+        "distribution",
         "docs",
         "plugin",
+        "provenance",
         "tasks",
         "tests",
         "tools",
@@ -91,11 +93,10 @@ def validate_repo_root(root: Path | None = None) -> list[str]:
                 errors.append(
                     f"unexpected file at repo root: {name} ({SUGGESTED_HOME})"
                 )
-        elif child.is_dir():
-            if name not in ALLOWED_ROOT_DIRS:
-                errors.append(
-                    f"unexpected directory at repo root: {name}/ ({SUGGESTED_HOME})"
-                )
+        elif child.is_dir() and name not in ALLOWED_ROOT_DIRS:
+            errors.append(
+                f"unexpected directory at repo root: {name}/ ({SUGGESTED_HOME})"
+            )
 
     return errors
 

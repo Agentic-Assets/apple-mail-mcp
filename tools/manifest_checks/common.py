@@ -18,6 +18,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+
+def _read_marketplace_identity() -> dict:
+    path = ROOT / "tools/marketplace_identity.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"invalid marketplace identity contract: {exc}") from exc
+    if payload.get("schema_version") != 1:
+        raise RuntimeError("unsupported marketplace identity contract schema")
+    return payload
+
+
+MARKETPLACE_IDENTITY = _read_marketplace_identity()
+
 # Per Claude Code marketplace rules: if both marketplace.json plugins[0] and
 # plugin.json declare any of these fields, the install errors out unless the
 # marketplace entry sets `strict: true`. See _check_marketplace_contract.
@@ -25,7 +39,9 @@ MARKETPLACE_COMPONENT_FIELDS = ("commands", "agents", "skills", "hooks", "mcpSer
 CODEX_MARKETPLACE_LABEL = ".agents/plugins/marketplace.json"
 CODEX_MANIFEST_LABEL = "plugin/.codex-plugin/plugin.json"
 CODEX_MCP_LABEL = "plugin/.mcp.json"
-DIRECT_SOURCE_MARKETPLACE_NAME = "apple-mail-mcp"
+DIRECT_SOURCE_MARKETPLACE_NAME = MARKETPLACE_IDENTITY["standalone_compatibility"]["marketplace_id"]
+PRIMARY_MARKETPLACE_NAME = MARKETPLACE_IDENTITY["primary_marketplace"]["id"]
+PRIMARY_PLUGIN_SELECTOR = MARKETPLACE_IDENTITY["primary_marketplace"]["selector"]
 AGENTIC_ASSETS_MARKETPLACE_DISPLAY_NAME = "Agentic Assets"
 CODEX_REQUIRED_FIELDS = (
     "name",

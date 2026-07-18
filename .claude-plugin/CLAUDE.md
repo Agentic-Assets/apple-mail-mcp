@@ -1,9 +1,17 @@
 # .claude-plugin/ — marketplace manifest
 
-Top-level **Claude Code marketplace** registration → [`plugin/`](../plugin/) via `"source": "./plugin"`.
-That source is relative inside the GitHub marketplace checkout. User install
-docs must register `Agentic-Assets/apple-mail-mcp`, not a local checkout path,
-so Claude can keep the marketplace tied to its GitHub source.
+Top-level **Claude Code standalone compatibility marketplace** registration →
+[`plugin/`](../plugin/) via `"source": "./plugin"`. Its public/development
+identity is deliberately `apple-mail-mcp`, with selector
+`apple-mail@apple-mail-mcp`; never rename it to `agentic-assets`.
+
+Agentic Assets users install from the separate
+[`Agentic-Assets/Agentic-Assets-Marketplace`](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace)
+catalog with the primary selector `apple-mail@agentic-assets`. The
+machine-readable boundary is [`tools/marketplace_identity.json`](../tools/marketplace_identity.json).
+This source repository owns editable `plugin/` development. The central
+marketplace owns allowlisted signed-tag promotion, evidence, and attestations
+for its immutable `plugins/apple-mail` snapshot.
 
 Codex Desktop/CLI uses a separate marketplace file at [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json) plus [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json). Keep Claude and Codex plugin identities aligned, but do not add Codex fields to this Claude marketplace manifest.
 
@@ -31,10 +39,15 @@ The check lives in `tools/manifest_checks/install_contracts.py::_check_marketpla
 - Codex plugin manifest → `plugin/.codex-plugin/plugin.json`
 - Desktop bundle → [`apple-mail-mcpb/`](../apple-mail-mcpb/)
 
-## Local install
+## Install
 
 ```bash
-# From GitHub (users)
+# Primary Agentic Assets marketplace (users)
+claude plugin marketplace add Agentic-Assets/Agentic-Assets-Marketplace --scope user
+claude plugin marketplace update agentic-assets
+claude plugin install apple-mail@agentic-assets --scope user
+
+# Standalone compatibility marketplace (public development)
 claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user
 claude plugin marketplace update apple-mail-mcp
 claude plugin install apple-mail@apple-mail-mcp --scope user
@@ -46,14 +59,17 @@ claude plugin install apple-mail@apple-mail-mcp
 
 Installs the MCP server (41 tools, **`--draft-safe`** by default) plus **eleven** auto-discovered workflow skills under `plugin/skills/`; see [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md).
 
-Codex users install through the sibling Codex marketplace:
+Codex users should also use the central marketplace identity:
 
 ```bash
-codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git
-codex plugin add apple-mail@apple-mail-mcp
+codex plugin marketplace add https://github.com/Agentic-Assets/Agentic-Assets-Marketplace.git
+codex plugin add apple-mail@agentic-assets
 ```
 
-For a local checkout, use `codex plugin marketplace add .` before the same `codex plugin add apple-mail@apple-mail-mcp` command. The shared `agentic-assets` marketplace ID belongs to [`Agentic-Assets/Agentic-Assets-Marketplace`](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace), which can list both Apple Mail and Corbis without a source collision.
+For standalone compatibility testing, register this repository and use
+`apple-mail@apple-mail-mcp`. For a local checkout, use
+`codex plugin marketplace add .` before that selector. Keep the central and
+standalone registrations distinct so neither source can replace the other.
 
 After edits: `plugin-dev:plugin-validator` when available + `tools/gates/validate_manifests.sh` (+ `plugin-dev:skill-reviewer` when skills change).
 

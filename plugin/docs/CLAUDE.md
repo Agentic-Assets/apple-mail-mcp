@@ -56,13 +56,20 @@ Fresh-install test: run `bash tools/gates/verify-offline-runtime.sh plugin` or u
 
 ## Related distribution shapes
 
-- **`../../.claude-plugin/marketplace.json`** — Top-level Claude Code direct-source marketplace manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `claude plugin marketplace add Agentic-Assets/apple-mail-mcp --scope user`, `claude plugin marketplace update apple-mail-mcp`, then `claude plugin install apple-mail@apple-mail-mcp --scope user`
-- **`../../.agents/plugins/marketplace.json`** — Top-level Codex direct-source marketplace manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside the GitHub marketplace checkout; install with `codex plugin marketplace add https://github.com/Agentic-Assets/apple-mail-mcp.git` then `codex plugin add apple-mail@apple-mail-mcp`
+- **`../../tools/marketplace_identity.json`** — Identity boundary: central marketplace `agentic-assets` and selector `apple-mail@agentic-assets`; standalone compatibility marketplace `apple-mail-mcp` and selector `apple-mail@apple-mail-mcp`; immutable allowlisted signed-tag promotion into `plugins/apple-mail`
+- **`../../.claude-plugin/marketplace.json`** — Top-level Claude Code standalone development/public compatibility manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside this GitHub checkout; do not rename it to the central identity
+- **`../../.agents/plugins/marketplace.json`** — Top-level Codex standalone development/public compatibility manifest (`name`: `apple-mail-mcp`); `plugins[0].source` → `./plugin` inside this GitHub checkout; do not rename it to the central identity
 - **`../../apple-mail-mcpb/`** — Claude Desktop `.mcpb` bundle build (separate manifest)
+
+Agentic Assets user installs come from
+`Agentic-Assets/Agentic-Assets-Marketplace` with selector
+`apple-mail@agentic-assets`. That repository owns promotion policy, evidence,
+and attestations for the promoted payload. This repository remains the editable
+source of truth. Do not edit a promoted marketplace payload to fix source code.
 
 ## When to change what
 
-- **Manifest edits** (`plugin.json`, marketplace, mcpb, Codex `.mcp.json`): bump version in all versioned files (see root `CLAUDE.md`); keep `.agents/plugins/marketplace.json` pointed at `./plugin` and `plugin/.mcp.json` draft-safe unless intentionally changing send semantics; run **`plugin-dev:plugin-validator`** before merge when available.
+- **Manifest edits** (`plugin.json`, marketplace, mcpb, Codex `.mcp.json`): bump version in all versioned files (see root `CLAUDE.md`); preserve the standalone `apple-mail-mcp` identity, keep `.agents/plugins/marketplace.json` pointed at `./plugin`, and keep `plugin/.mcp.json` draft-safe unless intentionally changing send semantics; run **`plugin-dev:plugin-validator`** before merge when available.
 - **Cursor adapter edits** (`.cursor-plugin/plugin.json`, `mcp.json`): retain the separate local launcher contract and do not claim Cursor support until a live client acceptance test passes.
 - **Launcher / deps**: edit `start_mcp.sh`, `requirements.txt`, or `pyproject.toml`; keep plugin and PyPI dependencies/packages aligned (`mcp-ui-server`, `plugin/ui`); test fresh venv by removing `plugin/venv/`; run `bash tools/gates/dev-check.sh release`.
 - **New MCP tools**: implement under `apple_mail_mcp/tools/` and register in `apple_mail_mcp/__init__.py` — not in this wrapper layer.

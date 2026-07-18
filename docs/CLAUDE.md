@@ -20,7 +20,16 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 **Verifying against real Mail.app** → [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md): setup, permissions, `quick-check` / `perf-test` batteries, safe probes, MCP env vars (`DEFAULT_MAIL_ACCOUNT`, `DEFAULT_MAIL_SIGNATURE`, `USER_EMAIL_PREFERENCES`).
 
-**Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Codex routing lives in [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json), and [`../plugin/.mcp.json`](../plugin/.mcp.json). Cursor routing lives in [`../plugin/.cursor-plugin/plugin.json`](../plugin/.cursor-plugin/plugin.json) and [`../plugin/mcp.json`](../plugin/mcp.json); treat it as pending until live client acceptance. Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
+**Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Codex routing lives in [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json), and [`../plugin/.mcp.json`](../plugin/.mcp.json). Cursor routing lives in [`../plugin/.cursor-plugin/plugin.json`](../plugin/.cursor-plugin/plugin.json) and [`../plugin/mcp.json`](../plugin/mcp.json); local 41-tool Cursor Agent acceptance passed, while Cursor marketplace/UI admission remains unverified. Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
+
+**Marketplace identity / promotion** →
+[`tools/marketplace_identity.json`](../tools/marketplace_identity.json). Primary
+Agentic Assets installs use `apple-mail@agentic-assets` from
+`Agentic-Assets/Agentic-Assets-Marketplace`. This repository retains
+`apple-mail@apple-mail-mcp` only as a standalone development/public
+compatibility selector. Marketplace payloads are immutable snapshots promoted
+from allowlisted signed tags; the marketplace owns policy, evidence, and
+attestation records.
 
 **Planning / backlog** → [`tasks/CLAUDE.md`](../tasks/CLAUDE.md) (read § Agent requirements) and [`tasks/todo.md`](../tasks/todo.md).
 
@@ -57,10 +66,14 @@ Workflow entry points are skills-only. Do not add or restore legacy slash comman
 
 ## CI vs live
 
-CI never touches Mail.app. Manifest validation, **module line budget** report, and pytest ([`tools/CLAUDE.md`](../tools/CLAUDE.md)). Live testing is manual on macOS after local changes.
+Local CI-equivalent gates never touch Mail.app. They run manifest validation,
+the **module line budget** report, and pytest
+([`tools/CLAUDE.md`](../tools/CLAUDE.md)). Live testing is manual on macOS after
+local changes.
 
 ## Related
 
-- User-facing direct-source install: root [`README.md`](../README.md) (marketplace slug `apple-mail-mcp`, plugin `apple-mail@apple-mail-mcp`)
+- User-facing primary install: root [`README.md`](../README.md) (marketplace slug `agentic-assets`, plugin `apple-mail@agentic-assets`)
+- Standalone compatibility install: marketplace slug `apple-mail-mcp`, plugin `apple-mail@apple-mail-mcp`
 - Cross-session backlog: [`tasks/todo.md`](../tasks/todo.md)
 - Active robustness goal: [`tasks/reference/apple-mail-plugin-robustness-goal-2026-05-22.md`](../tasks/reference/apple-mail-plugin-robustness-goal-2026-05-22.md) · historical phase sequencing: [`tasks/reference/phase-plan-3.1.7.md`](../tasks/reference/phase-plan-3.1.7.md) · live baseline: [`tasks/reference/live-test-baseline-2026-05-21.md`](../tasks/reference/live-test-baseline-2026-05-21.md)

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+for variable in $(git rev-parse --local-env-vars); do
+  unset "$variable"
+done
+PY="$ROOT/.venv/bin/python"
+if [[ ! -x "$PY" ]]; then
+  echo "error: pre-push blocker requires $PY" >&2
+  exit 1
+fi
+exec "$PY" "$ROOT/tools/release/pre_push.py" check --root "$ROOT"

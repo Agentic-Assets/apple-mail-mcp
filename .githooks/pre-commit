@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+for variable in $(git rev-parse --local-env-vars); do
+  unset "$variable"
+done
+exec bash "$ROOT/tools/gates/pre-commit-validate.sh"

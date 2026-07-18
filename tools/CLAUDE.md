@@ -4,12 +4,41 @@ Dev-infra guardrails — not MCP tools (`plugin/apple_mail_mcp/tools/` is the se
 
 | Subfolder | Holds |
 |-----------|-------|
-| [`gates/`](gates/) | Shell entry-point gates invoked by CI, pre-commit, and `.claude/hooks` |
-| [`validators/`](validators/) | Python validators invoked by the gates, CI, and tests |
+| [`gates/`](gates/) | Shell entry-point gates invoked locally by pre-commit, pre-push, and `.claude/hooks` |
+| [`validators/`](validators/) | Python validators invoked by the local gates and tests |
 | [`manifest_checks/`](manifest_checks/) | Manifest check implementations (imported by `validators/validate_manifests.py`) |
 | [`probes/`](probes/) | Research / smoke / patch helpers (not gates, not validators) |
 
-Root keeps only `expected_test_count.txt` (single source of truth for the collected-test count) and this index.
+Root keeps `expected_test_count.txt` (single source of truth for the collected-test
+count), [`marketplace_identity.json`](marketplace_identity.json) (marketplace
+identity and promotion boundary), and this index.
+
+## Marketplace identity
+
+`tools/marketplace_identity.json` declares the primary central marketplace
+`agentic-assets`, selector `apple-mail@agentic-assets`, source payload
+`plugin/`, and destination `plugins/apple-mail`. Promotion must start from an
+immutable signed tag in this allowlisted repository. The central marketplace
+owns promotion policy, evidence, and attestations; promoted payloads are not
+edited directly.
+
+The same file locks this repository's root Claude and Codex marketplace
+manifests to their standalone development/public compatibility identity:
+`apple-mail-mcp` and `apple-mail@apple-mail-mcp`. Validators for those root
+manifests must continue to enforce that identity. They must not be changed to
+the central `agentic-assets` identity.
+
+## Marketplace refresh helpers
+
+| Helper | Audience | Contract |
+|--------|----------|----------|
+| [`gates/refresh-central-marketplace.sh`](gates/refresh-central-marketplace.sh) | Primary Agentic Assets users | Preflight, install, or refresh `apple-mail@agentic-assets` from `Agentic-Assets/Agentic-Assets-Marketplace`; never removes marketplaces, plugins, caches, or user data |
+| [`gates/refresh-local-plugins.sh`](gates/refresh-local-plugins.sh) | Maintainers and standalone public-development users | Refresh the compatibility selector `apple-mail@apple-mail-mcp` from this source repository without changing the central marketplace |
+
+Run `bash tools/gates/refresh-central-marketplace.sh --check` for a read-only
+central preflight, then omit `--check` to apply. The central helper verifies
+Claude Code and Codex registrations and runtime bootstrap. It is not proof of
+Cursor marketplace/UI admission.
 
 ## sync_skill_references
 
@@ -101,8 +130,19 @@ That smoke installs the plugin into a temporary `CODEX_HOME`, reads `codex mcp g
 
 Skips Claude marketplace `metadata.version` (1.0.0) and Codex marketplace release versioning because `.agents/plugins/marketplace.json` is install routing metadata — see [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md).
 
-**Direct-source install contract:** marketplace slug `apple-mail-mcp`, plugin selector
-`apple-mail@apple-mail-mcp`. The shared `agentic-assets` identity belongs to [`Agentic-Assets/Agentic-Assets-Marketplace`](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace), not this source repo. Canonical commands live in [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) and root [`README.md`](../README.md). To refresh an existing Mac, run [`gates/refresh-local-plugins.sh`](gates/refresh-local-plugins.sh). It preflights sources, installs and verifies the lowercase target, and never removes or changes the separate shared marketplace; a conflicting direct-source registration fails closed.
+**Standalone compatibility contract:** marketplace slug `apple-mail-mcp`,
+plugin selector `apple-mail@apple-mail-mcp`. The primary `agentic-assets`
+identity and `apple-mail@agentic-assets` selector belong to
+[`Agentic-Assets/Agentic-Assets-Marketplace`](https://github.com/Agentic-Assets/Agentic-Assets-Marketplace),
+not this source repo. Primary refreshes use
+[`gates/refresh-central-marketplace.sh`](gates/refresh-central-marketplace.sh).
+Canonical commands live in
+[`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md) and root
+[`README.md`](../README.md). To refresh an existing standalone development
+install, run [`gates/refresh-local-plugins.sh`](gates/refresh-local-plugins.sh).
+It preflights sources, installs and verifies the lowercase compatibility target,
+and never removes or changes the separate shared marketplace; a conflicting
+direct-source registration fails closed.
 
 ## check_wrapper_surface.py
 
@@ -200,10 +240,11 @@ already derived/enforced separately by `validate_manifests`.
 
 ## pre-commit hook
 
-Install once per clone:
+Install in every local or cloud coding checkout before its first commit or push:
 
 ```bash
 bash tools/gates/install-git-hooks.sh
+test "$(git config --get core.hooksPath)" = ".githooks"
 ```
 
 Runs `bash tools/gates/dev-check.sh default` on every commit (manifests + pytest; wrapper check when staged tool surface changes). Manual equivalent:
@@ -212,9 +253,13 @@ Runs `bash tools/gates/dev-check.sh default` on every commit (manifests + pytest
 bash tools/gates/pre-commit-validate.sh
 ```
 
-## CI
+## Local CI-equivalent blockers
 
-`.github/workflows/ci.yml` (Ubuntu, Python 3.10): `gates/validate_manifests.sh`, module line budget report, then `pytest tests/ -q -rw`. Same gate as pre-commit; live Mail is manual ([`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)).
+GitHub-hosted Actions are intentionally disabled. The checked-in pre-commit and
+pre-push hooks run the CI-equivalent validation in the coding checkout. The
+pre-push hook requires an exact current release-gate stamp for release-sensitive
+changes. Live Mail remains manual
+([`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md)).
 
 Run after tool add/remove, version bump, mcpb `tools[]` edit, or plugin skill marketing copy in manifests. Supplement with **`plugin-dev:plugin-validator`** when available; add **`plugin-dev:skill-reviewer`** when editing `plugin/skills/*/SKILL.md`.
 
