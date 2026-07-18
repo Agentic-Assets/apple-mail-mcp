@@ -38,10 +38,7 @@ codex plugin add apple-mail@agentic-assets
 The central marketplace contains an immutable promoted snapshot from an
 allowlisted, signed Apple Mail source tag. This repository remains the editable
 source of truth; the marketplace owns promotion policy, evidence, and
-attestations. Maintainers may still register this source repository's standalone
-compatibility catalogs as `apple-mail-mcp` and install
-`apple-mail@apple-mail-mcp`, but that is not the primary Agentic Assets user
-path.
+attestations.
 
 ## Install (standalone copy)
 

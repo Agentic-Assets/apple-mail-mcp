@@ -89,3 +89,17 @@ def test_user_and_maintainer_docs_preserve_the_identity_boundary() -> None:
         text = (ROOT / path).read_text(encoding="utf-8")
         assert "refresh-central-marketplace.sh" in text, path
         assert "refresh-local-plugins.sh" in text, path
+
+
+def test_bundled_skill_docs_do_not_advertise_standalone_selector() -> None:
+    legacy_selector = "apple-mail@apple-mail-mcp"
+    offenders = [
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "plugin" / "skills").rglob("*.md")
+        if legacy_selector in path.read_text(encoding="utf-8")
+    ]
+
+    assert not offenders, (
+        "Bundled skill documentation must use the central marketplace selector; "
+        f"found {legacy_selector} in: {', '.join(offenders)}"
+    )
