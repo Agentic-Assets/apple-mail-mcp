@@ -61,17 +61,21 @@ class FakeReadEngine:
     ) -> None:
         self.name = name
         self.expands_occurrences = expands_occurrences
-        self.calendars = calendars if calendars is not None else [
-            {"calendar_id": "UID-WORK", "id_kind": "uid", "name": "Work", "writable": True, "description": None},
-            {"calendar_id": "UID-HOME", "id_kind": "uid", "name": "Home", "writable": True, "description": None},
-            {
-                "calendar_id": "UID-TEST",
-                "id_kind": "uid",
-                "name": "MCP Test Calendar",
-                "writable": False,
-                "description": None,
-            },
-        ]
+        self.calendars = (
+            calendars
+            if calendars is not None
+            else [
+                {"calendar_id": "UID-WORK", "id_kind": "uid", "name": "Work", "writable": True, "description": None},
+                {"calendar_id": "UID-HOME", "id_kind": "uid", "name": "Home", "writable": True, "description": None},
+                {
+                    "calendar_id": "UID-TEST",
+                    "id_kind": "uid",
+                    "name": "MCP Test Calendar",
+                    "writable": False,
+                    "description": None,
+                },
+            ]
+        )
         self.events = events or []
         self.masters = masters or []
         self.default = default
@@ -105,8 +109,8 @@ class FakeReadEngine:
             rows = [e for e in rows if window.start <= e["start"] <= window.end]
         return rows, list(self.row_errors)
 
-    def fetch_recurring_masters(self, window, calendar_name, *, timeout=None):
-        self.master_calls.append({"calendar": calendar_name, "window": window})
+    def fetch_recurring_masters(self, window, calendar_name, *, include_detail=False, timeout=None):
+        self.master_calls.append({"calendar": calendar_name, "window": window, "include_detail": include_detail})
         return [dict(m) for m in self.masters if m.get("calendar") == calendar_name], []
 
 

@@ -210,6 +210,7 @@ def fetch_recurring_masters_script(
     end_block: str,
     scan_cap: int,
     timeout_seconds: int,
+    include_detail: bool = False,
 ) -> str:
     """Bounded lookback fetch of recurring masters.
 
@@ -234,7 +235,7 @@ def fetch_recurring_masters_script(
             repeat with anEvent in matchingEvents
                 set evRule to recurrence of anEvent
                 if evRule is not missing value and evRule is not "" then
-{_event_row_block(include_detail=False)}
+{_event_row_block(include_detail=include_detail)}
                 end if
             end repeat
         on error errMsg

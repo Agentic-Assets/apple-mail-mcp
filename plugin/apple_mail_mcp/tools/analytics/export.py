@@ -17,6 +17,8 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
 
 _EXPORT_MAX_EMAILS_CAP = 50
+_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+_ATTACHMENT_MAX_TOTAL_BYTES = 100 * 1024 * 1024
 
 
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS)
@@ -40,6 +42,7 @@ def export_emails(
     date_to: str | None = None,
     recent_days: float = 2.0,
     include_sent: bool = True,
+    include_attachments: bool = False,
     timeout: int | None = None,
 ) -> str:
     """
@@ -72,14 +75,18 @@ def export_emails(
         message_ids: Optional list of exact Apple Mail message ids to export
         mailbox: Mailbox to export from (default: "INBOX")
         save_directory: Directory to save exports (default: "~/Desktop")
-        format: Export format: "txt", "html" (default: "txt")
+        format: Export format: "txt", "html", or raw RFC 822 "eml"
+            (default: "txt"). EML preserves Mail's source headers and MIME
+            structure for import into other mail clients.
         max_emails: Maximum number of emails to export. Defaults to 25;
             hard-capped at 50 for every scope (export runs in small bounded
             batches by design). Page with ``offset`` or narrow with filters
             to export more; full-mailbox scans are disabled, so large
             metadata-only walks must page across several bounded calls.
         offset: Pagination offset for bounded filtered or entire_mailbox exports.
-        sort: Export ordering. Use "newest_first" or "date_desc".
+        sort: Deterministic mailbox-page ordering. "newest_first" (or the
+            compatibility alias "date_desc") orders an entire_mailbox page by
+            received date descending, then numeric Mail message id.
         sender_exact: Exact sender-address discovery filter for filtered scope.
         sender_domain: Sender-domain discovery filter for filtered scope.
         email_address: Address to match across sender and recipient fields for
@@ -88,6 +95,14 @@ def export_emails(
         date_to: Optional YYYY-MM-DD upper date bound.
         recent_days: Bounded discovery window for filtered and thread exports.
         include_sent: Include Sent in thread exports when true.
+        include_attachments: For EML exports, also save each message's
+            attachments to ``{index}_{subject}/attachments/`` beside
+            ``message.eml``. Each attachment is capped at 25 MiB and the
+            each bounded Mail export batch at 100 MiB; larger files are
+            skipped and reported.
+            Attachment reads can be slow on cold Exchange/Gmail caches; use a
+            small page and increase ``timeout`` from its 120-second default if
+            Mail needs longer to download files.
         timeout: Optional AppleScript timeout in seconds. Defaults to 120s.
 
     Returns:
@@ -95,11 +110,18 @@ def export_emails(
     """
 
     from apple_mail_mcp.tools import analytics
+    from apple_mail_mcp.tools.analytics.export_formatting import (
+        attachment_bundle_save_block,
+        attachment_bundle_setup_block,
+        export_content_block,
+        mailbox_lookup_block,
+        normalize_export_format,
+        sanitize_delimiter_block,
+    )
     from apple_mail_mcp.tools.analytics.export_helpers import (
         build_correspondent_export_script,
         build_entire_mailbox_export_script,
         message_ids_by_mailbox,
-        normalize_export_format,
         run_message_id_export,
         run_multi_mailbox_id_export,
         unbounded_export_error,
@@ -125,6 +147,8 @@ def export_emails(
         )
     if sort not in {"newest_first", "date_desc"}:
         return "Error: Invalid sort. Use: newest_first or date_desc"
+    if include_attachments and normalized_format != "eml":
+        return "Error: include_attachments requires format='eml'"
 
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = analytics.validate_account_name(account, timeout=validation_timeout)
@@ -158,6 +182,9 @@ def export_emails(
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
             ids_by_mailbox={mailbox: message_ids},
+            include_attachments=include_attachments,
+            max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
+            max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES,
             timeout=timeout,
             runner=analytics.run_applescript,
         )
@@ -190,15 +217,7 @@ def export_emails(
             try
                 set targetAccount to account "{safe_account}"
                 -- Try to get mailbox
-                try
-                    set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
-                on error
-                    if "{safe_mailbox}" is "INBOX" then
-                        set targetMailbox to mailbox "Inbox" of targetAccount
-                    else
-                        error "Mailbox not found: {safe_mailbox}"
-                    end if
-                end try
+                {mailbox_lookup_block(safe_mailbox)}
 
                 -- Export by exact Mail message id (no subject scan).
                 set matchedMessages to (every message of targetMailbox whose id is {target_message_id})
@@ -208,6 +227,7 @@ def export_emails(
                 end if
 
                 if foundMessage is not missing value then
+                    set aMessage to foundMessage
                     set messageSubject to subject of foundMessage
                     set messageSender to sender of foundMessage
                     set messageDate to date received of foundMessage
@@ -215,29 +235,18 @@ def export_emails(
 
                     -- Create safe filename
                     set safeSubject to messageSubject
-                    set AppleScript's text item delimiters to "/"
-                    set safeSubjectParts to text items of safeSubject
-                    set AppleScript's text item delimiters to "-"
-                    set safeSubject to safeSubjectParts as string
-                    set AppleScript's text item delimiters to ""
+                    {sanitize_delimiter_block("safeSubject")}
 
                     set fileName to safeSubject & ".{safe_format}"
                     set filePath to "{safe_save_dir}/" & fileName
+                    set exportDir to "{safe_save_dir}"
+                    set exportCount to 1
+                    set exportAttachmentBytes to 0
+                    {attachment_bundle_setup_block(include_attachments=include_attachments)}
 
-                    -- Prepare export content
-                    if "{safe_format}" is "txt" then
-                        set exportContent to "Subject: " & messageSubject & return
-                        set exportContent to exportContent & "From: " & messageSender & return
-                        set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
-                        set exportContent to exportContent & messageContent
-                    else if "{safe_format}" is "html" then
-                        set exportContent to "<html><body>"
-                        set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
-                        set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
-                        set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
-                        set exportContent to exportContent & "<hr>" & messageContent
-                        set exportContent to exportContent & "</body></html>"
-                    end if
+                    -- Prepare export content. EML uses raw Mail source so
+                    -- RFC 822 headers and MIME structure survive export.
+                    {export_content_block(safe_format)}
 
                     -- Ensure the flat save_directory exists (this scope writes
                     -- directly into it, unlike other scopes' export subdirectory).
@@ -248,6 +257,7 @@ def export_emails(
                     set eof of fileRef to 0
                     write exportContent to fileRef as «class utf8»
                     close access fileRef
+                    {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=_ATTACHMENT_MAX_BYTES, max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES)}
 
                     set outputText to outputText & "✓ Email exported successfully!" & return & return
                     set outputText to outputText & "Subject: " & messageSubject & return
@@ -305,6 +315,9 @@ def export_emails(
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
             ids_by_mailbox=message_ids_by_mailbox(records, default_mailbox=mailbox),
+            include_attachments=include_attachments,
+            max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
+            max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES,
             timeout=timeout,
             runner=analytics.run_applescript,
         )
@@ -347,6 +360,9 @@ def export_emails(
             include_sent=include_sent,
             date_setup=date_setup,
             date_filter=date_filter,
+            include_attachments=include_attachments,
+            max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
+            max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES,
         )
 
     elif scope == "thread":
@@ -415,6 +431,9 @@ def export_emails(
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
             message_ids=ordered_thread_ids,
+            include_attachments=include_attachments,
+            max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
+            max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES,
             timeout=timeout,
             runner=analytics.run_applescript,
         )
@@ -445,8 +464,12 @@ def export_emails(
             safe_save_dir=safe_save_dir,
             max_emails=max_emails,
             offset=offset,
+            sort=sort,
             date_setup=date_setup,
             date_filter=date_filter,
+            include_attachments=include_attachments,
+            max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
+            max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES,
         )
 
     else:

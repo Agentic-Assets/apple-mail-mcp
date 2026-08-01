@@ -80,10 +80,25 @@ def test_mailbox_ref_sent_mail_uses_account_scoped_fallback():
     assert script.index('mailbox "Sent Mail" of targetAccount') < script.index("every mailbox of targetAccount")
 
 
+def test_mailbox_ref_gmail_special_folders_use_account_scoped_fallback():
+    for mailbox in ("All Mail", "Important"):
+        script = build_mailbox_ref(mailbox)
+        assert f'mailbox "{mailbox}" of targetAccount' in script
+        assert "every mailbox of targetAccount" in script
+        assert script.index(f'mailbox "{mailbox}" of targetAccount') < script.index("every mailbox of targetAccount")
+
+
 def test_mailbox_ref_nested():
     script = build_mailbox_ref("Projects/2024")
     assert '"2024"' in script
     assert '"Projects"' in script
+
+
+def test_mailbox_ref_resolves_unique_nested_leaf_or_fails_closed():
+    script = build_mailbox_ref("2024")
+    assert "every mailbox of targetAccount" in script
+    assert "every mailbox of __mailboxParent" in script
+    assert 'error "Mailbox name is ambiguous: 2024. Use a mailbox path."' in script
 
 
 if __name__ == "__main__":

@@ -71,6 +71,7 @@ class CalendarReadEngine(Protocol):
         window: CalendarWindow,
         calendar_name: str,
         *,
+        include_detail: bool = False,
         timeout: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]: ...
 
@@ -182,6 +183,7 @@ class AppleScriptCalendarEngine:
         window: CalendarWindow,
         calendar_name: str,
         *,
+        include_detail: bool = False,
         timeout: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         require_issued_window(window)
@@ -198,6 +200,7 @@ class AppleScriptCalendarEngine:
             end_block=applescript_date_block("windowEnd", lookback.end),
             scan_cap=int(CALENDAR_BOUNDS["RECURRING_MASTER_SCAN_CAP"]),
             timeout_seconds=seconds,
+            include_detail=include_detail,
         )
         raw = run_applescript(script, timeout=seconds)
         return parse_event_rows(raw, _host_tz())

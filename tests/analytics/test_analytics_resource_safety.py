@@ -239,7 +239,7 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
             )
 
         mock_run.assert_not_called()
-        self.assertEqual(result, "Error: Invalid format 'pdf'. Supported: txt, html")
+        self.assertEqual(result, "Error: Invalid format 'pdf'. Supported: txt, html, eml")
 
     def test_entire_mailbox_offset_and_date_window_are_bounded(self):
         capture = _ScriptCapture(return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!")

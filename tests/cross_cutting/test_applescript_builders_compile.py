@@ -246,6 +246,7 @@ class OsacompileAvailableTests(unittest.TestCase):
             header_text="SAVING REPLY AS DRAFT",
             success_text="Reply saved as draft!",
             safe_account="Test Account",
+            mailbox_lookup='set sourceMailbox to mailbox "Inbox" of targetAccount',
             lookup_script="set foundMessage to missing value",
             not_found_message="Email not found",
             body_temp_path="/tmp/apple-mail-compile-check-body.txt",

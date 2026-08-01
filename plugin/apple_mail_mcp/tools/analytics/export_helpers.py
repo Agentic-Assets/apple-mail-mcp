@@ -6,16 +6,14 @@ from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import iter_id_chunks
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, normalize_message_ids, run_applescript
 from apple_mail_mcp.core.replied import sent_mailbox_resolve_script
-
-SUPPORTED_EXPORT_FORMATS = ("txt", "html")
-
-
-def normalize_export_format(format_value: str) -> str:
-    normalized = (format_value or "").strip().lower()
-    if normalized not in SUPPORTED_EXPORT_FORMATS:
-        supported = ", ".join(SUPPORTED_EXPORT_FORMATS)
-        raise ValueError(f"Invalid format '{format_value}'. Supported: {supported}")
-    return normalized
+from apple_mail_mcp.tools.analytics.export_formatting import (
+    attachment_bundle_save_block,
+    attachment_bundle_setup_block,
+    deterministic_newest_first_block,
+    export_content_block,
+    mailbox_lookup_block,
+    sanitize_delimiter_block,
+)
 
 
 def message_ids_by_mailbox(records: list[dict[str, object]], *, default_mailbox: str) -> dict[str, list[str]]:
@@ -49,37 +47,6 @@ def unbounded_export_error(account: str) -> str:
     )
 
 
-def _export_content_block(safe_format: str) -> str:
-    """AppleScript block formatting the txt/html export body.
-
-    Assumes ``messageSubject``, ``messageSender``, ``messageDate``, and
-    ``messageContent`` are already bound in the enclosing scope. Shared by
-    every per-message export builder to avoid repeating the format branch.
-    """
-    return f'''if "{safe_format}" is "txt" then
-                    set exportContent to "Subject: " & messageSubject & return
-                    set exportContent to exportContent & "From: " & messageSender & return
-                    set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
-                    set exportContent to exportContent & messageContent
-                else if "{safe_format}" is "html" then
-                    set exportContent to "<html><body>"
-                    set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
-                    set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
-                    set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
-                    set exportContent to exportContent & "<hr>" & messageContent
-                    set exportContent to exportContent & "</body></html>"
-                end if'''
-
-
-def _sanitize_delimiter_block(var_name: str) -> str:
-    """AppleScript block that replaces "/" with "-" in ``var_name`` in place."""
-    return f'''set AppleScript's text item delimiters to "/"
-                set {var_name}Parts to text items of {var_name}
-                set AppleScript's text item delimiters to "-"
-                set {var_name} to {var_name}Parts as string
-                set AppleScript's text item delimiters to ""'''
-
-
 def build_exact_message_export_script(
     *,
     safe_account: str,
@@ -87,6 +54,9 @@ def build_exact_message_export_script(
     safe_format: str,
     safe_save_dir: str,
     message_ids: list[str],
+    include_attachments: bool = False,
+    max_attachment_bytes: int = 25 * 1024 * 1024,
+    max_total_attachment_bytes: int = 100 * 1024 * 1024,
 ) -> str:
     requested_ids = ", ".join(message_ids)
     return f'''
@@ -94,18 +64,11 @@ def build_exact_message_export_script(
                 set outputText to "EXPORTING MESSAGES BY ID" & return & return
                 set requestedIds to {{{requested_ids}}}
                 set exportCount to 0
+                set exportAttachmentBytes to 0
 
                 try
                     set targetAccount to account "{safe_account}"
-                    try
-                        set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
-                    on error
-                        if "{safe_mailbox}" is "INBOX" then
-                            set targetMailbox to mailbox "Inbox" of targetAccount
-                        else
-                            error "Mailbox not found: {safe_mailbox}"
-                        end if
-                    end try
+                    {mailbox_lookup_block(safe_mailbox)}
 
                     set exportDir to "{safe_save_dir}/message_id_export"
                     do shell script "mkdir -p " & quoted form of exportDir
@@ -120,24 +83,27 @@ def build_exact_message_export_script(
 
                         if foundMessage is not missing value then
                             try
+                                set aMessage to foundMessage
                                 set messageSubject to subject of foundMessage
                                 set messageSender to sender of foundMessage
                                 set messageDate to date received of foundMessage
                                 set messageContent to content of foundMessage
 
                                 set safeSubject to messageSubject
-                                {_sanitize_delimiter_block("safeSubject")}
+                                {sanitize_delimiter_block("safeSubject")}
 
                                 set exportCount to exportCount + 1
                                 set fileName to exportCount & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
                                 set filePath to exportDir & "/" & fileName
+                                {attachment_bundle_setup_block(include_attachments=include_attachments)}
 
-                                {_export_content_block(safe_format)}
+                                {export_content_block(safe_format)}
 
                                 set fileRef to open for access POSIX file filePath with write permission
                                 set eof of fileRef to 0
                                 write exportContent to fileRef as «class utf8»
                                 close access fileRef
+                                {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
                                 set outputText to outputText & "✓ Exported message_id " & requestedIdText & ": " & messageSubject & return
                             on error exportErr
@@ -170,8 +136,12 @@ def build_entire_mailbox_export_script(
     safe_save_dir: str,
     max_emails: int,
     offset: int,
+    sort: str,
     date_setup: str,
     date_filter: str,
+    include_attachments: bool = False,
+    max_attachment_bytes: int = 25 * 1024 * 1024,
+    max_total_attachment_bytes: int = 100 * 1024 * 1024,
 ) -> str:
     """Bounded ``messages pageStart thru pageEnd`` page-slice export.
 
@@ -186,16 +156,7 @@ def build_entire_mailbox_export_script(
 
         try
             set targetAccount to account "{safe_account}"
-            -- Try to get mailbox
-            try
-                set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
-            on error
-                if "{safe_mailbox}" is "INBOX" then
-                    set targetMailbox to mailbox "Inbox" of targetAccount
-                else
-                    error "Mailbox not found: {safe_mailbox}"
-                end if
-            end try
+            {mailbox_lookup_block(safe_mailbox)}
 
             -- Bind only the requested page window; never the full message list.
             set messageCount to count of messages of targetMailbox
@@ -203,6 +164,7 @@ def build_entire_mailbox_export_script(
             set pageEnd to {offset} + {max_emails}
             if pageEnd > messageCount then set pageEnd to messageCount
             set exportCount to 0
+            set exportAttachmentBytes to 0
 
             -- Create export directory
             set exportDir to "{safe_save_dir}/{safe_mailbox}_export"
@@ -210,6 +172,11 @@ def build_entire_mailbox_export_script(
 
             if pageStart <= messageCount and pageStart <= pageEnd then
                 set pageMessages to messages pageStart thru pageEnd of targetMailbox
+                -- ``newest_first`` and compatibility alias ``date_desc`` are
+                -- both applied as descending received-date order.
+                if "{sort}" is "newest_first" or "{sort}" is "date_desc" then
+                    {deterministic_newest_first_block()}
+                end if
 
                 repeat with aMessage in pageMessages
                     try
@@ -220,23 +187,27 @@ def build_entire_mailbox_export_script(
                             set messageSubject to subject of aMessage
                             set messageSender to sender of aMessage
                             set messageContent to content of aMessage
+                            set messageId to id of aMessage
 
                             -- Create safe filename with index
                             set exportCount to exportCount + 1
                             set fileName to exportCount & "_" & messageSubject & ".{safe_format}"
 
                             -- Remove unsafe characters
-                            {_sanitize_delimiter_block("fileName")}
+                            {sanitize_delimiter_block("fileName")}
 
                             set filePath to exportDir & "/" & fileName
+                            {attachment_bundle_setup_block(include_attachments=include_attachments)}
 
-                            {_export_content_block(safe_format)}
+                            {export_content_block(safe_format)}
 
                             -- Write to file
                             set fileRef to open for access POSIX file filePath with write permission
                             set eof of fileRef to 0
                             write exportContent to fileRef as «class utf8»
                             close access fileRef
+                            {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
+                            set outputText to outputText & "Exported message_id: " & (messageId as string) & return
                         end if
 
                     on error
@@ -272,6 +243,9 @@ def build_multi_mailbox_id_export_script(
     safe_format: str,
     safe_save_dir: str,
     message_ids: list[str],
+    include_attachments: bool = False,
+    max_attachment_bytes: int = 25 * 1024 * 1024,
+    max_total_attachment_bytes: int = 100 * 1024 * 1024,
 ) -> str:
     """Export ids across a fixed candidate mailbox list; never opens "All Mail".
 
@@ -309,6 +283,7 @@ def build_multi_mailbox_id_export_script(
         set requestedIds to {{{requested_ids}}}
         set openMailboxes to {{}}
         set exportCount to 0
+        set exportAttachmentBytes to 0
 
         try
             set targetAccount to account "{safe_account}"
@@ -332,24 +307,27 @@ def build_multi_mailbox_id_export_script(
 
                 if foundMessage is not missing value then
                     try
+                        set aMessage to foundMessage
                         set messageSubject to subject of foundMessage
                         set messageSender to sender of foundMessage
                         set messageDate to date received of foundMessage
                         set messageContent to content of foundMessage
 
                         set safeSubject to messageSubject
-                        {_sanitize_delimiter_block("safeSubject")}
+                        {sanitize_delimiter_block("safeSubject")}
 
                         set exportCount to exportCount + 1
                         set fileName to exportCount & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
                         set filePath to exportDir & "/" & fileName
+                        {attachment_bundle_setup_block(include_attachments=include_attachments)}
 
-                        {_export_content_block(safe_format)}
+                        {export_content_block(safe_format)}
 
                         set fileRef to open for access POSIX file filePath with write permission
                         set eof of fileRef to 0
                         write exportContent to fileRef as «class utf8»
                         close access fileRef
+                        {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
                         set outputText to outputText & "✓ Exported message_id " & requestedIdText & ": " & messageSubject & return
                     on error exportErr
@@ -382,6 +360,9 @@ def run_multi_mailbox_id_export(
     safe_format: str,
     safe_save_dir: str,
     message_ids: list[str],
+    include_attachments: bool,
+    max_attachment_bytes: int,
+    max_total_attachment_bytes: int,
     timeout: int | None,
     runner: Callable[[str, int | None], str] = run_applescript,
 ) -> str:
@@ -402,6 +383,9 @@ def run_multi_mailbox_id_export(
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
             message_ids=chunk,
+            include_attachments=include_attachments,
+            max_attachment_bytes=max_attachment_bytes,
+            max_total_attachment_bytes=max_total_attachment_bytes,
         )
         try:
             chunk_results.append(runner(script, timeout if timeout is not None else 120))
@@ -424,6 +408,9 @@ def build_correspondent_export_script(
     include_sent: bool,
     date_setup: str,
     date_filter: str,
+    include_attachments: bool = False,
+    max_attachment_bytes: int = 25 * 1024 * 1024,
+    max_total_attachment_bytes: int = 100 * 1024 * 1024,
 ) -> str:
     sent_resolve = sent_mailbox_resolve_script("sentMailbox", "targetAccount")
     sent_append = ""
@@ -469,15 +456,7 @@ def build_correspondent_export_script(
 
             try
                 set targetAccount to account "{safe_account}"
-                try
-                    set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
-                on error
-                    if "{safe_mailbox}" is "INBOX" then
-                        set targetMailbox to mailbox "Inbox" of targetAccount
-                    else
-                        error "Mailbox not found: {safe_mailbox}"
-                    end if
-                end try
+                {mailbox_lookup_block(safe_mailbox)}
                 {sent_resolve}
                 set searchMailboxes to {{targetMailbox}}
                 {sent_append}
@@ -486,6 +465,7 @@ def build_correspondent_export_script(
                 do shell script "mkdir -p " & quoted form of exportDir
                 set totalExportCount to 0
                 set globalMatchedCount to 0
+                set exportAttachmentBytes to 0
 
                 repeat with currentMailbox in searchMailboxes
                     if totalExportCount >= {max_emails} then exit repeat
@@ -514,29 +494,17 @@ def build_correspondent_export_script(
                                     set mailboxExportCount to mailboxExportCount + 1
                                     set totalExportCount to totalExportCount + 1
                                     set fileName to totalExportCount & "_" & mailboxName & "_" & messageSubject & ".{safe_format}"
-                                    {_sanitize_delimiter_block("fileName")}
+                                    {sanitize_delimiter_block("fileName")}
                                     set filePath to exportDir & "/" & fileName
+                                    {attachment_bundle_setup_block(include_attachments=include_attachments)}
 
-                                    if "{safe_format}" is "txt" then
-                                        set exportContent to "Subject: " & messageSubject & return
-                                        set exportContent to exportContent & "From: " & messageSender & return
-                                        set exportContent to exportContent & "Mailbox: " & mailboxName & return
-                                        set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
-                                        set exportContent to exportContent & messageContent
-                                    else if "{safe_format}" is "html" then
-                                        set exportContent to "<html><body>"
-                                        set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
-                                        set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
-                                        set exportContent to exportContent & "<p><strong>Mailbox:</strong> " & mailboxName & "</p>"
-                                        set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
-                                        set exportContent to exportContent & "<hr>" & messageContent
-                                        set exportContent to exportContent & "</body></html>"
-                                    end if
+                                    {export_content_block(safe_format, include_mailbox=True)}
 
                                     set fileRef to open for access POSIX file filePath with write permission
                                     set eof of fileRef to 0
                                     write exportContent to fileRef as «class utf8»
                                     close access fileRef
+                                    {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
                                 end if
                             end if
                         on error
@@ -568,6 +536,9 @@ def run_message_id_export(
     safe_format: str,
     safe_save_dir: str,
     ids_by_mailbox: dict[str, list[str]],
+    include_attachments: bool,
+    max_attachment_bytes: int,
+    max_total_attachment_bytes: int,
     timeout: int | None,
     runner: Callable[[str, int | None], str] = run_applescript,
 ) -> str:
@@ -587,6 +558,9 @@ def run_message_id_export(
                 safe_format=safe_format,
                 safe_save_dir=safe_save_dir,
                 message_ids=chunk,
+                include_attachments=include_attachments,
+                max_attachment_bytes=max_attachment_bytes,
+                max_total_attachment_bytes=max_total_attachment_bytes,
             )
             try:
                 chunk_results.append(runner(script, timeout if timeout is not None else 120))

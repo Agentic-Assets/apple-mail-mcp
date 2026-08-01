@@ -36,7 +36,15 @@ budget) instead of erroring like mail's account scoping. Prefer explicit scoping
 - `list_events(days_ahead=7)` for the upcoming week across calendars.
 - `list_events(calendar="Work", days_ahead=1, days_back=0)` for today on one calendar.
 - `list_events(start="2026-08-01", end="2026-08-31", query="review")` for a bounded search.
+- `list_events(calendar="Work", start="2026-01-01", end="2026-03-31", participant_query="person@example.com")` for historical meetings with a person. Page with `offset`, then use `get_events_by_id` only for exact relevant ids.
 - Page with `offset` when `truncated` is true; never widen the window instead.
+
+`participant_query` matches attendee display names and email addresses without returning
+participant metadata in the list response. On the EventKit fast path it also matches
+organizer name and email; Calendar.app scripting exposes attendees but not an organizer
+field. Combine it with `query` when a title term is known; both filters must match. Keep
+historical searches calendar-scoped and in 30-90 day windows, then retrieve exact ids for
+full notes and attendee metadata.
 
 On `UNBOUNDED_CALENDAR_SCAN`, supply an explicit non-empty window; on
 `CALENDAR_WINDOW_TOO_WIDE`, narrow the window; on

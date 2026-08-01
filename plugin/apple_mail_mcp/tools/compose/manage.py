@@ -1,9 +1,11 @@
 """``manage_drafts`` tool: list/find/open/delete Mail drafts."""
 
+from apple_mail_mcp.applescript_snippets import thread_headers_block
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, inject_preferences, normalize_message_ids
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import compose
+from apple_mail_mcp.tools.compose.cleanup import _expected_recipient_literal
 from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
 from apple_mail_mcp.tools.compose.drafts_scripts import (
     _build_manage_drafts_find_script,
@@ -38,6 +40,9 @@ def manage_drafts(
     subject_contains: str | None = None,
     limit: int | None = None,
     in_reply_to: str | None = None,
+    expected_in_reply_to: str | None = None,
+    expected_subject: str | None = None,
+    expected_to: str | None = None,
 ) -> str:
     """
     Manage draft emails - list, create, send, open, delete, or cleanup_empty drafts.
@@ -69,6 +74,16 @@ def manage_drafts(
         max_deletes: For action="cleanup_empty", maximum number of blank drafts to delete in one call (safety cap). Default 20. Ignored by other actions.
         limit: For action="list" and action="find", maximum newest Drafts messages to show or inspect. Defaults to the repo scan cap.
         in_reply_to: For action="find", source Internet Message-ID to match against Drafts In-Reply-To or References headers. Honored ONLY by action="find". action="create" cannot set In-Reply-To/References (the Mail scripting dictionary exposes no header property on a new outgoing message), so passing in_reply_to with action="create" returns CREATE_CANNOT_THREAD and creates no draft; use reply_to_email(message_id=...) to thread a reply instead.
+        expected_in_reply_to: For action="delete", the durable source
+            Message-ID expected in the current draft's In-Reply-To or
+            References headers. Supplying this guard requires
+            ``expected_subject`` and ``expected_to`` too; all three are
+            re-read inside the same AppleScript transaction immediately before
+            deletion. Use this guarded path for synchronized IMAP/Exchange
+            Drafts, whose numeric ids can drift.
+        expected_subject: Exact subject expected by the guarded delete path.
+        expected_to: Comma-separated recipient set expected by the guarded
+            delete path. Comparison is case-insensitive and set-based.
 
     Returns:
         Formatted output based on action. For action="list" each draft now reports
@@ -83,6 +98,25 @@ def manage_drafts(
             preferred="Call manage_drafts(action='list') or manage_drafts(action='find') first, then pass draft_id.",
             discovery="manage_drafts(action='list', subject_contains=...) or manage_drafts(action='find', in_reply_to=...)",
             exact_selector="draft_id",
+        )
+
+    delete_identity_supplied = any((expected_in_reply_to, expected_subject, expected_to))
+    if (
+        action == "delete"
+        and delete_identity_supplied
+        and not all((expected_in_reply_to, expected_subject, expected_to))
+    ):
+        return serialize_tool_error(
+            ToolError(
+                code="DRAFT_DELETE_IDENTITY_INCOMPLETE",
+                message=(
+                    "Guarded draft deletion requires expected_in_reply_to, expected_subject, and expected_to together. "
+                    "No draft was deleted."
+                ),
+                remediation={
+                    "preferred": "Re-resolve with manage_drafts(action='find', in_reply_to=...) and pass the current subject and recipients.",
+                },
+            )
         )
 
     account, account_error = _resolve_account(account, timeout=timeout)
@@ -342,6 +376,78 @@ def manage_drafts(
         if lookup_script is None:
             return _draft_label
 
+        guarded_delete_script = ""
+        if delete_identity_supplied:
+            assert expected_in_reply_to is not None
+            assert expected_subject is not None
+            assert expected_to is not None
+            normalized_expected_in_reply_to = expected_in_reply_to.strip("<> ")
+            if not normalized_expected_in_reply_to:
+                return serialize_tool_error(
+                    ToolError(
+                        code="DRAFT_DELETE_IDENTITY_INCOMPLETE",
+                        message="Guarded draft deletion requires a non-empty expected In-Reply-To value. No draft was deleted.",
+                        remediation={
+                            "preferred": "Pass the source Internet Message-ID returned by the resolved reply draft."
+                        },
+                    )
+                )
+            expected_to_literal = _expected_recipient_literal(expected_to)
+            if expected_to_literal is None:
+                return serialize_tool_error(
+                    ToolError(
+                        code="DRAFT_DELETE_IDENTITY_INCOMPLETE",
+                        message="Guarded draft deletion requires at least one expected recipient. No draft was deleted.",
+                        remediation={"preferred": "Pass the exact current To recipients from the resolved draft."},
+                    )
+                )
+            safe_expected_in_reply_to = escape_applescript(normalized_expected_in_reply_to)
+            safe_expected_subject = escape_applescript(expected_subject)
+            headers_script = thread_headers_block(
+                message_var="foundDraft",
+                in_reply_to_var="currentInReplyTo",
+                references_var="currentReferences",
+                include_on_error=True,
+            )
+            guarded_delete_script = f'''
+                    -- Exchange and IMAP Drafts can reassign numeric ids during sync.
+                    -- Revalidate the durable thread header, subject, and recipient
+                    -- set after the id lookup and immediately before deletion.
+                    set deleteIdentityMatches to true
+                    if (subject of foundDraft as string) is not "{safe_expected_subject}" then set deleteIdentityMatches to false
+                    {headers_script}
+                    set expectedRfcToken to "<{safe_expected_in_reply_to}>"
+                    if currentInReplyTo does not contain expectedRfcToken and currentReferences does not contain expectedRfcToken then set deleteIdentityMatches to false
+                    set actualToAddresses to {{}}
+                    try
+                        repeat with aRecipient in (to recipients of foundDraft)
+                            try
+                                set end of actualToAddresses to (address of aRecipient as string)
+                            end try
+                        end repeat
+                    end try
+                    set expectedToAddresses to {expected_to_literal}
+                    repeat with expectedToAddress in expectedToAddresses
+                        set expectedRecipientFound to false
+                        repeat with actualToAddress in actualToAddresses
+                            ignoring case
+                                if (actualToAddress as string) is (expectedToAddress as string) then set expectedRecipientFound to true
+                            end ignoring
+                        end repeat
+                        if not expectedRecipientFound then set deleteIdentityMatches to false
+                    end repeat
+                    repeat with actualToAddress in actualToAddresses
+                        set actualRecipientExpected to false
+                        repeat with expectedToAddress in expectedToAddresses
+                            ignoring case
+                                if (actualToAddress as string) is (expectedToAddress as string) then set actualRecipientExpected to true
+                            end ignoring
+                        end repeat
+                        if not actualRecipientExpected then set deleteIdentityMatches to false
+                    end repeat
+                    if not deleteIdentityMatches then return "DRAFT_DELETE_IDENTITY_DRIFT|||" & draftId
+            '''
+
         script = f'''
         tell application "Mail"
             set outputText to "DELETING DRAFT" & return & return
@@ -354,6 +460,8 @@ def manage_drafts(
                 if foundDraft is not missing value then
                     set draftSubject to subject of foundDraft
                     set draftId to id of foundDraft as string
+
+                    {guarded_delete_script}
 
                     -- Delete the draft
                     delete foundDraft
@@ -453,5 +561,19 @@ def manage_drafts(
         return (
             f"Error: AppleScript timed out for manage_drafts action {action!r} on "
             f"account {account!r}. Try again or pass a larger `timeout`."
+        )
+    if action == "delete" and result.strip().startswith("DRAFT_DELETE_IDENTITY_DRIFT|||"):
+        current_id = result.strip().split("|||", 1)[1]
+        return serialize_tool_error(
+            ToolError(
+                code="DRAFT_DELETE_IDENTITY_DRIFT",
+                message=(
+                    "Draft identity no longer matches the durable threading, subject, and recipient guard; no draft was deleted."
+                ),
+                remediation={
+                    "draft_id": current_id,
+                    "preferred": "Re-run manage_drafts(action='find', in_reply_to=...) and inspect the current draft before deleting.",
+                },
+            )
         )
     return result

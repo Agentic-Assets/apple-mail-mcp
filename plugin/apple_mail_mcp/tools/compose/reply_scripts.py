@@ -7,7 +7,6 @@ module without touching any I/O or patched name.
 
 from dataclasses import dataclass
 
-from apple_mail_mcp.core import inbox_mailbox_script
 from apple_mail_mcp.tools.compose.constants import TYPING_CHUNK_SIZE, TYPING_INTER_CHUNK_DELAY
 from apple_mail_mcp.tools.compose.lookup_scripts import _compose_signature_script
 from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
@@ -99,6 +98,7 @@ def _build_reply_objectmodel_applescript(
     header_text: str,
     success_text: str,
     safe_account: str,
+    mailbox_lookup: str,
     lookup_script: str,
     not_found_message: str,
     body_temp_path: str,
@@ -142,7 +142,7 @@ tell application "Mail"
 
     try
         set targetAccount to account "{safe_account}"
-        {inbox_mailbox_script("inboxMailbox", "targetAccount")}
+        {mailbox_lookup}
         {lookup_script}
 
         if foundMessage is missing value then
@@ -307,6 +307,7 @@ def _build_reply_native_window_applescript(
     header_text: str,
     success_text: str,
     safe_account: str,
+    mailbox_lookup: str,
     lookup_script: str,
     not_found_message: str,
     body_temp_path: str,
@@ -391,7 +392,7 @@ set guardSE to "(unset)"
 try
     tell application "Mail"
         set targetAccount to account "{safe_account}"
-        {inbox_mailbox_script("inboxMailbox", "targetAccount")}
+        {mailbox_lookup}
         {lookup_script}
 
         if foundMessage is missing value then
