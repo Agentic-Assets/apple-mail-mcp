@@ -27,14 +27,14 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | `manage/sync.py` | 1 | IMAP sync: `synchronize_account` (`helpers.py` is a shared leaf) |
 | `analytics/attachments.py` | 1 | Attachment listing: `list_email_attachments` (`statistics_parsing.py` is a pure leaf) |
 | `analytics/statistics.py` | 1 | Stats: `get_statistics` (account_overview/sender_stats/mailbox_breakdown) |
-| `analytics/export.py` | 1 | Export: `export_emails` by exact ids, bounded filters, correspondent/thread scopes, or mailbox pages |
+| `analytics/export.py` | 1 | Export: `export_emails` by exact ids, bounded filters, correspondent/thread scopes, or mailbox pages; supports raw EML and optional size-capped attachment bundles (`export_helpers.py` / `export_formatting.py` leaves) |
 | `analytics/full_export.py` | 1 | Disabled refusal shim: `full_inbox_export` (returns `UNBOUNDED_EXPORT_DISABLED`, no AppleScript runs) |
 | `analytics/dashboard.py` | 1 | Dashboard: `inbox_dashboard` + recent-email helpers |
 | `smart_inbox/awaiting_reply.py` | 1 | Follow-up tracking: `get_awaiting_reply` (sent-vs-inbox Message-ID cross-reference; `helpers.py` shares `_normalize_message_id`) |
 | `smart_inbox/needs_response.py` | 1 | Actionable detection: `get_needs_response` (newsletter/automated filtering, replied-detection join) |
 | `smart_inbox/top_senders.py` | 1 | Sender analytics: `get_top_senders` (bounded newest-first Counter aggregation, domain grouping) |
 | `calendar/calendars_list.py` | 1 | Calendar enumeration: `list_calendars` (writability, defaults, engine diagnostics) |
-| `calendar/events_list.py` | 1 | Bounded event listing/search: `list_events` (windows, query, recurring expansion, paging; `helpers.py` shares the fan-out collector) |
+| `calendar/events_list.py` | 1 | Bounded event listing/search: `list_events` (windows, query, participant-name/address filtering, recurring expansion, paging; `helpers.py` shares the fan-out collector) |
 | `calendar/events_get.py` | 1 | Exact-id detail fetch: `get_events_by_id` (notes, alarms, attendees; window-bounded) |
 | `calendar/availability.py` | 1 | Free-busy folding: `check_availability` (busy blocks + free slots, 62-day cap) |
 | `calendar/events_create.py` | 1 | Event creation: `create_event` (timezone-correct, alarms, allowlisted RRULE, conflict detection) |
@@ -125,7 +125,7 @@ Do not match outgoing rich drafts by subject — `_save_new_compose_window_as_dr
 
 ## Module size
 
-Every tool surface is now a split-by-domain package under the **600 LOC** budget; the `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, and `smart_inbox/` packages are the worked examples (search: `emails.py`, `by_id.py`, `thread.py`, plus `records.py`/`script.py`/`dispatch.py` leaves; inbox: `list_emails.py`, `unread_counts.py`, `accounts.py`, `mailboxes.py`, `overview.py`, plus `parsing.py`/`list_scripts.py` leaves; manage: `move.py`, `attachments.py`, `status.py`, `trash.py`, `mailbox.py`, `sync.py`, plus the shared `helpers.py` leaf; analytics: `attachments.py`, `statistics.py`, `export.py`, `export_helpers.py`, `full_export.py`, `dashboard.py`, plus the pure `statistics_parsing.py` leaf; smart_inbox: `awaiting_reply.py`, `needs_response.py`, `top_senders.py`, plus the pure `helpers.py` leaf), each file under budget, linked through the package `__init__.py` facade. CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. Prefer the same domain split over reviving single-file monoliths. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
+Every tool surface is a split-by-domain package under the **600 LOC** budget. The `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`, and `calendar/` packages are the worked examples; use their package `__init__.py` facades and focused leaves instead of reviving single-file monoliths. In particular, analytics splits export behavior between `export.py`, `export_helpers.py`, and pure `export_formatting.py`; calendar shares bounded engine and collection behavior through `calendar_core/` and `calendar/helpers.py`. CI warns on every run and **blocks growth** past the baseline in `tests/fixtures/module_line_budget/baseline.json`. See [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Module line budget.
 
 ## Related
 

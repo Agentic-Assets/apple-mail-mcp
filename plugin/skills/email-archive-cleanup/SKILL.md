@@ -75,7 +75,7 @@ Sequence:
 
 1. `search_emails(..., limit≤50)` preview; escalate only after inspecting sample subjects.
 2. Optional analytics: `get_statistics(scope="sender_stats", sender="...")` or `scope="mailbox_breakdown"` for volume proof.
-3. When deletion risk looms: `export_emails(...)` snapshots before **`manage_trash`**.
+3. When deletion risk looms: `export_emails(...)` snapshots before **`manage_trash`**. For preservation or migration evidence, use reviewed ids (or one bounded page) with `format="eml"` to preserve raw RFC 822 source headers and MIME. Use `include_attachments=True` only when required: each attachment is capped at 25 MiB and each batch at 100 MiB, skipped files are reported, and cold Exchange/Gmail caches may need a small page plus a higher `timeout` than the 120-second default.
 
 For archive campaigns, apply the **Human-Sender Screen** (above) to the preview results now: drop any human-looking or ambiguous sender from the candidate list before it becomes an id to move. Always quote expected totals after dry runs.
 

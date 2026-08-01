@@ -238,6 +238,20 @@ def _matches_query(payload: dict[str, Any], query: str) -> bool:
     return False
 
 
+def _matches_participant(raw: dict[str, Any], query: str) -> bool:
+    """Case-insensitively match attendee or organizer name/email metadata."""
+    needle = query.casefold()
+    participants = [raw.get("organizer"), *(raw.get("attendees") or [])]
+    for participant in participants:
+        if not isinstance(participant, dict):
+            continue
+        for field in ("name", "email"):
+            value = participant.get(field)
+            if isinstance(value, str) and needle in value.casefold():
+                return True
+    return False
+
+
 def collect_window_events(
     *,
     engine: CalendarReadEngine,
@@ -247,6 +261,7 @@ def collect_window_events(
     include_detail: bool = False,
     event_ids: list[str] | None = None,
     query: str | None = None,
+    participant_query: str | None = None,
     include_all_day: bool = True,
     timeout: int | None = None,
     budget: CallBudget | None = None,
@@ -276,13 +291,17 @@ def collect_window_events(
                 window,
                 name,
                 scan_cap=int(CALENDAR_BOUNDS["EVENT_SCAN_CAP"]),
-                include_detail=include_detail,
+                # This extra metadata is private to filtering: list responses
+                # remain summary-only unless their caller requested detail.
+                include_detail=include_detail or bool(participant_query),
                 event_ids=event_ids,
                 timeout=timeout,
             )
             calendar_errors.extend(f"{name}: {err}" for err in row_errors)
             recurring_masters: dict[str, dict[str, Any]] = {}
             for raw in raw_events:
+                if participant_query and not _matches_participant(raw, participant_query):
+                    continue
                 if raw.get("recurrence") and expand_recurring and not engine.expands_occurrences:
                     recurring_masters[str(raw["event_id"])] = raw
                     continue
@@ -293,9 +312,16 @@ def collect_window_events(
                     event_payload(raw, tz=tz, engine=engine.name, include_detail=include_detail, expansion=expansion)
                 )
             if expand_recurring and not engine.expands_occurrences and event_ids is None:
-                masters, master_errors = engine.fetch_recurring_masters(window, name, timeout=timeout)
+                masters, master_errors = engine.fetch_recurring_masters(
+                    window,
+                    name,
+                    include_detail=include_detail or bool(participant_query),
+                    timeout=timeout,
+                )
                 calendar_errors.extend(f"{name}: {err}" for err in master_errors)
                 for raw in masters:
+                    if participant_query and not _matches_participant(raw, participant_query):
+                        continue
                     recurring_masters.setdefault(str(raw["event_id"]), raw)
             for raw in recurring_masters.values():
                 rule_text = str(raw.get("recurrence") or "")

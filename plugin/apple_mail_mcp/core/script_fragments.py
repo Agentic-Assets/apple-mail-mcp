@@ -140,37 +140,55 @@ def build_mailbox_ref(
                 error "Mailbox not found: {escaped} (no localized inbox match)"
             end if"""
 
-    # Some provider-specific Sent folders are returned by ``every mailbox``
-    # but reject a direct named lookup. Try the requested name first so a
-    # user-created mailbox with one of these names still wins, then match the
-    # exact display name within the requested account only.
-    if mailbox.casefold() in SENT_MAILBOX_NAMES:
+    # Some provider-specific system folders are returned by ``every mailbox``
+    # but reject a direct named lookup. This is known for Sent Mail on Gmail
+    # and for labels such as All Mail and Important. Try the requested name
+    # first so a user-created mailbox with the same name still wins, then
+    # match the exact display name within the requested account only. This is
+    # a metadata-only fallback; it never enumerates messages.
+    if mailbox.casefold() in SENT_MAILBOX_NAMES | {"all mail", "important"}:
         return f'''set {var_name} to missing value
             try
                 set {var_name} to mailbox "{escaped}" of {account_var}
             on error
                 try
-                    repeat with __sentMailboxCandidate in every mailbox of {account_var}
-                        if (name of __sentMailboxCandidate as string) is "{escaped}" then
-                            set {var_name} to __sentMailboxCandidate
+                    repeat with __mailboxCandidate in every mailbox of {account_var}
+                        if (name of __mailboxCandidate as string) is "{escaped}" then
+                            set {var_name} to __mailboxCandidate
                             exit repeat
                         end if
                     end repeat
                     if {var_name} is missing value then
-                        error "Sent mailbox is unavailable in account"
+                        error "Mailbox is unavailable in account"
                     end if
                 on error
                     error "Mailbox not found: {escaped}"
                 end try
             end try'''
 
-    return f'''try
+    # Search results describe a mailbox by its display name. A nested leaf is
+    # usable only when it is unique, so resolve it across the account and one
+    # child level, otherwise require a ``Parent/Child`` path. This metadata
+    # fallback never scans messages.
+    return f'''set {var_name} to missing value
+            try
                 set {var_name} to mailbox "{escaped}" of {account_var}
             on error
-                if "{escaped}" is "INBOX" then
-                    set {var_name} to mailbox "Inbox" of {account_var}
-                else
+                set matchingMailboxes to {{}}
+                repeat with __mailboxParent in every mailbox of {account_var}
+                    if (name of __mailboxParent as string) is "{escaped}" then set end of matchingMailboxes to __mailboxParent
+                    try
+                        repeat with __mailboxChild in every mailbox of __mailboxParent
+                            if (name of __mailboxChild as string) is "{escaped}" then set end of matchingMailboxes to __mailboxChild
+                        end repeat
+                    end try
+                end repeat
+                if (count of matchingMailboxes) is 1 then
+                    set {var_name} to item 1 of matchingMailboxes
+                else if (count of matchingMailboxes) is 0 then
                     error "Mailbox not found: {escaped}"
+                else
+                    error "Mailbox name is ambiguous: {escaped}. Use a mailbox path."
                 end if
             end try'''
 

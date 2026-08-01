@@ -32,6 +32,7 @@ async def list_events(
     days_ahead: float = 7.0,
     timezone: str | None = None,
     query: str | None = None,
+    participant_query: str | None = None,
     include_all_day: bool = True,
     expand_recurring: bool = True,
     output_format: str = "json",
@@ -62,6 +63,11 @@ async def list_events(
     reported in ``calendar_errors`` and ``budget_exhausted``. ``query``
     matches title, location, and the first 280 characters of notes
     (``notes_preview``, not the full note) case-insensitively in Python.
+    ``participant_query`` independently matches attendee names and email
+    addresses. The EventKit fast path also matches organizer name and email;
+    Calendar.app's scripting API does not expose organizer metadata. Both
+    filters must match when supplied, and participant metadata is not added to
+    this list response.
 
     Args:
         calendar: One calendar name (fuzzy-resolved). Mutually exclusive with
@@ -73,6 +79,8 @@ async def list_events(
         days_ahead: Relative window days after now (default 7).
         timezone: IANA zone for interpretation and output (default host zone).
         query: Case-insensitive substring over title/location/notes.
+        participant_query: Case-insensitive substring over attendee names and
+            email addresses; EventKit also searches organizer metadata.
         include_all_day: Include all-day events (default True).
         expand_recurring: Expand recurring series into occurrences.
         output_format: "json" (default) or "text".
@@ -111,6 +119,7 @@ async def list_events(
             calendar_names=names,
             expand_recurring=expand_recurring,
             query=query,
+            participant_query=participant_query,
             include_all_day=include_all_day,
             timeout=timeout,
         )

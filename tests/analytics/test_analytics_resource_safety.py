@@ -239,7 +239,7 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
             )
 
         mock_run.assert_not_called()
-        self.assertEqual(result, "Error: Invalid format 'pdf'. Supported: txt, html")
+        self.assertEqual(result, "Error: Invalid format 'pdf'. Supported: txt, html, eml")
 
     def test_entire_mailbox_offset_and_date_window_are_bounded(self):
         capture = _ScriptCapture(return_value="EXPORTING MAILBOX\n\n✓ Mailbox exported successfully!")
@@ -285,7 +285,7 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
         mock_search.assert_called_once()
         self.assertEqual(mock_search.call_args.kwargs["sender_exact"], "person@example.com")
         self.assertEqual(len(capture.scripts), 2)
-        self.assertIn('mailbox "INBOX" of targetAccount', capture.scripts[0])
+        self.assertIn('repeat with __mailboxLookupName in {"INBOX", "Inbox"', capture.scripts[0])
         self.assertIn('mailbox "Archive" of targetAccount', capture.scripts[1])
 
     def test_thread_export_maps_ids_to_openable_mailboxes_not_all_mail(self):

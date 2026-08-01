@@ -2,14 +2,15 @@
 
 Candidate follow-up work. This is a menu, not a roadmap.
 
-## Release and marketplace
+## Marketplace and client evidence
 
-- **Complete the v3.11.6 source release** (priority: high; confidence: verified prerequisite)
-  Review and merge the feature branch only after Cayman's literal approval,
-  then create and verify the signed immutable source tag.
+**Resolution update (2026-08-01):** the v3.11.6 source branch merged on
+`origin/main` and its immutable tag exists. The remaining work is external
+Marketplace admission and client evidence, not another source-release merge.
+
 - **Regenerate central marketplace admission from v3.11.6** (priority: high; confidence: verified prerequisite)
-  Discard the staged v3.11.5 candidate, promote the signed v3.11.6 tag, and
-  rerun Codex, Claude, Cursor, and macOS Mail evidence against the new digest.
+  Promote only a trusted signed source tag and rerun Codex, Claude, Cursor,
+  and macOS Mail evidence against the resulting digest.
 - **Prove Cursor marketplace/UI distribution** (priority: high; confidence: verified evidence gap)
   Import the corrected official-schema catalog through Cursor's current team
   marketplace surface and capture install, update, rollback, and 41-tool

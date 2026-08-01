@@ -5,7 +5,6 @@ import types
 from datetime import datetime, timezone
 
 import pytest
-
 from apple_mail_mcp.calendar_core import eventkit as eventkit_mod
 from apple_mail_mcp.calendar_core.eventkit import EventKitCalendarEngine, eventkit_status
 from apple_mail_mcp.calendar_core.window import bounded_calendar_window
@@ -145,6 +144,9 @@ class _EventStub:
     def attendees(self):
         return []
 
+    def organizer(self):
+        return None
+
     def alarms(self):
         return []
 
@@ -203,7 +205,9 @@ class TestEventKitEngine:
         cal = _CalStub("Work")
         start_ts = datetime(2026, 7, 10, 9, tzinfo=UTC).timestamp()
         end_ts = datetime(2026, 7, 10, 10, tzinfo=UTC).timestamp()
-        engine, store = _engine(monkeypatch, events=[_EventStub("EK-1", "Standup", start_ts, end_ts, cal, recurring=True)])
+        engine, store = _engine(
+            monkeypatch, events=[_EventStub("EK-1", "Standup", start_ts, end_ts, cal, recurring=True)]
+        )
         window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
         records, errors = engine.fetch_window(window, "Work", scan_cap=300)
         assert errors == []
@@ -235,6 +239,26 @@ class TestEventKitEngine:
         window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
         records, _errors = engine.fetch_window(window, "Work", scan_cap=300, event_ids=["EK-1"])
         assert [r["event_id"] for r in records] == ["EK-1"]
+
+    def test_detail_maps_organizer_for_participant_matching(self, monkeypatch):
+        class _Organizer:
+            def name(self):
+                return "Alex Example"
+
+            def URL(self):
+                return types.SimpleNamespace(absoluteString=lambda: "mailto:alex@example.test")
+
+        class _OrganizedEvent(_EventStub):
+            def organizer(self):
+                return _Organizer()
+
+        cal = _CalStub("Work")
+        ts = datetime(2026, 7, 10, 9, tzinfo=UTC).timestamp()
+        engine, _store = _engine(monkeypatch, events=[_OrganizedEvent("EK-1", "E", ts, ts + 60, cal)])
+        window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
+        records, errors = engine.fetch_window(window, "Work", scan_cap=300, include_detail=True)
+        assert errors == []
+        assert records[0]["organizer"] == {"name": "Alex Example", "email": "alex@example.test"}
 
     def test_recurring_masters_pass_is_empty(self, monkeypatch):
         engine, _store = _engine(monkeypatch, events=[])

@@ -1,11 +1,18 @@
 # Live MCP + CLI Testing Report
 
+> **Historical record:** This is a 2026-05-21 snapshot of version 3.1.5 with
+> 27 registered tools, not the current baseline. Preserve its observations as
+> historical evidence. For current procedures, use
+> [`docs/AGENT_LIVE_TESTING.md`](../AGENT_LIVE_TESTING.md); for the current
+> branch's redacted results, use
+> [`LIVE_VERIFICATION_REPORT_2026-08-01.md`](LIVE_VERIFICATION_REPORT_2026-08-01.md).
+
 **Date:** 2026-05-21  
 **Branch:** `improve-speed-and-tools`  
 **Scope:** Safe live testing against local Mail.app using both the repo-owned CLI (`.venv/bin/apple-mail`) and the generated MCP wrapper (`apple-mail`).  
 **Safety:** Read-only commands and dry-run/no-hit mutation previews only. No mail was sent, moved, deleted, flagged, marked read/unread, or synchronized.
 
-## Current Baseline
+## Snapshot Baseline (2026-05-21)
 
 The working tree has substantial uncommitted implementation work from another agent. This report tests that current working tree as-is.
 

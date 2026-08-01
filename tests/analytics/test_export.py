@@ -124,7 +124,7 @@ def test_invalid_pdf_format_rejected_before_applescript():
     result, capture = _export(scope="entire_mailbox", format="pdf")
 
     assert not capture.scripts
-    assert result == "Error: Invalid format 'pdf'. Supported: txt, html"
+    assert result == "Error: Invalid format 'pdf'. Supported: txt, html, eml"
 
 
 def test_oldest_first_sort_rejected():
@@ -132,6 +132,38 @@ def test_oldest_first_sort_rejected():
 
     assert not capture.scripts
     assert result == "Error: Invalid sort. Use: newest_first or date_desc"
+
+
+def test_eml_export_uses_raw_mail_source_to_preserve_headers():
+    _result, capture = _export(scope="entire_mailbox", format="eml", max_emails=1)
+
+    script = capture.last_script
+    assert "set exportContent to source of aMessage" in script
+    assert 'set fileName to exportCount & "_" & messageSubject & ".eml"' in script
+
+
+def test_attachment_bundling_requires_eml_before_applescript():
+    result, capture = _export(scope="entire_mailbox", format="txt", include_attachments=True)
+
+    assert not capture.scripts
+    assert result == "Error: include_attachments requires format='eml'"
+
+
+def test_eml_attachment_bundle_is_size_and_batch_capped():
+    _result, capture = _export(
+        scope="entire_mailbox",
+        format="eml",
+        include_attachments=True,
+        max_emails=1,
+    )
+
+    script = capture.last_script
+    assert 'set filePath to bundleDir & "/message.eml"' in script
+    assert 'set attachmentDir to bundleDir & "/attachments"' in script
+    assert "set messageAttachments to mail attachments of aMessage" in script
+    assert "attachmentSize <= 26214400" in script
+    assert "(exportAttachmentBytes + attachmentSize) <= 104857600" in script
+    assert "save anAttachment in POSIX file" in script
 
 
 # ---------------------------------------------------------------------------
@@ -178,11 +210,61 @@ def test_entire_mailbox_uses_bounded_page_slice_not_all_messages():
     assert "set pageEnd to 5 + 10" in script
 
 
+def test_export_resolves_gmail_special_mailboxes_without_direct_lookup_only():
+    _result, capture = _export(scope="entire_mailbox", mailbox="All Mail", max_emails=1)
+
+    script = capture.last_script
+    assert 'mailbox "All Mail" of targetAccount' in script
+    assert "every mailbox of targetAccount" in script
+    assert 'error "Mailbox not found: All Mail"' in script
+
+
+def test_single_email_export_uses_special_mailbox_fallback():
+    _result, capture = _export(scope="single_email", mailbox="Important", message_id="42")
+
+    script = capture.last_script
+    assert 'mailbox "Important" of targetAccount' in script
+    assert "every mailbox of targetAccount" in script
+
+
+def test_export_resolves_parent_child_mailbox_path_without_double_escaping():
+    mailbox = 'Parent "Team"/Child'
+    expected_ref = 'mailbox "Child" of mailbox "Parent \\"Team\\"" of targetAccount'
+
+    cases = [
+        {"scope": "single_email", "message_id": "42"},
+        {"scope": "entire_mailbox", "max_emails": 1},
+        {
+            "scope": "correspondent",
+            "email_address": "person@example.com",
+            "date_from": "2026-07-01",
+            "max_emails": 1,
+        },
+    ]
+    for kwargs in cases:
+        _result, capture = _export(**kwargs, mailbox=mailbox)
+        assert expected_ref in capture.last_script
+        assert '\\\\"Team\\\\"' not in capture.last_script
+
+
 def test_entire_mailbox_default_max_emails_is_25_not_100():
     _result, capture = _export(scope="entire_mailbox")
 
     script = capture.last_script
     assert "set pageEnd to 0 + 25" in script
+
+
+def test_entire_mailbox_sorts_bounded_page_and_returns_exported_message_ids():
+    _result, capture = _export(scope="entire_mailbox", max_emails=10, offset=5, sort="date_desc")
+
+    script = capture.last_script
+    assert 'if "date_desc" is "newest_first" or "date_desc" is "date_desc" then' in script
+    assert "set orderedPageMessages to {}" in script
+    assert (
+        "if candidateDate > existingDate or (candidateDate = existingDate and candidateId > existingId) then" in script
+    )
+    assert "set pageMessages to orderedPageMessages" in script
+    assert 'set outputText to outputText & "Exported message_id: "' in script
 
 
 # ---------------------------------------------------------------------------

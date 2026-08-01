@@ -153,8 +153,10 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
             self,
             script,
             'set message signature of newMessage to signature "TU"',
+            'set content of newMessage to "Body" & return & return & signatureContent',
             "save newMessage",
         )
+        self.assertIn('content:"", visible:false', script)
 
     def test_include_signature_false_suppresses_default_signature_assignment(self):
         captured = []
@@ -3380,6 +3382,130 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
                 self.assertIn('set outputText to outputText & "Draft ID: " & draftId', script)
                 self.assertNotIn("contains", script)
 
+    def test_guarded_delete_revalidates_thread_subject_and_recipient_before_delete(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="<source@example.com>",
+                expected_subject="Current subject",
+                expected_to="recipient@example.com",
+            )
+
+        script = captured[0]
+        self.assertIn('set expectedToAddresses to {"recipient@example.com"}', script)
+        self.assertIn('if (subject of foundDraft as string) is not "Current subject"', script)
+        self.assertIn('set expectedRfcToken to "<source@example.com>"', script)
+        self.assertIn("currentInReplyTo does not contain expectedRfcToken", script)
+        self.assertLess(script.index("if not deleteIdentityMatches"), script.index("delete foundDraft"))
+
+    def test_guarded_delete_uses_bracketed_message_id_token_not_bare_substring(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="source@example.com",
+                expected_subject="Current subject",
+                expected_to="recipient@example.com",
+            )
+
+        script = captured[0]
+        self.assertIn('set expectedRfcToken to "<source@example.com>"', script)
+        self.assertNotIn('currentInReplyTo does not contain "source@example.com"', script)
+
+    def test_guarded_delete_reads_headers_without_undefined_sanitizer(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="source@example.com",
+                expected_subject="Current subject",
+                expected_to="recipient@example.com",
+            )
+
+        script = captured[0]
+        self.assertNotIn("my sanitize_field(", script)
+        self.assertIn('set expectedRfcToken to "<source@example.com>"', script)
+
+    def test_guarded_delete_returns_structured_drift_error_without_deleting(self):
+        with patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            return_value="DRAFT_DELETE_IDENTITY_DRIFT|||84055",
+        ):
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="<source@example.com>",
+                expected_subject="Current subject",
+                expected_to="recipient@example.com",
+            )
+
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "DRAFT_DELETE_IDENTITY_DRIFT")
+        self.assertEqual(payload["remediation"]["draft_id"], "84055")
+
+    def test_guarded_delete_rejects_partial_identity_before_applescript(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="<source@example.com>",
+            )
+
+        mock_run.assert_not_called()
+        self.assertEqual(json.loads(result)["code"], "DRAFT_DELETE_IDENTITY_INCOMPLETE")
+
+    def test_guarded_delete_rejects_explicitly_empty_identity_before_applescript(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="",
+                expected_subject="",
+                expected_to="",
+            )
+
+        mock_run.assert_not_called()
+        self.assertEqual(json.loads(result)["code"], "DRAFT_DELETE_IDENTITY_INCOMPLETE")
+
+    def test_guarded_delete_rejects_empty_normalized_thread_header_before_applescript(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="<>",
+                expected_subject="Current subject",
+                expected_to="recipient@example.com",
+            )
+
+        mock_run.assert_not_called()
+        self.assertEqual(json.loads(result)["code"], "DRAFT_DELETE_IDENTITY_INCOMPLETE")
+
     def test_identity_guarded_delete_refuses_drifted_or_mismatched_draft_before_delete(self):
         captured: list[str] = []
 
@@ -4027,6 +4153,26 @@ class ManageDraftsListTests(unittest.TestCase):
 
 
 class ComposeRunApplescriptMigrationTests(unittest.TestCase):
+    def test_reply_to_email_resolves_exact_id_from_selected_archive_mailbox(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            compose_tools.reply_to_email(
+                account="Work",
+                message_id="888",
+                mailbox="Archive",
+                reply_body="Thanks",
+            )
+
+        script = captured[0]
+        self.assertIn('mailbox "Archive" of targetAccount', script)
+        self.assertIn("every message of sourceMailbox whose id is 888", script)
+        self.assertNotIn("inboxMailbox", script)
+
     def test_reply_to_email_forwards_timeout_to_run_applescript(self):
         captured = {}
 
@@ -4077,6 +4223,13 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         self.assertIn("close (window of newMsg) saving no", captured["script"])
         self.assertNotIn("close window 1 saving no", captured["script"])
         self.assertIn("set index of (window of newMsg) to 1", captured["script"])
+        self.assertIn("on focusComposeBody()", captured["script"])
+        self.assertIn('perform action "AXPress" of bodyTarget', captured["script"])
+        self.assertNotIn("repeat 7 times", captured["script"])
+        self.assertNotIn("key code 48", captured["script"])
+        self.assertIn('if not my focusComposeBody() then error "COMPOSE_BODY_FOCUS_FAILED"', captured["script"])
+        self.assertIn("close (window of newMsg) saving no", captured["script"])
+        self.assertGreater(captured["script"].count("pb's setString:oldClip"), 1)
         self.assertNotIn('keystroke "s" using command down', captured["script"])
         self.assertNotIn("close window 1 saving yes", captured["script"])
         self.assertIn("Email saved as draft (HTML)", result)

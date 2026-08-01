@@ -3,15 +3,15 @@
 This queue records work that is intentionally outside the Apple Mail source
 contract branch. It is not evidence that any external mutation has occurred.
 
+> **Historical source-branch queue.** [PR #80](https://github.com/Agentic-Assets/apple-mail-mcp/pull/80)
+> merged on 2026-07-18, so its Apple Mail source-repository merge steps are
+> complete. The remaining Marketplace and client actions below require their
+> own authorization and current-state verification; do not treat this file as
+> permission to mutate an external registration.
+
 ## Apple Mail repository
 
-1. Review and merge the source-contract PR only after Cayman gives fresh merge
-   approval for that PR.
-2. After merge, create the first future release through
-   `tools/gates/create-release-tag.sh`; do not retrofit or move `v3.11.6`.
-3. Before that release-sensitive push, run
-   `bash tools/gates/source-release-gate.sh` from a clean, current `main`.
-4. Preserve the direct `apple-mail-mcp` marketplace only as the documented
+1. Preserve the direct `apple-mail-mcp` marketplace only as the documented
    standalone compatibility and development lane.
 
 ## Agentic Assets Marketplace repository

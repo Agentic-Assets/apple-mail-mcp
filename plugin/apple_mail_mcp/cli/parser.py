@@ -257,8 +257,17 @@ def _build_parser() -> argparse.ArgumentParser:
     cal_events.add_argument("--days", type=float, default=7.0, dest="days_ahead", help="Days ahead (default 7)")
     cal_events.add_argument("--days-back", type=float, default=0.0, dest="days_back", help="Days back (default 0)")
     cal_events.add_argument("--query", help="Case-insensitive substring over title/location/notes")
+    cal_events.add_argument(
+        "--participant-query",
+        help="Case-insensitive substring over attendee names and email addresses",
+    )
     cal_events.add_argument("--timezone", help="IANA zone for interpretation and output")
     cal_events.add_argument("--limit", type=int, default=50, help="Maximum events returned")
+    cal_events.add_argument(
+        "--timeout",
+        type=int,
+        help="Maximum seconds for each Calendar engine call",
+    )
     _add_json_flag(cal_events)
 
     grant = subparsers.add_parser(

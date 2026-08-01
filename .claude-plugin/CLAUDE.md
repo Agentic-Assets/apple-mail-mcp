@@ -20,7 +20,7 @@ Codex Desktop/CLI uses a separate marketplace file at [`../.agents/plugins/marke
 | Field | Example | Meaning |
 |-------|---------|---------|
 | `metadata.version` | `1.0.0` | **This marketplace JSON** — not the plugin. Don't bump on every release. |
-| `plugins[0].version` | `3.9.1` | **Plugin release**: sync with `pyproject.toml`, `plugin.json`, `server.json`, mcpb manifest. |
+| `plugins[0].version` | current plugin release | **Plugin release**: sync with `pyproject.toml`, `plugin.json`, `server.json`, and the MCPB manifest. |
 
 `validate_manifests.sh` checks `plugins[0].version`, tool-count in `plugins[0].description`, `source`, listed skill paths, plugin name/version parity with `plugin/.claude-plugin/plugin.json`, **and the dual-component-conflict rule below**.
 

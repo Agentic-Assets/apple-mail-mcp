@@ -7,6 +7,7 @@ from pathlib import Path
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
+    build_mailbox_ref,
     escape_applescript,
     inject_preferences,
 )
@@ -69,6 +70,7 @@ def reply_to_email(
     body_html: str | None = None,
     from_address: str | None = None,
     message_id: str | None = None,
+    mailbox: str = "INBOX",
     recent_days: float = 2.0,
     timeout: int | None = None,
     include_signature: bool = True,
@@ -112,6 +114,12 @@ def reply_to_email(
         from_address: Optional sender address to use for this reply. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
         message_id: Required. Exact numeric Apple Mail message id from
             ``search_emails`` or ``list_inbox_emails``.
+        mailbox: Mailbox containing ``message_id`` (default: ``INBOX``). Pass
+            a folder returned by ``search_emails`` or ``list_mailboxes``, for
+            example ``Archive`` or ``All Mail``. A unique nested folder leaf
+            is accepted; when that leaf is ambiguous, pass the
+            ``Parent/Child`` path from ``list_mailboxes``. The lookup remains
+            exact-id only and does not broaden into a mailbox scan.
         recent_days: Schema-compat parameter for deprecated subject_keyword path
             (default: 2.0 / 48h). Ignored when ``message_id`` is set.
         timeout: Optional per-AppleScript timeout in seconds. When omitted, the native
@@ -198,11 +206,11 @@ def reply_to_email(
     assert account is not None  # _resolve_account guarantees non-None when error is None
 
     lookup_script, lookup_error = _build_found_message_lookup(
-        "inboxMailbox",
+        "sourceMailbox",
         message_id=message_id,
         subject_keyword=None,
         recent_days=recent_days,
-        messages_var="inboxMessages",
+        messages_var="sourceMessages",
         tool_name="reply_to_email",
     )
     if lookup_error:
@@ -264,6 +272,7 @@ def reply_to_email(
 
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
+    mailbox_lookup = build_mailbox_ref(mailbox, account_var="targetAccount", var_name="sourceMailbox")
     not_found_message = f"Error: No email found for message_id={message_id}"
 
     # Write reply body to a temp file to avoid AppleScript string escaping
@@ -328,6 +337,7 @@ def reply_to_email(
             header_text=mode_plan.header_text,
             success_text=mode_plan.success_text,
             safe_account=safe_account,
+            mailbox_lookup=mailbox_lookup,
             lookup_script=lookup_script,
             not_found_message=not_found_message,
             body_temp_path=body_temp_path,
@@ -356,6 +366,7 @@ def reply_to_email(
             header_text=mode_plan.header_text,
             success_text=mode_plan.success_text,
             safe_account=safe_account,
+            mailbox_lookup=mailbox_lookup,
             lookup_script=lookup_script,
             not_found_message=not_found_message,
             body_temp_path=body_temp_path,

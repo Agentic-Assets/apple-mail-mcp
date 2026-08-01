@@ -37,6 +37,8 @@ Raise these caps only after a confirming search shows the user exactly which mes
 
 Before deleting a large mailbox, export the relevant bounded slice: `export_emails(scope="entire_mailbox", mailbox="Archive/2023", max_emails=50, format="html")` (page with `offset` for more than one call's worth; `max_emails` is hard-capped at 50 per call). For a sender or person-specific cleanup, prefer `export_emails(scope="filtered", sender_domain="example.com", recent_days=30, max_emails=25)` or `export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)`. The user gets a local copy in case a permanent delete removes something important.
 
+For preservation or migration evidence, use reviewed exact ids (or one bounded page) with `format="eml"`; it preserves Mail's raw RFC 822 source headers and MIME. Add `include_attachments=True` only when the attachment bundle is needed: each file is capped at 25 MiB and each bounded export batch at 100 MiB, with skipped files reported. Attachment reads can be slow on cold Exchange or Gmail caches, so start with a small page and raise `timeout` from its 120-second default only when necessary.
+
 ## Common Cleanup Patterns
 
 ### Purge old read newsletters

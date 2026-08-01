@@ -39,8 +39,8 @@ def _send_html_email(
     """Send an HTML-formatted email via NSPasteboard clipboard injection.
 
     Uses AppleScriptObjC to place HTML on the clipboard with the proper
-    pasteboard type, creates a compose window, tabs into the body, and
-    pastes.  Then sends, saves as draft, or leaves open for review.
+    pasteboard type, creates a compose window, focuses its editable body, and
+    pastes. Then sends, saves as draft, or leaves open for review.
     """
     safe_account = escape_applescript(account)
     escaped_subject = escape_applescript(subject)
@@ -138,37 +138,74 @@ end tell
 -- Step 3: Wait for compose window to render
 delay 2.5
 
--- Step 4: Tab from header fields into body, then paste
-tell application "System Events"
-    set frontmost of process "Mail" to true
-    delay 0.5
-    tell process "Mail"
-        -- Tab through: To -> Cc -> Bcc -> Subject -> Body
-        -- 7 tabs covers all combinations of visible/hidden CC/BCC fields
-        repeat 7 times
-            key code 48
-            delay 0.1
-        end repeat
-        delay 0.3
-
-        -- Paste HTML without Cmd+A so Mail's native signature remains intact.
-        keystroke "v" using command down
-        delay 0.5
-
-        {post_paste_script}
+-- Step 4: Focus the compose body, then paste. A fixed number of Tab presses
+-- is not safe: Mail exposes different header controls for different accounts,
+-- and extra tabs can change paragraph indentation or formatting before paste.
+on focusComposeBody()
+    tell application "System Events"
+        tell process "Mail"
+            try
+                set composeWindow to front window
+                set bodyCandidates to every UI element of composeWindow whose role is "AXWebArea"
+                if (count of bodyCandidates) is 0 then set bodyCandidates to every text area of composeWindow
+                if (count of bodyCandidates) is 0 then return false
+                set bodyTarget to item 1 of bodyCandidates
+                perform action "AXPress" of bodyTarget
+                delay 0.2
+                set focusedElement to value of attribute "AXFocusedUIElement"
+                set focusedRole to value of attribute "AXRole" of focusedElement
+                return focusedRole is "AXWebArea" or focusedRole is "AXTextArea"
+            on error
+                return false
+            end try
+        end tell
     end tell
-end tell
+end focusComposeBody
 
--- Step 5: Clean up temp file
-do shell script "rm -f " & quoted form of "{html_temp_path}"
+try
+    tell application "System Events"
+        set frontmost of process "Mail" to true
+        delay 0.5
+        tell process "Mail"
+            if not my focusComposeBody() then error "COMPOSE_BODY_FOCUS_FAILED"
 
--- Step 6: Restore clipboard
-if oldClip is not missing value then
-    pb's clearContents()
-    pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
-end if
+            -- Paste HTML without Cmd+A so Mail's native signature remains intact.
+            keystroke "v" using command down
+            delay 0.5
 
-return "{success_text}"
+            {post_paste_script}
+        end tell
+    end tell
+
+    -- Step 5: Clean up temp file
+    do shell script "rm -f " & quoted form of "{html_temp_path}"
+
+    -- Step 6: Restore clipboard
+    if oldClip is not missing value then
+        pb's clearContents()
+        pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
+    end if
+
+    return "{success_text}"
+on error errMsg
+    -- A focus failure happens after Mail has created a visible compose window.
+    -- Discard that exact window so draft mode never leaves a partial artifact.
+    try
+        tell application "Mail"
+            close (window of newMsg) saving no
+        end tell
+    end try
+    try
+        do shell script "rm -f " & quoted form of "{html_temp_path}"
+    end try
+    if oldClip is not missing value then
+        try
+            pb's clearContents()
+            pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
+        end try
+    end if
+    error errMsg
+end try
 '''
 
     try:
@@ -357,11 +394,23 @@ def compose_email(
         try
             set targetAccount to account "{safe_account}"
 
-            -- Create new outgoing message
-            set newMessage to make new outgoing message with properties {{subject:"{escaped_subject}", content:"{escaped_body}", visible:{visible}}}
+            -- Start with an empty standalone message. On Exchange, assigning
+            -- authored content before Mail applies a native signature can make
+            -- the authored portion render as quoted text in synced clients.
+            set newMessage to make new outgoing message with properties {{subject:"{escaped_subject}", content:"", visible:{visible}}}
 
             {sender_script}
             {signature_script}
+
+            -- Apply the authored body after the signature has been selected.
+            -- Prefix it to the current draft content so the signature remains
+            -- a separate trailing block rather than reclassifying the body as
+            -- a reply quote.
+            set signatureContent to ""
+            try
+                set signatureContent to content of newMessage as string
+            end try
+            set content of newMessage to "{escaped_body}" & return & return & signatureContent
 
             -- Add TO/CC/BCC recipients
             tell newMessage

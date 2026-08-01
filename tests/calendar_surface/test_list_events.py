@@ -5,7 +5,6 @@ import json
 from datetime import datetime, timedelta
 
 import pytest
-
 from apple_mail_mcp.tools.calendar import list_events
 
 from .conftest import HOST_TZ, FakeReadEngine, raw_event
@@ -21,7 +20,9 @@ def _soon(hours=24):
 
 class TestHappyPath:
     def test_default_week_window(self, fake_engines):
-        read = FakeReadEngine(events=[raw_event("UID-1", start=_soon()), raw_event("UID-2", calendar="Home", start=_soon(48))])
+        read = FakeReadEngine(
+            events=[raw_event("UID-1", start=_soon()), raw_event("UID-2", calendar="Home", start=_soon(48))]
+        )
         fake_engines(read=read)
         payload = _run()
         assert payload["total_matched"] == 2
@@ -58,6 +59,46 @@ class TestHappyPath:
         fake_engines(read=read)
         payload = _run(query="budget")
         assert [e["event_id"] for e in payload["events"]] == ["UID-1"]
+
+    def test_participant_query_finds_attendee_without_exposing_participants(self, fake_engines):
+        read = FakeReadEngine(
+            events=[
+                raw_event(
+                    "UID-1",
+                    title="Program discussion",
+                    start=_soon(),
+                    attendees=[{"name": "Alex Example", "email": "alex@example.test"}],
+                ),
+                raw_event("UID-2", title="Program discussion", start=_soon(2)),
+            ]
+        )
+        fake_engines(read=read)
+        payload = _run(calendar="Work", participant_query="ALEX@EXAMPLE.TEST")
+        assert [event["event_id"] for event in payload["events"]] == ["UID-1"]
+        assert "attendees" not in payload["events"][0]
+        assert read.fetch_calls[0]["include_detail"] is True
+
+    def test_participant_query_matches_organizer_and_combines_with_text_query(self, fake_engines):
+        event = raw_event("UID-1", title="Program discussion", start=_soon())
+        event["organizer"] = {"name": "Morgan Organizer", "email": "morgan@example.test"}
+        read = FakeReadEngine(events=[event])
+        fake_engines(read=read)
+        payload = _run(calendar="Work", query="program", participant_query="morgan")
+        assert [event["event_id"] for event in payload["events"]] == ["UID-1"]
+        assert _run(calendar="Work", query="different", participant_query="morgan")["events"] == []
+
+    def test_participant_query_filters_recurring_master_with_private_detail_fetch(self, fake_engines):
+        master = raw_event(
+            "UID-R",
+            start=datetime.now(HOST_TZ) - timedelta(days=30),
+            recurrence="FREQ=DAILY",
+            attendees=[{"name": "Alex Example", "email": "alex@example.test"}],
+        )
+        read = FakeReadEngine(masters=[master])
+        fake_engines(read=read)
+        payload = _run(calendar="Work", days_ahead=3, participant_query="alex")
+        assert payload["events"]
+        assert read.master_calls[0]["include_detail"] is True
 
     def test_include_all_day_false(self, fake_engines):
         read = FakeReadEngine(
@@ -191,9 +232,7 @@ class TestRecurringExpansion:
             "OCCURRENCE_SCAN_CEILING",
             2,
         )
-        master = raw_event(
-            "UID-R", start=datetime.now(HOST_TZ) - timedelta(days=30), recurrence="FREQ=DAILY"
-        )
+        master = raw_event("UID-R", start=datetime.now(HOST_TZ) - timedelta(days=30), recurrence="FREQ=DAILY")
         read = FakeReadEngine(masters=[master])
         fake_engines(read=read)
         payload = _run(calendar="Work", days_ahead=7)

@@ -193,6 +193,7 @@ class EventKitCalendarEngine:
             "recurring_flag": recurring,
             "notes": _text(event.notes()),
             "attendees": [],
+            "organizer": None,
             "alarms_minutes_before": [],
         }
         if include_detail:
@@ -210,6 +211,15 @@ class EventKitCalendarEngine:
                     }
                 )
             record["attendees"] = attendees
+            try:
+                organizer = event.organizer()
+            except Exception:
+                organizer = None
+            if organizer is not None:
+                record["organizer"] = {
+                    "name": _text(organizer.name()),
+                    "email": _participant_email(organizer),
+                }
             alarms = []
             for alarm in event.alarms() or []:
                 try:
@@ -266,10 +276,11 @@ class EventKitCalendarEngine:
         window: CalendarWindow,
         calendar_name: str,
         *,
+        include_detail: bool = False,
         timeout: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """EventKit predicates expand occurrences natively; no master pass."""
-        del window, calendar_name, timeout
+        del window, calendar_name, include_detail, timeout
         return [], []
 
 
