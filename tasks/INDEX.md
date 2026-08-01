@@ -17,7 +17,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
-| [`active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/) | Bounded Linear backlog fixes: export, mailbox resolution, calendar participant discovery, and compose/draft safety | Implementation and local verification in progress on `fix/apple-mail-linear-backlog-20260731` |
+| [`active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/) | Bounded Linear backlog fixes: export, mailbox resolution, calendar participant discovery, and compose/draft safety | Committed at `c99a63a`; local release proof complete, push/PR and protected live gates pending |
 | [`active/native-reply/`](active/native-reply/) | Native-format reply drafts (v3.8.0 ship + live TO-TEST) | Shipped; live verification pending (needs Cayman at the machine) |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 fuzzy-selector retirement, metadata-index spike, `allow_filter_scan` decision | Decision brief awaiting sign-off; follow-up branches not started |
 | [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate | Module split shipped (v3.9.1); perf/FTS stalled since 2026-05-27; confirm resume vs archive |
