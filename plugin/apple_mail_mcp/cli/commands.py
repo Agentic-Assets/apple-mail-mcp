@@ -301,8 +301,10 @@ def _cmd_calendar_events(args: argparse.Namespace) -> int:
         days_back=args.days_back,
         days_ahead=args.days_ahead,
         query=args.query,
+        participant_query=args.participant_query,
         timezone=args.timezone,
         limit=args.limit,
+        timeout=args.timeout,
         output_format="json" if args.json else "text",
     )
 

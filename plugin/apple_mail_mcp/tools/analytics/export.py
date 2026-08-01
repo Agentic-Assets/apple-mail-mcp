@@ -169,7 +169,6 @@ def export_emails(
 
     # Escape all user inputs for AppleScript
     safe_account = escape_applescript(account)
-    safe_mailbox = escape_applescript(mailbox)
     safe_format = escape_applescript(normalized_format)
     safe_save_dir = escape_applescript(save_dir)
 
@@ -217,7 +216,7 @@ def export_emails(
             try
                 set targetAccount to account "{safe_account}"
                 -- Try to get mailbox
-                {mailbox_lookup_block(safe_mailbox)}
+                {mailbox_lookup_block(mailbox)}
 
                 -- Export by exact Mail message id (no subject scan).
                 set matchedMessages to (every message of targetMailbox whose id is {target_message_id})
@@ -353,7 +352,7 @@ def export_emails(
             safe_email_address=escape_applescript(email_address),
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
-            safe_mailbox=safe_mailbox,
+            mailbox=mailbox,
             scan_upper_bound=min(max(max_emails + offset, compute_scan_upper_bound(recent_days)), 250),
             max_emails=max_emails,
             offset=offset,
@@ -459,7 +458,7 @@ def export_emails(
             """
         script = build_entire_mailbox_export_script(
             safe_account=safe_account,
-            safe_mailbox=safe_mailbox,
+            mailbox=mailbox,
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
             max_emails=max_emails,

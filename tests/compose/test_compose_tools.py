@@ -3427,6 +3427,27 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
         self.assertIn('set expectedRfcToken to "<source@example.com>"', script)
         self.assertNotIn('currentInReplyTo does not contain "source@example.com"', script)
 
+    def test_guarded_delete_reads_headers_without_undefined_sanitizer(self):
+        captured = []
+
+        def fake_run(script, timeout=120):
+            captured.append(script)
+            return "ok"
+
+        with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_run):
+            compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="source@example.com",
+                expected_subject="Current subject",
+                expected_to="recipient@example.com",
+            )
+
+        script = captured[0]
+        self.assertNotIn("my sanitize_field(", script)
+        self.assertIn('set expectedRfcToken to "<source@example.com>"', script)
+
     def test_guarded_delete_returns_structured_drift_error_without_deleting(self):
         with patch(
             "apple_mail_mcp.tools.compose.run_applescript",
@@ -3452,6 +3473,20 @@ class ManageDraftsCreateSenderOverrideTests(unittest.TestCase):
                 action="delete",
                 draft_id="84054",
                 expected_in_reply_to="<source@example.com>",
+            )
+
+        mock_run.assert_not_called()
+        self.assertEqual(json.loads(result)["code"], "DRAFT_DELETE_IDENTITY_INCOMPLETE")
+
+    def test_guarded_delete_rejects_explicitly_empty_identity_before_applescript(self):
+        with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
+            result = compose_tools.manage_drafts(
+                account="Work",
+                action="delete",
+                draft_id="84054",
+                expected_in_reply_to="",
+                expected_subject="",
+                expected_to="",
             )
 
         mock_run.assert_not_called()

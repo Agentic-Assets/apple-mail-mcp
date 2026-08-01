@@ -56,21 +56,28 @@ list_inbox_emails(max_emails=20, include_content=False)
 # 3. Mark read non-essential
 update_email_status(action="mark_read", message_ids=[...], mailbox="INBOX", max_updates=10)
 
-# 4. Archive processed emails (collect ids first)
+# 4. Preview a small archive candidate set. Before keeping any id, apply the
+#    Human-Sender Screen in email-archive-cleanup; leave human or ambiguous
+#    correspondents visible.
 processed = list_inbox_emails(
     account="Work",
     max_emails=20,
     include_content=False,
     output_format="json",
 )
-processed_ids = [item["message_id"] for item in processed["emails"]]
+# Keep only ids that passed the Human-Sender Screen after reviewing the preview.
+candidate_ids = ["<reviewed-automated-message-id>", ...]
 move_email(
     account="Work",
-    message_ids=processed_ids,
+    message_ids=candidate_ids,
     to_mailbox="Archive",
     from_mailbox="INBOX",
-    max_moves=len(processed_ids),
+    max_moves=len(candidate_ids),
+    dry_run=True,
 )
+
+# Show the dry-run count and selected subjects to the user. Only after explicit
+# confirmation, repeat the same call with dry_run=False.
 
 # 5. Review flagged items for tomorrow
 search_emails(mailboxes=["INBOX", "Archive"], read_status="all")  # Check flags

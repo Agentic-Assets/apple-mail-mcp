@@ -1,5 +1,9 @@
 # Codex Goal - Apple Mail Scripting Audit
 
+> **Historical and completed:** This 2026-06-19 goal records a completed audit
+> scope. Follow [`docs/AGENT_LIVE_TESTING.md`](../AGENT_LIVE_TESTING.md) and
+> run `bash tools/gates/dev-check.sh release` for current verification.
+
 ## Goal
 
 Audit Apple Mail MCP for Mail.app AppleScript design quality using the repo-local `mail-scripting-dictionary` skill as the controlling lens. The end state is an evidence-backed audit plus high-confidence fixes that make the plugin simpler, safer, and aligned with Mail's local scripting dictionary. Focus on code paths that create, save, verify, read, search, move, archive, delete, reply to, and attach files to messages. Confirm that dictionary-backed commands and writable properties are used where available, and that UI scripting, clipboard use, focus assumptions, broad scans, or subject-only matching are removed, justified, or tested.
@@ -14,7 +18,7 @@ Start with a repo audit map, then work in priority order. First inspect `compose
 
 ## Verification
 
-For each changed AppleScript path, verify syntax or behavior at the smallest safe level. Prefer unit tests that inspect generated AppleScript and mocked Mail outputs. Add or tighten tests for reply body above quote, exact Drafts id verification, attachment preserving reply body, `include_signature=false` body insertion, structured artifact ids, bounded scans, and no UI paste in safe paths. Run focused tests, then `bash tools/dev-check.sh release`. If available and safe, run `.venv/bin/apple-mail quick-check --json`; live draft smokes must never send and must clean up by exact Drafts id. Confirm manifest validation still blocks developer-only skills from packaged surfaces.
+For each changed AppleScript path, verify syntax or behavior at the smallest safe level. Prefer unit tests that inspect generated AppleScript and mocked Mail outputs. Add or tighten tests for reply body above quote, exact Drafts id verification, attachment preserving reply body, `include_signature=false` body insertion, structured artifact ids, bounded scans, and no UI paste in safe paths. Run focused tests, then `bash tools/gates/dev-check.sh release`. If available and safe, run `.venv/bin/apple-mail quick-check --json`; live draft smokes must never send and must clean up by exact Drafts id. Confirm manifest validation still blocks developer-only skills from packaged surfaces.
 
 ## Deliverables
 

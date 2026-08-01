@@ -33,6 +33,8 @@ A single `plugin/` runtime serves Claude Code, Codex, and Cursor plugin installs
 
 If you change distribution, version, or filenames: re-run `bash tools/gates/dev-check.sh release` and verify `tests/infra/test_validate_manifests.py` covers the change. **Never** ship a `.plugin` whose bytes differ from the `.zip` — the validator and local release tests treat that as a hard error.
 
+Full detail: [`CLAUDE.md`](CLAUDE.md) § Distribution channels · [`docs/CLAUDE-conventions.md`](docs/CLAUDE-conventions.md) § Distribution channels.
+
 ## Agent orchestration (required)
 
 When the host exposes this repo's subagent tools, use subagents for both **research and implementation**, not just exploration. Delegate real fixes, tests, docs, and live verification to subagents; the lead agent orchestrates and reviews. If the host, task owner, or safety lane forbids subagents, do the work directly and state that constraint in the handoff.
@@ -94,12 +96,6 @@ bash tools/gates/dev-check.sh                    # manifests + module budget + p
 
 ## Version bump (release together)
 
-Every non-docs-only change that ships through a PR must bump the public version.
-Do not leave behavior, manifest, skill, tool, or artifact changes under
-`Unreleased` when opening a release PR. `bash tools/gates/dev-check.sh release`
-fails unless `CHANGELOG.md` has a `## {version} - YYYY-MM-DD` heading matching
-`pyproject.toml` and no release bullets remain under `Unreleased`.
-
 - `pyproject.toml` → `[project].version`
 - `plugin/.claude-plugin/plugin.json` → `version`
 - `plugin/.codex-plugin/plugin.json` → `version`
@@ -115,4 +111,4 @@ Sync tool-count claims in manifests with `find plugin/apple_mail_mcp/tools -name
 `plugin/apple_mail_mcp/` (source of truth) · `plugin/` (shared Claude Code, Codex, and Cursor plugin runtime) · `.claude-plugin/` (Claude Code marketplace) · `.agents/plugins/` (Codex marketplace) · `apple-mail-mcpb/` · `tests/` · `tools/` · `docs/` · `tasks/`
 
 **Repo agent skills:** Add under `.agents/skills/<name>/`; symlink `.claude/skills/<name>` → `../../.agents/skills/<name>` (not `.cursor/skills/`). Commit and push after adding or moving skills.
-**Post-change ship:** Invoke `finalize-apple-mail-mcp` to sync docs, CLAUDE.md, manifests, then commit and push when the user asks.
+**Post-change ship:** Invoke `finalize-apple-mail-mcp` to sync docs, both root hubs (`AGENTS.md` and `CLAUDE.md`), and manifests, then commit and push when the user asks.

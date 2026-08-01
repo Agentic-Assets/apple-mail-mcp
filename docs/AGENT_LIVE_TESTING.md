@@ -348,6 +348,133 @@ bash tools/gates/dev-check.sh release
 
 Live Mail verification is manual on macOS with Mail.app running.
 
+## Opt-in feature checks (fixture-only)
+
+These drills supplement the routine smoke batteries. Run them only against a
+disposable/local fixture account and fixture messages, never client or founder
+mail. They may read fixture content and create drafts, but they never send.
+Use `--raw` with the generated wrapper (or the equivalent MCP call) because
+these options are not necessarily exposed as named wrapper flags.
+
+Set values only after locating a known disposable fixture. Use a unique test
+subject and recipient address so a human can recognize the artifact. Do not use
+subject search or a broad cleanup command to remove it.
+
+```bash
+export FIXTURE_ACCOUNT="Fixture Mail"
+export FIXTURE_MAILBOX="All Mail"          # or an explicit Parent/Child path
+export FIXTURE_MESSAGE_ID="12345"           # exact numeric id from search
+export FIXTURE_RECIPIENT="fixture@example.test"
+export FIXTURE_EXPORT_DIR="/tmp/apple-mail-eml-fixture"
+```
+
+### EML export and attachment limits
+
+Run an exact-id EML export, preferably against a fixture with a small
+attachment. Confirm the returned `message_id`, inspect that `message.eml`
+preserves the fixture's RFC 822 headers, and confirm the reported attachment
+saved/skipped counts. A deliberately over-limit fixture, if available, must be
+reported as skipped: each file is limited to 25 MiB and each bounded export
+batch to 100 MiB. Treat the local export directory as sensitive fixture data
+and remove it under the fixture-account retention procedure.
+
+```bash
+apple-mail -o json export-emails --raw '{
+  "account":"'"$FIXTURE_ACCOUNT"'",
+  "scope":"single_email",
+  "message_id":"'"$FIXTURE_MESSAGE_ID"'",
+  "mailbox":"'"$FIXTURE_MAILBOX"'",
+  "format":"eml",
+  "include_attachments":true,
+  "save_directory":"'"$FIXTURE_EXPORT_DIR"'"
+}'
+```
+
+### Archived reply and guarded cleanup
+
+With Mail visible and Accessibility granted to the wrapper host, make a native
+draft reply to the fixture using `mailbox="$FIXTURE_MAILBOX"`. This exercises
+special-mailbox lookup; for a duplicate nested leaf, use its exact
+`Parent/Child` path. Require a verified exact Drafts id in the JSON response,
+then re-resolve that one draft with `verify_draft` immediately before cleanup.
+Delete only by that exact id and supply the current `expected_in_reply_to`,
+`expected_subject`, and `expected_to` together. A guard mismatch must leave the
+draft untouched; after a successful guarded delete, list Drafts and confirm the
+exact id is absent. Never replace this sequence with subject-based cleanup.
+
+```bash
+apple-mail -o json reply-to-email --raw '{
+  "account":"'"$FIXTURE_ACCOUNT"'",
+  "message_id":"'"$FIXTURE_MESSAGE_ID"'",
+  "mailbox":"'"$FIXTURE_MAILBOX"'",
+  "reply_body":"Fixture native reply - do not send.",
+  "mode":"draft",
+  "native_format":true,
+  "output_format":"json"
+}'
+```
+
+After `verify_draft` returns the current values, set the four variables below
+from that one response and make the guarded cleanup call. Do not reuse values
+from an older list or a different draft.
+
+```bash
+export FIXTURE_DRAFT_ID="67890"
+export FIXTURE_IN_REPLY_TO="fixture-source@example.test"
+export FIXTURE_DRAFT_SUBJECT="Re: Fixture message"
+export FIXTURE_DRAFT_TO="fixture@example.test"
+
+apple-mail -o json manage-drafts --raw '{
+  "account":"'"$FIXTURE_ACCOUNT"'",
+  "action":"delete",
+  "draft_id":"'"$FIXTURE_DRAFT_ID"'",
+  "expected_in_reply_to":"'"$FIXTURE_IN_REPLY_TO"'",
+  "expected_subject":"'"$FIXTURE_DRAFT_SUBJECT"'",
+  "expected_to":"'"$FIXTURE_DRAFT_TO"'"
+}'
+```
+
+### Native HTML focus cleanup
+
+Use a standalone fixture recipient and `compose_email(mode="draft")` with a
+small `body_html` value. Verify the saved draft manually in Mail: the HTML body
+and signature should be present and no unrelated compose window should close.
+If the tool reports `COMPOSE_BODY_FOCUS_FAILED`, it must leave no fixture draft
+or open partial compose window; record that result rather than retrying through
+a windowless path. A standalone HTML draft has no reply headers, so do not
+pretend it meets the guarded-reply cleanup contract: inspect and remove it only
+in the isolated fixture account with its freshly resolved exact id.
+
+```bash
+apple-mail -o json compose-email --raw '{
+  "account":"'"$FIXTURE_ACCOUNT"'",
+  "to":"'"$FIXTURE_RECIPIENT"'",
+  "subject":"Fixture HTML focus check - do not send",
+  "body":"Fixture HTML focus check.",
+  "body_html":"<p><strong>Fixture HTML focus check.</strong></p>",
+  "mode":"draft"
+}'
+```
+
+### Calendar participant filter
+
+On a disposable calendar with a known attendee, issue a one-day bounded
+`list_events` request with both `query` and `participant_query`. Confirm only
+events matching both filters remain, that `engine` explains whether EventKit
+was used, and that attendee details are absent from the list response. Organizer
+matches are expected only on the EventKit path.
+
+```bash
+apple-mail -o json list-events --raw '{
+  "calendar":"Fixture Calendar",
+  "days_ahead":1,
+  "query":"fixture",
+  "participant_query":"fixture@example.test",
+  "limit":10,
+  "output_format":"json"
+}'
+```
+
 ## MCP config for agents
 
 ### MCP env vars

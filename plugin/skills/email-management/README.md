@@ -51,7 +51,8 @@ cp -r plugin/skills/email-management ~/.claude/skills/email-management
 # Full plugin skill suite
 for d in apple-mail-operator inbox-triage email-management mailbox-taxonomy \
          email-archive-cleanup mail-rules-advisor email-drafting \
-         email-style-profile email-attachments; do
+         email-style-profile email-attachments calendar-operator \
+         meeting-scheduler; do
   cp -r "plugin/skills/$d" "$HOME/.claude/skills/$d"
 done
 ```

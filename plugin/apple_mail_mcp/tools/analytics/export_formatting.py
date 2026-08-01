@@ -1,48 +1,23 @@
 """AppleScript fragments shared by bounded email-export builders."""
 
+from apple_mail_mcp.core.script_fragments import build_mailbox_ref
+
 SUPPORTED_EXPORT_FORMATS = ("txt", "html", "eml")
 
 
 def mailbox_lookup_block(
-    safe_mailbox: str,
+    mailbox: str,
     *,
     account_var: str = "targetAccount",
     var_name: str = "targetMailbox",
 ) -> str:
-    """Resolve a display mailbox without assuming direct lookup works.
+    """Resolve an unescaped mailbox through the shared canonical resolver.
 
-    Gmail labels such as ``All Mail`` and ``Important`` can be enumerable but
-    reject ``mailbox <name> of account``. The fallback is metadata-only and
-    accounts for one nested level, failing closed for ambiguous leaf names.
+    This preserves special-folder and localized INBOX fallbacks while also
+    accepting documented ``Parent/Child`` paths. Escaping happens exactly once
+    in :func:`build_mailbox_ref`.
     """
-    return f'''set {var_name} to missing value
-                try
-                    set {var_name} to mailbox "{safe_mailbox}" of {account_var}
-                on error
-                    if "{safe_mailbox}" is "INBOX" then
-                        try
-                            set {var_name} to mailbox "Inbox" of {account_var}
-                        end try
-                    end if
-                    if {var_name} is missing value then
-                        set matchingMailboxes to {{}}
-                        repeat with parentMailbox in every mailbox of {account_var}
-                            if (name of parentMailbox as string) is "{safe_mailbox}" then set end of matchingMailboxes to parentMailbox
-                            try
-                                repeat with childMailbox in every mailbox of parentMailbox
-                                    if (name of childMailbox as string) is "{safe_mailbox}" then set end of matchingMailboxes to childMailbox
-                                end repeat
-                            end try
-                        end repeat
-                        if (count of matchingMailboxes) is 1 then
-                            set {var_name} to item 1 of matchingMailboxes
-                        else if (count of matchingMailboxes) is 0 then
-                            error "Mailbox not found: {safe_mailbox}"
-                        else
-                            error "Mailbox name is ambiguous: {safe_mailbox}. Use a mailbox path."
-                        end if
-                    end if
-                end try'''
+    return build_mailbox_ref(mailbox, account_var=account_var, var_name=var_name)
 
 
 def normalize_export_format(format_value: str) -> str:

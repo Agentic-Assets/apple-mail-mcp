@@ -4,6 +4,8 @@ from typing import Any
 
 from apple_mail_mcp.core.escaping import escape_applescript
 
+_APPLESCRIPT_MAX_INTEGER = 2_147_483_647
+
 
 def normalize_search_terms(
     search_term: str | None = None,
@@ -39,14 +41,22 @@ def contains_any_condition(field_name: str, values: list[str]) -> str:
 
 
 def normalize_message_ids(message_ids: list[Any] | None) -> list[str]:
-    """Return de-duplicated numeric Mail ids as strings preserving order."""
+    """Return de-duplicated AppleScript-compatible Mail ids preserving order."""
     if not message_ids:
         return []
 
-    normalized = []
+    normalized: list[str] = []
+    seen: set[str] = set()
     for value in message_ids:
         value_text = str(value).strip()
-        if value_text and value_text.isdigit() and value_text not in normalized:
+        if not value_text or not value_text.isdigit():
+            continue
+        try:
+            numeric_id = int(value_text)
+        except ValueError:
+            continue
+        if numeric_id <= _APPLESCRIPT_MAX_INTEGER and value_text not in seen:
+            seen.add(value_text)
             normalized.append(value_text)
 
     return normalized

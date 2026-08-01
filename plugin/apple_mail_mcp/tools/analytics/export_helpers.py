@@ -50,7 +50,7 @@ def unbounded_export_error(account: str) -> str:
 def build_exact_message_export_script(
     *,
     safe_account: str,
-    safe_mailbox: str,
+    mailbox: str,
     safe_format: str,
     safe_save_dir: str,
     message_ids: list[str],
@@ -68,7 +68,7 @@ def build_exact_message_export_script(
 
                 try
                     set targetAccount to account "{safe_account}"
-                    {mailbox_lookup_block(safe_mailbox)}
+                    {mailbox_lookup_block(mailbox)}
 
                     set exportDir to "{safe_save_dir}/message_id_export"
                     do shell script "mkdir -p " & quoted form of exportDir
@@ -131,7 +131,7 @@ def build_exact_message_export_script(
 def build_entire_mailbox_export_script(
     *,
     safe_account: str,
-    safe_mailbox: str,
+    mailbox: str,
     safe_format: str,
     safe_save_dir: str,
     max_emails: int,
@@ -149,6 +149,7 @@ def build_entire_mailbox_export_script(
     WITHIN the page window, so out-of-range messages still count against
     the page but are skipped from the on-disk export.
     """
+    safe_mailbox = escape_applescript(mailbox)
     return f'''
     tell application "Mail"
         set outputText to "EXPORTING MAILBOX" & return & return
@@ -156,7 +157,7 @@ def build_entire_mailbox_export_script(
 
         try
             set targetAccount to account "{safe_account}"
-            {mailbox_lookup_block(safe_mailbox)}
+            {mailbox_lookup_block(mailbox)}
 
             -- Bind only the requested page window; never the full message list.
             set messageCount to count of messages of targetMailbox
@@ -401,7 +402,7 @@ def build_correspondent_export_script(
     safe_email_address: str,
     safe_format: str,
     safe_save_dir: str,
-    safe_mailbox: str,
+    mailbox: str,
     scan_upper_bound: int,
     max_emails: int,
     offset: int,
@@ -456,7 +457,7 @@ def build_correspondent_export_script(
 
             try
                 set targetAccount to account "{safe_account}"
-                {mailbox_lookup_block(safe_mailbox)}
+                {mailbox_lookup_block(mailbox)}
                 {sent_resolve}
                 set searchMailboxes to {{targetMailbox}}
                 {sent_append}
@@ -550,11 +551,10 @@ def run_message_id_export(
         invalid_ids.extend(value for value in raw_ids if not value.isdigit())
         if not normalized_ids:
             continue
-        safe_mailbox = escape_applescript(mailbox_name)
         for chunk in iter_id_chunks(normalized_ids):
             script = build_exact_message_export_script(
                 safe_account=safe_account,
-                safe_mailbox=safe_mailbox,
+                mailbox=mailbox_name,
                 safe_format=safe_format,
                 safe_save_dir=safe_save_dir,
                 message_ids=chunk,

@@ -111,6 +111,53 @@ class AppleMailCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIsNone(captured["mailboxes"])
 
+    def test_calendar_events_forwards_participant_query_and_per_engine_timeout(self):
+        captured = {}
+
+        def fake_list_events(**kwargs):
+            captured.update(kwargs)
+            return '{"events":[]}'
+
+        with (
+            patch("apple_mail_mcp.tools.calendar.list_events", side_effect=fake_list_events),
+            patch("builtins.print"),
+        ):
+            code = cli.main(
+                [
+                    "calendar-events",
+                    "--calendar",
+                    "Work",
+                    "--participant-query",
+                    "alex@example.com",
+                    "--timeout",
+                    "15",
+                    "--json",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["calendar"], "Work")
+        self.assertEqual(captured["participant_query"], "alex@example.com")
+        self.assertEqual(captured["timeout"], 15)
+        self.assertEqual(captured["output_format"], "json")
+
+    def test_calendar_events_defaults_keep_optional_filters_unset(self):
+        captured = {}
+
+        def fake_list_events(**kwargs):
+            captured.update(kwargs)
+            return '{"events":[]}'
+
+        with (
+            patch("apple_mail_mcp.tools.calendar.list_events", side_effect=fake_list_events),
+            patch("builtins.print"),
+        ):
+            code = cli.main(["calendar-events", "--json"])
+
+        self.assertEqual(code, 0)
+        self.assertIsNone(captured["participant_query"])
+        self.assertIsNone(captured["timeout"])
+
     def test_search_body_requires_explicit_allow_body_scan(self):
         captured = {}
 

@@ -99,6 +99,7 @@ bash tools/gates/dev-check.sh                    # manifests + module budget + p
 - `pyproject.toml` → `[project].version`
 - `plugin/.claude-plugin/plugin.json` → `version`
 - `plugin/.codex-plugin/plugin.json` → `version`
+- `plugin/.cursor-plugin/plugin.json` → `version`
 - `.claude-plugin/marketplace.json` → `plugins[0].version` (not `metadata.version`)
 - `server.json` → top-level + `packages[0].version`
 - `apple-mail-mcpb/manifest.json` → `version`
@@ -107,7 +108,7 @@ Sync tool-count claims in manifests with `find plugin/apple_mail_mcp/tools -name
 
 ## Related folders
 
-`plugin/apple_mail_mcp/` (source of truth) · `plugin/` (shared Claude Code + Codex plugin runtime) · `.agents/plugins/` (Codex marketplace) · `.claude-plugin/` (Claude Code marketplace) · `apple-mail-mcpb/` · `tests/` · `tools/` · `docs/` · `tasks/`
+`plugin/apple_mail_mcp/` (source of truth) · `plugin/` (shared Claude Code, Codex, and Cursor plugin runtime) · `.claude-plugin/` (Claude Code marketplace) · `.agents/plugins/` (Codex marketplace) · `apple-mail-mcpb/` · `tests/` · `tools/` · `docs/` · `tasks/`
 
 **Repo agent skills:** Add under `.agents/skills/<name>/`; symlink `.claude/skills/<name>` → `../../.agents/skills/<name>` (not `.cursor/skills/`). Commit and push after adding or moving skills.
-**Post-change ship:** Invoke `finalize-apple-mail-mcp` to sync docs, AGENTS.md, manifests, then commit and push when the user asks.
+**Post-change ship:** Invoke `finalize-apple-mail-mcp` to sync docs, both root hubs (`AGENTS.md` and `CLAUDE.md`), and manifests, then commit and push when the user asks.

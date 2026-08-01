@@ -100,11 +100,11 @@ def manage_drafts(
             exact_selector="draft_id",
         )
 
-    delete_identity_supplied = any((expected_in_reply_to, expected_subject, expected_to))
+    delete_identity_supplied = any(value is not None for value in (expected_in_reply_to, expected_subject, expected_to))
     if (
         action == "delete"
         and delete_identity_supplied
-        and not all((expected_in_reply_to, expected_subject, expected_to))
+        and not all(value and value.strip() for value in (expected_in_reply_to, expected_subject, expected_to))
     ):
         return serialize_tool_error(
             ToolError(
@@ -407,6 +407,7 @@ def manage_drafts(
                 message_var="foundDraft",
                 in_reply_to_var="currentInReplyTo",
                 references_var="currentReferences",
+                sanitize_fn=None,
                 include_on_error=True,
             )
             guarded_delete_script = f'''

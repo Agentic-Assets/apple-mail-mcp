@@ -14,7 +14,6 @@ from apple_mail_mcp.core import (
     reject_unknown_account,
 )
 
-
 # ---------------------------------------------------------------------------
 # normalize_message_ids: dedupe, strip, digit-only, str-coerce, order-preserve
 # ---------------------------------------------------------------------------
@@ -28,6 +27,14 @@ def test_normalize_message_ids_empty_returns_empty() -> None:
 def test_normalize_message_ids_strips_dedupes_and_filters_non_digits() -> None:
     result = normalize_message_ids([" 12 ", "12", "abc", "34", 56, "", "  "])
     assert result == ["12", "34", "56"]
+
+
+def test_normalize_message_ids_accepts_maximum_applescript_integer() -> None:
+    assert normalize_message_ids(["2147483647"]) == ["2147483647"]
+
+
+def test_normalize_message_ids_rejects_first_out_of_range_applescript_integer() -> None:
+    assert normalize_message_ids(["2147483648"]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -55,10 +62,7 @@ def test_equals_any_numeric_condition_empty_is_false() -> None:
 
 
 def test_equals_any_numeric_condition_builds_or_clause() -> None:
-    assert (
-        equals_any_numeric_condition("message id", ["1", "2"])
-        == "(message id is 1 or message id is 2)"
-    )
+    assert equals_any_numeric_condition("message id", ["1", "2"]) == "(message id is 1 or message id is 2)"
 
 
 # ---------------------------------------------------------------------------
@@ -97,9 +101,7 @@ def test_parse_email_list_parses_read_flag_and_fields() -> None:
 def test_parse_email_list_handles_trailing_email_without_total() -> None:
     output = "✓ Only One\nFrom: solo@example.com\n"
     emails = parse_email_list(output)
-    assert emails == [
-        {"subject": "Only One", "is_read": True, "sender": "solo@example.com"}
-    ]
+    assert emails == [{"subject": "Only One", "is_read": True, "sender": "solo@example.com"}]
 
 
 # ---------------------------------------------------------------------------

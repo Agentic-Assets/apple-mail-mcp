@@ -227,6 +227,26 @@ def test_single_email_export_uses_special_mailbox_fallback():
     assert "every mailbox of targetAccount" in script
 
 
+def test_export_resolves_parent_child_mailbox_path_without_double_escaping():
+    mailbox = 'Parent "Team"/Child'
+    expected_ref = 'mailbox "Child" of mailbox "Parent \\"Team\\"" of targetAccount'
+
+    cases = [
+        {"scope": "single_email", "message_id": "42"},
+        {"scope": "entire_mailbox", "max_emails": 1},
+        {
+            "scope": "correspondent",
+            "email_address": "person@example.com",
+            "date_from": "2026-07-01",
+            "max_emails": 1,
+        },
+    ]
+    for kwargs in cases:
+        _result, capture = _export(**kwargs, mailbox=mailbox)
+        assert expected_ref in capture.last_script
+        assert '\\\\"Team\\\\"' not in capture.last_script
+
+
 def test_entire_mailbox_default_max_emails_is_25_not_100():
     _result, capture = _export(scope="entire_mailbox")
 

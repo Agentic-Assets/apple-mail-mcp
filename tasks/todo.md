@@ -2,15 +2,15 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; local gates enforce).
 
-**Current branch:** `fix/apple-mail-linear-backlog-20260731` (`c99a63a`; from `main` @ `2d03487`).
+**Current branch:** `fix/apple-mail-linear-backlog-20260731` (`a776e51`; from `main` @ `2d03487`).
 
-**Active implementation:** [`tasks/active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/). Local release proof is captured in [`closeout-2026-07-31.md`](active/linear-backlog-2026-07-31/closeout-2026-07-31.md); record the branch, full SHA, exact checks, and deferred live gates on the affected issues. Do not merge without Cayman's new literal approval phrase.
+**Active implementation:** [`tasks/active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/). [Draft PR #83](https://github.com/Agentic-Assets/apple-mail-mcp/pull/83) carries the pushed closeout at `a776e51`; its exact local and bounded live checks are in [`closeout-2026-07-31.md`](active/linear-backlog-2026-07-31/closeout-2026-07-31.md). Do not merge without Cayman's new literal approval phrase.
 
 **Most recent shipped workstream:** [`tasks/active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/). Its explicit `${CURSOR_PLUGIN_ROOT}` launcher is on `main` at v3.11.6, the Codex adapter remains independent, the full local release gate passed, and live 41-tool Cursor Agent acceptance passed. Cursor marketplace/UI admission remains unverified.
 
 **Already shipped:** AGENTIC-1214 merged in v3.11.2. It added chunked, focus-guarded native reply typing; full-body verification above the quote; persisted header-linked Drafts identity; safe artifact cleanup; quote-boundary verification; and the `CREATE_CANNOT_THREAD` refusal for standalone draft creation with `in_reply_to`. Its closeout is archived under [`archive/2026-07/shipped/agentic-1214-reply-fixes/`](archive/2026-07/shipped/agentic-1214-reply-fixes/).
 
-**Next action:** push the verified Linear backlog branch, open a draft PR, and attach its full SHA, exact checks, and deferred live gates to the affected issues. Keep AGENTIC-781's human-operated native-reply checks open. AGENTIC-1093 and AGENTIC-842 remain founder-controlled, and AGENTIC-1191 needs a fresh sanitized reproduction before implementation.
+**Next action:** keep AGENTIC-781's human-operated native-reply checks open. AGENTIC-1093 and AGENTIC-842 remain founder-controlled, and AGENTIC-1191 needs a fresh sanitized reproduction before implementation. The implemented Mail, Calendar, and EML workflows still need their documented protected live fixtures before PR #83 can be treated as release-complete.
 
 **Main state:** `main` @ `2d03487` (PR #82). The latest release tag is **v3.11.6** (`04f9d60`; explicit Cursor plugin-root adapter plus the consolidated offline runtime, sent-mailbox, and compose-recipient verification work).
 
