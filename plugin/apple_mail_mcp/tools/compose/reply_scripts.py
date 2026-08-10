@@ -450,7 +450,6 @@ try
         end try
         {cc_script}
         {bcc_script}
-        {attachment_script}
     end tell
 
     -- Insert the reply body with a TYPED keystroke. Guard: Mail's dictionary front
@@ -540,11 +539,16 @@ try
             end tell
             return abortCode & return & "Subject: " & replySubject & return & "DerivedSubject: " & derivedReplySubject & return & "Detail: " & abortDetailText & " (mailFront=" & guardMail & " seFront=" & guardSE & ")"
         end if
-        set quotedNeedle to "wrote:"
     end if
+    set quotedNeedle to "wrote:"
 
     delay 0.4
     tell application "Mail"
+        -- Adding attachments before body typing can make Mail rebuild the rich
+        -- reply content and discard the quoted original. Attach only after the
+        -- typed body has completed successfully.
+        {attachment_script}
+
         {post_action}
 
         -- Mail's outgoing-message ID is not a Drafts ID on every account.

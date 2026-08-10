@@ -87,8 +87,9 @@ def reply_to_email(
     passed. Agents must never use the fallback.
 
     The saved draft's full body above the quoted original is verified
-    case-sensitively (not just its first line) before this call reports
-    success. On a placement mismatch with a known artifact id, the native
+    case-sensitively (not just its first line), the native quote must remain
+    present, and every requested attachment must be detected before this call
+    reports success. On a placement mismatch with a known artifact id, the native
     path automatically deletes that artifact and retypes the identical body
     once before re-verifying; a mismatch that still does not resolve returns
     ``REPLY_BODY_MISMATCH`` naming the suspect Drafts artifact id.
@@ -264,6 +265,23 @@ def reply_to_email(
         return blocked
     if output_format == "json" and effective_mode == "send":
         return "Error: output_format='json' is only supported for mode='draft' or mode='open'."
+    if native_format and effective_mode == "send" and attachments:
+        return serialize_tool_error(
+            ToolError(
+                code="REPLY_SEND_REQUIRES_VERIFIED_DRAFT",
+                message=(
+                    "Native replies with attachments must be saved and verified before sending. "
+                    "No Mail compose or send action was performed."
+                ),
+                remediation={
+                    "preferred_mode": "draft",
+                    "preferred": (
+                        "Retry with mode='draft', inspect the exact verified draft, then send that "
+                        "draft explicitly after approval."
+                    ),
+                },
+            )
+        )
 
     if effective_mode == "open":
         cap_err = _check_open_compose_window_cap()

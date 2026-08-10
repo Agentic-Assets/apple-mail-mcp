@@ -1228,7 +1228,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 signature_requested=False,
             )
 
-        self.assertTrue(verification.ok)
+        self.assertFalse(verification.ok)
+        self.assertEqual(verification.status, "attachment_verification_failed")
+        self.assertEqual(verification.error_artifact_id, "84053")
         self.assertEqual(verification.attachment_status, "missing")
         script = captured[0]
         self.assertIn('set expectedAttachmentNames to {"support.pdf"}', script)
@@ -1256,7 +1258,9 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 signature_requested=False,
             )
 
-        self.assertTrue(verification.ok)
+        self.assertFalse(verification.ok)
+        self.assertEqual(verification.status, "attachment_verification_failed")
+        self.assertEqual(verification.error_artifact_id, "84053")
         self.assertEqual(verification.attachment_status, "missing")
         script = captured[0]
         self.assertIn('set expectedAttachmentNames to {"support.pdf", "support.pdf"}', script)
@@ -1289,7 +1293,7 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertIn('set expectedAttachmentNames to {"foo;;;bar.pdf"}', script)
         self.assertIn("(name of anAttachment as string)", script)
 
-    def test_reply_draft_attachment_warning_includes_applied_count(self):
+    def test_reply_draft_attachment_failure_includes_applied_count(self):
         def fake_run(script, timeout=120):
             if "reply foundMessage" in script:
                 return _saved_reply_draft_output(to="native reply recipients", draft_id="84053")
@@ -1314,11 +1318,15 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
                 reply_body="Reply body",
                 attachments=str(attachment),
                 include_signature=False,
+                output_format="json",
             )
 
-        self.assertIn("Attachment Verification Status: missing", result)
-        self.assertIn("Attachments Applied Count: 0", result)
-        self.assertIn("requested attachments could not be verified", result)
+        payload = json.loads(result)
+        self.assertEqual(payload["code"], "REPLY_DRAFT_ATTACHMENT_VERIFICATION_FAILED")
+        self.assertEqual(payload["remediation"]["draft_id"], "84053")
+        self.assertEqual(payload["remediation"]["attachment_status"], "missing")
+        self.assertEqual(payload["remediation"]["attachment_count"], 0)
+        self.assertEqual(payload["remediation"]["attachments_applied"], [])
 
     def test_reply_verification_parser_preserves_pipe_in_attachment_filename(self):
         verification = compose_tools._reply_verification_from_output(
@@ -1662,7 +1670,10 @@ class ReplyToEmailSenderOverrideTests(unittest.TestCase):
         self.assertEqual(verification.status, "identity_unavailable")
         script = captured[0]
         self.assertIn("set requireNativeIdentity to true", script)
-        self.assertIn('if requireNativeIdentity then return "IDENTITY_UNAVAILABLE"', script)
+        self.assertIn(
+            'if requireNativeIdentity and attachmentFailureResult is "" then return "IDENTITY_UNAVAILABLE"',
+            script,
+        )
         self.assertIn('set expectedDraftRfcMessageId to "<draft-91061@example.com>"', script)
         self.assertIn('set expectedSourceRfcMessageId to "<source@example.com>"', script)
 
