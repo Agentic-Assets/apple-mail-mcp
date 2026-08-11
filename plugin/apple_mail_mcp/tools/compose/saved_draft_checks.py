@@ -3,6 +3,7 @@
 ``run_applescript`` is reached through the ``compose`` facade to preserve the existing patch seam."""
 
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 
 from apple_mail_mcp.applescript_snippets import sanitize_field_handler, text_offset_handler
@@ -82,6 +83,8 @@ def _verify_saved_reply_draft(
         native_draft_identity.source_rfc_message_id if native_draft_identity else ""
     )
     require_native_identity = "true" if native_draft_identity else "false"
+    require_rfc_identity = "true" if native_draft_identity and native_draft_identity.is_rfc_backed else "false"
+    require_exact_attachment_identity = "true" if expected_attachment_count is not None else "false"
     safe_quoted_needle = escape_applescript(_first_non_empty_line(quoted_needle or ""))
     expected_attachment_names = expected_attachment_names or []
     expected_attachment_names_script = (
@@ -246,6 +249,14 @@ def _verify_saved_reply_draft(
             set draftAttachments to mail attachments of draftMessage
             set actualAttachmentCount to count of draftAttachments
             if actualAttachmentCount < expectedAttachmentCount then return "missing"
+            repeat with anAttachment in draftAttachments
+                try
+                    set attachmentSize to file size of anAttachment as integer
+                    if attachmentSize is less than or equal to 0 then return "unreadable"
+                on error
+                    return "unreadable"
+                end try
+            end repeat
             if (count of expectedAttachmentNames) is 0 then return "verified"
 
             set draftAttachmentNames to {{}}
@@ -325,20 +336,26 @@ def _verify_saved_reply_draft(
         -- boundary, so a reply body that itself contains "wrote:" (e.g. "As
         -- Keynes wrote: ...") cannot false-fail into after_quote.
         set flatBody to my flattenForCompare(fullReplyBody)
-        if flatBody is "" then return "found"
         set flatDraft to my flattenForCompare(draftContent)
+        if flatBody is "" then
+            if quotedNeedle is "" then return "found"
+            set flatQuote to my flattenForCompare(quotedNeedle)
+            set quoteOffsetWithoutBody to my textOffset(flatDraft, flatQuote)
+            if quoteOffsetWithoutBody > 0 then return "found"
+            return "quote_missing"
+        end if
         set bodyOffset to my caseSensitiveOffset(flatDraft, flatBody)
         if bodyOffset is 0 then return "missing"
         if quotedNeedle is "" then return "found"
         set flatQuote to my flattenForCompare(quotedNeedle)
         set bodyEndOffset to bodyOffset + (count of characters of flatBody)
-        if bodyEndOffset > (count of characters of flatDraft) then return "found"
+        if bodyEndOffset > (count of characters of flatDraft) then return "quote_missing"
         set searchRegion to text bodyEndOffset thru -1 of flatDraft
         set quoteOffsetAfterBody to my textOffset(searchRegion, flatQuote)
         if quoteOffsetAfterBody > 0 then return "found"
         set quoteOffsetAnywhere to my textOffset(flatDraft, flatQuote)
         if quoteOffsetAnywhere > 0 and quoteOffsetAnywhere < bodyOffset then return "after_quote"
-        return "found"
+        return "quote_missing"
     end replyBodyAboveQuoteStatus
 
     on verifyReplyDraft(draftMessage, fullReplyBody, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
@@ -348,10 +365,15 @@ def _verify_saved_reply_draft(
         set draftAttachmentCount to my attachmentCount(draftMessage)
         set draftAttachmentRows to my attachmentRows(draftMessage)
         set draftSignatureStatus to my signatureStatus(draftContent, fullReplyBody, quotedNeedle, signatureWasRequested, expectedSignatureName)
-        if fullReplyBody is "" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         set bodyStatus to my replyBodyAboveQuoteStatus(draftContent, fullReplyBody, quotedNeedle)
-        if bodyStatus is "found" then return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
+        if bodyStatus is "found" then
+            if draftAttachmentStatus is "missing" then return "ATTACHMENT_MISSING|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
+            if draftAttachmentStatus is "unsupported" then return "ATTACHMENT_UNSUPPORTED|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
+            if draftAttachmentStatus is "unreadable" then return "ATTACHMENT_UNREADABLE|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
+            return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
+        end if
         if bodyStatus is "after_quote" then return "BODY_AFTER_QUOTE|" & draftId
+        if bodyStatus is "quote_missing" then return "QUOTE_MISSING|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         return "BODY_MISSING|" & draftId
     end verifyReplyDraft
 
@@ -372,6 +394,8 @@ def _verify_saved_reply_draft(
         set targetAccount to account "{safe_account}"
         set targetDraftIdText to "{safe_draft_id}"
         set requireNativeIdentity to {require_native_identity}
+        set requireRfcIdentity to {require_rfc_identity}
+        set requireExactAttachmentIdentity to {require_exact_attachment_identity}
         set expectedDraftRfcMessageId to "{safe_draft_rfc_message_id}"
         set expectedSourceRfcMessageId to "{safe_source_rfc_message_id}"
         set fullReplyBody to do shell script "cat " & quoted form of "{verify_body_temp_path}"
@@ -383,7 +407,11 @@ def _verify_saved_reply_draft(
         set replyDraftVerified to false
         set bodyMissingDraftId to ""
         set bodyAfterQuoteDraftId to ""
+        set quoteMissingResult to ""
+        set attachmentFailureResult to ""
         set foundDraftId to ""
+
+        if requireExactAttachmentIdentity and (requireNativeIdentity is false) then return "IDENTITY_UNAVAILABLE"
 
         repeat with verifyAttempt from 1 to 20
             try
@@ -394,24 +422,35 @@ def _verify_saved_reply_draft(
                         set targetDrafts to every message of draftsMailbox whose id is targetDraftId
                         if (count of targetDrafts) > 0 then
                             set exactDraft to item 1 of targetDrafts
-                            if requireNativeIdentity then
+                            if requireRfcIdentity then
                                 if (my identityMatches(exactDraft, expectedDraftRfcMessageId, expectedSourceRfcMessageId)) is false then
                                     return "IDENTITY_UNAVAILABLE"
                                 end if
                             end if
                             set exactResult to my verifyReplyDraft(exactDraft, fullReplyBody, quotedNeedle, expectedAttachmentCount, expectedAttachmentNames, signatureWasRequested, expectedSignatureName)
-                            return exactResult
+                            if exactResult starts with "ATTACHMENT_" then
+                                set attachmentFailureResult to exactResult
+                            else
+                                return exactResult
+                            end if
                         end if
-                        if requireNativeIdentity then return "IDENTITY_UNAVAILABLE"
+                        if (requireNativeIdentity or requireExactAttachmentIdentity) and attachmentFailureResult is "" then return "IDENTITY_UNAVAILABLE"
                     end try
                 end if
 
-                if requireNativeIdentity then return "IDENTITY_UNAVAILABLE"
+                -- An exact Drafts artifact with a known attachment failure
+                -- must fail closed. A same-subject fallback can only diagnose
+                -- identity-unavailable work; it must never certify an older
+                -- matching draft after this compose call's exact artifact
+                -- lacked a requested attachment.
+                if attachmentFailureResult is not "" then return attachmentFailureResult
+                if (requireNativeIdentity or requireExactAttachmentIdentity) and attachmentFailureResult is "" then return "IDENTITY_UNAVAILABLE"
 
-                set totalDrafts to count of messages of draftsMailbox
-                set headEnd to totalDrafts
-                if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
-                if headEnd > 0 then
+                if (requireNativeIdentity is false) and (requireExactAttachmentIdentity is false) then
+                    set totalDrafts to count of messages of draftsMailbox
+                    set headEnd to totalDrafts
+                    if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
+                    if headEnd > 0 then
                     set candidateDrafts to messages 1 thru headEnd of draftsMailbox
                     repeat with draftMessage in candidateDrafts
                         try
@@ -426,6 +465,10 @@ def _verify_saved_reply_draft(
                                     if bodyAfterQuoteDraftId is "" then set bodyAfterQuoteDraftId to text 18 thru -1 of draftResult
                                 else if draftResult starts with "BODY_MISSING|" then
                                     if bodyMissingDraftId is "" then set bodyMissingDraftId to text 14 thru -1 of draftResult
+                                else if draftResult starts with "QUOTE_MISSING|" then
+                                    if quoteMissingResult is "" then set quoteMissingResult to draftResult
+                                else if draftResult starts with "ATTACHMENT_" then
+                                    if attachmentFailureResult is "" then set attachmentFailureResult to draftResult
                                 end if
                             end if
 
@@ -435,6 +478,7 @@ def _verify_saved_reply_draft(
                             end if
                         end try
                     end repeat
+                    end if
                 end if
             end try
             if replyDraftVerified then exit repeat
@@ -444,9 +488,11 @@ def _verify_saved_reply_draft(
         if replyDraftVerified then
             return foundDraftId
         end if
+        if attachmentFailureResult is not "" then return attachmentFailureResult
         if bodyAfterQuoteDraftId is not "" then
             return "BODY_AFTER_QUOTE|" & bodyAfterQuoteDraftId
         end if
+        if quoteMissingResult is not "" then return quoteMissingResult
         if bodyMissingDraftId is not "" then
             return "BODY_MISSING|" & bodyMissingDraftId
         end if
@@ -462,4 +508,18 @@ def _verify_saved_reply_draft(
     finally:
         with suppress(OSError):
             Path(verify_body_temp_path).unlink(missing_ok=True)
-    return _reply_verification_from_output(output)
+    verification = _reply_verification_from_output(output)
+    if expected_attachment_count is not None and verification.ok:
+        has_exact_native_identity = bool(
+            native_draft_identity
+            and draft_id
+            and native_draft_identity.draft_id == draft_id
+            and verification.matched_artifact_id == draft_id
+        )
+        if not has_exact_native_identity:
+            return _ReplyDraftVerification(ok=False, status="identity_unavailable")
+    artifact_id = (
+        verification.matched_artifact_id or verification.error_artifact_id or verification.body_missing_artifact_id
+    )
+    identity_verified = bool(draft_id and artifact_id and artifact_id == draft_id)
+    return replace(verification, artifact_identity_verified=identity_verified)

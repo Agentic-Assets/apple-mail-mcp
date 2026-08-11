@@ -14,6 +14,7 @@ from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
     _native_reply_draft_resolver_script,
     _native_reply_draft_resolver_setup_script,
 )
+from apple_mail_mcp.tools.compose.reply_window_scripts import native_reply_window_handlers_applescript
 from apple_mail_mcp.tools.compose.typing_scripts import build_chunked_typing_handler
 
 
@@ -230,12 +231,7 @@ def _native_reply_post_action(mode: str) -> str:
 def _native_reply_draft_window_close_script() -> str:
     """Return the quiet close used only after native Drafts resolution."""
     return """
-        try
-            close (every window whose name is replySubject) saving no
-        end try
-        try
-            if derivedReplySubject is not replySubject then close (every window whose name is derivedReplySubject) saving no
-        end try
+        my closeNativeReplyWindowSafely(replyWindowId, replySubject, derivedReplySubject)
     """
 
 
@@ -299,6 +295,7 @@ on looksLikeReplyWindowTitle(windowTitle)
     end ignoring
     return false
 end looksLikeReplyWindowTitle
+
 """
 
 
@@ -327,7 +324,6 @@ def _build_reply_native_window_applescript(
     has_attachments: bool,
 ) -> str:
     """Build the windowed native reply script used when ``native_format=True``.
-
     Mail's ``reply ... with opening window`` renders its own rich quoted thread
     (the colored quote bar) and inserts the account's default reply signature
     (with logo). Those exist only in the rendered compose window, never in the
@@ -369,25 +365,34 @@ def _build_reply_native_window_applescript(
     draft_resolver_script = _native_reply_draft_resolver_script() if mode != "send" else ""
     draft_window_close_script = _native_reply_draft_window_close_script() if mode == "draft" else ""
     subject_helpers = _native_reply_subject_helpers_applescript()
+    window_handlers = native_reply_window_handlers_applescript()
     typing_handler = build_chunked_typing_handler(
         chunk_size=TYPING_CHUNK_SIZE,
         inter_chunk_delay=TYPING_INTER_CHUNK_DELAY,
     )
     return f'''
 {subject_helpers}
+{window_handlers}
 {typing_handler}
 {draft_resolver_handlers}
 set bodyTempPath to "{body_temp_path}"
 set derivedReplySubject to ""
 set replySubject to ""
 set replyMessage to missing value
+set replyWindowId to ""
+set preReplyWindowIds to missing value
 set replyDraftId to ""
 set replyDraftRfcMessageId to ""
+set replyDraftIdentityEvidence to ""
 set quotedNeedle to ""
 set didType to false
 set typingInterruptedDetail to ""
 set guardMail to "(unset)"
+set guardMailWindowId to "(unset)"
 set guardSE to "(unset)"
+set composeFocusVerified to false
+set editorFocusResult to ""
+set replyWindowRaised to false
 
 try
     tell application "Mail"
@@ -401,8 +406,28 @@ try
         end if
 
         {draft_resolver_setup_script}
-
         set sourceSubject to subject of foundMessage as string
+        set sourceSender to sender of foundMessage as string
+        -- Sender-only attribution can occur in a body/signature; require a source-body anchor.
+        set sourceQuoteAnchor to ""
+        try
+            set sourceContent to content of foundMessage as string
+            repeat with sourceParagraph in paragraphs of sourceContent
+                set candidateQuoteText to contents of sourceParagraph as string
+                if (count of characters of candidateQuoteText) >= 16 then
+                    if (count of characters of candidateQuoteText) > 160 then
+                        set sourceQuoteAnchor to text 1 thru 160 of candidateQuoteText
+                    else
+                        set sourceQuoteAnchor to candidateQuoteText
+                    end if
+                    exit repeat
+                end if
+            end repeat
+        end try
+        if sourceQuoteAnchor is "" then
+            {cleanup_script}
+            return "QUOTE_PROOF_UNAVAILABLE" & return & "Detail: source content has no usable quote anchor"
+        end if
         if sourceSubject starts with "Re:" or sourceSubject starts with "RE:" or sourceSubject starts with "re:" then
             set derivedReplySubject to sourceSubject
         else
@@ -410,6 +435,7 @@ try
         end if
         set replySubject to derivedReplySubject
         set replyBodyText to do shell script "cat " & quoted form of bodyTempPath
+        set preReplyWindowIds to my mailWindowIdSnapshot()
 
         -- Native Mail reply: Mail builds its own rich quoted thread and inserts the
         -- account's default reply signature into the opened window. Content is never
@@ -418,6 +444,7 @@ try
         delay 1.2
         activate
         delay 0.4
+        set replyWindowId to my newlyOpenedReplyWindowId(preReplyWindowIds, derivedReplySubject)
 
         -- Prefer Mail's own outgoing reply subject when it is the same reply thread.
         -- Mail collapses duplicate Re:/Fwd: prefixes, so the derived source subject
@@ -450,76 +477,71 @@ try
         end try
         {cc_script}
         {bcc_script}
-        {attachment_script}
     end tell
 
-    -- Insert the reply body with a TYPED keystroke. Guard: Mail's dictionary front
-    -- window must exactly equal the adopted replySubject (live title after core-
-    -- matched adoption, else derived). An empty System Events title is tolerated
-    -- (AX quirk); a different non-empty SE title aborts. Subject-core matching is
-    -- only used to adopt Mail's normalized title, never as the keystroke boundary.
-    if replyBodyText is not "" then
-        repeat with guardAttempt from 1 to 4
-            set guardMail to "(unset)"
-            set guardSE to "(unset)"
-            tell application "Mail"
-                activate
-            end tell
-            delay 0.3
-            tell application "System Events"
-                tell process "Mail"
-                    set frontmost to true
-                    delay 0.3
-                    try
-                        perform action "AXRaise" of (first window whose name is replySubject)
-                    end try
-                    try
-                        if derivedReplySubject is not replySubject then
-                            perform action "AXRaise" of (first window whose name is derivedReplySubject)
-                        end if
-                    end try
-                    delay 0.3
-                    try
-                        set guardSE to name of front window
-                    end try
-                end tell
-            end tell
-            tell application "Mail"
+    -- Guard the exact Mail window id, then focus its AX editor before typing.
+    repeat with guardAttempt from 1 to 4
+        set guardMail to "(unset)"
+        set guardMailWindowId to "(unset)"
+        set guardSE to "(unset)"
+        tell application "Mail"
+            set replyWindowRaised to my raiseNativeReplyWindowSafely(replyWindowId, replySubject, derivedReplySubject)
+        end tell
+        delay 0.3
+        tell application "System Events"
+            tell process "Mail"
+                set frontmost to true
+                delay 0.3
+                delay 0.3
                 try
-                    set guardMail to name of front window
+                    set guardSE to name of front window
                 end try
-                -- Late adoption: if focus landed on Mail's normalized reply title,
-                -- adopt it before the exact-title keystroke check.
-                if guardMail is not "(unset)" and guardMail is not "" then
-                    if my subjectCoresMatch(guardMail, derivedReplySubject) then
-                        set replySubject to guardMail
-                    end if
-                end if
             end tell
-            set mailOk to (guardMail is replySubject)
-            set seOk to (guardSE is replySubject or guardSE is "" or guardSE is "(unset)")
-            if mailOk and seOk then
-                set typeChunksResult to my typeReplyBodyChunks(replyBodyText, replySubject, derivedReplySubject)
-                if typeChunksResult is "typed" then
-                    set didType to true
+        end tell
+        tell application "Mail"
+            try
+                set guardMail to name of front window
+                set guardMailWindowId to id of front window as string
+            end try
+            -- Late adoption: if focus landed on Mail's normalized reply title,
+            -- adopt it before the exact-title keystroke check.
+            if guardMail is not "(unset)" and guardMail is not "" then
+                if my subjectCoresMatch(guardMail, derivedReplySubject) then
+                    set replySubject to guardMail
+                end if
+            end if
+        end tell
+        set mailOk to (guardMail is replySubject and guardMailWindowId is replyWindowId)
+        set seOk to (guardSE is replySubject or guardSE is "" or guardSE is "(unset)")
+        if mailOk and seOk then
+            set editorFocusResult to my focusReplyBodyEditor(replySubject, derivedReplySubject, replyWindowId)
+            if editorFocusResult is "focused" then
+                set composeFocusVerified to true
+                if replyBodyText is not "" then
+                    set typeChunksResult to my typeReplyBodyChunks(replyBodyText, replySubject, derivedReplySubject, replyWindowId)
+                    if typeChunksResult is "typed" then
+                        set didType to true
+                    else
+                        set composeFocusVerified to false
+                        set typingInterruptedDetail to typeChunksResult
+                    end if
                 else
-                    set typingInterruptedDetail to typeChunksResult
+                    set didType to true
                 end if
                 exit repeat
             end if
-            delay 0.5
-        end repeat
-
-        if didType is false then
-            -- Distinguish a mid-typing focus loss (chunked keystroke aborted
-            -- partway through) from a pre-typing focus failure: true focus loss
-            -- (Inbox / other app window) vs. a reply window whose title still
-            -- does not core-match the expected subject.
+        end if
+        delay 0.5
+    end repeat
+    if composeFocusVerified is false then
+            -- Distinguish a mid-typing focus loss from a pre-typing failure.
             set abortDetailText to "could not focus reply window"
             set abortCode to "GUARD_ABORT"
             if typingInterruptedDetail is not "" then
                 set abortCode to "TYPING_INTERRUPTED"
                 set abortDetailText to typingInterruptedDetail
+            else if editorFocusResult is not "" then
+                set abortDetailText to editorFocusResult
             else if guardMail is not "(unset)" and guardMail is not "" then
                 if (my subjectCoresMatch(guardMail, derivedReplySubject)) is false then
                     if my looksLikeReplyWindowTitle(guardMail) then
@@ -527,24 +549,21 @@ try
                     end if
                 end if
             end if
-            tell application "Mail"
-                try
-                    close (every window whose name is replySubject) saving no
-                end try
-                try
-                    if derivedReplySubject is not replySubject then
-                        close (every window whose name is derivedReplySubject) saving no
-                    end if
-                end try
-                {cleanup_script}
-            end tell
+            my closeNativeReplyWindowSafely(replyWindowId, replySubject, derivedReplySubject)
+            {cleanup_script}
             return abortCode & return & "Subject: " & replySubject & return & "DerivedSubject: " & derivedReplySubject & return & "Detail: " & abortDetailText & " (mailFront=" & guardMail & " seFront=" & guardSE & ")"
-        end if
-        set quotedNeedle to "wrote:"
     end if
-
+    -- Pair the source attribution with actual source content. A bare
+    -- ``wrote:`` or even sender-only attribution can occur in an authored
+    -- body/signature and would falsely certify a lost native quote.
+    set quotedNeedle to sourceSender & " wrote:" & return & sourceQuoteAnchor
     delay 0.4
     tell application "Mail"
+        -- Adding attachments before body typing can make Mail rebuild the rich
+        -- reply content and discard the quoted original. Attach only after the
+        -- typed body has completed successfully.
+        {attachment_script}
+
         {post_action}
 
         -- Mail's outgoing-message ID is not a Drafts ID on every account.
@@ -561,7 +580,7 @@ try
         set outputText to outputText & "To: native reply recipients" & return
         set outputText to outputText & "Subject: " & replySubject & return
         if replyDraftId is not "" then set outputText to outputText & "Draft ID: " & replyDraftId & return
-        if replyDraftId is not "" then set outputText to outputText & "Draft Identity: " & replyDraftId & "|||" & replyDraftRfcMessageId & "|||" & sourceRfcMessageId & return
+        if replyDraftId is not "" and replyDraftIdentityEvidence is not "" then set outputText to outputText & "Draft Identity: " & replyDraftId & "|||" & replyDraftRfcMessageId & "|||" & sourceRfcMessageId & "|||" & replyDraftIdentityEvidence & return
         if quotedNeedle is not "" then set outputText to outputText & "Quote Needle: " & quotedNeedle & return
         {extra_output_lines}
 
@@ -571,16 +590,7 @@ try
     end tell
 on error errMsg
     try
-        tell application "Mail"
-            close (every window whose name is replySubject) saving no
-        end tell
-    end try
-    try
-        tell application "Mail"
-            if derivedReplySubject is not "" and derivedReplySubject is not replySubject then
-                close (every window whose name is derivedReplySubject) saving no
-            end if
-        end tell
+        my closeNativeReplyWindowSafely(replyWindowId, replySubject, derivedReplySubject)
     end try
     try
         {cleanup_script}

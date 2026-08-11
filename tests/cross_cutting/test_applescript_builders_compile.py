@@ -266,8 +266,9 @@ class OsacompileAvailableTests(unittest.TestCase):
             has_attachments=False,
         )
 
-        self.assertIn("on chunkFocusBlockedName(expectedTitle, derivedTitle)", script)
-        self.assertIn("on typeReplyBodyChunks(bodyText, expectedTitle, derivedTitle)", script)
+        self.assertIn("on chunkFocusBlockedName(expectedTitle, derivedTitle, expectedWindowId)", script)
+        self.assertIn("on typeReplyBodyChunks(bodyText, expectedTitle, derivedTitle, expectedWindowId)", script)
+        self.assertIn("on focusReplyBodyEditor(expectedTitle, derivedTitle, expectedWindowId)", script)
         self.assertIn("key up shift", script)
         ok, err = _osacompile_check(script)
         self.assertTrue(

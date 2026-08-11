@@ -17,8 +17,8 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
-| [`active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/) | Bounded Linear backlog fixes: export, mailbox resolution, calendar participant discovery, and compose/draft safety | Pushed at `a776e51`; [draft PR #83](https://github.com/Agentic-Assets/apple-mail-mcp/pull/83) is open; protected live gates remain |
-| [`active/native-reply/`](active/native-reply/) | Native-format reply drafts (v3.8.0 ship + live TO-TEST) | Shipped; live verification pending (needs Cayman at the machine) |
+| [`active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/) | Bounded Linear backlog fixes: export, mailbox resolution, calendar participant discovery, and compose/draft safety | Shipped in PR #83, merged to `origin/main` at `ed9e1ee`; retained here pending archival housekeeping |
+| [`active/native-reply/`](active/native-reply/) | Native-format reply drafts, including attachment preservation and fail-closed verification | Attachment fix verified offline; disposable-fixture live matrix pending |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 fuzzy-selector retirement, metadata-index spike, `allow_filter_scan` decision | Decision brief awaiting sign-off; follow-up branches not started |
 | [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate | Module split shipped (v3.9.1); perf/FTS stalled since 2026-05-27; confirm resume vs archive |
 | [`active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/) | Explicit Cursor plugin-root launcher and host-specific validator | Shipped on `main` in v3.11.6; local 41-tool Cursor Agent acceptance passed; Marketplace/UI distribution evidence remains open |

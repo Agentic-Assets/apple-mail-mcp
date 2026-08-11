@@ -395,12 +395,14 @@ apple-mail -o json export-emails --raw '{
 With Mail visible and Accessibility granted to the wrapper host, make a native
 draft reply to the fixture using `mailbox="$FIXTURE_MAILBOX"`. This exercises
 special-mailbox lookup; for a duplicate nested leaf, use its exact
-`Parent/Child` path. Require a verified exact Drafts id in the JSON response,
-then re-resolve that one draft with `verify_draft` immediately before cleanup.
-Delete only by that exact id and supply the current `expected_in_reply_to`,
-`expected_subject`, and `expected_to` together. A guard mismatch must leave the
-draft untouched; after a successful guarded delete, list Drafts and confirm the
-exact id is absent. Never replace this sequence with subject-based cleanup.
+`Parent/Child` path. Inspect `draft_id_source` in the JSON response before any
+cleanup. Only `persisted_header_identity` may enter the guarded-cleanup path,
+after a fresh `verify_draft` read. A
+`transaction_scoped_numeric_identity` is a successful same-operation iCloud
+verification but is **verify-and-inspect only**: do not open, send, delete, or
+retype it automatically. A guard mismatch must leave the draft untouched; after
+a successful guarded delete, list Drafts and confirm the exact id is absent.
+Never replace this sequence with subject-based cleanup.
 
 ```bash
 apple-mail -o json reply-to-email --raw '{
@@ -414,9 +416,12 @@ apple-mail -o json reply-to-email --raw '{
 }'
 ```
 
-After `verify_draft` returns the current values, set the four variables below
-from that one response and make the guarded cleanup call. Do not reuse values
-from an older list or a different draft.
+Proceed only when the response reported `draft_id_source` as
+`persisted_header_identity` and `verify_draft` returns current values. Set the
+four variables below from that one response and make the guarded cleanup call.
+Do not reuse values from an older list or a different draft. When the source is
+`transaction_scoped_numeric_identity`, retain the fixture draft for manual
+inspection and record the result instead.
 
 ```bash
 export FIXTURE_DRAFT_ID="67890"

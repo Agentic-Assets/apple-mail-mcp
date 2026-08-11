@@ -284,8 +284,8 @@ class TestNoNoneLiteralInAppleScript(unittest.TestCase):
 
         self.assertIsInstance(result, str)
         self.assertNotIn("Account: None", result)
-        # The account name must appear in the output correctly
-        self.assertIn("Account: Work", result)
+        # Structured rich-import failures retain the resolved account.
+        self.assertIn('"account": "Work"', result)
 
 
 # ---------------------------------------------------------------------------

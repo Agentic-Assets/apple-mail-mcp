@@ -30,3 +30,11 @@ def test_mcpb_builder_copies_the_offline_payload() -> None:
 
     assert 'cp "${SOURCE_DIR}/requirements.lock"' in builder
     assert 'cp -R "${SOURCE_DIR}/wheelhouse"' in builder
+
+
+def test_mcpb_builder_copies_static_readme_without_a_heredoc() -> None:
+    """The bundle builder must not hang while feeding its generated README."""
+    builder = (ROOT / "apple-mail-mcpb/build-mcpb.sh").read_text(encoding="utf-8")
+
+    assert 'cp "${SCRIPT_DIR}/README.md" "${BUILD_DIR}/README.md"' in builder
+    assert 'cat > "${BUILD_DIR}/README.md" <<' not in builder

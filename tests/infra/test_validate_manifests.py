@@ -13,9 +13,23 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "validators"))
 
 import validate_manifests
+from manifest_checks.artifacts import _generated_mcpb_readme
+from manifest_checks.common import ACTIVE_DOC_TOOL_COUNT_REQUIRED
 
 
 class ValidateManifestsTests(unittest.TestCase):
+    def test_mcpb_readme_validator_uses_the_bundle_readme_as_its_single_source(self):
+        """The artifact check must match the README copied by build-mcpb.sh."""
+        self.assertEqual(
+            _generated_mcpb_readme(),
+            (ROOT / "apple-mail-mcpb/README.md").read_bytes(),
+        )
+
+    def test_bundle_readme_carries_the_active_tool_count_claim(self):
+        """The copied bundle README, not validator code, is the active package doc."""
+        self.assertIn("apple-mail-mcpb/README.md", ACTIVE_DOC_TOOL_COUNT_REQUIRED)
+        self.assertNotIn("tools/manifest_checks/artifacts.py", ACTIVE_DOC_TOOL_COUNT_REQUIRED)
+
     def test_validate_manifests_passes_on_current_repo(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "tools" / "validators" / "validate_manifests.py")],
@@ -896,7 +910,7 @@ class ValidateManifestsTests(unittest.TestCase):
             script,
         )
         self.assertIn('codex plugin marketplace add "$CODEX_MARKETPLACE_SOURCE"', script)
-        self.assertIn('tools/marketplace_identity.json', script)
+        self.assertIn("tools/marketplace_identity.json", script)
         self.assertIn('standalone["marketplace_id"]', script)
         self.assertIn('standalone["selector"]', script)
         self.assertIn('codex plugin add "$CODEX_PLUGIN_SELECTOR"', script)
@@ -924,7 +938,7 @@ class ValidateManifestsTests(unittest.TestCase):
     def test_refresh_helper_is_fail_closed_and_never_mutates_shared_marketplace(self):
         script = (ROOT / "tools" / "gates" / "refresh-local-plugins.sh").read_text(encoding="utf-8")
 
-        self.assertIn('tools/marketplace_identity.json', script)
+        self.assertIn("tools/marketplace_identity.json", script)
         self.assertIn('standalone["marketplace_id"]', script)
         self.assertIn('standalone["selector"]', script)
         self.assertNotIn("LEGACY_MARKETPLACES", script)

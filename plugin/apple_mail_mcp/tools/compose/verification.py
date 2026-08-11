@@ -41,6 +41,7 @@ class _ReplyDraftVerification:
     attachment_count: int | None = None
     attachments_applied: list[dict[str, Any]] | None = None
     signature_status: str | None = None
+    artifact_identity_verified: bool = False
 
 
 def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
@@ -56,11 +57,39 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     except ValueError:
         attachment_count = None
     attachments_applied = _normalize_attachment_rows(parts[5]) if len(parts) > 5 and parts[5].strip() else None
+    if (
+        attachment_status == "verified"
+        and attachments_applied
+        and any(
+            not isinstance(attachment.get("size"), int) or attachment["size"] <= 0 for attachment in attachments_applied
+        )
+    ):
+        attachment_status = "unreadable"
     if status == "FOUND":
+        if attachment_status in {"missing", "unsupported", "unreadable"}:
+            return _ReplyDraftVerification(
+                ok=False,
+                status="attachment_verification_failed",
+                error_artifact_id=artifact_id,
+                attachment_status=attachment_status,
+                attachment_count=attachment_count,
+                attachments_applied=attachments_applied,
+                signature_status=signature_status,
+            )
         return _ReplyDraftVerification(
             ok=True,
             status="found",
             matched_artifact_id=artifact_id,
+            attachment_status=attachment_status,
+            attachment_count=attachment_count,
+            attachments_applied=attachments_applied,
+            signature_status=signature_status,
+        )
+    if status in {"ATTACHMENT_MISSING", "ATTACHMENT_UNSUPPORTED", "ATTACHMENT_UNREADABLE"}:
+        return _ReplyDraftVerification(
+            ok=False,
+            status="attachment_verification_failed",
+            error_artifact_id=artifact_id,
             attachment_status=attachment_status,
             attachment_count=attachment_count,
             attachments_applied=attachments_applied,
@@ -77,6 +106,16 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
             ok=False,
             status="body_after_quote",
             body_missing_artifact_id=artifact_id,
+        )
+    if status == "QUOTE_MISSING":
+        return _ReplyDraftVerification(
+            ok=False,
+            status="quoted_original_missing",
+            error_artifact_id=artifact_id,
+            attachment_status=attachment_status,
+            attachment_count=attachment_count,
+            attachments_applied=attachments_applied,
+            signature_status=signature_status,
         )
     if status == "IDENTITY_UNAVAILABLE":
         return _ReplyDraftVerification(ok=False, status="identity_unavailable")
@@ -234,6 +273,12 @@ def _reply_draft_verification_error(
     if verification.status == "body_after_quote":
         code = "REPLY_DRAFT_BODY_AFTER_QUOTE"
         detail = "contains the inserted reply body after the quoted original instead of above it"
+    elif verification.status == "quoted_original_missing":
+        code = "REPLY_QUOTED_ORIGINAL_MISSING"
+        detail = "contains the inserted reply body but no longer contains the quoted original"
+    elif verification.status == "attachment_verification_failed":
+        code = "REPLY_DRAFT_ATTACHMENT_VERIFICATION_FAILED"
+        detail = "does not contain every requested attachment"
     elif verification.status == "verification_timeout":
         code = "REPLY_DRAFT_VERIFICATION_TIMEOUT"
         detail = "could not be verified before the verifier timed out"
@@ -241,24 +286,61 @@ def _reply_draft_verification_error(
         code = "REPLY_DRAFT_VERIFICATION_ERROR"
         detail = "could not be verified because Mail returned a verifier error"
 
+    failure_needs_verified_identity = verification.status in {
+        "quoted_original_missing",
+        "attachment_verification_failed",
+    }
+    identity_verified = verification.artifact_identity_verified
+    remediation: dict[str, Any] = {
+        "mailbox": "Drafts",
+        "verification_status": verification.status,
+        "expected_body_needle": _first_non_empty_line(reply_body),
+        "retyped": retyped,
+    }
+    if failure_needs_verified_identity and not identity_verified:
+        remediation.update(
+            {
+                "suspect_artifact_message_id": artifact_id,
+                "artifact_identity_verified": False,
+                "preferred": (
+                    "Inspect the suspected Drafts artifact and retry after Mail finishes saving. "
+                    "Do not delete it automatically because persisted reply identity was not verified."
+                ),
+            }
+        )
+    else:
+        remediation.update(
+            {
+                "artifact_message_id": artifact_id,
+                "draft_id": artifact_id,
+                "artifact_identity_verified": identity_verified,
+                "preferred": (
+                    "Inspect or delete the artifact by exact Drafts message_id, then retry after Mail finishes saving."
+                ),
+            }
+        )
+    if verification.status == "attachment_verification_failed":
+        remediation.update(
+            {
+                "attachment_status": verification.attachment_status,
+                "attachment_count": verification.attachment_count,
+                "attachments_applied": verification.attachments_applied or [],
+            }
+        )
+
+    artifact_description = (
+        f"saved Drafts artifact {artifact_id}"
+        if identity_verified or not failure_needs_verified_identity
+        else f"suspected Drafts artifact {artifact_id}"
+    )
     return serialize_tool_error(
         ToolError(
             code=code,
             message=(
-                f"Reply draft was {mode_text}, but saved Drafts artifact {artifact_id} {detail}. No email was sent."
+                f"Reply draft was {mode_text}, but {artifact_description} {detail}. No email was sent."
                 + (" An automatic retype was attempted once and still did not resolve this." if retyped else "")
             ),
-            remediation={
-                "artifact_message_id": artifact_id,
-                "draft_id": artifact_id,
-                "mailbox": "Drafts",
-                "verification_status": verification.status,
-                "expected_body_needle": _first_non_empty_line(reply_body),
-                "retyped": retyped,
-                "preferred": (
-                    "Inspect or delete the artifact by exact Drafts message_id, then retry after Mail finishes saving."
-                ),
-            },
+            remediation=remediation,
         )
     )
 

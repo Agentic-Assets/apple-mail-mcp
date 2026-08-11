@@ -6,6 +6,18 @@
   `${CURSOR_PLUGIN_ROOT}` while preserving the draft-safe launch flag.
 - Validate Cursor and Codex launcher contracts independently so a relative
   Codex path cannot mask an invalid Cursor installation path.
+- Native replies now add attachments only after the authored body finishes
+  typing, preventing the object-model mutation from disrupting Mail's native
+  quote cursor.
+- Saved reply verification now fails closed with
+  `REPLY_QUOTED_ORIGINAL_MISSING` or
+  `REPLY_DRAFT_ATTACHMENT_VERIFICATION_FAILED` when the native quote or a
+  requested attachment is absent. Persisted identity matches name the exact
+  retained artifact; same-subject fallback ids are marked as suspect and
+  never authorize deletion.
+- Native attachment replies now require draft-first verification instead of
+  direct send. Verification also retries transient attachment materialization
+  and requires the quote for attachment-only replies.
 
 ## 3.11.5 - 2026-07-15
 

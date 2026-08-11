@@ -87,8 +87,9 @@ def reply_to_email(
     passed. Agents must never use the fallback.
 
     The saved draft's full body above the quoted original is verified
-    case-sensitively (not just its first line) before this call reports
-    success. On a placement mismatch with a known artifact id, the native
+    case-sensitively (not just its first line), the native quote must remain
+    present, and every requested attachment must be detected before this call
+    reports success. On a placement mismatch with a known artifact id, the native
     path automatically deletes that artifact and retypes the identical body
     once before re-verifying; a mismatch that still does not resolve returns
     ``REPLY_BODY_MISMATCH`` naming the suspect Drafts artifact id.
@@ -264,6 +265,23 @@ def reply_to_email(
         return blocked
     if output_format == "json" and effective_mode == "send":
         return "Error: output_format='json' is only supported for mode='draft' or mode='open'."
+    if effective_mode == "send" and attachments:
+        return serialize_tool_error(
+            ToolError(
+                code="REPLY_SEND_REQUIRES_VERIFIED_DRAFT",
+                message=(
+                    "Replies with attachments must be saved and verified before sending. "
+                    "No Mail compose or send action was performed."
+                ),
+                remediation={
+                    "preferred_mode": "draft",
+                    "preferred": (
+                        "Retry with mode='draft', inspect the exact verified draft, then send that "
+                        "draft explicitly after approval."
+                    ),
+                },
+            )
+        )
 
     if effective_mode == "open":
         cap_err = _check_open_compose_window_cap()
@@ -473,6 +491,7 @@ def reply_to_email(
                 and bool(artifact_id)
                 and bool(draft_id)
                 and native_draft_identity is not None
+                and native_draft_identity.is_rfc_backed
                 and artifact_id == draft_id
             )
             if not can_retry:
@@ -521,7 +540,13 @@ def reply_to_email(
                     draft_id=draft_id,
                     verification=verification,
                     captured_draft_id_source=(
-                        "persisted_header_identity" if native_draft_identity else "mail_returned"
+                        (
+                            "persisted_header_identity"
+                            if native_draft_identity.is_rfc_backed
+                            else "transaction_scoped_numeric_identity"
+                        )
+                        if native_draft_identity
+                        else "mail_returned"
                     ),
                     retyped=retyped,
                     stale_artifact_id=stale_artifact_id,

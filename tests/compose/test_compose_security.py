@@ -278,9 +278,7 @@ def test_bug3_subprocess_called_process_error_returns_structured_error():
             )
 
     assert isinstance(result, str), "Tool must return str, not raise"
-    assert result.startswith("Error:"), (
-        f"Expected structured error on CalledProcessError, got: {result!r}"
-    )
+    assert '"code": "RICH_DRAFT_COMPOSE_FAILED"' in result
     assert "Mail" in result or "draft" in result.lower(), (
         f"Error message should mention Mail or draft: {result!r}"
     )
@@ -311,9 +309,7 @@ def test_bug3_file_not_found_error_returns_structured_error():
             )
 
     assert isinstance(result, str), "Tool must return str, not raise"
-    assert result.startswith("Error:"), (
-        f"Expected structured error on FileNotFoundError, got: {result!r}"
-    )
+    assert '"code": "RICH_DRAFT_COMPOSE_FAILED"' in result
 
 
 # ---------------------------------------------------------------------------
