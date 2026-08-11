@@ -1,10 +1,10 @@
 """Safe native-reply Drafts-ID resolver AppleScript fragments.
 
 Mail's immediate ``outgoing message`` identifier is not reliably the same as
-the persisted identifier in an account's Drafts mailbox, particularly on
-Exchange. Native replies therefore snapshot the complete Drafts mailbox only
-when it fits inside a bounded cap, then emit an identity capsule only when one
-new persisted RFC Message-ID has an ``In-Reply-To`` RFC token matching source.
+the persisted identifier in an account's Drafts mailbox. Native replies take a
+bounded before/after snapshot. The preferred result is an RFC-linked identity;
+when iCloud has not assigned an outgoing RFC Message-ID, exactly one newly
+persisted numeric Drafts row is emitted as a transaction-only identity.
 """
 
 from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
@@ -20,13 +20,16 @@ on fullDraftRfcSnapshot(draftsMailbox, draftCap)
         if totalDrafts > draftCap then return missing value
         if totalDrafts is 0 then return {0, {}}
         set draftMessages to messages 1 thru totalDrafts of draftsMailbox
+        set draftIds to {}
         set draftRfcMessageIds to {}
         repeat with aDraft in draftMessages
+            set draftId to id of aDraft as string
+            if draftId is "" then return missing value
             set rfcMessageId to message id of aDraft as string
-            if rfcMessageId is "" then return missing value
+            set end of draftIds to draftId
             set end of draftRfcMessageIds to rfcMessageId
         end repeat
-        return {totalDrafts, draftRfcMessageIds}
+        return {totalDrafts, draftIds, draftRfcMessageIds}
     on error
         return missing value
     end try
@@ -40,9 +43,9 @@ on sourceRfcMessageIdFor(sourceMessage)
     return ""
 end sourceRfcMessageIdFor
 
-on rfcMessageIdWasPresent(rfcMessageId, priorRfcMessageIds)
-    repeat with priorRfcMessageId in priorRfcMessageIds
-        if (contents of priorRfcMessageId as string) is rfcMessageId then return true
+on identifierWasPresent(identifier, priorIdentifiers)
+    repeat with priorIdentifier in priorIdentifiers
+        if (contents of priorIdentifier as string) is identifier then return true
     end repeat
     return false
 end rfcMessageIdWasPresent
@@ -87,30 +90,33 @@ end headerHasExactRfcToken
 
 on persistedReplyDraftIdentity(draftsMailbox, preSaveDraftSnapshot, sourceMessageId, draftCap)
     try
-        if sourceMessageId is "" then return ""
         if preSaveDraftSnapshot is missing value then return ""
         set preSaveDraftCount to item 1 of preSaveDraftSnapshot
-        set preSaveDraftRfcMessageIds to item 2 of preSaveDraftSnapshot
+        set preSaveDraftIds to item 2 of preSaveDraftSnapshot
         set postSaveDraftCount to count of messages of draftsMailbox
         if postSaveDraftCount > draftCap then return ""
         if postSaveDraftCount is not (preSaveDraftCount + 1) then return ""
         set postSaveDrafts to messages 1 thru postSaveDraftCount of draftsMailbox
-        set matchingDraftIdentities to {}
+        set newDraftIdentities to {}
         repeat with aDraft in postSaveDrafts
             set candidateDraftId to id of aDraft as string
+            if candidateDraftId is "" then return ""
             set candidateRfcMessageId to message id of aDraft as string
-            if candidateRfcMessageId is "" then return ""
-            if (my rfcMessageIdWasPresent(candidateRfcMessageId, preSaveDraftRfcMessageIds)) is false then
-                set inReplyToResult to my draftInReplyTo(aDraft)
-                if item 1 of inReplyToResult is false then return ""
-                if my headerHasExactRfcToken(item 2 of inReplyToResult, sourceMessageId) then
-                    set end of matchingDraftIdentities to {candidateDraftId, candidateRfcMessageId}
-                end if
+            if (my identifierWasPresent(candidateDraftId, preSaveDraftIds)) is false then
+                set end of newDraftIdentities to {candidateDraftId, candidateRfcMessageId}
             end if
         end repeat
-        if (count of matchingDraftIdentities) is 1 then
-            set matchingIdentity to item 1 of matchingDraftIdentities
-            return {item 1 of matchingIdentity as string, item 2 of matchingIdentity as string, sourceMessageId}
+        if (count of newDraftIdentities) is not 1 then return ""
+        set matchingIdentity to item 1 of newDraftIdentities
+        set candidateDraftId to item 1 of matchingIdentity as string
+        set candidateRfcMessageId to item 2 of matchingIdentity as string
+        if candidateRfcMessageId is "" then return {candidateDraftId, "", "", "transaction"}
+        if sourceMessageId is "" then return ""
+        set candidateDraft to first message of draftsMailbox whose id is (candidateDraftId as integer)
+        set inReplyToResult to my draftInReplyTo(candidateDraft)
+        if item 1 of inReplyToResult is false then return ""
+        if my headerHasExactRfcToken(item 2 of inReplyToResult, sourceMessageId) then
+            return {candidateDraftId, candidateRfcMessageId, sourceMessageId, "rfc"}
         end if
     end try
     return ""
@@ -137,13 +143,15 @@ def _native_reply_draft_resolver_script() -> str:
     return f"""
         set replyDraftId to ""
         set replyDraftRfcMessageId to ""
+        set replyDraftIdentityEvidence to ""
         try
-            if preSaveDraftSnapshot is not missing value and sourceRfcMessageId is not "" then
+            if preSaveDraftSnapshot is not missing value then
                 repeat with identityAttempt from 1 to 3
                     set replyDraftIdentity to my persistedReplyDraftIdentity(draftsMailbox, preSaveDraftSnapshot, sourceRfcMessageId, {DRAFT_LIST_CAP})
                     if replyDraftIdentity is not "" then
                         set replyDraftId to item 1 of replyDraftIdentity as string
                         set replyDraftRfcMessageId to item 2 of replyDraftIdentity as string
+                        set replyDraftIdentityEvidence to item 4 of replyDraftIdentity as string
                         exit repeat
                     end if
                     if identityAttempt is less than 3 then delay 0.5
@@ -152,5 +160,6 @@ def _native_reply_draft_resolver_script() -> str:
         on error
             set replyDraftId to ""
             set replyDraftRfcMessageId to ""
+            set replyDraftIdentityEvidence to ""
         end try
     """

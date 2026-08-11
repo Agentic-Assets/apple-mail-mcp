@@ -83,6 +83,8 @@ def _verify_saved_reply_draft(
         native_draft_identity.source_rfc_message_id if native_draft_identity else ""
     )
     require_native_identity = "true" if native_draft_identity else "false"
+    require_rfc_identity = "true" if native_draft_identity and native_draft_identity.is_rfc_backed else "false"
+    require_exact_attachment_identity = "true" if expected_attachment_count is not None else "false"
     safe_quoted_needle = escape_applescript(_first_non_empty_line(quoted_needle or ""))
     expected_attachment_names = expected_attachment_names or []
     expected_attachment_names_script = (
@@ -247,6 +249,14 @@ def _verify_saved_reply_draft(
             set draftAttachments to mail attachments of draftMessage
             set actualAttachmentCount to count of draftAttachments
             if actualAttachmentCount < expectedAttachmentCount then return "missing"
+            repeat with anAttachment in draftAttachments
+                try
+                    set attachmentSize to file size of anAttachment as integer
+                    if attachmentSize is less than or equal to 0 then return "unreadable"
+                on error
+                    return "unreadable"
+                end try
+            end repeat
             if (count of expectedAttachmentNames) is 0 then return "verified"
 
             set draftAttachmentNames to {{}}
@@ -359,6 +369,7 @@ def _verify_saved_reply_draft(
         if bodyStatus is "found" then
             if draftAttachmentStatus is "missing" then return "ATTACHMENT_MISSING|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
             if draftAttachmentStatus is "unsupported" then return "ATTACHMENT_UNSUPPORTED|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
+            if draftAttachmentStatus is "unreadable" then return "ATTACHMENT_UNREADABLE|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
             return "FOUND|" & draftId & "|" & draftAttachmentStatus & "|" & draftSignatureStatus & "|" & draftAttachmentCount & "|" & draftAttachmentRows
         end if
         if bodyStatus is "after_quote" then return "BODY_AFTER_QUOTE|" & draftId
@@ -383,6 +394,8 @@ def _verify_saved_reply_draft(
         set targetAccount to account "{safe_account}"
         set targetDraftIdText to "{safe_draft_id}"
         set requireNativeIdentity to {require_native_identity}
+        set requireRfcIdentity to {require_rfc_identity}
+        set requireExactAttachmentIdentity to {require_exact_attachment_identity}
         set expectedDraftRfcMessageId to "{safe_draft_rfc_message_id}"
         set expectedSourceRfcMessageId to "{safe_source_rfc_message_id}"
         set fullReplyBody to do shell script "cat " & quoted form of "{verify_body_temp_path}"
@@ -398,6 +411,8 @@ def _verify_saved_reply_draft(
         set attachmentFailureResult to ""
         set foundDraftId to ""
 
+        if requireExactAttachmentIdentity and (requireNativeIdentity is false) then return "IDENTITY_UNAVAILABLE"
+
         repeat with verifyAttempt from 1 to 20
             try
                 set draftsMailbox to mailbox "Drafts" of targetAccount
@@ -407,7 +422,7 @@ def _verify_saved_reply_draft(
                         set targetDrafts to every message of draftsMailbox whose id is targetDraftId
                         if (count of targetDrafts) > 0 then
                             set exactDraft to item 1 of targetDrafts
-                            if requireNativeIdentity then
+                            if requireRfcIdentity then
                                 if (my identityMatches(exactDraft, expectedDraftRfcMessageId, expectedSourceRfcMessageId)) is false then
                                     return "IDENTITY_UNAVAILABLE"
                                 end if
@@ -419,13 +434,19 @@ def _verify_saved_reply_draft(
                                 return exactResult
                             end if
                         end if
-                        if requireNativeIdentity and attachmentFailureResult is "" then return "IDENTITY_UNAVAILABLE"
+                        if (requireNativeIdentity or requireExactAttachmentIdentity) and attachmentFailureResult is "" then return "IDENTITY_UNAVAILABLE"
                     end try
                 end if
 
-                if requireNativeIdentity and attachmentFailureResult is "" then return "IDENTITY_UNAVAILABLE"
+                -- An exact Drafts artifact with a known attachment failure
+                -- must fail closed. A same-subject fallback can only diagnose
+                -- identity-unavailable work; it must never certify an older
+                -- matching draft after this compose call's exact artifact
+                -- lacked a requested attachment.
+                if attachmentFailureResult is not "" then return attachmentFailureResult
+                if (requireNativeIdentity or requireExactAttachmentIdentity) and attachmentFailureResult is "" then return "IDENTITY_UNAVAILABLE"
 
-                if requireNativeIdentity is false then
+                if (requireNativeIdentity is false) and (requireExactAttachmentIdentity is false) then
                     set totalDrafts to count of messages of draftsMailbox
                     set headEnd to totalDrafts
                     if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
@@ -488,6 +509,15 @@ def _verify_saved_reply_draft(
         with suppress(OSError):
             Path(verify_body_temp_path).unlink(missing_ok=True)
     verification = _reply_verification_from_output(output)
+    if expected_attachment_count is not None and verification.ok:
+        has_exact_native_identity = bool(
+            native_draft_identity
+            and draft_id
+            and native_draft_identity.draft_id == draft_id
+            and verification.matched_artifact_id == draft_id
+        )
+        if not has_exact_native_identity:
+            return _ReplyDraftVerification(ok=False, status="identity_unavailable")
     artifact_id = (
         verification.matched_artifact_id or verification.error_artifact_id or verification.body_missing_artifact_id
     )

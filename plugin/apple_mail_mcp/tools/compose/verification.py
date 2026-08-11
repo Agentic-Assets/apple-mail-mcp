@@ -57,8 +57,16 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
     except ValueError:
         attachment_count = None
     attachments_applied = _normalize_attachment_rows(parts[5]) if len(parts) > 5 and parts[5].strip() else None
+    if (
+        attachment_status == "verified"
+        and attachments_applied
+        and any(
+            not isinstance(attachment.get("size"), int) or attachment["size"] <= 0 for attachment in attachments_applied
+        )
+    ):
+        attachment_status = "unreadable"
     if status == "FOUND":
-        if attachment_status in {"missing", "unsupported"}:
+        if attachment_status in {"missing", "unsupported", "unreadable"}:
             return _ReplyDraftVerification(
                 ok=False,
                 status="attachment_verification_failed",
@@ -77,7 +85,7 @@ def _reply_verification_from_output(output: str) -> _ReplyDraftVerification:
             attachments_applied=attachments_applied,
             signature_status=signature_status,
         )
-    if status in {"ATTACHMENT_MISSING", "ATTACHMENT_UNSUPPORTED"}:
+    if status in {"ATTACHMENT_MISSING", "ATTACHMENT_UNSUPPORTED", "ATTACHMENT_UNREADABLE"}:
         return _ReplyDraftVerification(
             ok=False,
             status="attachment_verification_failed",

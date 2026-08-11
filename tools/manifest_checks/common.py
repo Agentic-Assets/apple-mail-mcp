@@ -67,11 +67,8 @@ ACTIVE_DOC_TOOL_COUNT_REQUIRED = (
     ".claude-plugin/CLAUDE.md",
     "apple-mail-mcpb/CLAUDE.md",
     "apple-mail-mcpb/build-mcpb.sh",
-    # The generated MCPB README (with its "<N> tools" claim) lives in
-    # _generated_mcpb_readme(); this entry tracks that the embedded count
-    # stays in sync with the registry. It moved here from validate_manifests.py
-    # when the checks were split into the manifest_checks package.
-    "tools/manifest_checks/artifacts.py",
+    # build-mcpb.sh copies this README verbatim into the distribution bundle.
+    "apple-mail-mcpb/README.md",
 )
 ACTIVE_DOC_TOOL_COUNT_SCAN_ONLY = (
     "tools/CLAUDE.md",

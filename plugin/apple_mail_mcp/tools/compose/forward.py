@@ -1,12 +1,24 @@
-"""``forward_email`` tool: forward an existing message with optional attachments."""
+"""``forward_email`` tool: draft-first forwarding with explicit attachments."""
 
+import json
+import uuid
+from collections import Counter
 from pathlib import Path
+from typing import Any
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, inject_preferences
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import compose
+from apple_mail_mcp.tools.compose.attachment_draft_verification import (
+    marker_draft_verification_handlers,
+)
 from apple_mail_mcp.tools.compose.constants import _MESSAGE_ID_REQUIRED_ERROR
+from apple_mail_mcp.tools.compose.forward_attachment_scripts import (
+    forward_marker_draft_proof_call,
+    forward_marker_draft_verification_handlers,
+    forward_marker_finalize_script,
+)
 from apple_mail_mcp.tools.compose.helpers import (
     _check_open_compose_window_cap,
     _clean_applescript_error,
@@ -20,9 +32,152 @@ from apple_mail_mcp.tools.compose.payload import (
     _compose_sender_script,
     _split_addresses,
     _strip_cdata_wrappers,
+    _validate_attachment_paths,
 )
-from apple_mail_mcp.tools.compose.saved_draft_checks import _verify_saved_forward_draft
-from apple_mail_mcp.tools.compose.verification import _extract_output_field
+from apple_mail_mcp.tools.compose.standalone_draft_identity_scripts import (
+    _standalone_draft_identity_handlers,
+    standalone_draft_identity_resolver_script,
+    standalone_draft_identity_setup_script,
+)
+from apple_mail_mcp.tools.compose.verification import (
+    _extract_output_field,
+    _first_non_empty_line,
+    _format_forward_verification_lines,
+)
+
+
+def _forward_attachment_verification_error(detail: str) -> str:
+    """Return a fail-closed response for an attachment-bearing forward draft."""
+    return (
+        "Error: FORWARD_DRAFT_ATTACHMENT_VERIFICATION_FAILED\n"
+        f"Saved forward draft was not ready: {detail}. No email was sent. "
+        "Inspect the exact Drafts message and retry after Mail finishes saving.\n"
+    )
+
+
+def _is_known_inline_signature_asset(filename: str) -> bool:
+    """Return whether Mail identified a provider-inserted Outlook image asset.
+
+    Mail may retain an account-provided Outlook inline signature image even
+    when the caller did not select a signature. This narrow allowance is only
+    for that provider-generated naming convention; every caller-selected file
+    still has to be present and readable by exact filename and multiplicity.
+    """
+    return filename.startswith("Outlook-") and filename.lower().endswith(".png")
+
+
+def _verify_exact_saved_forward_draft(
+    account: str,
+    *,
+    draft_id: str | None,
+    to: str,
+    subject: str | None,
+    lead_message: str | None,
+    expected_signature: bool | None,
+    attachment_paths: list[str],
+    attachment_proof: str,
+    timeout: int | None,
+) -> str:
+    """Verify one exact saved forward, including exact caller-selected attachments."""
+    if attachment_paths and attachment_proof == "verified":
+        return (
+            "Attachment Verification Status: verified\n"
+            "Attachment Proof Scope: same-operation marker-bound persisted Drafts row\n"
+            "Draft Locator: unavailable after iCloud ID rewrite\n"
+            "Draft Locator Stability: not a reusable identity\n"
+            "Attachment-bearing forward draft is ready for human review."
+        )
+
+    if not draft_id:
+        return (
+            "Error: FORWARD_DRAFT_ID_UNAVAILABLE\n"
+            "Mail saved the forward but did not expose its exact Drafts message ID. "
+            "No email was sent; inspect Drafts and retry after Mail finishes saving.\n"
+        )
+
+    verification_args: dict[str, Any] = {
+        "account": account,
+        "draft_id": draft_id,
+        "expected_to": to,
+        "expected_subject": subject,
+        "expected_body_contains": _first_non_empty_line(lead_message or "") or None,
+        "expected_signature": expected_signature,
+        "timeout": timeout,
+    }
+    if attachment_paths:
+        verification_args["expected_attachments"] = attachment_paths
+    try:
+        raw_verification = compose.verify_draft(**verification_args)
+    except Exception:
+        return (
+            "Error: FORWARD_DRAFT_VERIFICATION_FAILED\n"
+            "Mail could not verify the exact saved forward Drafts message. No email was sent.\n"
+        )
+    try:
+        payload = json.loads(raw_verification)
+    except json.JSONDecodeError:
+        return (
+            "Error: FORWARD_DRAFT_VERIFICATION_FAILED\n"
+            "Mail returned an invalid exact-Drafts verification response. No email was sent.\n"
+        )
+
+    if payload.get("found") is not True:
+        return (
+            "Error: FORWARD_DRAFT_VERIFICATION_FAILED\n"
+            "Mail did not verify the exact saved forward Drafts message. No email was sent.\n"
+        )
+
+    verified_id = str(payload.get("draft_id") or "")
+    if verified_id != draft_id:
+        return (
+            "Error: FORWARD_DRAFT_ID_MISMATCH\n"
+            f"Mail verification returned Draft ID {verified_id or 'unavailable'}, not the saved Draft ID {draft_id}. "
+            "No email was sent.\n"
+        )
+
+    if attachment_paths:
+        attachments = payload.get("attachments")
+        found_rows = attachments.get("found") if isinstance(attachments, dict) else None
+        if not isinstance(found_rows, list):
+            return _forward_attachment_verification_error("Mail did not return attachment records")
+
+        expected_names = Counter(Path(path).name for path in attachment_paths)
+        selected_rows: list[dict[str, Any]] = []
+        extra_rows: list[dict[str, Any]] = []
+        remaining_expected = expected_names.copy()
+        for row in found_rows:
+            if not isinstance(row, dict):
+                return _forward_attachment_verification_error("Mail returned an invalid attachment record")
+            attachment_row = {str(key): value for key, value in row.items()}
+            filename = str(attachment_row.get("filename") or "")
+            if remaining_expected[filename] > 0:
+                remaining_expected[filename] -= 1
+                selected_rows.append(attachment_row)
+            else:
+                extra_rows.append(attachment_row)
+
+        if any(remaining_expected.values()) or any(
+            not _is_known_inline_signature_asset(str(row.get("filename") or "")) for row in extra_rows
+        ):
+            return _forward_attachment_verification_error(
+                "the saved attachment filename/count set did not match the requested files and known inline signature assets"
+            )
+
+        unreadable = [
+            str(row.get("filename") or "attachment")
+            for row in selected_rows
+            if not isinstance(row.get("size"), int) or row["size"] <= 0
+        ]
+        if unreadable:
+            return _forward_attachment_verification_error(
+                "Mail reported unreadable attachment data for " + ", ".join(unreadable)
+            )
+
+    lines = _format_forward_verification_lines(raw_verification, draft_id)
+    if attachment_paths:
+        lines += "Attachment Verification Status: verified\n"
+        lines += f"Attachments Applied Count: {len(attachment_paths)}\n"
+    return lines
 
 
 @mcp.tool(annotations=DESTRUCTIVE_TOOL_ANNOTATIONS)
@@ -42,6 +197,7 @@ def forward_email(
     timeout: int | None = None,
     include_signature: bool = True,
     signature_name: str | None = None,
+    attachments: str | None = None,
 ) -> str:
     """
     Forward an email to one or more recipients by exact ``message_id``.
@@ -69,9 +225,13 @@ def forward_email(
         timeout: Optional per-AppleScript timeout in seconds. Defaults to the standard 120s. Raise this when working with large mailboxes or slow accounts.
         include_signature: Whether to apply the configured/default Mail signature (default: True).
         signature_name: Optional Mail signature name; falls back to DEFAULT_MAIL_SIGNATURE when omitted.
+        attachments: Optional comma-separated local file paths. These are added
+            only to an exact verified draft or open review window.
 
     Returns:
-        Confirmation message with details of forwarded email
+        Confirmation with the current numeric Drafts locator for saved drafts.
+        This locator can drift after server sync; re-resolve it immediately
+        before any later draft mutation.
     """
 
     if not message_id and not subject_keyword:
@@ -109,6 +269,8 @@ def forward_email(
     # Validate mode
     if mode not in ("send", "draft", "open"):
         return f"Error: Invalid mode '{mode}'. Use: send, draft, open"
+    if attachments and mode == "send":
+        return "Error: Attachments require mode='draft' or mode='open' so Mail can verify the saved draft."
     blocked = compose._send_blocked(mode)
     if blocked:
         return blocked
@@ -117,6 +279,12 @@ def forward_email(
         cap_err = _check_open_compose_window_cap()
         if cap_err:
             return cap_err
+
+    attachment_paths: list[str] = []
+    if attachments:
+        attachment_paths, attachment_error = _validate_attachment_paths(attachments)
+        if attachment_error:
+            return attachment_error
 
     try:
         sender_override, sender_error = _validate_from_address(account, from_address, timeout=timeout)
@@ -142,6 +310,15 @@ def forward_email(
 
     safe_cc = escape_applescript(cc) if cc else ""
     safe_bcc = escape_applescript(bcc) if bcc else ""
+
+    attachment_script = ""
+    for attachment_path in attachment_paths:
+        safe_attachment_path = escape_applescript(attachment_path)
+        attachment_script += f'''
+        set theFile to POSIX file "{safe_attachment_path}"
+        make new attachment with properties {{file name:theFile}} at after the last paragraph
+        delay 1
+        '''
 
     # Build TO recipients (split comma-separated)
     to_script = ""
@@ -172,6 +349,27 @@ def forward_email(
         )
         fwd_cleanup_script = f'do shell script "rm -f " & quoted form of "{fwd_msg_temp_path}"'
 
+    forward_marker_handlers = ""
+    forward_marker_finalization_script = ""
+    forward_attachment_proof_output = ""
+    initial_forward_subject_script = "set initialForwardSubject to fwdSubject"
+    if attachment_paths and mode in {"draft", "open"}:
+        forward_subject_marker = f"__apple_mail_forward_{uuid.uuid4().hex}__"
+        forward_marker_handlers = marker_draft_verification_handlers()
+        forward_marker_handlers += forward_marker_draft_verification_handlers()
+        marker_proof_script = forward_marker_draft_proof_call(
+            to_addresses=_split_addresses(to),
+            cc_addresses=_split_addresses(cc),
+            bcc_addresses=_split_addresses(bcc),
+            body=message or "",
+            attachment_paths=attachment_paths,
+        )
+        forward_marker_finalization_script = forward_marker_finalize_script(forward_subject_marker, marker_proof_script)
+        initial_forward_subject_script = f'set initialForwardSubject to "{escape_applescript(forward_subject_marker)}"'
+        forward_attachment_proof_output = (
+            'set outputText to outputText & "Forward Attachment Proof: " & forwardAttachmentProof & return'
+        )
+
     visible_lower = "true" if mode == "open" else "false"
     if mode == "send":
         header_text = "FORWARDING EMAIL"
@@ -186,25 +384,29 @@ def forward_email(
         post_forward_action = "save forwardMessage"
         success_text = "Forward saved as draft."
 
+    draft_id_setup_script = ""
     draft_id_capture_script = ""
     draft_id_output_script = ""
     if mode in {"draft", "open"}:
-        draft_id_capture_script = """
-        set forwardDraftId to ""
-        try
-            set forwardDraftId to id of forwardMessage as string
-        end try
-        """
+        draft_id_setup_script = standalone_draft_identity_setup_script()
+        draft_id_capture_script = standalone_draft_identity_resolver_script()
         draft_id_output_script = """
-        if forwardDraftId is not "" then set outputText to outputText & "Draft ID: " & forwardDraftId & return
+        if savedDraftId is not "" then
+            set outputText to outputText & "Draft ID: " & savedDraftId & return
+            set outputText to outputText & "Draft ID Source: " & savedDraftIdSource & return
+            set outputText to outputText & "Draft ID Scope: current Drafts locator; re-resolve after sync" & return
+        end if
         """
 
     script = f'''
+{forward_marker_handlers}
+{_standalone_draft_identity_handlers() if mode in {"draft", "open"} else ""}
 tell application "Mail"
     set outputText to "{header_text}" & return & return
 
     try
         set targetAccount to account "{safe_account}"
+        {draft_id_setup_script}
         -- Try to get mailbox
         try
             set targetMailbox to mailbox "{safe_mailbox}" of targetAccount
@@ -247,9 +449,10 @@ tell application "Mail"
 
         set fwdSubject to origSubject
         if fwdSubject does not start with "Fwd:" then set fwdSubject to "Fwd: " & fwdSubject
+        {initial_forward_subject_script}
 
         -- Object-model draft: NO window, NO clipboard, NO System Events
-        set forwardMessage to make new outgoing message with properties {{visible:{visible_lower}, subject:fwdSubject, content:fullBody}}
+        set forwardMessage to make new outgoing message with properties {{visible:{visible_lower}, subject:initialForwardSubject, content:fullBody}}
 
         {sender_script}
         {signature_script}
@@ -261,9 +464,16 @@ tell application "Mail"
         {cc_script}
         {bcc_script}
 
+        -- Only explicit caller-selected paths are attached. A source
+        -- message's attachments are never copied implicitly on forward.
+        tell forwardMessage
+            {attachment_script}
+        end tell
+
         {post_forward_action}
 
         {draft_id_capture_script}
+        {forward_marker_finalization_script}
 
         -- Clean up temp file
         {fwd_cleanup_script}
@@ -272,6 +482,7 @@ tell application "Mail"
         set outputText to outputText & "To: {safe_to}" & return
         set outputText to outputText & "Subject: " & fwdSubject & return
         {draft_id_output_script}
+        {forward_attachment_proof_output}
     '''
 
     if cc:
@@ -301,17 +512,31 @@ tell application "Mail"
         )
         if mode in ("draft", "open") and success_text in result:
             draft_id = _extract_output_field(result, "Draft ID")
+            attachment_proof = _extract_output_field(result, "Forward Attachment Proof") or ""
             forward_subject = _extract_output_field(result, "Subject")
-            expected_signature = False if not include_signature else (resolved_signature_name is not None)
-            result += _verify_saved_forward_draft(
-                account,
-                draft_id=draft_id,
-                to=to,
-                subject=forward_subject,
-                lead_message=message,
-                expected_signature=expected_signature,
-                timeout=timeout,
+            expected_signature = (
+                False if not include_signature else (True if resolved_signature_name is not None else None)
             )
+            try:
+                verification = _verify_exact_saved_forward_draft(
+                    account,
+                    draft_id=draft_id,
+                    to=to,
+                    subject=forward_subject,
+                    lead_message=message,
+                    expected_signature=expected_signature,
+                    attachment_paths=attachment_paths,
+                    attachment_proof=attachment_proof,
+                    timeout=timeout,
+                )
+            except Exception:
+                return (
+                    "Error: FORWARD_DRAFT_VERIFICATION_FAILED\n"
+                    "Mail could not verify the exact saved forward Drafts message. No email was sent.\n"
+                )
+            if verification.startswith("Error:"):
+                return verification
+            result += verification
         return result
     except AppleScriptTimeout:
         return (

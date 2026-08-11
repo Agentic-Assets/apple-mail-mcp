@@ -1,10 +1,17 @@
 """``compose_email`` tool and its ``_send_html_email`` SMTP helper for new outgoing messages."""
 
+import html
+import uuid
 from pathlib import Path
 
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, inject_preferences
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import compose
+from apple_mail_mcp.tools.compose.attachment_draft_verification import (
+    marker_draft_proof_call,
+    marker_draft_verification_handlers,
+    verify_standalone_attachment_readiness,
+)
 from apple_mail_mcp.tools.compose.helpers import (
     _check_open_compose_window_cap,
     _clean_applescript_error,
@@ -19,6 +26,12 @@ from apple_mail_mcp.tools.compose.payload import (
     _split_addresses,
     _standalone_compose_thread_warning,
     _strip_cdata_wrappers,
+)
+from apple_mail_mcp.tools.compose.standalone_draft_identity_scripts import (
+    _standalone_draft_identity_handlers,
+    standalone_draft_identity_resolver_script,
+    standalone_draft_identity_setup_script,
+    standalone_marker_draft_finalize_script,
 )
 
 
@@ -35,16 +48,14 @@ def _send_html_email(
     sender_override: str | None = None,
     timeout: int | None = None,
     signature_name: str | None = None,
+    attachment_paths: list[str] | None = None,
 ) -> str:
-    """Send an HTML-formatted email via NSPasteboard clipboard injection.
-
-    Uses AppleScriptObjC to place HTML on the clipboard with the proper
-    pasteboard type, creates a compose window, focuses its editable body, and
-    pastes. Then sends, saves as draft, or leaves open for review.
-    """
+    """Compose HTML through a focused NSPasteboard-backed Mail editor."""
     safe_account = escape_applescript(account)
     escaped_subject = escape_applescript(subject)
-
+    temporary_subject_marker = f"__apple_mail_mcp_{uuid.uuid4().hex}__"
+    initial_subject = temporary_subject_marker
+    final_subject_before_send_script = f'set subject of newMsg to "{escaped_subject}"'
     # Build recipient scripts
     to_lines = ""
     for addr in _split_addresses(to):
@@ -56,23 +67,41 @@ def _send_html_email(
 
     sender_script = _compose_sender_script("newMsg", f'account "{safe_account}"', sender_override)
     signature_script = _compose_signature_script("newMsg", signature_name)
+    draft_id_capture_script = ""
+    draft_id_output_script = ""
+    marker_draft_proof_handlers = ""
+    if attachment_paths and mode in {"draft", "open"}:
+        marker_draft_proof_handlers = marker_draft_verification_handlers()
+        marker_proof_script = marker_draft_proof_call(
+            to_addresses=_split_addresses(to),
+            cc_addresses=_split_addresses(cc),
+            bcc_addresses=_split_addresses(bcc),
+            body=body_plain,
+            attachment_names=[Path(path).name for path in attachment_paths],
+        )
+        draft_id_capture_script = standalone_marker_draft_finalize_script(
+            temporary_subject_marker, subject, marker_proof_script
+        )
+        draft_id_output_script = """ & return & "Draft ID: " & savedDraftId & return & "Draft ID Source: " & savedDraftIdSource & return & "Attachment Transaction Proof: " & attachmentTransactionProof"""
 
     # Mode-specific behaviour after paste
     if mode == "send":
-        post_paste_script = """
+        post_paste_script = f"""
             -- Send via Mail's object model after HTML paste lands.
             delay 0.5
             tell application "Mail"
+                {final_subject_before_send_script}
                 send newMsg
             end tell
         """
         success_text = "Email sent successfully (HTML)"
     elif mode == "draft":
-        post_paste_script = """
+        post_paste_script = f"""
             -- Save as draft: save then close the correct window (one persist only)
             delay 0.5
             tell application "Mail"
                 save newMsg
+                {draft_id_capture_script}
                 try
                     close (window of newMsg) saving no
                 end try
@@ -80,11 +109,12 @@ def _send_html_email(
         """
         success_text = "Email saved as draft (HTML)"
     else:  # open
-        post_paste_script = """
+        post_paste_script = f"""
             -- Save first, then leave open for review
             delay 0.5
             tell application "Mail"
                 save newMsg
+                {draft_id_capture_script}
             end tell
         """
         success_text = "Email opened in Mail for review (HTML). Edit and send when ready."
@@ -105,10 +135,13 @@ def _send_html_email(
 use framework "Foundation"
 use framework "AppKit"
 use scripting additions
+{marker_draft_proof_handlers}
+{_standalone_draft_identity_handlers() if attachment_paths and mode in {"draft", "open"} else ""}
 
 -- Step 1: Read HTML from temp file and place on clipboard
 set htmlString to do shell script "cat " & quoted form of "{html_temp_path}"
 set pb to current application's NSPasteboard's generalPasteboard()
+set temporarySubjectMarker to "{temporary_subject_marker}"
 
 -- Save current clipboard for restoration
 set oldClip to pb's stringForType:(current application's NSPasteboardTypeString)
@@ -119,7 +152,9 @@ pb's setData:htmlData forType:(current application's NSPasteboardTypeHTML)
 
 -- Step 2: Create compose window (empty body so signature doesn't interfere)
 tell application "Mail"
-    set newMsg to make new outgoing message with properties {{subject:"{escaped_subject}", content:"", visible:true}}
+    set targetAccount to account "{safe_account}"
+    {standalone_draft_identity_setup_script() if attachment_paths and mode in {"draft", "open"} else ""}
+    set newMsg to make new outgoing message with properties {{subject:"{initial_subject}", content:"", visible:true}}
     {sender_script}
     {signature_script}
     tell newMsg
@@ -141,20 +176,25 @@ delay 2.5
 -- Step 4: Focus the compose body, then paste. A fixed number of Tab presses
 -- is not safe: Mail exposes different header controls for different accounts,
 -- and extra tabs can change paragraph indentation or formatting before paste.
-on focusComposeBody()
+on focusComposeBody(theMarker)
     tell application "System Events"
         tell process "Mail"
             try
-                set composeWindow to front window
-                set bodyCandidates to every UI element of composeWindow whose role is "AXWebArea"
-                if (count of bodyCandidates) is 0 then set bodyCandidates to every text area of composeWindow
-                if (count of bodyCandidates) is 0 then return false
-                set bodyTarget to item 1 of bodyCandidates
-                perform action "AXPress" of bodyTarget
-                delay 0.2
-                set focusedElement to value of attribute "AXFocusedUIElement"
-                set focusedRole to value of attribute "AXRole" of focusedElement
-                return focusedRole is "AXWebArea" or focusedRole is "AXTextArea"
+                set composeWindow to first window whose name contains theMarker
+                perform action "AXRaise" of composeWindow
+                if name of composeWindow does not contain theMarker then return false
+                repeat with focusAttempt from 1 to 6
+                    try
+                        set focusedElement to value of attribute "AXFocusedUIElement"
+                        set focusedRole to value of attribute "AXRole" of focusedElement as string
+                        if focusedRole is "AXWebArea" or focusedRole is "AXTextArea" then return true
+                    end try
+                    if focusAttempt is less than 6 then
+                        key code 48
+                        delay 0.2
+                    end if
+                end repeat
+                return false
             on error
                 return false
             end try
@@ -167,7 +207,7 @@ try
         set frontmost of process "Mail" to true
         delay 0.5
         tell process "Mail"
-            if not my focusComposeBody() then error "COMPOSE_BODY_FOCUS_FAILED"
+            if not my focusComposeBody(temporarySubjectMarker) then error "COMPOSE_BODY_FOCUS_FAILED"
 
             -- Paste HTML without Cmd+A so Mail's native signature remains intact.
             keystroke "v" using command down
@@ -186,13 +226,40 @@ try
         pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
     end if
 
-    return "{success_text}"
+    return "{success_text}"{draft_id_output_script}
 on error errMsg
-    -- A focus failure happens after Mail has created a visible compose window.
-    -- Discard that exact window so draft mode never leaves a partial artifact.
+    -- Restore the unique subject marker before looking for the compose window:
+    -- the final subject is set immediately before save, so a save failure may
+    -- otherwise leave the marker absent from the window title.
     try
         tell application "Mail"
-            close (window of newMsg) saving no
+            if temporarySubjectMarker is not "" then set subject of newMsg to temporarySubjectMarker
+        end tell
+    end try
+    -- Only close the AX window carrying this operation's marker. Never close
+    -- a positional window, which could belong to another in-progress draft.
+    try
+        if temporarySubjectMarker is not "" then
+            tell application "System Events"
+                tell process "Mail"
+                    repeat with composeWindow in windows
+                        try
+                            if name of composeWindow contains temporarySubjectMarker then
+                                perform action "AXClose" of composeWindow
+                                exit repeat
+                            end if
+                        end try
+                    end repeat
+                end tell
+            end tell
+        end if
+    end try
+    -- Mail can persist a visible outgoing message before its editor finishes
+    -- loading. This is the exact object created above, so remove it on any
+    -- focus/paste/save failure rather than leaving a partial self draft.
+    try
+        tell application "Mail"
+            delete newMsg
         end tell
     end try
     try
@@ -216,6 +283,22 @@ end try
             confirm += f"\nCC: {cc}"
         if bcc:
             confirm += f"\nBCC: {bcc}"
+        if attachment_paths and mode in {"draft", "open"}:
+            verification = verify_standalone_attachment_readiness(
+                output=output,
+                account=account,
+                to=to,
+                cc=cc or "",
+                bcc=bcc or "",
+                subject=subject,
+                body=body_plain,
+                attachment_paths=attachment_paths,
+                timeout=timeout,
+                verify_draft=compose.verify_draft,
+            )
+            if verification.startswith("Error:"):
+                return verification
+            confirm += "\n" + verification
         return confirm
     except AppleScriptTimeout:
         return "Error: HTML email script timed out"
@@ -277,6 +360,12 @@ def compose_email(
     blocked = compose._send_blocked(mode)
     if blocked:
         return blocked
+    if attachments and mode == "send":
+        return (
+            "Error: ATTACHMENT_DRAFT_VERIFICATION_REQUIRED\n"
+            "Attachment-bearing emails must be saved and exactly verified before human review and sending. "
+            "Use mode='draft' or mode='open'."
+        )
 
     if mode == "open":
         cap_err = _check_open_compose_window_cap()
@@ -312,6 +401,7 @@ def compose_email(
     # Validate and resolve attachments early
     attachment_script = ""
     attachment_info = ""
+    validated_paths: list[str] = []
     if attachments:
         validated_paths, error = compose._validate_attachment_paths(attachments)
         if error:
@@ -325,14 +415,18 @@ def compose_email(
             '''
             attachment_info += f"  {path}\n"
 
-    # --- HTML path: use NSPasteboard clipboard injection ---
-    if body_html:
+    # Attachment-bearing iCloud drafts can lose authored content when Mail's
+    # object model assigns ``content`` before saving. Use the compose-window
+    # writer for every attachment draft/open message, including plain text.
+    # Attachment sends are rejected above, so this never expands send behavior.
+    if body_html or (validated_paths and mode in {"draft", "open"}):
+        pasted_html = body_html or html.escape(body).replace("\n", "<br>\n")
         return _send_html_email(
             account=account,
             to=to,
             subject=subject,
             body_plain=body,
-            body_html=body_html,
+            body_html=pasted_html,
             cc=cc,
             bcc=bcc,
             attachments_script=attachment_script,
@@ -340,6 +434,7 @@ def compose_email(
             sender_override=sender_override,
             timeout=timeout,
             signature_name=resolved_signature_name,
+            attachment_paths=validated_paths,
         )
 
     # --- Plain-text path: existing AppleScript approach ---
@@ -387,12 +482,23 @@ def compose_email(
         send_command = "save newMessage"
         success_text = "✓ Email saved as draft!"
 
+    draft_id_capture_script = ""
+    draft_id_output_script = ""
+    if validated_paths and mode in {"draft", "open"}:
+        draft_id_capture_script = standalone_draft_identity_resolver_script()
+        draft_id_output_script = """
+            set outputText to outputText & "Draft ID: " & savedDraftId & return
+            set outputText to outputText & "Draft ID Source: " & savedDraftIdSource & return
+        """
+
     script = f'''
+    {_standalone_draft_identity_handlers() if validated_paths and mode in {"draft", "open"} else ""}
     tell application "Mail"
         set outputText to "{header_text}" & return & return
 
         try
             set targetAccount to account "{safe_account}"
+            {standalone_draft_identity_setup_script() if validated_paths and mode in {"draft", "open"} else ""}
 
             -- Start with an empty standalone message. On Exchange, assigning
             -- authored content before Mail applies a native signature can make
@@ -402,14 +508,20 @@ def compose_email(
             {sender_script}
             {signature_script}
 
-            -- Apply the authored body after the signature has been selected.
-            -- Prefix it to the current draft content so the signature remains
-            -- a separate trailing block rather than reclassifying the body as
-            -- a reply quote.
+            -- Mail applies an account's automatic signature asynchronously.
+            -- Wait a bounded second for it before prefixing the authored body,
+            -- so a late signature cannot overwrite the user's content.
             set signatureContent to ""
-            try
-                set signatureContent to content of newMessage as string
-            end try
+            repeat with signatureAttempt from 1 to 5
+                try
+                    set signatureContent to content of newMessage as string
+                end try
+                if signatureContent is not "" then exit repeat
+                if signatureAttempt is less than 5 then delay 0.2
+            end repeat
+
+            -- Prefix authored text so the native signature remains a separate
+            -- trailing block rather than reclassifying the body as a quote.
             set content of newMessage to "{escaped_body}" & return & return & signatureContent
 
             -- Add TO/CC/BCC recipients
@@ -427,9 +539,12 @@ def compose_email(
             -- Send, save as draft, or leave open for review
             {send_command}
 
+            {draft_id_capture_script}
+
             set outputText to outputText & "{success_text}" & return
             set outputText to outputText & "To: {safe_to}" & return
             set outputText to outputText & "Subject: {escaped_subject}" & return
+            {draft_id_output_script}
     '''
 
     if cc:
