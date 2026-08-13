@@ -4291,9 +4291,15 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         self.assertNotIn("close window 1 saving no", captured["script"])
         self.assertIn("set index of (window of newMsg) to 1", captured["script"])
         self.assertIn("on focusComposeBody(theMarker)", captured["script"])
-        self.assertIn("repeat with focusAttempt from 1 to 6", captured["script"])
         self.assertNotIn("repeat 7 times", captured["script"])
+        self.assertIn("headerRoles contains focusedRole", captured["script"])
         self.assertIn("key code 48", captured["script"])
+        self.assertIn('perform action "AXFocus" of composeEditor', captured["script"])
+        self.assertIn("click composeEditor", captured["script"])
+        self.assertLess(
+            captured["script"].index("headerRoles contains focusedRole"),
+            captured["script"].index("key code 48"),
+        )
         self.assertIn(
             'if not my focusComposeBody(temporarySubjectMarker) then error "COMPOSE_BODY_FOCUS_FAILED"',
             captured["script"],

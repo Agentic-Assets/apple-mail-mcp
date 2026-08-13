@@ -187,8 +187,12 @@ def test_plain_attachment_draft_uses_focused_ui_writer_and_discards_only_its_win
     script = captured_scripts[0]
     assert "on focusComposeBody(theMarker)" in script
     assert 'if not my focusComposeBody(temporarySubjectMarker) then error "COMPOSE_BODY_FOCUS_FAILED"' in script
-    assert "repeat with focusAttempt from 1 to 6" in script
+    assert "headerRoles contains focusedRole" in script
     assert "key code 48" in script
+    assert 'perform action "AXFocus" of composeEditor' in script
+    assert script.index('if focusedRole is "AXWebArea" or focusedRole is "AXTextArea" then return true') < script.index(
+        "key code 48"
+    )
     assert 'keystroke "v" using command down' in script
     assert script.index('keystroke "v" using command down') < script.index("save newMsg")
     assert "markerDraftProof(markedDraft" in script
@@ -345,6 +349,8 @@ def test_attachment_draft_focus_uses_bounded_axrole_iteration_not_invalid_ui_sel
 
     script = scripts[0]
     assert 'every UI element of composeWindow whose role is "AXWebArea"' not in script
+    assert "set allElements to entire contents of composeWindow" in script
+    assert "repeat with candidateElement in allElements" in script
     assert 'value of attribute "AXFocusedUIElement"' in script
     assert 'value of attribute "AXRole" of focusedElement' in script
 
@@ -378,8 +384,8 @@ def test_attachment_draft_focus_binds_to_its_marker_not_the_front_window(tmp_pat
     assert "focusComposeBody(temporarySubjectMarker)" in script
 
 
-def test_attachment_draft_focus_tabs_only_until_mail_confirms_the_editor_role(tmp_path: Path):
-    """Tab traversal is bounded and role-driven, so paste cannot land in a recipient field."""
+def test_attachment_draft_focus_never_tabs_into_the_editor(tmp_path: Path):
+    """Tab in a focused WebKit body inserts first-line indent; click/AXFocus instead."""
     attachment = tmp_path / "report.pdf"
     attachment.write_text("report")
     scripts: list[str] = []
@@ -402,9 +408,11 @@ def test_attachment_draft_focus_tabs_only_until_mail_confirms_the_editor_role(tm
         )
 
     script = scripts[0]
-    assert "repeat with focusAttempt from 1 to 6" in script
+    assert "headerRoles contains focusedRole" in script
     assert 'value of attribute "AXFocusedUIElement"' in script
     assert "key code 48" in script
+    assert 'perform action "AXFocus" of composeEditor' in script
+    assert script.index("headerRoles contains focusedRole") < script.index("key code 48")
     assert script.index("focusComposeBody(temporarySubjectMarker)") < script.index('keystroke "v" using command down')
 
 

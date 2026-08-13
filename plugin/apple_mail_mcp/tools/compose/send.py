@@ -19,6 +19,7 @@ from apple_mail_mcp.tools.compose.helpers import (
     _resolve_signature_name,
     _validate_from_address,
 )
+from apple_mail_mcp.tools.compose.html_focus_scripts import html_compose_focus_handler
 from apple_mail_mcp.tools.compose.lookup_scripts import _compose_signature_script
 from apple_mail_mcp.tools.compose.payload import (
     _build_recipient_loops,
@@ -173,34 +174,9 @@ end tell
 -- Step 3: Wait for compose window to render
 delay 2.5
 
--- Step 4: Focus the compose body, then paste. A fixed number of Tab presses
--- is not safe: Mail exposes different header controls for different accounts,
--- and extra tabs can change paragraph indentation or formatting before paste.
-on focusComposeBody(theMarker)
-    tell application "System Events"
-        tell process "Mail"
-            try
-                set composeWindow to first window whose name contains theMarker
-                perform action "AXRaise" of composeWindow
-                if name of composeWindow does not contain theMarker then return false
-                repeat with focusAttempt from 1 to 6
-                    try
-                        set focusedElement to value of attribute "AXFocusedUIElement"
-                        set focusedRole to value of attribute "AXRole" of focusedElement as string
-                        if focusedRole is "AXWebArea" or focusedRole is "AXTextArea" then return true
-                    end try
-                    if focusAttempt is less than 6 then
-                        key code 48
-                        delay 0.2
-                    end if
-                end repeat
-                return false
-            on error
-                return false
-            end try
-        end tell
-    end tell
-end focusComposeBody
+-- Step 4: Focus the compose body, then paste. Never Tab into a WebKit
+-- body: extra tabs become first-line indent once the caret is already there.
+{html_compose_focus_handler()}
 
 try
     tell application "System Events"
