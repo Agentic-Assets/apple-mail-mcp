@@ -443,8 +443,9 @@ apple-mail -o json manage-drafts --raw '{
 
 Use a standalone fixture recipient and `compose_email(mode="draft")` with a
 small `body_html` value. Verify the saved draft manually in Mail: the HTML body
-and signature should be present and no unrelated compose window should close.
-If the tool reports `COMPOSE_BODY_FOCUS_FAILED`, it must leave no fixture draft
+and signature should be present, **the first line must not start with tab
+indent**, and no unrelated compose window should close. If the tool reports
+`COMPOSE_BODY_FOCUS_FAILED`, it must leave no fixture draft
 or open partial compose window; record that result rather than retrying through
 a windowless path. A standalone HTML draft has no reply headers, so do not
 pretend it meets the guarded-reply cleanup contract: inspect and remove it only

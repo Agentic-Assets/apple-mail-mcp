@@ -2,6 +2,13 @@
 
 ## 3.11.6 - 2026-07-15
 
+- **HTML compose no longer Tabs into Mail's body editor.** After signature
+  insertion the caret is already in the WebKit compose field, so the old
+  unguarded `focusComposeBody` Tab loop inserted first-line indent (often
+  four tabs) before the HTML paste. Focus now binds to the marker-named
+  compose window, AXFocus/clicks the editor, and Tabs only while
+  Accessibility reports a header field. It never Tabs when the body
+  already has focus, and never Tabs when the focused role cannot be read.
 - Fix the Cursor adapter to resolve `start_mcp.sh` from
   `${CURSOR_PLUGIN_ROOT}` while preserving the draft-safe launch flag.
 - Validate Cursor and Codex launcher contracts independently so a relative
