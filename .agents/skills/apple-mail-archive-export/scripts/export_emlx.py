@@ -390,11 +390,97 @@ def attachment_names(msg: Message) -> list[str]:
     return names
 
 
-def index_text(msg_obj: Message | None, final_bytes: bytes | None) -> tuple[str, list[str]]:
+def _scan_header_block(block: str, boundaries: set[bytes], names: list[str]) -> None:
+    """Read one MIME part header block for a boundary and a filename."""
+    part = email.message_from_string(block)
+    boundary = part.get_param("boundary")
+    if boundary:
+        boundaries.add(str(boundary).encode("utf-8", "surrogateescape"))
+    try:
+        fn = part.get_filename()
+    except Exception:
+        # compat32 raises on a header holding a lone high surrogate. An
+        # unreadable name still means a part declared one, but there is nothing
+        # to index, so drop it rather than ending the run.
+        return
+    if fn:
+        names.append(" ".join(str(fn).split()))
+
+
+def attachment_names_streamed(path: Path, line_cap: int = 8192,
+                              header_cap: int = 1 << 20) -> list[str]:
+    """Attachment filenames from a message file too large to hold in memory.
+
+    An oversize message never reaches the parser, so index_text returned no
+    attachment names for it at all. In the reference archive that hid the two
+    largest attachments in the corpus: both 910 MB messages carry a real .zip
+    and .png that were invisible to --stats, --has-attachment and the FTS
+    attachments column while the bytes sat in the .eml the whole time. A guard
+    that returns an empty list for input it cannot parse reads as "this message
+    has no attachments" rather than "this message was not examined", which is
+    the silent-success shape the rest of this exporter exists to avoid.
+
+    Grepping the file for `filename=` would also match body text and quoted
+    replies, so this tracks MIME structure instead: a header block is only read
+    where one can legally start, directly after a delimiter line for a boundary
+    an enclosing part already declared. Cost is bounded by header size, never by
+    payload size, so a 910 MB message is scanned in one streaming pass.
+
+    Body text is deliberately not extracted. Decoding a multi-hundred-MB payload
+    to index it would cost the memory this path exists to avoid, and the caller
+    records the message by metadata regardless.
+    """
+    names: list[str] = []
+    boundaries: set[bytes] = set()
+    block: list[bytes] = []
+    block_len = 0
+    in_headers = True  # a message begins with its own header block
+
+    def flush() -> None:
+        nonlocal block, block_len
+        if block:
+            _scan_header_block(
+                b"".join(block).decode("utf-8", "surrogateescape"), boundaries, names)
+        block, block_len = [], 0
+
+    with path.open("rb") as fh:
+        carry = b""
+        while chunk := fh.read(1 << 20):
+            lines = (carry + chunk).split(b"\n")
+            carry = lines.pop()
+            if len(carry) > line_cap:
+                # A run this long with no newline is payload, and cannot be a
+                # header line or a delimiter. Dropping it can only cost a
+                # misaligned split until the next real newline arrives.
+                carry = b""
+            for line in lines:
+                if in_headers:
+                    if not line.rstrip(b"\r"):
+                        flush()
+                        in_headers = False
+                    elif block_len < header_cap:
+                        block.append(line + b"\n")
+                        block_len += len(line) + 1
+                    continue
+                stripped = line.rstrip(b"\r")
+                if stripped.startswith(b"--"):
+                    inner = stripped[2:]
+                    if any(inner in (b, b + b"--") for b in boundaries):
+                        in_headers = True
+        if in_headers:
+            flush()
+    return names
+
+
+def index_text(msg_obj: Message | None, final_bytes: bytes | None,
+               path: Path | None = None) -> tuple[str, list[str]]:
     """Body text + attachment names for the index, from whatever we have.
 
     Reuses the reassembled Message when one exists; otherwise parses the output
-    bytes just for indexing. Oversize messages are indexed by metadata only.
+    bytes just for indexing. Falls back to a streaming header scan of the written
+    file, which is what keeps an oversize or unparseable message's attachments in
+    the index instead of recording it as having none. Body text is still skipped
+    on that path; see attachment_names_streamed.
     """
     if msg_obj is not None:
         return extract_body_text(msg_obj), attachment_names(msg_obj)
@@ -402,6 +488,11 @@ def index_text(msg_obj: Message | None, final_bytes: bytes | None) -> tuple[str,
         try:
             reparsed = email.message_from_bytes(final_bytes)
             return extract_body_text(reparsed), attachment_names(reparsed)
+        except Exception:
+            pass  # fall through: names from the file beat nothing at all
+    if path is not None:
+        try:
+            return "", attachment_names_streamed(path)
         except Exception:
             return "", []
     return "", []
@@ -708,7 +799,7 @@ def export_message(
         out_path.write_bytes(final_bytes)
 
     stats.written += 1
-    body, atts = index_text(msg_obj, final_bytes)
+    body, atts = index_text(msg_obj, final_bytes, out_path)
 
     return Exported(
         emlx_id=emlx_id,

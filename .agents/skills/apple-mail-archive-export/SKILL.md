@@ -172,6 +172,8 @@ small enough to afford it, and quote the coverage percentage when it is not.
 ```bash
 python3 "$SKILL/scripts/make_mbox.py"  --out "$ARCHIVE/10-export"       # optional
 python3 "$SKILL/scripts/check_mbox.py" --out "$ARCHIVE/10-export"       # if you made mbox
+python3 "$SKILL/scripts/split_mbox.py" --out "$ARCHIVE/10-export"       # if any mbox > 4 GiB
+python3 "$SKILL/scripts/extract_attachments.py" --out "$ARCHIVE/10-export"   # optional
 python3 "$SKILL/scripts/search.py" --archive "$ARCHIVE/10-export" --stats
 ```
 
@@ -190,6 +192,24 @@ an earlier version of `make_mbox.py` corrupted the folded `Received:` header on
 Message-ID multisets all passed. A round trip can only pass if every byte was
 preserved or reversibly transformed, which is why it is worth its own gate.
 
+**Split anything past a few GiB before handing it to a client.** Large single mbox
+files are widely reported to fail on import, 4 GiB being the threshold usually named;
+say that it is the conventional split point rather than a limit anyone here measured.
+Splitting is cheap and provably lossless, a failed import is neither, which is the
+whole argument. `split_mbox.py` splits every
+oversized file in `mbox/` into per-year files in `10-export/mbox-by-year/`, copying
+record bytes through verbatim and never re-encoding a message. It proves the split
+instead of asserting it: the source file, the records it streamed, and the per-year
+outputs re-read and concatenated in ascending year order must all give the same
+SHA-256, and the per-year record counts must equal the UTC-year histogram in
+`index.sqlite`. That closed accounting is only available because `make_mbox.py`
+wrote records in `date_epoch` order, which makes each year a contiguous run. On the
+reference account it turned the 9.0 GB Inbox and 8.5 GB Sent Items into four
+per-year files each, largest 3.5 GiB, in 44 seconds with all three hashes equal for
+both. Read the script's docstring before changing where the year comes from; the
+envelope line is a deliberate choice over the index, and the timezone reasoning
+behind it is written down there.
+
 For getting the result into a specific client - Thunderbird needs an add-on,
 Apple Mail wants a particular directory shape, Outlook takes neither - see
 `references/importing.md`. It also covers which flag headers each client reads,
@@ -198,6 +218,37 @@ and why the imported unread count will disagree with Mail's old sidebar badge.
 `search.py` gives full-text search over decoded subject, body, sender,
 recipients, and attachment names. Decoding is the point: bodies are base64 or
 quoted-printable on disk, so `ripgrep` over raw files under-recalls badly.
+
+**Offer `extract_attachments.py` when the user wants the files rather than the
+mail.** It writes `20-attachments/`: one content-addressed copy of each distinct
+attachment under `blobs/<aa>/<bb>/<sha256>`, then three hard-linked views over
+the same inodes - `by-folder/`, `by-sender/`, and `by-type/`, each partitioned by
+year - plus a JSONL manifest with one row per occurrence. Dedup by content hash
+is what makes this affordable: on the reference account 44,299 occurrences
+collapsed to 6,459 distinct files, because 85% of everything attached to business
+mail is the same Outlook signature logo pasted over and over. That is 14.46 GB of
+occurrences stored as 8.62 GB, and `du` on the tree agrees, so the saving is real
+inodes rather than an accounting claim.
+
+Two things in it are worth understanding before you edit it. **Decode before you
+sanitize, never after.** A filename can hide `../../../escape.txt` inside an RFC
+2047 base64 word or split it across RFC 2231 continuations, so a sanitizer that
+runs first sees something harmless and passes it through; the bundled test asserts
+containment for both encodings and for Windows reserved names, absolute UNC paths,
+and macOS case-insensitive collisions. **And the rule that excludes body parts is
+load-bearing**, because Apple Mail detaches a `text/calendar` invitation body to
+disk exactly like a real attachment: treat those as attachments and the count
+inflates by roughly 1,800 on a corpus this size, which is most of the way to the
+count discrepancy described in `references/pitfalls.md`.
+
+The 14 attachments whose payload never made it to disk get a manifest row with
+`sha256: null` and a `.UNAVAILABLE.txt` marker inside `by-folder/`, so the gap is
+visible to someone browsing the tree and not only to someone running a query. The
+same run also settles the leftover-payload question `pitfalls.md` raises: 380 of
+the snapshot's payload directories were never consumed, and hashing all of them
+showed 376 were byte-duplicates of attachments already stored and 4 were invite
+bodies excluded by design. Reconcile that class of gap by content hash, never by
+comparing path counts.
 
 ### 5. Make the archive self-sufficient, then write its README
 
@@ -257,6 +308,9 @@ Items`. Never call the MCP's `synchronize_account` on a decommissioned account.
 | `scripts/verify_export.py` | Byte-compare exported attachments against originals, covering both the decoded `Attachments/` and encoded `.emlxpart` sources; stratified sampling; exits non-zero on mismatch |
 | `scripts/make_mbox.py` | One mboxrd file per folder, flags written for both mutt and Thunderbird |
 | `scripts/check_mbox.py` | Byte-exact round trip of every mbox message back to its `.eml`; exits non-zero on mismatch |
+| `scripts/split_mbox.py` | Per-year split of any mbox over `--max-bytes` (default 4 GiB) into `mbox-by-year/`; verbatim record bytes, proves the ascending concatenation still equals the source SHA-256; exits non-zero on any broken invariant |
+| `scripts/extract_attachments.py` | Every attachment into `20-attachments/`, deduplicated by SHA-256 into `blobs/` with hard-linked `by-folder` / `by-sender` / `by-type` views and a JSONL manifest; decodes RFC 2047/2231 filenames before sanitizing them; `--self-test` runs the containment suite |
+| `scripts/test_extract_attachments.py` | Containment and classification gate for the extractor: filename traversal, encoded traversal, reserved names, case collisions, sandbox escape, 91 cases |
 | `scripts/search.py` | Full-text + filtered search CLI over the archive |
 
 All are standard-library Python 3 or bash. No dependencies to install.

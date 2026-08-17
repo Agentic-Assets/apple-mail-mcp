@@ -301,6 +301,36 @@ MIME part will report unmatched leftovers and look like it found missing data.
 Reconcile by content hash, not by path count: if the unmatched payload's bytes
 already appear in the export, nothing is missing.
 
+### "How many attachments" has no single answer, so state the predicate
+
+Three defensible numbers came out of the same 39,269-message corpus, and quoting the
+wrong one overstates the archive by a factor of eight:
+
+| Predicate | Value |
+|---|---|
+| Named MIME part occurrences | 43,486 |
+| Distinct files after SHA-256 dedup | 6,459 |
+| Parts marked `Content-Disposition: attachment` | 5,642 |
+| Detached part bodies re-spliced during export (`filled_attachments`) | 45,506 |
+
+`filled_attachments` is the trap, because it is the biggest number and sits in the
+report, so it gets quoted as a total. It counts reassembly *operations*: it includes
+unnamed invite bodies and excludes named attachments that were never detached.
+
+Two failure modes to avoid when reconciling these:
+
+- **A count can silently narrow its own set.** An audit here reported 5,572
+  "`Content-Disposition: attachment` parts" that was really
+  attachment-disposition *and* named, which is a different and smaller set (5,574 on
+  re-measurement), and it also skipped the oversize messages. It looked like
+  confirmation because it matched the figure it was checking. Write the predicate into
+  the output label, not just the number.
+- **Summing to zero remainder is weak evidence.** Two independent enumerations
+  produced *different* partitions of the same 2,020 gap that both closed exactly,
+  because a term can be booked additively on one side or subtractively on the other.
+  Closure confirms the arithmetic, never the terms. Agreement between two independent
+  codebases on the same *predicate* is the check that carries weight.
+
 ### mbox escaping
 
 Use **mboxrd** (`^>*From ` -> `>&`), which is reversible. Never mboxo. In the

@@ -32,6 +32,16 @@ Keep the `.eml` tree as the archive of record regardless. mbox has to mutate bod
 bytes to escape lines beginning `From `, so it is a convenience copy, not the
 canonical one.
 
+**Anything much over 4 GiB is a size problem before it is a format problem.**
+Large single mbox files are widely reported to fail on import, 4 GiB being the
+threshold usually named, and the failure arrives hours in, leaving a partial mailbox
+that looks finished. Nobody here has measured where the cliff actually is, so treat
+4 GiB as the conventional point to split at and not a proven limit. Run
+`split_mbox.py --out "$ARCHIVE/10-export"` first and import from `mbox-by-year/`,
+which holds `Inbox-2024.mbox` style per-year files whose concatenation is proved
+byte-identical to the original. One client folder appears per year, so a 2024 folder
+and a 2025 folder rather than one unmanageable Inbox.
+
 ## 2. Thunderbird
 
 Thunderbird stores mail as mbox internally but ships **no import UI for it**,
@@ -123,3 +133,4 @@ is right and the old badge was wrong. Say so before the user reports it as a bug
 | Everything shows as unread | Only `Status:` was written and the target is Thunderbird (section 6) |
 | Attachments appear as 0 KB | The export dropped detached payloads. Re-run `verify_export.py`; this is the failure this skill exists to prevent |
 | Import is extremely slow | Normal for multi-GB folders. Import per folder rather than all at once |
+| Import stalls, dies, or ends short on one huge folder | The file is past the few-GiB size where large-mbox imports are reported to fail. Split it with `split_mbox.py` and import `mbox-by-year/` one year at a time |

@@ -23,6 +23,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 | [`active/v4-performance-consolidation-2026-05-27/`](active/v4-performance-consolidation-2026-05-27/) | v4 perf, FTS, strict-gate | Module split shipped (v3.9.1); perf/FTS stalled since 2026-05-27; confirm resume vs archive |
 | [`active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/) | Explicit Cursor plugin-root launcher and host-specific validator | Shipped on `main` in v3.11.6; local 41-tool Cursor Agent acceptance passed; Marketplace/UI distribution evidence remains open |
 | [`active/central-marketplace-source-contract/`](active/central-marketplace-source-contract/) | Source payload, identity, signed-tag, and local-gate contract for the shared multi-plugin marketplace | PR #80 merged; shared Marketplace admission and client-registration remediation remain separately authorized external gates |
+| [`active/fast-search-index/`](active/fast-search-index/) | Index-backed fast path for metadata search: `Envelope Index` capability envelope, safe-read pattern, phased tool plan (AGENTIC-2345) | Research complete and measured; implementation not started. Phase 0 is AGENTIC-2344, which blocks the lane |
 
 ## Reference
 

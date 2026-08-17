@@ -142,16 +142,30 @@ disambiguating suffix would cost three lines.
 
 ## 3. Capability gaps users will ask for
 
-### Attachment-only extraction
+### Attachment-only extraction - shipped
 
-The skill description advertises "save all my attachments" as a trigger, and there
-is no script that does *only* that. A user who wants their PDFs out has to export
-the whole archive and then dig through `.eml` files.
+`scripts/extract_attachments.py` now closes this. It went further than the sketch
+that used to sit here, in two ways worth recording because both were discovered
+rather than designed.
 
-Fix: `scripts/extract_attachments.py` writing `attachments/<mailbox>/<date>_<id>_<name>`
-with collision handling and a manifest of source message per file. It is a small
-script over machinery that already exists, and it closes a promise the description
-already makes.
+The sketch proposed one file per occurrence under `attachments/<mailbox>/`. That
+would have written 14.46 GB to store 8.62 GB of distinct bytes, because 85% of
+attachments on business mail are the same signature logo repeated. Content
+addressing plus hard-linked views gives the same browsable tree for the smaller
+number, so dedup is not an optimization to add later; it decides the layout.
+
+The sketch also treated collision handling as "three lines". It is not, because a
+declared filename is attacker-controlled and can be encoded: `../../../escape.txt`
+survives inside an RFC 2047 base64 word or split across RFC 2231 continuations, so
+any sanitizer that runs before decoding waves it through. Decode first, sanitize
+second, and keep a test that asserts containment for the encoded forms rather than
+only the literal `../` case.
+
+Remaining gap: the extractor deliberately does not descend into `message/rfc822`
+attachments, matching the exporter, so attachments nested inside forwarded emails
+are stored as the containing `.eml` rather than individually. See the counting
+discussion in `pitfalls.md` before changing that, since it moves several published
+totals at once.
 
 ### Whole-store export in one command
 
