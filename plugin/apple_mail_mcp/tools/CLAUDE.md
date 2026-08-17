@@ -6,10 +6,10 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 | Module | # | Purpose / tools |
 |--------|---|-----------------|
 | `inbox/list_emails.py` | 1 | Listing: `list_inbox_emails` (async per-account dispatch; `parsing.py`/`list_scripts.py` leaves) |
-| `inbox/unread_counts.py` | 1 | Unread totals: `get_mailbox_unread_counts` |
+| `inbox/unread_counts.py` | 1 | Unread totals: `get_mailbox_unread_counts` (cached-count provenance via `unread_provenance.py`; sentinel key `PROVENANCE_KEY`) |
 | `inbox/accounts.py` | 2 | Account enumeration: `list_accounts`, `list_account_addresses` |
 | `inbox/mailboxes.py` | 1 | Folder listing: `list_mailboxes` |
-| `inbox/overview.py` | 1 | Overview: `get_inbox_overview` |
+| `inbox/overview.py` | 1 | Overview: `get_inbox_overview` (script builder + parser; `overview_formatting.py` holds the pure text/JSON formatters) |
 | `search/emails.py` | 1 | Find: `search_emails` (windowing, replied-detection) |
 | `search/by_id.py` | 2 | Exact-id fetch: `get_email_by_id`, `get_email_by_ids` |
 | `search/thread.py` | 1 | Thread reconstruction: `get_email_thread` |
@@ -107,6 +107,30 @@ Normalized dict JSON: `get_statistics`, `get_inbox_overview`, `list_inbox_emails
 Per-email rows on `list_inbox_emails`, `search_emails`, `get_email_by_id`, `get_email_by_ids`, `get_email_thread`, `get_needs_response`, `inbox_dashboard`, and `get_inbox_overview` recent rows also carry `was_replied_to` / `has_draft`, and each response carries a top-level `draft_scan` status object; docstrings on the individual tools are the source of truth for exact field shapes.
 
 `reply_to_email(output_format="json")` is a compose contract for verified `mode="draft"` / `mode="open"` only. It returns reply artifact metadata including `draft_id`, `verified_draft_id`, `exact_id_verified`, `attachment_status`, `attachment_count`, `attachments_applied`, and verification status fields. Effective `mode="send"` with JSON is rejected before mutation because sent replies do not produce a verifiable Drafts artifact.
+
+## Cached unread counts (AGENTIC-2346)
+
+Mail's `unread count of <mailbox>` is a **cached aggregate**, not a computed one, and it drifts low. Measured 2026-08-17 on a 25,012-message Exchange Inbox: Mail reported **3,236** unread where per-message truth was **10,016** (68% under-report); a 1,549-message folder on the same account was off by 1. `count of messages` is reliable.
+
+Recomputing it was measured, not assumed. `count of (messages of <mb> whose read status is false)` — the one `whose` predicate the bounded-scan lint allows on a mailbox — returned in <1 s on 393 messages, 4 s on 1,549, and **no result at 240 s or 300 s** on 25,012. It is affordable only where the cache is already right and unaffordable exactly where it is wrong, and 4 s per mid-size folder cannot be spent across the 100-mailboxes-per-account fan-out. An exact cheap path means reading Mail's `Envelope Index` (AGENTIC-2345), not AppleScript.
+
+So the four reporting surfaces label the number instead. Single source: [`unread_provenance.py`](unread_provenance.py) (`unread_count_disclosure`, `measured_unread_disclosure`, `unread_count_text_label`, `unread_count_text_footer`). Never emit a bare `unread count` value from a new tool — route it through that module.
+
+| Field | Meaning |
+|-------|---------|
+| `unread_count_source` | `mail_cached_aggregate` (cached) or `per_message_read_status` (counted in this call's bounded sample) |
+| `unread_count_measured` | `false` for the cache, `true` for a per-message count |
+| `unread_count_note` | Agent-facing prose; emitted once per payload envelope, not per row |
+| `unread_count_suspect` + `_reason` + `_detail` | Set only when the cached value is **provably** wrong |
+
+Two cross-checks are free wherever the tool already read the data, and only those two:
+
+- `cached_unread_exceeds_message_count` — needs `count of messages` (`list_mailboxes(include_counts=True)`, `get_inbox_overview`, `get_statistics`).
+- `sampled_unread_exceeds_cached_unread` — needs per-message `read status`; unread in a newest-first slice is a strict lower bound (`get_inbox_overview`'s recent pass).
+
+`get_mailbox_unread_counts` reads neither, so it labels but never flags, and carries the block under the `__unread_count_provenance__` sentinel key (same dunder convention as `__truncated__`). **A clean check is not proof of a correct count** — the measured 3,236-vs-10,016 case trips neither. `get_statistics`'s `read` is `total - unread` and inherits the cache error with the sign flipped, so it carries the same label. `sender_stats` counts per-message `read status` and is genuinely measured.
+
+Contract tests: `tests/cross_cutting/test_unread_count_provenance.py`.
 
 ## Agent-facing selection
 

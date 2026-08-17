@@ -22,6 +22,15 @@ from apple_mail_mcp.tools.analytics.statistics_parsing import (
     _statistics_json_error,
     _statistics_scan_caps,
 )
+from apple_mail_mcp.tools.unread_provenance import (
+    UNREAD_COUNT_NOTE_LINE,
+    unread_count_text_label,
+)
+
+#: AppleScript-literal form of the cached-count note for the mailbox_breakdown
+#: report, which is assembled inside the script rather than in Python. Same line
+#: every other text surface prints.
+_MAILBOX_BREAKDOWN_NOTE = escape_applescript(UNREAD_COUNT_NOTE_LINE)
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -51,6 +60,20 @@ def get_statistics(
     the per-message sample used for ``top_senders``, ``flagged``,
     ``with_attachments``, and ``mailbox_distribution`` — those remain
     sample-based because Mail.app exposes no mailbox-wide count for them.
+
+    **``unread`` is not measured in ``account_overview`` or
+    ``mailbox_breakdown``.** ``count of messages`` is reliable, but ``unread
+    count`` is a cached aggregate that drifts low: measured 2026-08-17 on a
+    25,012-message Exchange Inbox, Mail reported 3,236 unread where per-message
+    truth was 10,016 (a 68% under-report). ``read`` is computed as
+    ``total - unread``, so it inherits that error with the sign flipped and is
+    over-reported by the same amount. Both scopes label the number
+    ``unread_count_source="mail_cached_aggregate"`` with
+    ``unread_count_measured=false``, and set ``unread_count_suspect`` when the
+    cached count exceeds the message count. ``sender_stats`` is different: it
+    counts per-message ``read status`` inside its bounded sample, so it reports
+    ``unread_count_source="per_message_read_status"`` with
+    ``unread_count_measured=true``.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
@@ -455,13 +478,21 @@ def get_statistics(
                 end try
 
                 -- Use Mail's own count APIs to avoid materializing the full
-                -- message list on large mailboxes.
+                -- message list on large mailboxes. `unread count` is a cached
+                -- aggregate that drifts low, so both it and the `Read` figure
+                -- derived from it are labelled; `Total messages` is reliable.
                 set totalMessages to count of messages of targetMailbox
                 set unreadMessages to unread count of targetMailbox
+                if unreadMessages > totalMessages then
+                    set unreadLabel to "{unread_count_text_label(suspect=True)}"
+                else
+                    set unreadLabel to "{unread_count_text_label()}"
+                end if
 
                 set outputText to outputText & "Total messages: " & totalMessages & return
-                set outputText to outputText & "Unread: " & unreadMessages & return
-                set outputText to outputText & "Read: " & (totalMessages - unreadMessages) & return
+                set outputText to outputText & "Unread: " & unreadMessages & unreadLabel & return
+                set outputText to outputText & "Read: " & (totalMessages - unreadMessages) & unreadLabel & return
+                set outputText to outputText & "{_MAILBOX_BREAKDOWN_NOTE}" & return
 
             on error errMsg
                 return "Error: " & errMsg

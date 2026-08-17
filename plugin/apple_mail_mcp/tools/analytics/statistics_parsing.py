@@ -5,6 +5,12 @@ from collections import Counter
 from typing import Any
 
 from apple_mail_mcp.constants import SCAN_BOUNDS
+from apple_mail_mcp.tools.unread_provenance import (
+    measured_unread_disclosure,
+    unread_count_disclosure,
+    unread_count_text_footer,
+    unread_count_text_label,
+)
 
 
 def _statistics_recent_days_applied(days_back: int, scope: str) -> float:
@@ -154,12 +160,30 @@ def _format_statistics_json(
         "recent_days_applied": _statistics_recent_days_applied(days_back, scope),
         "statistics": statistics,
         "errors": errors or [],
+        **_statistics_unread_provenance(scope, statistics),
     }
     if sender is not None:
         payload["sender"] = sender
     if scope == "mailbox_breakdown":
         payload["mailbox"] = mailbox or "INBOX"
     return payload
+
+
+def _statistics_unread_provenance(scope: str, statistics: dict[str, Any]) -> dict[str, Any]:
+    """Say which source produced this scope's ``unread`` number.
+
+    ``account_overview`` and ``mailbox_breakdown`` read Mail's cached ``unread
+    count of <mailbox>`` aggregate. ``sender_stats`` counts per-message ``read
+    status`` inside its bounded sample and is therefore measured — different
+    provenance, so a different label.
+    """
+    if scope == "sender_stats":
+        return measured_unread_disclosure()
+    total_key = "total_messages" if scope == "mailbox_breakdown" else "total_emails"
+    return unread_count_disclosure(
+        cached_unread=statistics.get("unread"),
+        total_messages=statistics.get(total_key),
+    )
 
 
 def _statistics_json_error(
@@ -249,7 +273,12 @@ def _build_account_overview_report(raw_overview: str, escaped_account: str) -> s
         total_unread = 0  # legacy fallback can't compute true unread
         mailbox_totals = {}
 
+    # `total_unread` is a sum of Mail's cached per-mailbox aggregates, so
+    # `total_read` inherits the cache's error with the sign flipped: where the
+    # cache under-reports unread, this over-reports read. Both are labelled.
     total_read = total_emails - total_unread
+    unread_suspect = total_unread > total_emails
+    cached_label = unread_count_text_label(suspect=unread_suspect)
     header = (
         "╔══════════════════════════════════════════╗\n"
         f"║      EMAIL STATISTICS - {escaped_account}       ║\n"
@@ -260,14 +289,19 @@ def _build_account_overview_report(raw_overview: str, escaped_account: str) -> s
     lines_out.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
     lines_out.append(f"Total Emails: {total_emails}\n")
     if total_emails > 0:
-        lines_out.append(f"Unread: {total_unread} ({round(total_unread / total_emails * 100)}%)\n")
-        lines_out.append(f"Read: {total_read} ({round(total_read / total_emails * 100)}%)\n")
+        lines_out.append(f"Unread: {total_unread} ({round(total_unread / total_emails * 100)}%){cached_label}\n")
+        lines_out.append(f"Read: {total_read} ({round(total_read / total_emails * 100)}%){cached_label}\n")
         lines_out.append(f"Flagged: {sample_flagged}\n")
         lines_out.append(
             f"With Attachments: {sample_with_attachments} ({round(sample_with_attachments / total_emails * 100)}%)\n"
         )
     else:
-        lines_out.append("Unread: 0\nRead: 0\nFlagged: 0\nWith Attachments: 0\n")
+        lines_out.append(f"Unread: 0{cached_label}\nRead: 0{cached_label}\nFlagged: 0\nWith Attachments: 0\n")
+    # Keep the note inside VOLUME METRICS: the senders / mailbox-distribution
+    # parsers only scan lines after their own section headers, so a note here
+    # can never be mistaken for a data row.
+    for note_line in unread_count_text_footer():
+        lines_out.append(note_line + "\n")
     lines_out.append("\n")
     lines_out.append("👥 SAMPLE SENDERS\n")
     lines_out.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
