@@ -1,0 +1,55 @@
+{
+  "skill_name": "apple-mail-archive-export",
+  "_note": "This repo is PUBLIC. Account addresses and account UUIDs are machine identity and must never be committed here. Where an eval needs a specific account, it names the account by TYPE and resolves the concrete address/UUID at run time via the `list_accounts` tool (or by reading the directory names under the local Mail store). Measured counts are publishable and are kept as-is so the assertions stay gradeable.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "archive-icloud-account-with-attachments",
+      "prompt": "I want to archive my iCloud mail account out of Apple Mail into something local and searchable before I clean up this Mac. Put the archive somewhere sensible and tell me how to search it later. I really care about the attachments coming through intact.",
+      "expected_output": "A verified local archive of the iCloud account (531 messages, 386 of them .partial.emlx). Attachments must be reassembled from the sibling Attachments/ dirs, not dropped. Should include a byte-level verification step and a way to search.",
+      "assertions": [
+        "Resolves the iCloud account to its own account UUID rather than guessing or hardcoding one",
+        "Exports all 531 messages from that account",
+        "Attachments are reassembled into the output rather than dropped (the account is 386/531 .partial.emlx)",
+        "Runs a content-level verification of attachment bytes, not just a message count comparison",
+        "Copies or snapshots the account before exporting instead of exporting straight from the live ~/Library/Mail store",
+        "Gives the user a concrete, runnable way to search the archive afterwards",
+        "Does not modify ~/Library/Mail and does not launch or quit Mail.app"
+      ],
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "diagnose-partial-emlx-backup-gap",
+      "prompt": "quick question - about half the files under ~/Library/Mail are named .partial.emlx and i have a backup script that just copies the *.emlx files out. is my mail actually backed up or am i losing stuff? not sure if partial means it didnt download",
+      "expected_output": "Must correctly explain that .partial.emlx does NOT mean the message failed to download - it means Mail moved attachment part bodies into a sibling Attachments/<id>/<part>/ directory. Must conclude the user's script IS losing attachments and explain the fix (splice the payloads back, re-encoding those from Attachments/ but splicing .emlxpart verbatim).",
+      "assertions": [
+        "States that .partial.emlx does NOT mean the message failed to download",
+        "Explains that attachment part bodies live in a sibling Attachments/<id>/<part>/ directory",
+        "Concludes unambiguously that the user's .emlx-only backup script IS losing attachments",
+        "Explains the fix: splice the attachment payloads back into the X-Apple-Content-Length stub parts",
+        "Distinguishes the two payload sources: Attachments/ is decoded and must be re-encoded, .emlxpart is already encoded and spliced verbatim",
+        "Backs the answer with real counts measured from the user's own store",
+        "Does not claim per-message read/flagged state is lost, since it rides along in each .emlx plist trailer"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "convert-university-account-to-mbox-for-thunderbird",
+      "prompt": "convert my university email account out of Apple Mail into mbox files I can import into Thunderbird. it's a small account, shouldn't take long",
+      "expected_output": "One mbox file per mailbox for the university account (51 messages across Inbox/Drafts/Sent Items/Deleted Items), using mboxrd escaping. Should not corrupt bodies with mboxo escaping, should round-trip back to the source byte-exact, and should preserve read/flag state in a header Thunderbird actually reads.",
+      "assertions": [
+        "Resolves the university account to its own account UUID rather than guessing or hardcoding one",
+        "Produces mbox output covering all 4 non-empty mailboxes (Inbox, Drafts, Sent Items, Deleted Items)",
+        "Total '^From ' separator count across the mbox files equals 51",
+        "Escapes body lines beginning 'From ' so message boundaries cannot be corrupted on import",
+        "Preserves read/flagged state in a flag header the target client (Thunderbird) actually reads",
+        "Gives concrete Thunderbird import instructions",
+        "Attachments are present in the mbox output rather than dropped",
+        "Injected flag headers do not split a folded header; every message round-trips back to its .eml source"
+      ],
+      "files": []
+    }
+  ]
+}

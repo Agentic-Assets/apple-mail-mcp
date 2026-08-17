@@ -57,13 +57,16 @@ from apple_mail_mcp.tools.inbox.list_scripts import (
 from apple_mail_mcp.tools.inbox.mailboxes import _list_mailboxes_json, list_mailboxes
 from apple_mail_mcp.tools.inbox.overview import (
     _build_overview_one_account_script,
+    _parse_overview_account,
+    _run_overview_one,
+    get_inbox_overview,
+)
+from apple_mail_mcp.tools.inbox.overview_formatting import (
+    _account_unread_provenance,
     _format_overview,
     _format_overview_json,
     _overview_json_error,
     _overview_suggestions,
-    _parse_overview_account,
-    _run_overview_one,
-    get_inbox_overview,
 )
 from apple_mail_mcp.tools.inbox.parsing import (
     _VALID_READ_FILTERS,
@@ -81,6 +84,7 @@ __all__ = [
     "SCAN_BOUNDS",
     "ToolError",
     "_VALID_READ_FILTERS",
+    "_account_unread_provenance",
     "_attach_warnings_to_json",
     "_build_inbox_collection_block",
     "_build_list_inbox_json_script",

@@ -224,11 +224,18 @@ async def inbox_dashboard(
         carry ``was_replied_to`` (bool) and ``has_draft`` (bool or null);
         the dict also gains a top-level ``draft_scan`` object:
         ``{"status": "ok"|"error"|"skipped", "scanned": N, "accounts": [...]}``.
+
+        Per-account ``accounts`` values are Mail's **cached** ``unread count``
+        aggregate, not measured counts — see the top-level
+        ``unread_count_source`` / ``unread_count_measured`` /
+        ``unread_count_note`` fields, and never report them as exact.
     """
     if output_format not in {"ui", "json"}:
         return "Error: Invalid output_format. Use: ui, json"
 
     from apple_mail_mcp.tools.inbox import get_mailbox_unread_counts
+    from apple_mail_mcp.tools.inbox.unread_counts import PROVENANCE_KEY
+    from apple_mail_mcp.tools.unread_provenance import unread_count_disclosure
 
     per_call_timeout = timeout if timeout is not None else 60
     selected_account = account or _server.DEFAULT_MAIL_ACCOUNT
@@ -242,6 +249,11 @@ async def inbox_dashboard(
         summary_only=True,
         timeout=per_call_timeout,
     )
+    # Lift the cached-count provenance sentinel out of the account map so it
+    # travels as a first-class field and never renders as a phantom account
+    # card in the UI (the template iterates Object.keys(accountsData)).
+    disclosure = accounts_data.pop(PROVENANCE_KEY, None) or unread_count_disclosure()
+
     recent_emails = await analytics._get_recent_emails_structured_async(
         account=selected_account,
         max_total=max_total,
@@ -266,6 +278,7 @@ async def inbox_dashboard(
             "recent_emails": recent_emails,
             "errors": [],
             "draft_scan": build_draft_scan_status(snapshots),
+            **disclosure,
         }
 
     from apple_mail_mcp import UI_AVAILABLE

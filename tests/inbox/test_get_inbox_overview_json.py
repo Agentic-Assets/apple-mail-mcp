@@ -42,7 +42,8 @@ class GetInboxOverviewJsonTests(unittest.TestCase):
 
         self.assertIsInstance(result, str)
         self.assertIn("EMAIL INBOX OVERVIEW", result)
-        self.assertIn("Work: 2 unread (10 total)", result)
+        # AGENTIC-2346: cached unread numbers carry an inline provenance label.
+        self.assertIn("Work: 2 unread [Mail cached, unverified] (10 total)", result)
         self.assertIn("Quarterly report", result)
 
     def test_compact_mode_preserves_shorter_text(self):

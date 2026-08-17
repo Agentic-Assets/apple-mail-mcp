@@ -126,6 +126,16 @@ def _sort_search_records(records: list[dict[str, Any]], sort: str) -> list[dict[
     return sorted(records, key=lambda item: item.get("received_date", ""), reverse=reverse)
 
 
+def _format_error_details(error_details: list[dict[str, str]], scope_key: str) -> str:
+    """Render ``error_details`` as ``<scope> (<type>: <message>)`` pairs.
+
+    *scope_key* names the field that identifies the failure: ``account`` for
+    account-level failures (every entry carries one) or ``mailbox`` for
+    per-mailbox failures (only ``mailbox_error`` entries carry one).
+    """
+    return "; ".join(f"{item.get(scope_key, '?')} ({item['type']}: {item['message']})" for item in error_details)
+
+
 def _format_search_records_text(
     records: list[dict[str, Any]],
     subject_only: bool = False,
@@ -170,10 +180,19 @@ def _format_search_records_text(
     lines.append(f"FOUND: {len(records)} matching email(s)")
     if errors:
         if error_details:
-            detail_text = "; ".join(f"{item['account']} ({item['type']}: {item['message']})" for item in error_details)
-            lines.append(f"PARTIAL: {len(errors)} account issue(s): {detail_text}")
+            lines.append(f"PARTIAL: {len(errors)} account issue(s): {_format_error_details(error_details, 'account')}")
         else:
             lines.append(f"PARTIAL: {len(errors)} account issue(s): {', '.join(errors)}")
+    elif error_details:
+        # A single-account scan reports per-mailbox failures (including the
+        # per-message scan-failure counter from ``script._SCAN_FAILURE_REPORT``)
+        # in ``error_details`` with nothing in ``errors``. Surface them here too:
+        # text is the default ``output_format``, so without this a scan that
+        # threw on every candidate would still render as a clean "FOUND: 0"
+        # (AGENTIC-2344).
+        lines.append(
+            f"PARTIAL: {len(error_details)} mailbox issue(s): {_format_error_details(error_details, 'mailbox')}"
+        )
     lines.append("========================================")
     return "\n".join(lines)
 

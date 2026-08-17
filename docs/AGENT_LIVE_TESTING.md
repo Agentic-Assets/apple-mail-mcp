@@ -2,6 +2,8 @@
 
 Use the repo-owned CLI (`.venv/bin/apple-mail`) to verify changes against real Mail.app immediately after edits. This bypasses the slow generated mcporter wrapper and calls the same Python tool functions as the MCP server.
 
+> **This repo is PUBLIC, and everything below reads a real mailbox.** Output from these commands contains real addresses, subjects, account UUIDs, and absolute paths. Never paste it verbatim into a commit, doc, test fixture, PR comment, or Linear issue. Report counts, timings, and redacted samples instead. Root [`AGENTS.md`](../AGENTS.md) § This repo is PUBLIC has the pre-commit diff scan.
+
 ## Setup
 
 ```bash

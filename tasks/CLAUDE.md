@@ -4,6 +4,8 @@ Cross-session planning artifacts. In-conversation work uses ephemeral task lists
 
 **Agents MUST read this file and [`todo.md`](todo.md) before creating or moving anything under `tasks/`.**
 
+**This repo is PUBLIC.** Research notes, handoffs, and measurement writeups land here, and they are world-readable on push. Measured numbers are publishable; the mailboxes behind them are not. Keep out real addresses, subjects, account UUIDs, absolute `/Users/...` paths, and session scratch paths or session IDs. See root [`AGENTS.md`](../AGENTS.md) § This repo is PUBLIC.
+
 ## Agent requirements (mandatory)
 
 Every coding agent working in this repo **must** follow the `tasks/` layout. CI enforces it via `tools/validators/validate_tasks_layout.py` and `tests/infra/test_tasks_layout.py`.

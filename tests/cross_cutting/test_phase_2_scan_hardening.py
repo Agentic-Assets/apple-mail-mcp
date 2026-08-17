@@ -307,7 +307,16 @@ class TimeoutForwardingTests(unittest.TestCase):
                 summary_only=True,
             )
 
-        self.assertEqual(result, {"Work": 3})
+        # The per-account counts, minus the cached-count provenance sentinel
+        # (AGENTIC-2346: every reported unread number is labelled).
+        self.assertEqual(
+            {k: v for k, v in result.items() if not k.startswith("__")},
+            {"Work": 3},
+        )
+        self.assertEqual(
+            result["__unread_count_provenance__"]["unread_count_source"],
+            "mail_cached_aggregate",
+        )
         self.assertIn('if accountName is not "Work" then', captured["script"])
         self.assertIn("set shouldIncludeAccount to false", captured["script"])
         self.assertIn("if shouldIncludeAccount then", captured["script"])

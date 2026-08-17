@@ -2,6 +2,22 @@
 
 Navigation hub for **apple-mail-mcp**: one Python MCP server (**41 tools**, `fastmcp>=3.1.0,<4`) shipped as PyPI package (`mcp-apple-mail`), shared Claude Code, Codex, and Cursor plugin runtime (`plugin/`), Claude Desktop/Cowork `.plugin`, and Claude Desktop `.mcpb` (`apple-mail-mcpb/`). Marketplace entries: `.claude-plugin/marketplace.json` for Claude Code and `.agents/plugins/marketplace.json` for Codex Desktop/CLI. Cursor uses its distinct plugin-local adapter; local Cursor Agent acceptance has passed, while Cursor marketplace/UI admission remains a separate distribution check. The collected-test count is single-sourced in `tools/expected_test_count.txt` (the dev-check/release gate fails on drift and prints the new number); recount with `PYTEST_ADDOPTS='' .venv/bin/pytest --collect-only tests`.
 
+## This repo is PUBLIC. Check what you commit.
+
+`Agentic-Assets/apple-mail-mcp` is a **public** GitHub repo. Commits, branches, PR and issue comments, and release artifacts are world-readable the moment they are pushed, and a force-push does not unpublish them.
+
+The point of this codebase is reading real mailboxes, so real mail data is always one live test away from the working tree. **Never commit:** real email addresses or contact details · real subjects, bodies, snippets, or `Message-ID` headers · account UUIDs, server hostnames, or mailbox URLs · absolute `/Users/<name>/...` paths, session scratch paths, or session IDs · secrets, tokens, or cookies · live-test output pasted verbatim.
+
+Commit **counts, timings, and redacted samples** instead. Fixtures use synthetic addresses (`sender@example.com`). A number measured from a real mailbox is publishable; the message it came from is not.
+
+Scan the diff before committing docs, `tasks/` artifacts, test fixtures, or anything carrying live-test output:
+
+```bash
+git diff --cached -U0 | grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|/Users/|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-'
+```
+
+A hit is not automatically a failure (`sender@example.com` is fine), but every hit needs a look. Carry this constraint into every subagent prompt that writes files or commits.
+
 ## Marketplace identity boundary
 
 [`tools/marketplace_identity.json`](tools/marketplace_identity.json) is the

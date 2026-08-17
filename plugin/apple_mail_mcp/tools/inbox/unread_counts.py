@@ -14,6 +14,12 @@ from apple_mail_mcp.core import (
 )
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import inbox
+from apple_mail_mcp.tools.unread_provenance import unread_count_disclosure
+
+#: Namespaced sentinel key carrying the cached-count provenance block. Uses the
+#: same dunder convention as the ``__truncated__`` marker below so it cannot
+#: collide with a real account or mailbox name.
+PROVENANCE_KEY = "__unread_count_provenance__"
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -26,7 +32,21 @@ def get_mailbox_unread_counts(
     timeout: int | None = None,
 ) -> dict[str, Any]:
     """
-    Get unread counts per mailbox for one account or all accounts.
+    Get Mail's **cached** unread counts per mailbox for one or all accounts.
+
+    Every number here is Mail.app's ``unread count`` mailbox property, a cached
+    aggregate — **not a measured count**. It drifts low, sometimes hugely:
+    measured 2026-08-17 on a 25,012-message Exchange Inbox, Mail reported 3,236
+    unread where per-message truth was 10,016 (a 68% under-report). Report these
+    as approximate, never as exact, and never subtract them from a message count
+    to claim a read count. When an exact number matters, page bounded
+    per-message reads with ``list_inbox_emails(read_status="unread")``.
+
+    This tool reads no per-mailbox message count, so it cannot cross-check
+    itself; the response carries the provenance block but never a suspect flag.
+    ``list_mailboxes(include_counts=True)``, ``get_inbox_overview``, and
+    ``get_statistics`` do read both numbers and will flag a cached count that is
+    provably wrong.
 
     When summary_only=True, returns only per-account inbox unread totals
     (replaces the former get_unread_count tool).
@@ -47,6 +67,11 @@ def get_mailbox_unread_counts(
     Returns:
         If summary_only=False: nested dict keyed by account name then mailbox path
         If summary_only=True: flat dict mapping account names to inbox unread counts
+
+        Both shapes also carry a ``__unread_count_provenance__`` key holding
+        ``unread_count_source`` (always ``"mail_cached_aggregate"``),
+        ``unread_count_measured`` (always ``False``), and
+        ``unread_count_note``. Skip that key when iterating account names.
     """
     if account is None and _server.DEFAULT_MAIL_ACCOUNT:
         account = _server.DEFAULT_MAIL_ACCOUNT
@@ -104,7 +129,7 @@ def get_mailbox_unread_counts(
                     "AppleScript timed out while fetching inbox unread counts. Try again or pass a larger `timeout`."
                 ),
             }
-        flat_counts: dict[str, int] = {}
+        flat_counts: dict[str, Any] = {}
         for item in result.split("|"):
             if ":" in item:
                 acct_name, count_str = item.split(":", 1)
@@ -112,6 +137,7 @@ def get_mailbox_unread_counts(
                     flat_counts[acct_name] = int(count_str)
                 else:
                     flat_counts[acct_name] = -1
+        flat_counts[PROVENANCE_KEY] = unread_count_disclosure()
         return flat_counts
 
     account_filter = (
@@ -200,11 +226,10 @@ def get_mailbox_unread_counts(
                 "AppleScript timed out while fetching mailbox unread counts. Try again or pass a larger `timeout`."
             ),
         }
-    nested_counts: dict[str, dict[str, int | bool]] = {}
+    nested_counts: dict[str, Any] = {}
     truncated_accounts: set[str] = set()
-    if not result:
-        return nested_counts
-
+    # An empty `result` (the script's no-rows case) falls through both loops and
+    # returns the provenance block alone.
     for line in result.splitlines():
         parts = line.split("|||", 2)
         if len(parts) != 3:
@@ -221,4 +246,5 @@ def get_mailbox_unread_counts(
             nested_counts[acct] = {}
         nested_counts[acct]["__truncated__"] = True
 
+    nested_counts[PROVENANCE_KEY] = unread_count_disclosure()
     return nested_counts
