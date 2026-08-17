@@ -18,7 +18,7 @@ Human- and agent-facing docs that survive outside the codebase. Plugin skills an
 
 **Implementing or changing MCP tools** → start with root [`CLAUDE.md`](../CLAUDE.md) (architecture), then [`CLAUDE-conventions.md`](CLAUDE-conventions.md) (anti-patterns, **module line budget**). Run mocked tests per [`tests/CLAUDE.md`](../tests/CLAUDE.md).
 
-**Verifying against real Mail.app** → [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md): setup, permissions, `quick-check` / `perf-test` batteries, safe probes, MCP env vars (`DEFAULT_MAIL_ACCOUNT`, `DEFAULT_MAIL_SIGNATURE`, `USER_EMAIL_PREFERENCES`).
+**Verifying against real Mail.app** → [`AGENT_LIVE_TESTING.md`](AGENT_LIVE_TESTING.md): setup, permissions, `quick-check` / `perf-test` batteries, safe probes, fixture-only HTML compose subject/focus drills (real subject never `__apple_mail_mcp_…`, no leading tab indent), MCP env vars (`DEFAULT_MAIL_ACCOUNT`, `DEFAULT_MAIL_SIGNATURE`, `USER_EMAIL_PREFERENCES`).
 
 **Plugin shell / manifests / skills** → [`plugin/docs/CLAUDE.md`](../plugin/docs/CLAUDE.md), [`.claude-plugin/CLAUDE.md`](../.claude-plugin/CLAUDE.md), [`apple-mail-mcpb/CLAUDE.md`](../apple-mail-mcpb/CLAUDE.md), [`plugin/skills/CLAUDE.md`](../plugin/skills/CLAUDE.md). Codex routing lives in [`../.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), [`../plugin/.codex-plugin/plugin.json`](../plugin/.codex-plugin/plugin.json), and [`../plugin/.mcp.json`](../plugin/.mcp.json). Cursor routing lives in [`../plugin/.cursor-plugin/plugin.json`](../plugin/.cursor-plugin/plugin.json) and [`../plugin/mcp.json`](../plugin/mcp.json); local 41-tool Cursor Agent acceptance passed, while Cursor marketplace/UI admission remains unverified. Run `plugin-dev:plugin-validator` after manifest edits; `plugin-dev:skill-reviewer` after skill edits.
 
@@ -45,7 +45,7 @@ Eleven skills ship under [`plugin/skills/`](../plugin/skills/) and auto-load wit
 | [`mailbox-taxonomy`](../plugin/skills/mailbox-taxonomy/) | Folder strategy, noise diagnosis, structural `create_mailbox` |
 | [`email-archive-cleanup`](../plugin/skills/email-archive-cleanup/) | Staged archive / bulk move / trash with dry runs + exports |
 | [`mail-rules-advisor`](../plugin/skills/mail-rules-advisor/) | Mail filter / rule **proposals** (manual apply in Mail.app — no rule API) |
-| [`email-drafting`](../plugin/skills/email-drafting/) | Compose, reply, forward, rich drafts (`--draft-safe` aware) |
+| [`email-drafting`](../plugin/skills/email-drafting/) | Compose, reply, forward, rich/HTML drafts (`body_html`, subject restore); `--draft-safe` aware |
 | [`email-style-profile`](../plugin/skills/email-style-profile/) | Voice from Sent mail + `USER_EMAIL_PREFERENCES` before drafting |
 | [`email-attachments`](../plugin/skills/email-attachments/) | List and save attachments with path safety |
 | [`calendar-operator`](../plugin/skills/calendar-operator/) | Bounded calendar reads, safe event CRUD, ID-first deletes, TCC troubleshooting |
@@ -62,7 +62,8 @@ Workflow entry points are skills-only. Do not add or restore legacy slash comman
 3. Safe commands — batteries (`quick-check`, `perf-test`, `smoke-test`) and individual probes
 4. Post-edit workflow (fast loop → full perf gate + thresholds)
 5. Unit tests vs live Mail (CI = mocked only)
-6. MCP config for agents (`mcp-config --repo`, draft-safe)
+6. Opt-in fixture drills (EML export, guarded reply cleanup, HTML compose subject/focus)
+7. MCP config for agents (`mcp-config --repo`, draft-safe)
 
 ## CI vs live
 

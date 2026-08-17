@@ -33,7 +33,7 @@ The live module inventory below is intentionally names-only; use `find tests -ty
 - **`analytics/`**: `test_analytics_resource_safety`, `test_dashboard_id_first`, `test_dashboard_reply_state`, `test_export`, `test_full_inbox_export`, `test_get_statistics_json`
 - **`calendar_surface/`**: `test_availability`, `test_batch_create`, `test_calendar_date_block`, `test_calendar_engine`, `test_calendar_gating`, `test_calendar_records`, `test_calendar_recurrence`, `test_calendar_scripts`, `test_calendar_validation`, `test_calendar_window`, `test_create_event`, `test_delete_events`, `test_eventkit_engine`, `test_get_events_by_id`, `test_list_calendars`, `test_list_events`, `test_manage_calendars`, `test_update_event`
 - **`cli/`**: `test_cli`, `test_cli_characterization`, `test_cli_perf`
-- **`compose/`**: `test_compose_none_handling`, `test_compose_security`, `test_compose_tools`, `test_draft_verification_helpers`, `test_manage_drafts_threading`
+- **`compose/`**: `test_attachment_draft_contract`, `test_compose_none_handling`, `test_compose_security`, `test_compose_tools`, `test_draft_verification_helpers`, `test_html_compose_focus`, `test_html_compose_subject`, `test_manage_drafts_threading`
 - **`core/`**: `test_applescript_snippets`, `test_bounded_scan_contract`, `test_bulk_helpers`, `test_core_fetch_replied_ids`, `test_core_helpers_characterization`, `test_core_validators`, `test_metadata_index_contract`, `test_no_unbounded_whose`, `test_orphan_watcher`, `test_read_only_registry`, `test_reply_state`
 - **`cross_cutting/`**: `test_applescript_builders_compile`, `test_applescript_script_idioms`, `test_id_first_guidance`, `test_modernization_3_1_5`, `test_phase_2_scan_hardening`, `test_phase_a_fixes`, `test_replied_detection`, `test_scalability_24k`, `test_tier1_hardening_regression`, `test_tier3_hardening`
 - **`inbox/`**: `test_contracts_inbox_tools`, `test_get_inbox_overview_json`, `test_gmail_unread_crash_regression`, `test_inbox_pure_helpers`, `test_inbox_tools`, `test_inbox_typed_kwargs`, `test_list_inbox_reply_state`, `test_overview_reply_state`, `test_reply_state_wiring`
@@ -46,6 +46,32 @@ The live module inventory below is intentionally names-only; use `find tests -ty
 ## v3.2.0 contract suite (capability-token + unbounded-scan refusal — keep green before any release)
 
 `test_bounded_scan_contract`, `test_no_unbounded_whose`, `test_full_inbox_export`.
+
+## HTML compose contract (`compose_email` + `body_html` / attachments)
+
+Mocked script-capture tests lock the AppleScript order and cleanup semantics for
+HTML paste, subject restore, focus, and attachment identity. Live verification:
+[`docs/AGENT_LIVE_TESTING.md`](../docs/AGENT_LIVE_TESTING.md) § HTML compose
+subject and focus.
+
+| Module | What it locks |
+|--------|----------------|
+| `test_html_compose_subject.py` | Real subject restored on `newMsg` **after paste, before first save**; never `set subject of newMsg to temporarySubjectMarker` on success or error; send path verifies restored subject before `send newMsg`; attachment finalize binds by exact saved subject (`operation_exact_subject`), never `set subject of markedDraft to`; Python throw/timeout runs `run_html_compose_subject_followup` and **fails closed** (marker absence is not success); `DRAFT_ATTACHMENT_PROOF_FAILED` stays distinct |
+| `test_html_compose_focus.py` | `focusComposeBody` binds to marker-named window; Tabs only while Accessibility reports a header field; returns immediately when body already focused; paste precedes subject restore |
+| `test_attachment_draft_contract.py` | Attachment drafts paste before save; finalize order is restore outgoing subject → `save newMsg` → bounded Drafts scan → proof (stored subject must equal the real subject); error cleanup deletes the focus-failure fixture without restoring a real subject; no `whose subject` scans |
+| `test_compose_tools.py` (`ComposeRunApplescriptMigrationTests`) | HTML draft/open/send paths keep restore-before-save ordering |
+
+Key assertions to preserve when editing `html_subject_scripts.py`, `html_focus_scripts.py`, or `send.py`:
+
+- Order: `focusComposeBody` → paste → `set subject of newMsg to "<real>"` → verify (exact marker token, not a prefix contains) → `save newMsg` / `send newMsg` → attachment proof / marker sweep.
+- The marker is a pre-save window-binding token only; saved Drafts subjects are read-only on Gmail — never write the marker back onto a persisted draft.
+- Error/follow-up paths use `standalone_exact_marker_restore_or_delete_script`; ambiguous marker matches fail closed. Focus failure deletes the fixture. Success-path leftover marker Drafts fail closed instead of delete-and-succeed.
+
+Run the compose HTML suite in isolation:
+
+```bash
+.venv/bin/pytest tests/compose/test_html_compose_subject.py tests/compose/test_html_compose_focus.py tests/compose/test_attachment_draft_contract.py -q
+```
 
 ## Module line budget
 

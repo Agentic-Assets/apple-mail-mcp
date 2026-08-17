@@ -1,0 +1,7 @@
+{
+  "plugins": {
+    "agentic-assets/apple-mail": {
+      "enabled": true
+    }
+  }
+}

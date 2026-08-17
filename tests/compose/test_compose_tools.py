@@ -4309,6 +4309,15 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
         self.assertNotIn('keystroke "s" using command down', captured["script"])
         self.assertNotIn("close window 1 saving yes", captured["script"])
         self.assertIn("Email saved as draft (HTML)", result)
+        self.assertLess(
+            captured["script"].index('keystroke "v" using command down'),
+            captured["script"].index('set subject of newMsg to "Hi"'),
+        )
+        self.assertLess(
+            captured["script"].index('set subject of newMsg to "Hi"'),
+            captured["script"].index("save newMsg"),
+        )
+        self.assertNotIn("set subject of newMsg to temporarySubjectMarker", captured["script"])
 
     def test_send_html_email_open_mode_saves_before_leaving_open(self):
         captured = {}
@@ -4331,6 +4340,14 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
             )
 
         self.assertIn("save newMsg", captured["script"])
+        self.assertLess(
+            captured["script"].index('set subject of newMsg to "Hi"'),
+            captured["script"].index("save newMsg"),
+        )
+        self.assertNotIn(
+            "close (window of newMsg) saving no",
+            captured["script"].split("on error errMsg")[0],
+        )
         self.assertNotIn('keystroke "s" using command down', captured["script"])
         self.assertNotIn("close window 1 saving yes", captured["script"])
         self.assertIn("review", result)
@@ -4356,6 +4373,18 @@ class ComposeRunApplescriptMigrationTests(unittest.TestCase):
             )
 
         self.assertIn("send newMsg", captured["script"])
+        self.assertLess(
+            captured["script"].index('set subject of newMsg to "Hi"'),
+            captured["script"].index("send newMsg"),
+        )
+        self.assertNotIn(
+            'if restoredOutgoingSubject contains "__apple_mail_mcp_" then error "HTML_COMPOSE_SUBJECT_RESTORE_FAILED"',
+            captured["script"],
+        )
+        self.assertIn(
+            'if restoredOutgoingSubject is not "Hi" then error "HTML_COMPOSE_SUBJECT_RESTORE_FAILED"',
+            captured["script"],
+        )
         self.assertNotIn('keystroke "d" using {command down, shift down}', captured["script"])
         self.assertIn("Email sent successfully (HTML)", result)
 

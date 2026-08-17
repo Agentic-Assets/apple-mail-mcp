@@ -7,6 +7,7 @@ from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools.compose.attachment_draft_verification import (
     verify_standalone_attachment_readiness,
 )
+from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
 from apple_mail_mcp.tools.compose.standalone_draft_identity_scripts import (
     _standalone_draft_identity_handlers,
     standalone_draft_identity_resolver_script,
@@ -200,7 +201,11 @@ def test_plain_attachment_draft_uses_focused_ui_writer_and_discards_only_its_win
     assert "set content of newMessage to" not in script
     assert "close (window of newMsg) saving no" in script
     assert "close window 1 saving no" not in script
-    assert "delete newMsg" in script
+    assert "set subject of newMsg to temporarySubjectMarker" not in script
+    error_handler = script.split("on error errMsg", 1)[1]
+    assert 'if errMsg contains "COMPOSE_BODY_FOCUS_FAILED"' in error_handler
+    assert error_handler.index('if errMsg contains "COMPOSE_BODY_FOCUS_FAILED"') < error_handler.index("delete newMsg")
+    assert 'if errSubject contains "__apple_mail_mcp_"' not in error_handler
 
 
 def test_html_attachment_draft_resolves_the_persisted_drafts_id_after_saving(tmp_path: Path):
@@ -234,8 +239,8 @@ def test_html_attachment_draft_resolves_the_persisted_drafts_id_after_saving(tmp
     script = captured_scripts[0]
     assert "attachmentObjectProof(newMsg" not in script
     assert script.index("save newMsg") < script.index("set markedDrafts to")
-    assert script.index("set markedDrafts to") < script.index('set subject of newMsg to "Report"')
-    assert script.index('set subject of newMsg to "Report"') < script.index("set refreshedDraftId to id of markedDraft")
+    assert script.index('set subject of newMsg to "Report"') < script.index("save newMsg")
+    assert "set subject of markedDraft to" not in script
 
 
 def test_attachment_draft_keeps_the_final_subject_out_of_the_editor_before_paste(tmp_path: Path):
@@ -291,11 +296,14 @@ def test_attachment_draft_sets_the_final_subject_only_after_marker_resolution(tm
         )
 
     script = scripts[0]
-    assert script.index("set markedDrafts to") < script.index('set subject of newMsg to "Final board materials"')
+    assert script.index('set subject of newMsg to "Final board materials"') < script.index("save newMsg")
+    assert script.index("save newMsg") < script.index("set markedDrafts to")
+    assert '(subject of candidateDraft as string) is "Final board materials"' in script
+    assert "set subject of markedDraft to" not in script
 
 
-def test_attachment_draft_failure_cleanup_uses_the_operation_marker_and_exact_mail_object(tmp_path: Path):
-    """A focus or paste failure must not close another compose window or leave this one persisted."""
+def test_attachment_draft_failure_cleanup_does_not_restamp_the_marker(tmp_path: Path):
+    """A focus or paste failure must not re-stamp the marker subject onto the draft."""
     attachment = tmp_path / "report.pdf"
     attachment.write_text("report")
     scripts: list[str] = []
@@ -319,9 +327,48 @@ def test_attachment_draft_failure_cleanup_uses_the_operation_marker_and_exact_ma
 
     script = scripts[0]
     assert "set temporarySubjectMarker to" in script
-    assert "if name of composeWindow contains temporarySubjectMarker then" in script
-    assert "delete newMsg" in script
+    assert "set subject of newMsg to temporarySubjectMarker" not in script
+    assert "if name of composeWindow contains temporarySubjectMarker then" not in script
+    assert "close (window of newMsg) saving no" in script
     assert "close window 1 saving no" not in script
+    assert "(subject of candidateDraft as string) is " in script
+    assert "whose subject" not in script
+    error_handler = script.split("on error errMsg", 1)[1]
+    assert 'if errMsg contains "COMPOSE_BODY_FOCUS_FAILED"' in error_handler
+    assert error_handler.index('if errMsg contains "COMPOSE_BODY_FOCUS_FAILED"') < error_handler.index("delete newMsg")
+    assert 'if errSubject contains "__apple_mail_mcp_"' not in error_handler
+
+
+def test_attachment_draft_failure_cleanup_prefers_exact_marker_restore(tmp_path: Path):
+    """Error cleanup restores a unique leftover marker row instead of re-stamping it."""
+    attachment = tmp_path / "report.pdf"
+    attachment.write_text("report")
+    scripts: list[str] = []
+
+    with (
+        patch(
+            "apple_mail_mcp.tools.compose.run_applescript",
+            side_effect=lambda script, timeout=120: (
+                scripts.append(script) or "Email saved as draft (HTML)\nAttachment Transaction Proof: verified\n"
+            ),
+        ),
+        patch("apple_mail_mcp.tools.compose._validate_attachment_paths", return_value=([str(attachment)], None)),
+    ):
+        compose_tools.compose_email(
+            account="Work",
+            to="recipient@example.com",
+            subject="Final board materials",
+            body="Please review.",
+            attachments=str(attachment),
+        )
+
+    script = scripts[0]
+    assert 'set markerSweepStatus to "cleared"' in script
+    assert 'set subject of leftoverMsg to "Final board materials"' in script
+    assert "set subject of markedDraft to" not in script
+    assert "delete markedDraft" in script
+    assert "if markerMatchCount is greater than 1 then" in script
+    assert f"if draftCount is greater than {DRAFT_LIST_CAP} then exit repeat" not in script
 
 
 def test_attachment_draft_focus_uses_bounded_axrole_iteration_not_invalid_ui_selector(tmp_path: Path):
@@ -491,7 +538,7 @@ def test_compose_attachment_draft_does_not_expose_a_reusable_icloud_locator(tmp_
     assert "Draft Locator: unavailable after iCloud ID rewrite" in result
     assert "Draft Locator Stability: not a reusable identity" in result
     assert "fullDraftRfcSnapshot" in captured_scripts[0]
-    assert "operation_subject_marker" in captured_scripts[0]
+    assert "operation_exact_subject" in captured_scripts[0]
     assert "set savedDraftId to id of newMessage as string" not in captured_scripts[0]
 
 
@@ -503,6 +550,7 @@ def test_standalone_draft_identity_falls_back_only_to_one_new_numeric_drafts_id_
     assert "set numericDraftIds to {}" in handlers
     assert "set numericCandidateIds to {}" in handlers
     assert 'set rfcMessageId to ""' in handlers
+    assert "try\n                set candidateDraftId to (id of aDraft) as string\n            end try" in handlers
     assert "try\n                set rfcMessageId to message id of aDraft as string\n            end try" in handlers
     assert 'set candidateDraftId to ""' in handlers
     assert (
@@ -546,21 +594,25 @@ def test_attachment_marker_proof_binds_to_cc_and_bcc_recipients(tmp_path: Path):
     assert "bcc recipients of draftMessage" in script
     assert '"cc@example.com"' in script
     assert '"bcc@example.com"' in script
+    assert 'if storedSubject is expectedMarker then return "subject_mismatch"' in script
+    assert 'if storedSubject is not expectedSubject then return "subject_mismatch"' in script
 
 
 def test_marker_finalization_is_bounded_and_fails_closed_after_proof():
-    """A saved marker draft cannot be ready unless final-subject persistence succeeds."""
-    script = standalone_marker_draft_finalize_script(
-        "__marker__", "Final subject", 'set attachmentTransactionProof to "verified"'
-    )
+    """Proof runs after save; subject writes are not legal on the persisted Gmail draft."""
+    script = standalone_marker_draft_finalize_script("Final subject", 'set attachmentTransactionProof to "verified"')
 
     assert 'set attachmentTransactionProof to "identity_unavailable"' in script
     assert "every message of draftsMailbox whose subject" not in script
-    assert "set draftMessages to messages 1 thru draftCount of draftsMailbox" in script
-    assert (
-        'if (subject of markedDraft as string) is not "Final subject" then error "DRAFT_ATTACHMENT_FINALIZATION_FAILED"'
-        in script
-    )
+    assert f"if draftCount is greater than {DRAFT_LIST_CAP} then exit repeat" not in script
+    assert f"if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}" in script
+    assert "set candidateMessages to messages 1 thru headEnd of draftsMailbox" in script
+    assert "set end of markedDrafts to contents of candidateDraft" in script
+    assert '(subject of candidateDraft as string) is "Final subject"' in script
+    assert "set subject of markedDraft to" not in script
+    assert "set subject of newMsg to" not in script
+    assert "set refreshedDraftId to (id of markedDraft) as string" in script
+    assert 'error "DRAFT_ATTACHMENT_PROOF_FAILED:' in script
     assert 'set attachmentTransactionProof to "finalization_failed"' in script
     assert "error errMsg" in script
 

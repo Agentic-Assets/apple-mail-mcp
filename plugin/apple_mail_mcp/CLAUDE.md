@@ -25,7 +25,7 @@ Tool/CLI work: delegate to subagents when available and permitted; use **`plugin
 
 ## `tools/` subfolder
 
-**41 tools** in **7 surfaces** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3, calendar 10). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools | awk -F: '{sum+=$NF} END {print sum}'` (recursive: `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`, and `calendar/` are packages). For tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`**; do not duplicate those conventions here.
+**41 tools** in **7 surfaces** (inbox 6, search 4, compose 7, manage 6, analytics 5, smart_inbox 3, calendar 10). Verify: `rg -c '^@mcp\.tool' plugin/apple_mail_mcp/tools | awk -F: '{sum+=$NF} END {print sum}'` (recursive: `compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`, and `calendar/` are packages). Compose HTML paste splits body focus (`compose/html_focus_scripts.py`) and post-paste subject restore (`compose/html_subject_scripts.py`) out of `compose/send.py`; module map and transaction order live in **`tools/CLAUDE.md`** § Compose package leaves. For other tool work read **`tools/CLAUDE.md`** and **`docs/CLAUDE-conventions.md`**; do not duplicate those conventions here.
 
 **Module line budget:** every tool surface (`compose/`, `search/`, `inbox/`, `manage/`, `analytics/`, `smart_inbox/`, `calendar/`) is split into under-budget packages; no tool module exceeds **600 LOC**. CI warns and blocks further growth (`docs/CLAUDE-conventions.md` § Module line budget).
 

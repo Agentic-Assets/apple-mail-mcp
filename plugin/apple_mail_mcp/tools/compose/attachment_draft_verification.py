@@ -2,12 +2,15 @@
 
 import json
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+
+from apple_mail_mcp.core import escape_applescript
+from apple_mail_mcp.tools.compose.verification import _extract_output_field
 
 
 def marker_draft_verification_handlers() -> str:
-    """Return Mail handlers that verify the one UUID-marked persisted draft."""
+    """Return Mail handlers that verify the bound persisted draft row."""
     return """
 using terms from application "Mail"
 on markerRecipientSetMatches(actualRecipients, expectedAddresses)
@@ -36,8 +39,11 @@ on markerRecipientSetMatches(actualRecipients, expectedAddresses)
     end try
 end markerRecipientSetMatches
 
-on markerDraftProof(draftMessage, expectedTo, expectedCc, expectedBcc, expectedBody, expectedAttachmentNames)
+on markerDraftProof(draftMessage, expectedTo, expectedCc, expectedBcc, expectedSubject, expectedMarker, expectedBody, expectedAttachmentNames)
     try
+        set storedSubject to subject of draftMessage as string
+        if storedSubject is expectedMarker then return "subject_mismatch"
+        if storedSubject is not expectedSubject then return "subject_mismatch"
         if my markerRecipientSetMatches(to recipients of draftMessage, expectedTo) is false then return "recipient_mismatch"
         if my markerRecipientSetMatches(cc recipients of draftMessage, expectedCc) is false then return "cc_recipient_mismatch"
         if my markerRecipientSetMatches(bcc recipients of draftMessage, expectedBcc) is false then return "bcc_recipient_mismatch"
@@ -70,33 +76,30 @@ end using terms from
 """
 
 
+def quoted_applescript_list(values: Iterable[str]) -> str:
+    """Join values as an AppleScript brace-list of escaped quoted strings."""
+    return ", ".join(f'"{escape_applescript(value)}"' for value in values)
+
+
 def marker_draft_proof_call(
     *,
     to_addresses: list[str],
     cc_addresses: list[str],
     bcc_addresses: list[str],
+    subject: str,
+    marker: str,
     body: str,
     attachment_names: list[str],
 ) -> str:
-    """Build the strict persisted-marker proof call for ``markedDraft``."""
-    from apple_mail_mcp.core import escape_applescript
-
-    def address_list(addresses: list[str]) -> str:
-        return ", ".join(f'"{escape_applescript(address)}"' for address in addresses)
-
-    recipients = address_list(to_addresses)
-    cc_recipients = address_list(cc_addresses)
-    bcc_recipients = address_list(bcc_addresses)
-    names = ", ".join(f'"{escape_applescript(name)}"' for name in attachment_names)
+    """Build the strict persisted-draft proof call for ``markedDraft``."""
     return (
         "set attachmentTransactionProof to my markerDraftProof(markedDraft, "
-        f'{{{recipients}}}, {{{cc_recipients}}}, {{{bcc_recipients}}}, "{escape_applescript(body)}", {{{names}}})'
+        f"{{{quoted_applescript_list(to_addresses)}}}, "
+        f"{{{quoted_applescript_list(cc_addresses)}}}, "
+        f"{{{quoted_applescript_list(bcc_addresses)}}}, "
+        f'"{escape_applescript(subject)}", "{escape_applescript(marker)}", '
+        f'"{escape_applescript(body)}", {{{quoted_applescript_list(attachment_names)}}})'
     )
-
-
-def _draft_locator(output: str) -> str:
-    prefix = "Draft ID: "
-    return next((line[len(prefix) :].strip() for line in output.splitlines() if line.startswith(prefix)), "")
 
 
 def _recipient_counts(value: object) -> Counter[str] | None:
@@ -167,10 +170,7 @@ def verify_standalone_attachment_readiness(
     warnings. The numeric locator is not a durable identity and is never used
     for a later automatic mutation.
     """
-    proof_prefix = "Attachment Transaction Proof: "
-    proof = next(
-        (line[len(proof_prefix) :].strip() for line in output.splitlines() if line.startswith(proof_prefix)), ""
-    )
+    proof = _extract_output_field(output, "Attachment Transaction Proof") or ""
     if proof == "verified":
         return "\n".join(
             [
@@ -187,7 +187,7 @@ def verify_standalone_attachment_readiness(
             f"Persisted marker-draft verification returned {proof!r}; the draft is not ready."
         )
 
-    draft_id = _draft_locator(output)
+    draft_id = _extract_output_field(output, "Draft ID") or ""
     if not draft_id:
         return (
             "Error: DRAFT_ATTACHMENT_READBACK_ID_UNAVAILABLE\n"

@@ -439,28 +439,108 @@ apple-mail -o json manage-drafts --raw '{
 }'
 ```
 
-### Native HTML focus cleanup
+### HTML compose subject and focus
 
-Use a standalone fixture recipient and `compose_email(mode="draft")` with a
-small `body_html` value. Verify the saved draft manually in Mail: the HTML body
-and signature should be present, **the first line must not start with tab
-indent**, and no unrelated compose window should close. If the tool reports
-`COMPOSE_BODY_FOCUS_FAILED`, it must leave no fixture draft
-or open partial compose window; record that result rather than retrying through
-a windowless path. A standalone HTML draft has no reply headers, so do not
-pretend it meets the guarded-reply cleanup contract: inspect and remove it only
-in the isolated fixture account with its freshly resolved exact id.
+Use a standalone fixture recipient and unique human-readable subjects (never
+accept `__apple_mail_mcp_…` in a window title or Drafts row). All drills are
+draft-only (`mode="draft"` or `mode="open"`); never send.
+
+**Contract to prove manually in Mail.app:**
+
+1. **Real subject, never the marker** — the compose window title and any saved
+   Drafts row must show your requested subject, not `__apple_mail_mcp_…`.
+   The marker is an internal pre-save window-binding token only.
+2. **Restore before save** — after HTML paste, the tool sets the real subject on
+   the outgoing message before the first `save` (attachment paths run proof
+   after that save).
+3. **No leading tab indent** — the first body line must not start with tab
+   characters (focus may Tab only while Accessibility reports a header field).
+4. **Failed compose cleanup** — on `COMPOSE_BODY_FOCUS_FAILED`,
+   `HTML_COMPOSE_SUBJECT_RESTORE_FAILED`, or `DRAFT_ATTACHMENT_PROOF_FAILED`,
+   inspect Drafts and open compose windows: do not leave a fixture artifact
+   whose subject still contains `__apple_mail_mcp_`. Focus failure deletes the
+   empty outgoing fixture; it must not persist a blank draft under the real
+   subject. Marker cleanup is not a saved draft. Record the structured error
+   instead of retrying through a windowless path.
+
+Mocked ordering is locked in `tests/compose/test_html_compose_subject.py`,
+`tests/compose/test_html_compose_focus.py`, and
+`tests/compose/test_attachment_draft_contract.py`.
+
+#### (a) HTML draft without attachment — real subject in Drafts
 
 ```bash
 apple-mail -o json compose-email --raw '{
   "account":"'"$FIXTURE_ACCOUNT"'",
   "to":"'"$FIXTURE_RECIPIENT"'",
-  "subject":"Fixture HTML focus check - do not send",
-  "body":"Fixture HTML focus check.",
-  "body_html":"<p><strong>Fixture HTML focus check.</strong></p>",
+  "subject":"Fixture HTML subject - do not send",
+  "body":"Fixture HTML body.",
+  "body_html":"<p><strong>Fixture HTML body.</strong></p>",
   "mode":"draft"
 }'
 ```
+
+After success: open the saved draft in Mail (or list Drafts in the fixture
+account). Confirm the subject is exactly `Fixture HTML subject - do not send`,
+the HTML body and signature are present, and the first line has no leading tab
+indent. Remove the draft by exact id in the fixture account only.
+
+#### (b) HTML + attachment, saved open for review — real subject in window title
+
+Use a small disposable attachment under `/tmp` or the fixture export dir.
+
+```bash
+export FIXTURE_ATTACH="/tmp/apple-mail-fixture-note.pdf"
+printf 'fixture' > "$FIXTURE_ATTACH"
+
+apple-mail -o json compose-email --raw '{
+  "account":"'"$FIXTURE_ACCOUNT"'",
+  "to":"'"$FIXTURE_RECIPIENT"'",
+  "subject":"Fixture HTML subject restore attach - do not send",
+  "body":"Hi fixture,",
+  "body_html":"<p>Hi fixture,</p>",
+  "attachments":"'"$FIXTURE_ATTACH"'",
+  "mode":"open"
+}'
+```
+
+Before editing or sending: the **open compose window title** must show
+`Fixture HTML subject restore attach - do not send`, not a `__apple_mail_mcp_`
+token. Confirm the attachment is present, HTML rendered, and the first body
+line is not tab-indented. Close without sending; delete any saved draft in the
+fixture account by exact id if Mail persisted one.
+
+#### (c) Plain attachment path (no `body_html`) — same focus and subject rules
+
+Attachment-only standalone drafts still paste through the HTML writer and the
+same `focusComposeBody` handler.
+
+```bash
+apple-mail -o json compose-email --raw '{
+  "account":"'"$FIXTURE_ACCOUNT"'",
+  "to":"'"$FIXTURE_RECIPIENT"'",
+  "subject":"Fixture attachment subject - do not send",
+  "body":"Plain authored body for attachment path.",
+  "attachments":"'"$FIXTURE_ATTACH"'",
+  "mode":"draft"
+}'
+```
+
+Confirm the same subject and indent checks as (a). Expect attachment
+verification fields in the tool output when readback succeeds.
+
+#### (d) Error path — no marker subject left behind
+
+If (a)–(c) return `COMPOSE_BODY_FOCUS_FAILED` or
+`HTML_COMPOSE_SUBJECT_RESTORE_FAILED`, list Drafts in the fixture account and
+scan open compose windows. **Pass** only when no row or window still shows a
+subject containing `__apple_mail_mcp_`, and when focus failure did not leave a
+blank real-subject draft. Follow-up `cleared` / `deleted` / `outgoing_ok` only
+means no leftover marker remains; the tool must fail closed and must not
+return `Email saved as draft (HTML)`. Locked by
+`test_sweep_cleared_is_not_proof_of_a_real_subject_draft` and
+`test_outgoing_ok_followup_is_not_a_saved_draft` in
+`test_html_compose_subject.py`.
 
 ### Calendar participant filter
 

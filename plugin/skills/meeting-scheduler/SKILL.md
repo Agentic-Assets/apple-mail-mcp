@@ -65,6 +65,8 @@ When delivery matters, skip platform invitations entirely:
    (`compose_email(mode="draft")`), describing the meeting and attaching or inlining
    the event details; the user reviews and sends it themselves.
 3. Hand the drafting itself to `email-drafting` when tone matters.
+4. A meeting URL in HTML compose may show a Mail link-preview card; hand that
+   body off to `email-drafting`.
 
 ## Guardrails
 

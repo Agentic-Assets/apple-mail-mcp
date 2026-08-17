@@ -2,6 +2,30 @@
 
 ## 3.11.6 - 2026-07-15
 
+- **HTML compose no longer leaves the internal marker as the visible subject.**
+  The temporary `__apple_mail_mcp_…` token is only for binding the compose
+  window during focus and paste. After paste, the real subject is set on the
+  outgoing message and verified before the first save or send. Error and
+  Python follow-up paths restore or delete leftover marker rows instead of
+  re-stamping the marker; a failed compose must not leave a draft or open
+  window titled with `__apple_mail_mcp_`.
+- **Attachment HTML finalize binds by the saved real subject, not a marker
+  rewrite on the persisted Drafts row.** Proof runs after save; Gmail saved
+  draft subjects stay read-only. Proof fails if the stored subject is still
+  the operation marker or is not the requested real subject.
+- **HTML compose follow-up no longer converts marker cleanup into success.**
+  `cleared` / `deleted` / `outgoing_ok` only mean no leftover marker remains;
+  they do not prove a real-subject draft exists.
+- **HTML compose focus failure deletes the fixture outgoing message** instead
+  of restoring the real subject and closing without delete, which let Gmail
+  persist an empty draft.
+- **Success-path leftover marker Drafts fail closed** instead of
+  delete-and-succeed if IMAP persisted the marker after outgoing readback.
+- **Forward attachment drafts restore `fwdSubject` on the live outgoing
+  message before the first save** and never write saved `message.subject`.
+- **HTML compose uses the documented 120s AppleScript timeout** unless the
+  caller passes `timeout`. Restore verification matches the exact marker
+  token, not a bare `__apple_mail_mcp_` prefix contains.
 - **HTML compose no longer Tabs into Mail's body editor.** After signature
   insertion the caret is already in the WebKit compose field, so the old
   unguarded `focusComposeBody` Tab loop inserted first-line indent (often
