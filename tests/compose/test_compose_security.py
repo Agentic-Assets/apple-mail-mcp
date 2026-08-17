@@ -5,6 +5,15 @@ Covers three confirmed bugs fixed in compose.py:
 Bug 1 (HIGH - security): create_rich_email_draft output_path bypassed
   validate_save_path, allowing writes to sensitive dirs like ~/.ssh.
 
+Bug 1b (HIGH - data loss, AGENTIC-2361): the first Bug 1 fix inlined a
+  SENSITIVE_DIRS-only denylist instead of calling validate_save_path. Every
+  SENSITIVE_DIRS entry is home-relative (".ssh", "Library/LaunchDaemons", ...),
+  so the inlined loop could not match any absolute path outside the home
+  directory: "/etc/hosts", "/Library/LaunchDaemons/x.plist" and any pre-existing
+  user file elsewhere on the volume were accepted and overwritten by an
+  unconditional write_bytes. output_path now routes through the shared
+  validate_save_path, which enforces home containment first.
+
 Bug 2 (MED - shell quoting): AppleScript shell commands used bare
   single-quoted paths instead of ``quoted form of`` for html_temp_path
   and fwd_html_temp_path variables.
@@ -18,6 +27,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -31,6 +41,19 @@ from apple_mail_mcp.tools import compose as compose_tools
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _home_rooted_tmpdir():
+    """Yield a scratch directory that ``validate_save_path`` treats as inside home.
+
+    ``output_path`` is now home-restricted, and tests must never write into the
+    operator's real home directory. Repointing ``HOME`` at a scratch directory
+    keeps every byte in the temp filesystem while still exercising the accepted
+    branch of the guard.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {"HOME": tmpdir}):
+        yield tmpdir
 
 def _make_applescript_result(returncode=0, stdout=b"ok", stderr=b""):
     m = MagicMock()
@@ -149,6 +172,97 @@ def test_bug1_safe_output_path_succeeds():
 
 
 # ---------------------------------------------------------------------------
+# Bug 1b (AGENTIC-2361) — absolute paths outside the home directory
+# ---------------------------------------------------------------------------
+
+_SENTINEL = b"PRE-EXISTING USER DATA THAT MUST SURVIVE\n"
+
+
+def test_bug1b_absolute_output_path_outside_home_is_refused(tmp_path):
+    """The load-bearing case: an absolute path outside home, holding a file the
+    user already owns, must be refused with the file left byte-identical.
+
+    The superseded inlined denylist accepted this path (no home-relative
+    SENSITIVE_DIRS entry can match it) and truncated the file via write_bytes.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    outside = tmp_path / "outside"  # sibling of home, therefore outside it
+    outside.mkdir()
+    victim = outside / "quarterly-report.eml"
+    victim.write_bytes(_SENTINEL)
+
+    cap = _ScriptCapture(return_value=["sender@example.com"])
+    with (
+        patch.dict(os.environ, {"HOME": str(home)}),
+        patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap),
+        patch("apple_mail_mcp.tools.compose.subprocess.run"),
+    ):
+        result = compose_tools.create_rich_email_draft(
+            account="Work",
+            subject="Quarterly report",
+            to="team@example.com",
+            text_body="Body",
+            output_path=str(victim),
+            open_in_mail=False,
+        )
+
+    assert result.startswith("Error:"), f"outside-home output_path must be refused, got: {result!r}"
+    assert "home directory" in result
+    assert victim.read_bytes() == _SENTINEL, "refused write must leave the pre-existing file untouched"
+
+
+def test_bug1b_system_sensitive_directory_outside_home_is_refused():
+    """``Library/LaunchDaemons`` is listed in SENSITIVE_DIRS but only ever
+    resolved against ``$HOME``. The system copy at ``/Library/LaunchDaemons``
+    is outside home, so only the home-containment check can refuse it."""
+    write_calls: list[str] = []
+
+    cap = _ScriptCapture(return_value=["sender@example.com"])
+    with (
+        patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap),
+        patch("apple_mail_mcp.tools.compose.subprocess.run"),
+        patch.object(Path, "mkdir"),
+        patch.object(Path, "write_bytes", lambda self, data: write_calls.append(str(self))),
+    ):
+        result = compose_tools.create_rich_email_draft(
+            account="Work",
+            subject="Payload",
+            to="team@example.com",
+            text_body="Body",
+            output_path="/Library/LaunchDaemons/com.example.plist",
+            open_in_mail=False,
+        )
+
+    assert result.startswith("Error:"), f"system LaunchDaemons path must be refused, got: {result!r}"
+    assert not write_calls, f"no write may be attempted, got writes to {write_calls!r}"
+
+
+def test_bug1b_unresolvable_tilde_user_returns_error_instead_of_raising():
+    """``Path.expanduser`` raises RuntimeError for an unknown ``~user``. The
+    shared validator must convert that into a tool-boundary error string."""
+    cap = _ScriptCapture(return_value=["sender@example.com"])
+    with (
+        patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=cap),
+        patch("apple_mail_mcp.tools.compose.subprocess.run"),
+        patch.object(Path, "mkdir"),
+        patch.object(Path, "write_bytes", MagicMock()),
+    ):
+        result = compose_tools.create_rich_email_draft(
+            account="Work",
+            subject="Test",
+            to="team@example.com",
+            text_body="Body",
+            output_path="~nosuchuser12345/draft.eml",
+            open_in_mail=False,
+        )
+
+    assert isinstance(result, str)
+    assert result.startswith("Error:")
+    assert "output_path" in result
+
+
+# ---------------------------------------------------------------------------
 # Bug 2 — shell quoting: quoted form of must appear for html_temp_path
 # ---------------------------------------------------------------------------
 
@@ -258,7 +372,7 @@ def test_bug3_subprocess_called_process_error_returns_structured_error():
     and returned as a structured error string, never re-raised."""
     cap = _ScriptCapture(return_value=["sender@example.com", "saved"])
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with _home_rooted_tmpdir() as tmpdir:
         output_path = Path(tmpdir) / "test.eml"
 
         with (
@@ -289,7 +403,7 @@ def test_bug3_file_not_found_error_returns_structured_error():
     must be caught and returned as a structured error string."""
     cap = _ScriptCapture(return_value=["sender@example.com", "saved"])
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with _home_rooted_tmpdir() as tmpdir:
         output_path = Path(tmpdir) / "test.eml"
 
         with (

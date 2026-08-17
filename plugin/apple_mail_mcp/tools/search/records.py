@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.constants import SCAN_BOUNDS
-from apple_mail_mcp.core import AppleScriptTimeout
+from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript
 from apple_mail_mcp.core.reply_state import reply_state_tags
 
 MONTH_NAMES = [
@@ -52,6 +52,50 @@ def _build_applescript_date(var_name: str, date_value: str | None, end_of_day: b
 
 
 _ERROR_MAILBOX_PREFIX = "ERROR_MAILBOX|||"
+
+_SCRIPT_ERROR_PREFIXES = ("ERROR|||", "Error: ")
+
+
+def _script_error_message(output: str) -> str | None:
+    """Return the error text when *output* is a whole-script error sentinel.
+
+    Search AppleScript wraps its body in ``on error`` handlers that return
+    ``ERROR|||<msg>`` or ``Error: <msg>`` as the *entire* result. Neither
+    string splits into 8 pipe fields, so handing it to
+    ``_parse_search_records`` yields ``[]`` — a failed scan rendered as a
+    clean empty result. Runners check this first and report the failure
+    instead of an empty one (pattern P2, ``core.reply_state_wiring``).
+    """
+    head = output.split("\n", 1)[0].strip() if output else ""
+    for prefix in _SCRIPT_ERROR_PREFIXES:
+        if head.startswith(prefix):
+            return head[len(prefix) :].strip() or head
+    return None
+
+
+def _read_failure_row(mailbox: str) -> str:
+    """AppleScript emitting one ``ERROR_MAILBOX`` row when matched reads were lost.
+
+    Pattern P1 (in-band marker + per-item count, as in ``search.script``). A
+    per-message ``try`` that swallows a failed read leaves the message
+    matched but unemitted, which a caller cannot tell apart from "that id is
+    not in this mailbox". Comparing emitted rows against matched messages
+    turns that difference back into a reportable fact;
+    ``_parse_search_records`` already routes the row to ``mailbox_errors``.
+    Assumes ``recordLines`` (emitted rows) and ``targetMessages`` (matched
+    messages) are in scope, and must run before any non-record row is added.
+    """
+    return f"""
+                    set matchedCount to count of targetMessages
+                    if (count of recordLines) < matchedCount then
+                        set end of recordLines to "{_ERROR_MAILBOX_PREFIX}{escape_applescript(mailbox)}|||read failed for " & ((matchedCount - (count of recordLines)) as string) & " of " & (matchedCount as string) & " matched message(s); results are incomplete"
+                    end if
+"""
+
+
+def _mailbox_error_texts(mailbox_errors: list[dict[str, str]]) -> list[str]:
+    """Render parser mailbox errors as flat ``<mailbox>: <message>`` strings."""
+    return [f"{item.get('mailbox') or '?'}: {item.get('message', '')}" for item in mailbox_errors]
 
 
 def _parse_search_records(

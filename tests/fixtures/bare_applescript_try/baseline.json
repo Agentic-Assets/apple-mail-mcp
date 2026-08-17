@@ -1,0 +1,183 @@
+{
+  "_comment": "Ratchet baseline for tests/core/test_no_bare_applescript_try.py. Counts only ever go down: lowering or removing an entry is always valid, raising one is not. Keys are repo-relative module paths.",
+  "_regenerate": "python3 tests/core/test_no_bare_applescript_try.py --write-baseline",
+  "rules": {
+    "bare": "AppleScript `try` with no `on error` arm, or with an empty `on error` arm. The thrown error is provably unobservable.",
+    "silent": "`on error` arm present and non-empty but with no observable error signal (no re-raise, no bound error variable use, no sanctioned marker, no error/fail/skip/partial token). Heuristic tier: a sentinel-setting probe arm can be legitimate, so existing cases are recorded here rather than hard-failed."
+  },
+  "modules": {
+    "plugin/apple_mail_mcp/applescript_snippets.py": {
+      "bare": 3,
+      "silent": 2
+    },
+    "plugin/apple_mail_mcp/bounded_scan.py": {
+      "bare": 1
+    },
+    "plugin/apple_mail_mcp/calendar_core/scripts_read.py": {
+      "bare": 7
+    },
+    "plugin/apple_mail_mcp/calendar_core/scripts_write.py": {
+      "bare": 2,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/core/escaping.py": {
+      "bare": 1
+    },
+    "plugin/apple_mail_mcp/core/replied.py": {
+      "bare": 4,
+      "silent": 3
+    },
+    "plugin/apple_mail_mcp/core/reply_state.py": {
+      "bare": 5,
+      "silent": 5
+    },
+    "plugin/apple_mail_mcp/core/script_fragments.py": {
+      "bare": 3,
+      "silent": 3
+    },
+    "plugin/apple_mail_mcp/tools/analytics/attachments.py": {
+      "bare": 3,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/analytics/dashboard.py": {
+      "bare": 4
+    },
+    "plugin/apple_mail_mcp/tools/analytics/export.py": {
+      "bare": 1
+    },
+    "plugin/apple_mail_mcp/tools/analytics/export_failure_reporting.py": {
+      "bare": 2
+    },
+    "plugin/apple_mail_mcp/tools/analytics/export_helpers.py": {
+      "bare": 8
+    },
+    "plugin/apple_mail_mcp/tools/analytics/statistics.py": {
+      "bare": 6,
+      "silent": 2
+    },
+    "plugin/apple_mail_mcp/tools/compose/attachment_draft_verification.py": {
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/compose/cleanup.py": {
+      "bare": 2,
+      "silent": 2
+    },
+    "plugin/apple_mail_mcp/tools/compose/drafts_scripts.py": {
+      "bare": 4
+    },
+    "plugin/apple_mail_mcp/tools/compose/forward.py": {
+      "bare": 3
+    },
+    "plugin/apple_mail_mcp/tools/compose/forward_attachment_scripts.py": {
+      "bare": 1,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/compose/helpers.py": {
+      "bare": 2,
+      "silent": 3
+    },
+    "plugin/apple_mail_mcp/tools/compose/html_focus_scripts.py": {
+      "bare": 6,
+      "silent": 2
+    },
+    "plugin/apple_mail_mcp/tools/compose/html_subject_scripts.py": {
+      "bare": 5,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/compose/lookup_scripts.py": {
+      "bare": 2
+    },
+    "plugin/apple_mail_mcp/tools/compose/manage.py": {
+      "bare": 6
+    },
+    "plugin/apple_mail_mcp/tools/compose/reply_draft_resolver_scripts.py": {
+      "bare": 3,
+      "silent": 4
+    },
+    "plugin/apple_mail_mcp/tools/compose/reply_runner.py": {
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/compose/reply_scripts.py": {
+      "bare": 9
+    },
+    "plugin/apple_mail_mcp/tools/compose/reply_window_identity_scripts.py": {
+      "bare": 1,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/compose/reply_window_scripts.py": {
+      "bare": 3,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/compose/saved_draft_checks.py": {
+      "bare": 6,
+      "silent": 6
+    },
+    "plugin/apple_mail_mcp/tools/compose/send.py": {
+      "bare": 2,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/compose/standalone_draft_identity_scripts.py": {
+      "bare": 10,
+      "silent": 4
+    },
+    "plugin/apple_mail_mcp/tools/compose/typing_scripts.py": {
+      "bare": 9
+    },
+    "plugin/apple_mail_mcp/tools/compose/verify_tools.py": {
+      "bare": 4
+    },
+    "plugin/apple_mail_mcp/tools/inbox/accounts.py": {
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/inbox/list_scripts.py": {
+      "bare": 6
+    },
+    "plugin/apple_mail_mcp/tools/inbox/mailboxes.py": {
+      "bare": 5
+    },
+    "plugin/apple_mail_mcp/tools/inbox/overview.py": {
+      "bare": 4
+    },
+    "plugin/apple_mail_mcp/tools/inbox/unread_counts.py": {
+      "bare": 3,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/manage/attachments.py": {
+      "bare": 1,
+      "silent": 2
+    },
+    "plugin/apple_mail_mcp/tools/manage/mailbox.py": {
+      "silent": 2
+    },
+    "plugin/apple_mail_mcp/tools/manage/move.py": {
+      "bare": 1
+    },
+    "plugin/apple_mail_mcp/tools/manage/sync.py": {
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/manage/trash.py": {
+      "bare": 2
+    },
+    "plugin/apple_mail_mcp/tools/search/by_id.py": {
+      "bare": 5
+    },
+    "plugin/apple_mail_mcp/tools/search/script.py": {
+      "bare": 5,
+      "silent": 3
+    },
+    "plugin/apple_mail_mcp/tools/search/thread.py": {
+      "bare": 6,
+      "silent": 1
+    },
+    "plugin/apple_mail_mcp/tools/smart_inbox/awaiting_reply.py": {
+      "bare": 7,
+      "silent": 2
+    },
+    "plugin/apple_mail_mcp/tools/smart_inbox/needs_response.py": {
+      "bare": 4
+    },
+    "plugin/apple_mail_mcp/tools/smart_inbox/top_senders.py": {
+      "bare": 1
+    }
+  }
+}

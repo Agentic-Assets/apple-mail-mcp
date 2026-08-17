@@ -3,6 +3,18 @@
 from typing import Literal
 
 
+def indent_block(block: str, indent: str) -> str:
+    """Indent every line of *block* after the first, leaving blank lines empty.
+
+    Fragments are spliced into an f-string that already indents the placeholder,
+    so the first line must stay bare or it ends up double-indented. AppleScript
+    ignores indentation, but the emitted script is read by humans during live
+    debugging and is asserted on by script-text tests, so it is kept exact.
+    """
+    first, *rest = block.split("\n")
+    return "\n".join([first] + [f"{indent}{line}" if line else line for line in rest])
+
+
 def sanitize_field_handler(*, include_attachment_row_delimiter: bool = False, name: str = "sanitize_field") -> str:
     """Return an AppleScript handler that normalizes fields for delimited output."""
     attachment_delimiter_block = ""
@@ -32,6 +44,52 @@ def sanitize_field_handler(*, include_attachment_row_delimiter: bool = False, na
         return valueText
     end {name}
     """
+
+
+_ISO_DATETIME_HANDLERS = """on pad2(numberValue)
+    if numberValue < 10 then
+        return "0" & (numberValue as string)
+    end if
+    return numberValue as string
+end pad2
+
+on month_number(monthValue)
+    set monthValues to {January, February, March, April, May, June, July, August, September, October, November, December}
+    repeat with monthIndex from 1 to 12
+        if item monthIndex of monthValues is monthValue then
+            return monthIndex
+        end if
+    end repeat
+    return 0
+end month_number
+
+on iso_datetime(dateValue)
+    set yearValue to year of dateValue as integer
+    set monthValue to my month_number(month of dateValue)
+    set dayValue to day of dateValue as integer
+    set hourValue to hours of dateValue
+    set minuteValue to minutes of dateValue
+    set secondValue to seconds of dateValue
+    return (yearValue as string) & "-" & my pad2(monthValue) & "-" & my pad2(dayValue) & "T" & my pad2(hourValue) & ":" & my pad2(minuteValue) & ":" & my pad2(secondValue)
+end iso_datetime"""
+
+
+def iso_datetime_handlers(*, indent: str = "    ") -> str:
+    """Return the ``pad2`` / ``month_number`` / ``iso_datetime`` handler trio.
+
+    ``iso_datetime`` renders a Mail ``date`` as ``YYYY-MM-DDTHH:MM:SS``, which is
+    the ``received_at`` field every ``|||``-delimited record row carries. It is
+    spelled in AppleScript rather than parsed in Python because Mail's own date
+    string is locale-dependent. ``month_number`` exists because ``month of`` is a
+    constant (``January``), not an integer, and comparing against the literal list
+    is the only ordering AppleScript offers.
+
+    Callers splice the result into a script that already indents its first line,
+    so the first line carries no indent and ``indent`` is applied to every line
+    after it. Emitting the trio more than once in a single script would redefine
+    the handlers, so each script includes it exactly once.
+    """
+    return indent_block(_ISO_DATETIME_HANDLERS, indent)
 
 
 def text_offset_handler(*, name: str = "textOffset") -> str:

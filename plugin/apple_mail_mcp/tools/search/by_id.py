@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 from apple_mail_mcp.applescript_snippets import (
+    iso_datetime_handlers,
     recipient_addresses_block,
     sanitize_field_handler,
     thread_headers_block,
@@ -26,7 +27,12 @@ from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import search
 from apple_mail_mcp.tools.reply_state_wiring import annotate_rows_with_reply_state, build_draft_scan_status
-from apple_mail_mcp.tools.search.records import _format_search_records_text, _parse_search_records
+from apple_mail_mcp.tools.search.records import (
+    _format_search_records_text,
+    _mailbox_error_texts,
+    _parse_search_records,
+    _read_failure_row,
+)
 
 
 def _fetch_email_record_by_id(
@@ -77,32 +83,7 @@ def _fetch_email_record_by_id(
     script = f'''
     {sanitize_script}
 
-    on pad2(numberValue)
-        if numberValue < 10 then
-            return "0" & (numberValue as string)
-        end if
-        return numberValue as string
-    end pad2
-
-    on month_number(monthValue)
-        set monthValues to {{January, February, March, April, May, June, July, August, September, October, November, December}}
-        repeat with monthIndex from 1 to 12
-            if item monthIndex of monthValues is monthValue then
-                return monthIndex
-            end if
-        end repeat
-        return 0
-    end month_number
-
-    on iso_datetime(dateValue)
-        set yearValue to year of dateValue as integer
-        set monthValue to my month_number(month of dateValue)
-        set dayValue to day of dateValue as integer
-        set hourValue to hours of dateValue
-        set minuteValue to minutes of dateValue
-        set secondValue to seconds of dateValue
-        return (yearValue as string) & "-" & my pad2(monthValue) & "-" & my pad2(dayValue) & "T" & my pad2(hourValue) & ":" & my pad2(minuteValue) & ":" & my pad2(secondValue)
-    end iso_datetime
+    {iso_datetime_handlers()}
 
     tell application "Mail"
         with timeout of {effective_timeout} seconds
@@ -201,11 +182,11 @@ def _fetch_email_records_by_ids(
     include_content: bool = True,
     max_content_length: int = 5000,
     timeout: int | None = None,
-) -> list[dict[str, Any]]:
-    """Fetch exact message records by numeric Mail ids, chunked for AppleScript safety."""
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Fetch exact records by numeric Mail ids (chunked); returns (records, mailbox_errors)."""
     normalized_ids = normalize_message_ids(message_ids)
     if not normalized_ids:
-        return []
+        return [], []
 
     if max_content_length < 0:
         raise ValueError("max_content_length must be >= 0")
@@ -261,32 +242,7 @@ def _fetch_email_records_by_ids(
         script = f'''
         {sanitize_script}
 
-        on pad2(numberValue)
-            if numberValue < 10 then
-                return "0" & (numberValue as string)
-            end if
-            return numberValue as string
-        end pad2
-
-        on month_number(monthValue)
-            set monthValues to {{January, February, March, April, May, June, July, August, September, October, November, December}}
-            repeat with monthIndex from 1 to 12
-                if item monthIndex of monthValues is monthValue then
-                    return monthIndex
-                end if
-            end repeat
-            return 0
-        end month_number
-
-        on iso_datetime(dateValue)
-            set yearValue to year of dateValue as integer
-            set monthValue to my month_number(month of dateValue)
-            set dayValue to day of dateValue as integer
-            set hourValue to hours of dateValue
-            set minuteValue to minutes of dateValue
-            set secondValue to seconds of dateValue
-            return (yearValue as string) & "-" & my pad2(monthValue) & "-" & my pad2(dayValue) & "T" & my pad2(hourValue) & ":" & my pad2(minuteValue) & ":" & my pad2(secondValue)
-        end iso_datetime
+        {iso_datetime_handlers(indent="        ")}
 
         tell application "Mail"
             with timeout of {effective_timeout} seconds
@@ -330,7 +286,7 @@ def _fetch_email_records_by_ids(
                             set end of recordLines to messageId & "|||" & internetMessageId & "|||" & messageSubject & "|||" & messageSender & "|||" & mailboxName & "|||" & accountName & "|||" & readValue & "|||" & receivedAt & "|||" & contentPreview & "|||" & toRecips & "|||" & ccRecips & "|||" & inReplyTo & "|||" & refsValue & "|||" & bccRecips & "|||" & wasRepliedToken
                         end try
                     end repeat
-
+{_read_failure_row(mailbox)}
                     set AppleScript's text item delimiters to linefeed
                     set outputText to recordLines as string
                     set AppleScript's text item delimiters to ""
@@ -348,7 +304,7 @@ def _fetch_email_records_by_ids(
         if result:
             rows.extend(result.splitlines())
 
-    records, _mb_errors = _parse_search_records("\n".join(rows))
+    records, mailbox_errors = _parse_search_records("\n".join(rows))
     if include_content:
         for item in records:
             preview = item.get("content_preview", "") or ""
@@ -357,7 +313,7 @@ def _fetch_email_records_by_ids(
                 or re.search(r"(?m)^>", preview)
                 or "-----Original Message-----" in preview
             )
-    return records
+    return records, mailbox_errors
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -512,7 +468,9 @@ def get_email_by_ids(
         item also carries `was_replied_to` (bool, always present) and
         `has_draft` (true/false/null). Text mode formats found items
         (prefixed with `[REPLIED]` / `[HAS DRAFT]` when applicable) and lists
-        missing or invalid ids.
+        missing or invalid ids. `errors` stays empty when every matched
+        message was read; a matched message whose read threw is reported
+        there, separating "id is not here" from "id could not be read".
     """
     if output_format not in {"text", "json"}:
         return "Error: Invalid output_format. Use: text, json"
@@ -536,7 +494,7 @@ def get_email_by_ids(
     effective_timeout = timeout if timeout is not None else 120
 
     try:
-        records = _fetch_email_records_by_ids(
+        records, mailbox_errors = _fetch_email_records_by_ids(
             account=account,
             message_ids=normalized_ids,
             mailbox=mailbox,
@@ -564,6 +522,7 @@ def get_email_by_ids(
         date_field="received_date",
     )
     draft_scan = build_draft_scan_status(snapshots)
+    error_texts = _mailbox_error_texts(mailbox_errors)
 
     if output_format == "json":
         return json.dumps(
@@ -578,6 +537,7 @@ def get_email_by_ids(
                 "include_content": include_content,
                 "chunk_size": MAX_WHOSE_IDS,
                 "draft_scan": draft_scan,
+                "errors": error_texts,
             }
         )
 
@@ -586,6 +546,7 @@ def get_email_by_ids(
         lines.append(_format_search_records_text(ordered_items))
     else:
         lines.append("No emails found for requested message_ids.")
+    lines.extend(f"PARTIAL: {text}" for text in error_texts)
     if missing_ids:
         lines.append(f"Missing message_ids: {', '.join(missing_ids)}")
     if invalid_ids:

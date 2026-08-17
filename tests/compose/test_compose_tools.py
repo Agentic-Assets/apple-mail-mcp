@@ -2,8 +2,10 @@
 
 import inspect
 import json
+import os
 import tempfile
 import unittest
+from contextlib import contextmanager
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -15,6 +17,19 @@ from apple_mail_mcp.tools import compose as compose_tools
 from apple_mail_mcp.tools.compose import constants as compose_constants
 from apple_mail_mcp.tools.compose import reply_runner
 from apple_mail_mcp.tools.compose.reply_identity import NativeReplyDraftIdentity
+
+
+@contextmanager
+def _home_rooted_tmpdir():
+    """Yield a scratch directory that ``validate_save_path`` treats as inside home.
+
+    ``create_rich_email_draft(output_path=...)`` is home-restricted (AGENTIC-2361),
+    and tests must never write into the operator's real home directory.
+    Repointing ``HOME`` at a scratch directory keeps every byte in the temp
+    filesystem while still exercising the accepted branch of the guard.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {"HOME": tmpdir}):
+        yield tmpdir
 
 
 def _make_subprocess_result(returncode=0, stdout=b"", stderr=b""):
@@ -320,7 +335,7 @@ class DefaultMailSignatureSupportTests(unittest.TestCase):
 class ComposeToolTests(unittest.TestCase):
     def test_create_rich_email_draft_delegates_mail_open_to_html_compose_transaction(self):
         """Rich EML export and supported Mail drafting are separate transactions."""
-        with tempfile.TemporaryDirectory(dir=Path.home()) as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             attachment = Path(tmpdir) / "board.pdf"
             attachment.write_bytes(b"attachment contents")
             output_path = Path(tmpdir) / "delegated-rich-draft.eml"
@@ -369,7 +384,7 @@ class ComposeToolTests(unittest.TestCase):
 
     def test_create_rich_email_draft_fails_closed_when_html_editor_cannot_focus(self):
         """A failed focused HTML editor must not be reported as a ready rich draft."""
-        with tempfile.TemporaryDirectory(dir=Path.home()) as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "focus-failure-rich-draft.eml"
 
             with (
@@ -399,7 +414,7 @@ class ComposeToolTests(unittest.TestCase):
 
     def test_create_rich_email_draft_embeds_validated_attachment_in_eml(self):
         """Attachment-bearing EML-only drafts are prepared, never Mail-verified ready."""
-        with tempfile.TemporaryDirectory(dir=Path.home()) as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             attachment = Path(tmpdir) / "board.pdf"
             attachment.write_bytes(b"attachment contents")
             output_path = Path(tmpdir) / "rich-with-attachment.eml"
@@ -427,7 +442,7 @@ class ComposeToolTests(unittest.TestCase):
             self.assertNotIn("ready", result.lower())
 
     def test_create_rich_email_draft_blocks_reply_like_subject_without_confirmation(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "blocked.eml"
 
             with patch("apple_mail_mcp.tools.compose.run_applescript") as mock_run:
@@ -445,7 +460,7 @@ class ComposeToolTests(unittest.TestCase):
         self.assertFalse(output_path.exists())
 
     def test_create_rich_email_draft_allows_reply_like_subject_when_confirmed(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "confirmed.eml"
 
             with patch(
@@ -466,7 +481,7 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Rich draft prepared successfully", result)
 
     def test_create_rich_email_draft_writes_multipart_eml(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "weekly-update.eml"
 
             with (
@@ -497,7 +512,7 @@ class ComposeToolTests(unittest.TestCase):
             mock_compose.assert_called_once()
 
     def test_create_rich_email_draft_allows_partial_details(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "partial.eml"
 
             with (
@@ -519,7 +534,7 @@ class ComposeToolTests(unittest.TestCase):
             self.assertIn("Opened in Mail: no", result)
 
     def test_create_rich_email_draft_empty_subject_does_not_open_mail_by_default(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "empty-subject.eml"
             scripts = []
 
@@ -685,7 +700,7 @@ class StripCdataTests(unittest.TestCase):
 
 class CreateRichEmailDraftCdataTests(unittest.TestCase):
     def test_cdata_wrapped_html_body_is_stripped_in_eml(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "cdata.eml"
 
             with (
@@ -970,7 +985,7 @@ class ComposeSenderScriptTests(unittest.TestCase):
 
 class CreateRichEmailDraftFromAddressTests(unittest.TestCase):
     def test_omits_from_header_for_multi_alias_account(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "multi.eml"
             with (
                 patch(
@@ -993,7 +1008,7 @@ class CreateRichEmailDraftFromAddressTests(unittest.TestCase):
             self.assertNotIn("From:", header_block)
 
     def test_stamps_from_header_for_single_alias_account(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "single.eml"
             with (
                 patch(
@@ -1015,7 +1030,7 @@ class CreateRichEmailDraftFromAddressTests(unittest.TestCase):
             self.assertIn("From: solo@example.com", payload)
 
     def test_stamps_from_header_when_address_is_valid(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with _home_rooted_tmpdir() as tmpdir:
             output_path = Path(tmpdir) / "stamped.eml"
             with (
                 patch(

@@ -24,6 +24,7 @@ from apple_mail_mcp.tools.inbox.list_scripts import (
 )
 from apple_mail_mcp.tools.inbox.parsing import (
     _annotate_text_rows_with_reply_state,
+    _parse_inbox_error_lines,
     _parse_pipe_delimited_emails,
     _resolve_read_filter,
     _strip_count_marker,
@@ -140,9 +141,12 @@ async def list_inbox_emails(
         Every email row always carries ``was_replied_to`` (bool) and
         ``has_draft`` (bool or null); ``draft_scan`` summarizes the Drafts
         correlation scan: ``{"status": "ok"|"error"|"skipped", "scanned":
-        N, "accounts": [...], "error"?: "..."}``. ``errors`` is the list of
-        account names whose AppleScript probe timed out (empty list when
-        nothing timed out). When deprecated aliases (`limit`, `unread_only`)
+        N, "accounts": [...], "error"?: "..."}``. ``errors`` lists per-account
+        probe failures: a bare account name when its AppleScript probe timed
+        out, or ``"<account>: <detail>"`` when the inbox script itself failed
+        (missing account, unreachable mailbox). It is empty only when every
+        probe succeeded, so ``emails == []`` with ``errors == []`` really does
+        mean an empty inbox. When deprecated aliases (`limit`, `unread_only`)
         are used a ``warnings`` key is also present.
 
         **Breaking change (v3.2.x):** the JSON path previously returned a
@@ -457,9 +461,12 @@ async def _list_inbox_emails_json(
     """Return inbox emails as a structured dict.
 
     Stable shape: ``{"emails": [...], "errors": [...], "draft_scan": {...}}``
-    for both the single-account and multi-account paths. ``errors`` is the
-    list of account names whose probe timed out (empty list when nothing
-    timed out). Account-listing timeouts surface as
+    for both the single-account and multi-account paths. ``errors`` holds a
+    bare account name for a timed-out probe and ``"<account>: <detail>"`` for
+    an inbox script that reported a top-level failure via the in-band
+    ``__APPLE_MAIL_MCP_ERROR__`` marker (``_parse_inbox_error_lines``), so an
+    empty ``emails`` list with an empty ``errors`` list is a genuinely empty
+    inbox rather than a swallowed failure. Account-listing timeouts surface as
     ``{"emails": [], "errors": ["__account_listing__"], "draft_scan": ...}``.
 
     Every email always carries ``was_replied_to`` (bool, Mail's native
@@ -491,7 +498,10 @@ async def _list_inbox_emails_json(
         except AppleScriptTimeout:
             return {"emails": [], "errors": [account], "draft_scan": build_draft_scan_status({})}
         emails = _parse_pipe_delimited_emails(raw, has_message_id=include_message_id)
-        errors = []
+        # A swallowed AppleScript failure used to reach here as "" → [] with
+        # errors == [], which reads as "inbox empty". The script now emits an
+        # in-band marker line instead; surface it the way text mode already does.
+        errors = _parse_inbox_error_lines(raw)
     else:
         try:
             accounts = await asyncio.to_thread(inbox._list_mail_accounts, timeout)
@@ -524,6 +534,7 @@ async def _list_inbox_emails_json(
                 errors.append(acct)
                 continue
             emails.extend(_parse_pipe_delimited_emails(outcome, has_message_id=include_message_id))
+            errors.extend(_parse_inbox_error_lines(outcome))
 
     # Replied-detection: `was_replied_to` is parsed straight off Mail's
     # native property, so no Sent-mailbox AppleScript round trip is needed.

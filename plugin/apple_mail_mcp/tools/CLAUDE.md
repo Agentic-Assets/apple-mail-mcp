@@ -70,6 +70,16 @@ All `@mcp.tool` handlers live here; `apple_mail_mcp/__init__.py` imports these s
 
 Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediation` fields. Tests in `tests/cross_cutting/test_phase_2_scan_hardening.py` and `tests/search/test_mail_search_tools.py` lock the contracts.
 
+**Boundary conversion (38 of 41 tools).** `server.py` wraps every registered tool so an *uncaught* `ToolError` becomes this envelope instead of propagating as a transport exception. Calendar tools catch `ToolError` themselves and are unaffected (no double-serialization). Three tools are **excluded** because they declare container return types, and FastMCP validates the returned value against a structured-output schema derived from that annotation — handing them a JSON string yields a pydantic validation error with the real code buried inside `input_value`, which is worse than raising:
+
+| Tool | Return annotation |
+|------|-------------------|
+| `list_accounts` | `list[str]` |
+| `list_account_addresses` | `dict[str, list[str]]` |
+| `get_mailbox_unread_counts` | `dict[str, Any]` |
+
+Those three **raise** `ToolError` with an accurate message rather than returning the envelope. `tests/core/test_tool_error_envelope_boundary.py::test_container_return_tools_are_the_only_boundary_exceptions` pins the set so it cannot grow silently. Making the surface uniformly `-> str` would remove the exception, but widening those annotations changes the published `outputSchema`, which is a client-visible contract change.
+
 | Code | When | Remediation hint |
 |------|------|------------------|
 | `FILTER_SCAN_DISABLED` | `move_email` / `update_email_status` / `manage_trash` called with filters but no `message_ids` and `allow_filter_scan=False` | Collect ids first; or `allow_filter_scan=True` for approved bulk |
@@ -79,6 +89,9 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 | `WHOSE_ID_LIST_TOO_LARGE` | `message_ids` longer than `MAX_WHOSE_IDS` (50) | `iter_id_chunks` + one call per batch |
 | `UNSAFE_WHOSE_ON_LIST` | `build_bounded_message_scan(..., whose_condition=...)` | Use `build_bounded_filtered_scan` |
 | `HTML_COMPOSE_SUBJECT_RESTORE_FAILED` | HTML compose left a visible `__apple_mail_mcp_` marker subject or could not restore/verify the real subject before save | Inspect Drafts and open compose windows for the requested real subject; do not send a marker subject |
+| `REPLY_SENDER_OVERRIDE_FAILED` | `reply_to_email(from_address=...)` and Mail refused `set sender of replyMessage` | Nothing was saved and the compose window was closed with `saving no`. Confirm the address is a configured Mail identity (`list_account_addresses`), then retry; omit `from_address` to use the account default |
+| `INVALID_TIMEOUT` | Any tool passed `timeout` <= 0 or > 3600 to `run_applescript` | Raised before the Mail lock is acquired, so nothing ran. Pass a positive value in seconds, or omit for the tool default. `0` does not mean "no deadline" — omit the parameter instead |
+| `INVALID_ACTION_CAP` | `update_email_status` called with `max_updates` <= 0 | Refused before any Mail I/O. Pass a positive cap, or omit for the default. A non-positive cap is not "act on nothing": the id-resolution helper used to return one message for `limit=0` (AGENTIC-2374). `manage_trash` / `move_email` adopt this guard once PR #91 lands |
 
 ## Forbidden AppleScript patterns
 
@@ -141,7 +154,7 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 | Tool | Default | Notes |
 |------|---------|-------|
 | `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True`. Bare `https://` URLs in HTML compose may become Mail link-preview cards in the open window; the tool does not create or verify those cards. |
-| `reply_to_email` | `mode="draft"` (via `send=False`), `native_format=True` | `native_format=True` is the only supported path: it opens Mail's reply window (rich quote bar + logo signature) and types `reply_body` above the quote, which needs window focus + **Accessibility permission** or returns `REPLY_WINDOW_FOCUS_FAILED` (no draft saved). `native_format=False` returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed (deliberate headless/CI only, never set by agents). Both verify exact Drafts id first with bounded fallback, expose `exact_id_verified` in JSON, and preserve known `draft_id` on verifier timeout/error |
+| `reply_to_email` | `mode="draft"` (via `send=False`), `native_format=True` | `native_format=True` is the only supported path: it opens Mail's reply window (rich quote bar + logo signature) and types `reply_body` above the quote, which needs window focus + **Accessibility permission** or returns `REPLY_WINDOW_FOCUS_FAILED` (no draft saved). `native_format=False` returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed (deliberate headless/CI only, never set by agents). Both verify exact Drafts id first with bounded fallback, expose `exact_id_verified` in JSON, and preserve known `draft_id` on verifier timeout/error. `from_address` is fail-closed: a refused `set sender` aborts before `save` and returns `REPLY_SENDER_OVERRIDE_FAILED` with nothing saved |
 | `verify_draft` | read-only | Exact Drafts id snapshot for recipients, body, attachments, signatures, quoted original, and thread headers. Optional `resolve_source=True` (`resolve_recent_days=30.0` default) maps the reply's `In-Reply-To` header back to its source Inbox message via one bounded `search_emails(internet_message_id=...)` call, adding a `source` block (`resolved`/`not_found_in_window`/`no_in_reply_to_header`) |
 | `verify_drafts` | read-only | Batch exact Drafts id snapshots with per-draft JSON payloads; accepts the same `resolve_source` / `resolve_recent_days` options as `verify_draft` |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
