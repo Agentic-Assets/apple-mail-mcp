@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import inbox as inbox_tools
 from apple_mail_mcp.tools import manage as manage_tools
 from apple_mail_mcp.tools import search as search_tools
+from apple_mail_mcp.tools.search.script import _build_search_script
 
 
 def _record_line(
@@ -2445,6 +2447,189 @@ class ReplyStateAnnotationTests(unittest.TestCase):
         # needs a wasRepliedToken check, no extra AppleScript round trip.
         self.assertIn("was replied to of aMessage", captured["script"])
         self.assertIn('if wasRepliedToken is "true" then set repliedMarker to "[REPLIED] "', captured["script"])
+
+
+class SubjectFilterUnboundReferenceTests(unittest.TestCase):
+    """AGENTIC-2344: the subject fast path must filter on a bound loop variable.
+
+    v3.11.6 shipped ``if subject contains "x" then`` inside
+    ``repeat with aMessage in candidateMessages``. Inside a ``whose`` clause a
+    bare property reference is legal because ``whose`` supplies the implicit
+    target; inside an explicit ``repeat`` loop there is no implicit target, so
+    Mail raises -1728 ``Can't get subject.`` on every iteration. The loop's
+    ``try`` swallowed it, so subject search returned 0 results on every account
+    with ``has_more: false`` and no errors.
+
+    Unit tests mock ``subprocess.run`` and never execute the AppleScript, and
+    ``osacompile`` accepts the fragment because it is syntactically valid, so
+    text-level invariants on the emitted script are the only automatable guard.
+    """
+
+    # Mail properties that are only resolvable via `of <var>` or inside a
+    # `whose` clause. A bare one on the left of a comparison is unbound.
+    _BARE_PROPERTY = re.compile(
+        r"(?<![A-Za-z0-9_])"
+        r"(subject|sender|content|read status|date received|date sent|message id|was replied to)"
+        r"\s+(contains|is|starts with|ends with|does not contain)\b"
+    )
+
+    # One mailbox diagnostic, exactly as `script._SCAN_FAILURE_REPORT` emits it
+    # when every candidate read threw.
+    _SCAN_FAILURE_LINE = (
+        "ERROR_MAILBOX|||Inbox|||per-message scan failed for 50 of 50 scanned message(s); results are incomplete"
+    )
+
+    @staticmethod
+    def _fast_path_script(subject_terms):
+        """Build the subject-only fast-path script (no sender/body/date_to/etc.)."""
+        script, _body_capped, _mb_capped = _build_search_script(
+            account="Work",
+            mailbox="Inbox",
+            subject_terms=subject_terms,
+            sender=None,
+            has_attachments=None,
+            read_status="all",
+            date_from="2026-08-01",
+            date_to=None,
+            include_content=False,
+            content_length=0,
+            offset=0,
+            limit=20,
+            body_text=None,
+            recent_days=2.0,
+        )
+        return script
+
+    @staticmethod
+    def _candidate_loop(script):
+        """Return just the bounded candidate `repeat` loop body."""
+        start = script.index("repeat with aMessage in candidateMessages")
+        end = script.index("end repeat", start)
+        return script[start:end]
+
+    @staticmethod
+    def _search_subject(applescript_result, **kwargs):
+        """Run the broken call shape — `search_emails(subject_keyword=...)` with no
+        other filter — against a stubbed AppleScript result.
+
+        Returns ``(tool output, the script that was sent to Mail)``.
+        """
+        captured = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return applescript_result
+
+        with patch("apple_mail_mcp.tools.search.run_applescript", side_effect=fake_run):
+            output = _run(
+                search_tools.search_emails(
+                    account="Work",
+                    subject_keyword="Invoice",
+                    limit=20,
+                    include_draft_state=False,
+                    **kwargs,
+                )
+            )
+        return output, captured["script"]
+
+    def test_fast_path_filters_on_bound_variable(self):
+        """The condition must name `messageSubject`, the variable the line above binds."""
+        script = self._fast_path_script(["Invoice"])
+        loop = self._candidate_loop(script)
+
+        self.assertIn("set messageSubject to subject of aMessage", loop)
+        self.assertIn('if messageSubject contains "Invoice" then', loop)
+
+    def test_fast_path_condition_operands_are_all_locally_bound(self):
+        """Regression guard: every operand in the fast-path condition must be a
+        variable the loop itself assigned with `set <name> to ...`.
+
+        Before the fix the operand was the bare property `subject`, which no
+        `set` statement binds, so this assertion fails on the shipped v3.11.6
+        script and passes on the fixed one.
+        """
+        script = self._fast_path_script(["Invoice", "Receipt"])
+        loop = self._candidate_loop(script)
+
+        condition_match = re.search(r"^\s*if (.+?) then$", loop, re.MULTILINE)
+        if condition_match is None:
+            self.fail(f"no `if … then` condition found in the fast-path loop:\n{loop}")
+        condition = condition_match.group(1)
+        bound_vars = set(re.findall(r"\bset ([A-Za-z_][A-Za-z0-9_]*) to ", loop))
+        operands = [clause.split(" contains ")[0].strip() for clause in condition.split(" or ")]
+
+        self.assertEqual(len(operands), 2, f"expected one clause per subject term, got {condition!r}")
+        for operand in operands:
+            self.assertIn(
+                operand,
+                bound_vars,
+                f"condition operand {operand!r} is not bound by any `set` in the loop; "
+                f"a bare Mail property throws -1728 inside `repeat with ... in ...`. Loop:\n{loop}",
+            )
+
+    def test_no_bare_mail_property_comparison_outside_whose(self):
+        """No emitted line may compare a bare Mail property unless it is a `whose` clause."""
+        for terms in (["Invoice"], ["Invoice", "Receipt"]):
+            script = self._fast_path_script(terms)
+            for lineno, line in enumerate(script.splitlines(), start=1):
+                if "whose" in line:
+                    continue
+                match = self._BARE_PROPERTY.search(line)
+                if match is not None:
+                    self.fail(
+                        f"line {lineno} compares bare property {match.group(1)!r} outside a "
+                        f"`whose` clause (unbound at runtime, -1728): {line.strip()!r}"
+                    )
+
+    def test_subject_only_search_returns_matches(self):
+        """End-to-end regression for the exact call shape that returned 0 results:
+        subject term only — no sender, sender_exact, sender_domain,
+        internet_message_id, attachment filter, read-status filter, body search,
+        or date_to."""
+        output, script = self._search_subject(_record_line_ws(901, "Invoice 901 for August"), output_format="json")
+        response = json.loads(output)
+
+        self.assertEqual(response["returned"], 1)
+        self.assertEqual(response["items"][0]["subject"], "Invoice 901 for August")
+        # The fast path is the one that was broken; confirm we took it and that
+        # its condition is bound to the loop variable.
+        self.assertIn("set messageSubject to subject of aMessage", script)
+        self.assertIn('if messageSubject contains "Invoice" then', script)
+
+    def test_scan_loops_count_per_message_failures(self):
+        """Amplifier guard: a swallowed per-message throw must be counted, and a
+        non-zero count must emit an ERROR_MAILBOX diagnostic rather than letting
+        an all-failed scan look like a legitimate empty result."""
+        script = self._fast_path_script(["Invoice"])
+
+        self.assertIn("set scanReadFailures to 0", script)
+        self.assertIn("set scanReadFailures to scanReadFailures + 1", script)
+        self.assertIn("if scanReadFailures > 0 then", script)
+        self.assertIn('"ERROR_MAILBOX|||" & mailboxName & "|||per-message scan failed for "', script)
+        # The counting arm replaces the bare `try ... end try` swallow.
+        loop = self._candidate_loop(script)
+        self.assertIn("on error", loop)
+
+    def test_scan_failure_count_surfaces_in_json_error_details(self):
+        """The counter reaches the caller through the existing error channel."""
+        output, _script = self._search_subject(self._SCAN_FAILURE_LINE, output_format="json")
+        response = json.loads(output)
+
+        self.assertEqual(response["returned"], 0)
+        self.assertIn("error_details", response)
+        detail = response["error_details"][0]
+        self.assertEqual(detail["mailbox"], "Inbox")
+        self.assertEqual(detail["type"], "mailbox_error")
+        self.assertIn("per-message scan failed for 50 of 50", detail["message"])
+
+    def test_scan_failure_count_surfaces_in_text_output(self):
+        """Text is the default output_format, so an all-failed scan must not
+        render as a clean `FOUND: 0` there either."""
+        result, _script = self._search_subject(self._SCAN_FAILURE_LINE)
+
+        self.assertIn("FOUND: 0 matching email(s)", result)
+        self.assertIn("PARTIAL: 1 mailbox issue(s)", result)
+        self.assertIn("per-message scan failed for 50 of 50", result)
 
 
 if __name__ == "__main__":

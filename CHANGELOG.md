@@ -2,6 +2,22 @@
 
 ## 3.11.6 - 2026-07-15
 
+- **`search_emails` subject filtering returned 0 results on every account.**
+  The subject-only fast path built its filter as a bare `subject contains "…"`
+  and spliced it into `repeat with aMessage in candidateMessages`. A bare
+  property reference only resolves where an enclosing `whose` clause supplies
+  the implicit target; inside an explicit `repeat` loop it is unbound, so Mail
+  raised -1728 `Can't get subject.` on every message. The loop's `try`
+  swallowed the error, so the tool reported an empty result set with
+  `has_more: false` and no errors. The fast path now tests `messageSubject`,
+  the loop-local the preceding line already binds.
+- **A scan that throws on every message no longer looks like a legitimate
+  empty result.** All three `search_emails` scan loops now count swallowed
+  per-message failures and emit one `ERROR_MAILBOX` diagnostic per mailbox
+  when the count is non-zero, surfaced as a `mailbox_error` in
+  `error_details`. Text output (the default `output_format`) reports mailbox
+  issues even when no account-level error occurred, so a fully failed scan
+  can no longer render as a clean `FOUND: 0`.
 - **HTML compose no longer leaves the internal marker as the visible subject.**
   The temporary `__apple_mail_mcp_…` token is only for binding the compose
   window during focus and paste. After paste, the real subject is set on the

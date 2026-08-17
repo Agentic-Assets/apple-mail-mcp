@@ -10,6 +10,30 @@ from apple_mail_mcp.core import build_mailbox_ref, escape_applescript
 from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.tools.search.records import _build_applescript_date
 
+# Per-message read failures inside the scan loops below used to be swallowed by
+# a bare ``try ... end try``, which made "every candidate raised" look exactly
+# like "nothing matched". That is what let AGENTIC-2344 ship: the subject fast
+# path emitted an unbound ``subject contains "x"`` (legal only inside a
+# ``whose`` clause, -1728 ``Can't get subject.`` inside ``repeat with aMessage
+# in ...``), so every iteration threw and the tool returned a confident empty
+# result with no errors. Count the throws and emit one ``ERROR_MAILBOX``
+# diagnostic per mailbox, which ``records._parse_search_records`` already routes
+# into the response's ``error_details`` — so a scan that failed on every message
+# can never again be reported as an authoritative zero.
+#
+# ``_SCAN_FAILURE_ARM`` is a dangling ``on error`` clause, not a standalone
+# statement: splice it directly before the scan loop's own ``end try``.
+_SCAN_FAILURE_INIT = "set scanReadFailures to 0"
+
+_SCAN_FAILURE_ARM = """on error
+                                        set scanReadFailures to scanReadFailures + 1"""
+
+_SCAN_FAILURE_REPORT = """
+                            if scanReadFailures > 0 then
+                                set end of recordLines to "ERROR_MAILBOX|||" & mailboxName & "|||per-message scan failed for " & (scanReadFailures as string) & " of " & (count of candidateMessages) & " scanned message(s); results are incomplete"
+                            end if
+"""
+
 
 def _build_search_script(
     account: str,
@@ -204,12 +228,14 @@ def _build_search_script(
     early_date_break = "if messageDate < fromDate then exit repeat" if date_from and not date_to else ""
     escaped_body = escape_applescript(body_text) if body_text else ""
     per_msg_conditions: list[str] = []
+    # Bound to the loop-local ``messageSubject`` variable, never to a bare
+    # ``subject`` property reference: every consumer of this string interpolates
+    # it into an explicit ``repeat with aMessage in ...`` loop, which supplies no
+    # implicit target (AGENTIC-2344).
+    subject_checks = ""
     if subject_terms:
         subject_checks = " or ".join(f'messageSubject contains "{escape_applescript(t)}"' for t in subject_terms)
         per_msg_conditions.append(f"({subject_checks})")
-        candidate_subject_checks = " or ".join(f'subject contains "{escape_applescript(t)}"' for t in subject_terms)
-    else:
-        candidate_subject_checks = ""
     if sender:
         per_msg_conditions.append(f'messageSender contains "{escaped_sender}"')
     if escaped_sender_exact:
@@ -254,19 +280,26 @@ def _build_search_script(
         # returned by `messages 1 thru N`. The slice is deliberately tiny for
         # default subject lookups, so a subject-only loop is fast and avoids
         # date/sender/read-status/body fetches on large Exchange inboxes.
+        #
+        # The condition MUST test the loop-local `messageSubject` bound on the
+        # line above. A bare `subject contains ...` is only valid inside a
+        # `whose` clause; here it is unbound and throws -1728 on every message.
         message_collection = f"""
                                 {bounded_candidate_script}
+                                {_SCAN_FAILURE_INIT}
                             ignoring case
                                 repeat with aMessage in candidateMessages
                                     if (count of matchingMessages) >= {scan_cap} then exit repeat
                                     try
                                         set messageSubject to subject of aMessage
-                                        if {candidate_subject_checks} then
+                                        if {subject_checks} then
                                             set end of matchingMessages to aMessage
                                         end if
+                                    {_SCAN_FAILURE_ARM}
                                     end try
                                 end repeat
                             end ignoring
+                            {_SCAN_FAILURE_REPORT}
         """
     elif per_msg_conditions:
         combined_condition = " and ".join(per_msg_conditions)
@@ -282,6 +315,7 @@ def _build_search_script(
         )
         message_collection = f"""
                                 {bounded_candidate_script}
+                                {_SCAN_FAILURE_INIT}
                             ignoring case
                                 repeat with aMessage in candidateMessages
                                     if (count of matchingMessages) >= {scan_cap} then exit repeat
@@ -299,20 +333,25 @@ def _build_search_script(
                                         if {combined_condition} then
                                             set end of matchingMessages to aMessage
                                         end if
+                                    {_SCAN_FAILURE_ARM}
                                     end try
                                 end repeat
                             end ignoring
+                            {_SCAN_FAILURE_REPORT}
         """
     else:
         message_collection = f"""
                                 {bounded_candidate_script}
+                                {_SCAN_FAILURE_INIT}
                             repeat with aMessage in candidateMessages
                                 try
                                     set messageDate to date received of aMessage
                                     {early_date_break}
                                     set end of matchingMessages to aMessage
+                                {_SCAN_FAILURE_ARM}
                                 end try
                             end repeat
+                            {_SCAN_FAILURE_REPORT}
         """
 
     # Template the inner AppleScript timeout from the same value the outer

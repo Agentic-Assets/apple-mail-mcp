@@ -91,6 +91,7 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 | `every message of MB` (no `whose`) | Raw enumeration | `messages 1 thru N of MB` |
 | `build_bounded_message_scan(..., whose_condition=...)` | Raises `UNSAFE_WHOSE_ON_LIST` at runtime | `build_bounded_filtered_scan(...)` |
 | `build_whose_id_list(ids)` with > 50 ids | Mail parser crash/hang; raises `WHOSE_ID_LIST_TOO_LARGE` | `iter_id_chunks(ids)` + loop |
+| Bare property in a spliced condition: `subject contains "x"` inside `repeat with aMessage in …` | No implicit target outside `whose`; -1728 `Can't get subject.` on every message, swallowed by the loop's `try` → silent 0 results that look authoritative (AGENTIC-2344) | `set messageSubject to subject of aMessage`, then test `messageSubject contains "x"`. Never reuse a `whose`-shaped condition in a `repeat` loop |
 | Pipe-row emit without `sanitize_pipe_delimited_field` on user fields | Subject containing `&#124;&#124;&#124;` corrupts `message_id` → wrong-email delete | `core.sanitize_pipe_delimited_field("messageSubject")` etc. |
 
 When in doubt, copy the pattern from `search/emails.py`'s per-message loop — it has been audited as Gmail-safe and Exchange-bounded.
