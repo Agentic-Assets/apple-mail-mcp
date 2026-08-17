@@ -17,6 +17,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
+| [`active/silent-error-channels/`](active/silent-error-channels/) | Bare-AppleScript-`try` defect class: silent error channels, two file-clobber paths, timeout validation, and the package-wide lint ratchet (AGENTIC-2363 family, 2361, 2369, 2374) | PR #92 open at `833ce61`; release gate green, no live verification. Ratchet baseline records 236 remaining sites |
 | [`active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/) | Bounded Linear backlog fixes: export, mailbox resolution, calendar participant discovery, and compose/draft safety | Shipped in PR #83, merged to `origin/main` at `ed9e1ee`; retained here pending archival housekeeping |
 | [`active/native-reply/`](active/native-reply/) | Native-format reply drafts, including attachment preservation and fail-closed verification | Attachment fix verified offline; disposable-fixture live matrix pending |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 fuzzy-selector retirement, metadata-index spike, `allow_filter_scan` decision | Decision brief awaiting sign-off; follow-up branches not started |
