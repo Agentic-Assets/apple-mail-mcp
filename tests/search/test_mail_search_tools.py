@@ -1091,13 +1091,27 @@ class ManageToolTests(unittest.TestCase):
         self.assertNotIn("delete aMessage", script)
 
     def test_manage_trash_permanent_delete_apply_to_all_dry_run_does_not_delete(self):
+        """apply_to_all resolves ids through the bounded search, then previews by id.
+
+        The purge used to be a hand-rolled script over a bare newest-first
+        ``messages 1 thru N of trashMailbox`` slice, which applied no date window at
+        all. It now goes through ``_search_message_ids`` (which carries
+        ``date_from`` / ``date_to``) and recurses into the id-direct path, so the
+        dry-run label is the BY IDS variant and the preview must still not delete.
+        """
         captured = {}
 
         def fake_run(script, timeout=120):
             captured["script"] = script
             return "preview"
 
-        with patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run):
+        with (
+            patch(
+                "apple_mail_mcp.tools.manage._search_mail_records",
+                return_value=[{"message_id": "101", "subject": "Old", "sender": "sender@example.com"}],
+            ) as mock_search,
+            patch("apple_mail_mcp.tools.manage.run_applescript", side_effect=fake_run),
+        ):
             result = manage_tools.manage_trash(
                 account="Work",
                 action="delete_permanent",
@@ -1105,10 +1119,12 @@ class ManageToolTests(unittest.TestCase):
                 allow_filter_scan=True,
             )
 
+        self.assertEqual(mock_search.call_args.kwargs["mailbox"], "Trash")
         self.assertIn("preview", result)
         self.assertIn("DRY RUN - PREVIEW PERMANENT DELETE", captured["script"])
         self.assertIn("Would permanently delete", captured["script"])
-        self.assertIn("TOTAL WOULD DELETE", captured["script"])
+        self.assertIn("id is 101", captured["script"])
+        self.assertNotIn("messages 1 thru 5 of trashMailbox", captured["script"])
         self.assertNotIn("delete aMessage", captured["script"])
 
     def test_update_email_status_with_message_ids_uses_exact_id_condition(self):

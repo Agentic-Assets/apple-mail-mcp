@@ -17,7 +17,7 @@ The MCP server enforces conservative defaults to prevent runaway destructive ope
 | Tool | Default cap | Override parameter |
 |------|-------------|--------------------|
 | `manage_trash` (move_to_trash, delete_permanent) | 5 messages | `max_deletes=N` |
-| `manage_trash` (empty_trash) | hard confirmation required | `confirm_empty=True` |
+| `manage_trash` (empty_trash) | hard confirmation required, previews by default | `confirm_empty=True` plus `dry_run=False` |
 | `update_email_status` | 10 messages | `max_updates=N` |
 | `move_email` | 50 messages | `max_moves=N` |
 
@@ -30,8 +30,8 @@ Raise these caps only after a confirming search shows the user exactly which mes
 3. **Dry-run by id**: `move_email(message_ids=[...], to_mailbox="...", dry_run=True)` or `manage_trash(message_ids=[...], dry_run=True)`.
 4. **Move to Trash first** with `manage_trash(action="move_to_trash", message_ids=[...], dry_run=False)`. Reversible inside Apple Mail.
 5. **Verify** by listing Trash or re-searching the source window.
-6. **Permanent delete only when certain** with `manage_trash(action="delete_permanent", message_ids=[...])`.
-7. **Empty Trash is the nuclear option.** Run `manage_trash(action="empty_trash", confirm_empty=True)` only after explicit user confirmation.
+6. **Permanent delete only when certain**: preview with `manage_trash(action="delete_permanent", message_ids=[...])`, then repeat with `dry_run=False` to delete.
+7. **Empty Trash is the nuclear option.** Preview first with `manage_trash(action="empty_trash", confirm_empty=True)`, which reports what would go and deletes nothing. Repeat the call with `dry_run=False` only after explicit user confirmation.
 
 ## Pre-Cleanup Backup
 
@@ -64,8 +64,8 @@ move_email(message_ids=[...], to_mailbox="Archive/2025")
 
 1. `export_emails(scope="entire_mailbox", mailbox="Projects/OldProject", max_emails=50, offset=0)` for the audit trail (page with `offset` if the mailbox holds more than 50 messages; `max_emails` is capped at 50 per call).
 2. `list_inbox_emails` or `search_emails` in that mailbox → collect ids.
-3. `manage_trash(action="move_to_trash", message_ids=[...])` in batches of ≤50.
-4. Verify, then `manage_trash(action="empty_trash", confirm_empty=True)` if appropriate.
+3. Preview with `manage_trash(action="move_to_trash", message_ids=[...])` in batches of ≤50, then repeat each call with `dry_run=False` to act.
+4. Verify, then preview with `manage_trash(action="empty_trash", confirm_empty=True)` and repeat with `dry_run=False` if appropriate.
 
 ## Confirmation Script
 

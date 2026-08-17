@@ -99,7 +99,7 @@ Quote expected totals from the dry-run response. Discuss raising `max_moves` / `
 |--------|---------------|
 | File / archive batch | `move_email(dry_run=False, message_ids=ids, to_mailbox="...", max_moves=50)` |
 | Mark processed | `update_email_status(action="mark_read"\|"unflag", message_ids=ids, max_updates≤50 after confirmation)` |
-| Remove noise | `manage_trash(action="move_to_trash", message_ids=ids, max_deletes≤50)`; escalate `delete_permanent` only post-export + verbal/written affirmation |
+| Remove noise | `manage_trash(action="move_to_trash", dry_run=False, message_ids=ids, max_deletes≤50)` after the dry run; escalate `delete_permanent` only post-export + verbal/written affirmation |
 | Hydrate caches | `synchronize_account(account="...", confirm_sync=True)` only after explicit user approval; it can fetch large remote backlogs |
 
 Slice `ids` into batches of ≤50. Re-run narrower `search_emails` between batches until stop conditions.

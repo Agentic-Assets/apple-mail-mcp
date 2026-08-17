@@ -8,6 +8,7 @@ from apple_mail_mcp.tools import compose
 from apple_mail_mcp.tools.compose.cleanup import _expected_recipient_literal
 from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
 from apple_mail_mcp.tools.compose.drafts_scripts import (
+    _build_manage_drafts_cleanup_script,
     _build_manage_drafts_find_script,
     _build_manage_drafts_list_script,
 )
@@ -70,7 +71,7 @@ def manage_drafts(
         standalone_confirmed: Required explicit override for action="create" when the subject/body looks like a reply or forward but the caller intentionally wants a new standalone draft.
         hide_empty: For action="list", skip drafts whose subject AND body are both blank (orphaned compose windows). Default False (show everything).
         subject_contains: For action="list", only show drafts whose subject contains this keyword (case-insensitive). This is the fast, reliable way to find a draft you just created — the list scans the newest drafts first and applies the filter in-loop (no date filter is added). Default None (show everything).
-        dry_run: For action="cleanup_empty", when True (default) only previews which blank drafts would be removed without deleting. Set False to actually delete. Ignored by other actions.
+        dry_run: For action="cleanup_empty", when True (default) only previews which blank drafts would be removed without deleting. Set False to actually delete. Ignored by other actions. A draft is classified blank only when its subject and body were both read successfully; a draft whose subject or body read fails is reported as skipped and is never deleted, because a failed read is not evidence of emptiness.
         max_deletes: For action="cleanup_empty", maximum number of blank drafts to delete in one call (safety cap). Default 20. Ignored by other actions.
         limit: For action="list" and action="find", maximum newest Drafts messages to show or inspect. Defaults to the repo scan cap.
         in_reply_to: For action="find", source Internet Message-ID to match against Drafts In-Reply-To or References headers. Honored ONLY by action="find". action="create" cannot set In-Reply-To/References (the Mail scripting dictionary exposes no header property on a new outgoing message), so passing in_reply_to with action="create" returns CREATE_CANNOT_THREAD and creates no draft; use reply_to_email(message_id=...) to thread a reply instead.
@@ -486,70 +487,11 @@ def manage_drafts(
     elif action == "cleanup_empty":
         if max_deletes < 1:
             return "Error: 'max_deletes' must be >= 1 for cleanup_empty"
-        dry_run_flag = "true" if dry_run else "false"
-        mode_label = "PREVIEW (dry run)" if dry_run else "DELETING"
-        script = f'''
-        tell application "Mail"
-            set isDryRun to {dry_run_flag}
-            set maxDeletes to {max_deletes}
-            set reportLines to ""
-            set emptyCount to 0
-            set actedCount to 0
-
-            try
-                set targetAccount to account "{safe_account}"
-                set draftsMailbox to mailbox "Drafts" of targetAccount
-                set draftMessages to messages 1 thru {DRAFT_LIST_CAP} of draftsMailbox
-
-                -- Collect empty drafts first (subject blank AND body empty), then
-                -- act on them by reference so deletion does not shift indices.
-                set emptyDrafts to {{}}
-                repeat with aDraft in draftMessages
-                    try
-                        set draftSubject to subject of aDraft
-                        set draftBody to ""
-                        try
-                            set draftBody to content of aDraft
-                        end try
-                        set AppleScript's text item delimiters to {{return, linefeed, tab, space}}
-                        set bodyParts to text items of draftBody
-                        set AppleScript's text item delimiters to ""
-                        set bodyStripped to bodyParts as string
-                        if draftSubject is "" and bodyStripped is "" then
-                            set end of emptyDrafts to aDraft
-                        end if
-                    end try
-                end repeat
-
-                set emptyCount to count of emptyDrafts
-                repeat with aDraft in emptyDrafts
-                    if actedCount >= maxDeletes then exit repeat
-                    try
-                        set draftId to (id of aDraft) as string
-                        if isDryRun then
-                            set reportLines to reportLines & "   • would delete blank draft id " & draftId & return
-                        else
-                            delete aDraft
-                            set reportLines to reportLines & "   • deleted blank draft id " & draftId & return
-                        end if
-                        set actedCount to actedCount + 1
-                    end try
-                end repeat
-
-            on error errMsg
-                return "Error: " & errMsg
-            end try
-
-            set reportHeader to "DRAFT CLEANUP - {safe_account} ({mode_label})" & return & return
-            set reportSummary to "Found " & emptyCount & " blank draft(s); "
-            if isDryRun then
-                set reportSummary to reportSummary & "would remove " & actedCount & " (cap " & maxDeletes & "). Re-run with dry_run=False to delete."
-            else
-                set reportSummary to reportSummary & "deleted " & actedCount & " (cap " & maxDeletes & ")."
-            end if
-            return reportHeader & reportSummary & return & return & reportLines
-        end tell
-        '''
+        script = _build_manage_drafts_cleanup_script(
+            safe_account=safe_account,
+            dry_run=dry_run,
+            max_deletes=max_deletes,
+        )
 
     else:
         return f"Error: Invalid action '{action}'. Use: list, find, create, send, open, delete, cleanup_empty"

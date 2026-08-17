@@ -2,9 +2,13 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; local gates enforce).
 
-**Current branch:** `fix/native-reply-attachment-verification` (base: `origin/main` @ `ed9e1ee`).
+**Current branch:** `fix/trash-safety-and-zero-bounds` work is on `fix/trash-dryrun-and-scan-cap-clamps` (base: `origin/main` @ `aa7fe0a`).
 
-**Active implementation:** [`tasks/active/native-reply/`](active/native-reply/). This branch now applies the draft-first attachment contract to standalone compose, replies, explicit-path forwards, and rich EML drafts. The local release gate is green; protected disposable-fixture checks remain required before the work can be considered live-release-complete. Do not merge without Cayman's new literal approval phrase.
+**Active implementation:** [`tasks/active/trash-safety-and-zero-bounds/`](active/trash-safety-and-zero-bounds/). Eleven defects in one class: a bound or guard that fails silently and reports success. Eight of them caused permanent mail loss or an unselected mutation, including `max_deletes=-1` deleting the entire Trash and `cleanup_empty` deleting non-empty drafts. Also fixes `inbox_dashboard`'s default UI mode, which was serving a dead page (parse-time SyntaxError). Local gates green at 1932 tests. **No destructive path was live-verified** — a disposable-fixture pass is the outstanding gate. Do not merge without Cayman's literal approval phrase. Closeout: [`closeout-2026-08-17.md`](active/trash-safety-and-zero-bounds/closeout-2026-08-17.md) · forward queue: [`forward-queue-2026-08-17.md`](active/trash-safety-and-zero-bounds/forward-queue-2026-08-17.md).
+
+**Also open:** [`tasks/active/identity-gate-and-search-date-window/`](active/identity-gate-and-search-date-window/) on branch `fix/identity-gate-and-search-date-window` (PR #90, unmerged). Expect small conflicts with the branch above on `CHANGELOG.md`, `tools/expected_test_count.txt`, `tests/core/test_no_unbounded_whose.py`, and `tests/search/test_mail_search_tools.py`. The commit-msg identity gate is blocked on #90 landing.
+
+**Earlier lane, still open:** [`tasks/active/native-reply/`](active/native-reply/) applies the draft-first attachment contract to standalone compose, replies, explicit-path forwards, and rich EML drafts. Local release gate green; protected disposable-fixture checks remain required before it is live-release-complete. Do not merge without Cayman's new literal approval phrase.
 
 **Most recent shipped workstream:** [`tasks/active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/). Its explicit `${CURSOR_PLUGIN_ROOT}` launcher is on `main` at v3.11.6, the Codex adapter remains independent, the full local release gate passed, and live 41-tool Cursor Agent acceptance passed. Cursor marketplace/UI admission remains unverified.
 

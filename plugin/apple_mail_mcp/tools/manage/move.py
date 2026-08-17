@@ -6,7 +6,7 @@ seams keep working."""
 
 from apple_mail_mcp import server as _server
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error, target_selector_deprecated_error
-from apple_mail_mcp.bounded_scan import build_whose_id_list
+from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS, build_whose_id_list
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     build_mailbox_ref,
@@ -28,6 +28,64 @@ from apple_mail_mcp.tools.manage.helpers import (
     _with_filter_scan_warning,
 )
 
+# Ceiling for `max_moves`. Deliberately `MAX_WHOSE_IDS` (50) and not a
+# `SCAN_BOUNDS` key: no entry in `SCAN_BOUNDS` describes a move, and `TRASH_SCAN`
+# is trash-specific. 50 is the cap this tool *already* enforces on its id-direct
+# path through `_check_message_ids_cap`, and the filter-scan path can resolve at
+# most `SCAN_BOUNDS["SEARCH_HARD_CEILING"]` (also 50) ids before recursing into
+# that same capped path. A larger `max_moves` is therefore unreachable on either
+# path, so clamping here discards a nonsense value without narrowing any working
+# range. Tying the ceiling to `MAX_WHOSE_IDS` also means the clamp and the id-count
+# cap can never drift apart.
+MAX_MOVES_CEILING = MAX_WHOSE_IDS
+
+
+def _nonpositive_max_moves_error(max_moves: int) -> str:
+    """Structured refusal for a `max_moves` that cannot be honored at all.
+
+    Refusing rather than clamping up to 1 is the deliberate half of this fix.
+    `max_moves` bounds a *mutation*, and clamping a non-positive bound to 1 would
+    move one message under a limit the caller set to "none" — the same defect class
+    as the AppleScript index clamp, relocated into Python and harder to see. An
+    oversized bound has an obvious intent to honor partially ("as many as you can");
+    a non-positive one has none.
+
+    `UNBOUNDED_SCAN_REQUIRED` rather than a new code: `list_inbox_emails` already
+    answers `max_emails <= 0` with it and `search_emails` answers a non-positive
+    `limit` the same way, so a non-positive page/batch size is inside the code's
+    established meaning.
+    """
+    return serialize_tool_error(
+        ToolError(
+            code="UNBOUNDED_SCAN_REQUIRED",
+            message=(
+                f"move_email refuses a non-positive max_moves (got max_moves={max_moves}); "
+                f"pass max_moves between 1 and {MAX_MOVES_CEILING}"
+            ),
+            remediation={
+                "preferred": f"Pass max_moves=10 (valid range 1-{MAX_MOVES_CEILING})",
+                "note": (
+                    "max_moves=0 and max_moves=-1 are not 'no limit'. Both build a slice "
+                    "Mail resolves to real messages, so a move would happen under a bound "
+                    "you set to none."
+                ),
+            },
+        )
+    )
+
+
+def _max_moves_clamp_note(requested: int, effective: int) -> str:
+    """One-line requested-vs-effective disclosure, or empty when nothing was clamped.
+
+    A clamp that silently caps a mutation below the requested number is a partial
+    action reported as complete. Every clamped call names the rejected request next
+    to the bound actually applied, so `TOTAL: 50 email(s) moved` can never be
+    mistaken for the caller's own 10000.
+    """
+    if requested == effective:
+        return ""
+    return f"(max_moves={requested} requested, clamped to {effective}; valid range 1-{MAX_MOVES_CEILING})"
+
 
 def _move_email_by_message_ids(
     *,
@@ -39,6 +97,7 @@ def _move_email_by_message_ids(
     dry_run: bool,
     timeout: int,
     dest_ref: str,
+    requested_max_moves: int | None = None,
 ) -> str:
     normalized_ids = normalize_message_ids(message_ids)
     if not normalized_ids:
@@ -64,7 +123,33 @@ def _move_email_by_message_ids(
         else f"""
                 set destMailbox to {dest_ref}"""
     )
+    clamp_note = _max_moves_clamp_note(
+        requested_max_moves if requested_max_moves is not None else max_moves,
+        max_moves,
+    )
+    clamp_footer = (
+        f"""
+                set outputText to outputText & "   {clamp_note}" & return"""
+        if clamp_note
+        else ""
+    )
 
+    # The `items 1 thru {max_moves}` slice below is safe only because `move_email`
+    # clamps the bound to 1..MAX_MOVES_CEILING first. `matchingMessages` is a local
+    # AppleScript list of message specifiers, not a Mail `messages` element, so plain
+    # list semantics apply and they are unforgiving (probed read-only inside a
+    # `tell application "Mail"` block):
+    #   * `items 1 thru 0` raises -1728, which this block's `on error` reports as a
+    #     mailbox-naming problem rather than as a bad bound.
+    #   * `items 1 thru -1` is end-relative and returns the ENTIRE list, and its
+    #     `count > -1` guard is always true, so the documented safety limit inverted
+    #     into "move everything matched".
+    #   * `items 1 thru -2` silently drops the LAST matched id and still prints
+    #     "(max_moves limit reached)" — a partial move reported as a capped one.
+    # With the bound >= 1 the guard admits the slice only when `count > max_moves`,
+    # i.e. `count >= max_moves + 1 >= 2`, so the indices always land inside 1..count.
+    # And unlike `count of messages of <mailbox>` (which reads stale-high) this is an
+    # exact local list count, so the clamp plus the enclosing `try` covers the site.
     script = f'''
     tell application "Mail"
         with timeout of {timeout} seconds
@@ -102,7 +187,7 @@ def _move_email_by_message_ids(
                 set outputText to outputText & "TOTAL: " & moveCount & " email(s) {result_prefix.lower()}" & return
                 if moveCount >= {max_moves} then
                     set outputText to outputText & "(max_moves limit reached)" & return
-                end if
+                end if{clamp_footer}
                 set outputText to outputText & "========================================" & return
 
             on error errMsg
@@ -161,12 +246,20 @@ def move_email(
           subject_keyword: Deprecated schema-compat selector. Returns
               ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
           from_mailbox: Source mailbox name (default: "INBOX")
-          max_moves: Maximum number of emails to move (default: 50, safety limit)
+          max_moves: Maximum number of emails to move (default: 50, safety limit).
+              Valid range 1-50. A non-positive ``max_moves`` is refused with
+              ``UNBOUNDED_SCAN_REQUIRED`` before any AppleScript runs: 0 and -1 are
+              not "no limit", they build a slice Mail resolves to real messages. A
+              value above 50 is clamped (50 is already the hard cap on
+              ``message_ids`` per call, so nothing above it was reachable) and the
+              response names both the requested and the effective bound.
           subject_keywords: Deprecated schema-compat selector (same as subject_keyword).
           sender: Deprecated schema-compat selector. Returns
               ``TARGET_SELECTOR_DEPRECATED`` when ``message_ids`` is omitted.
           older_than_days: Optional age filter - only move emails older than N days
-              (requires ``allow_filter_scan=True`` when ``message_ids`` is omitted)
+              (requires ``allow_filter_scan=True`` when ``message_ids`` is omitted).
+              Must be positive; a zero or negative value is treated as absent rather
+              than as an empty date window.
           dry_run: If True, preview without acting. Fast with message_ids; slow with filters.
           only_read: If True, only move emails that have been read (default: False)
           recent_days: Recent window when using date/bulk filter scan (default: 2.0).
@@ -197,6 +290,23 @@ def move_email(
             exact_selector="message_ids",
         )
 
+    # Validate the only bound this tool exposes before any Mail round trip,
+    # including the account probe, so a nonsense bound costs nothing — the same
+    # reasoning `manage_trash` applies to its `action` check. `max_moves` had no
+    # floor, no ceiling and no rejection, and three consumers read it raw:
+    #   * the id-direct `items 1 thru {max_moves}` slice (see the template above),
+    #   * the filter-scan execute path as `_search_message_ids(limit=max_moves)`,
+    #   * the dry-run path as `limit=max_moves + 1`, one value lower.
+    # The search dispatch seam now raises `ValueError` for `limit < 1`, which was
+    # strictly better than the silent wrong move it replaced but surfaced here as a
+    # raw exception (only `AppleScriptTimeout` is caught), and it never covered the
+    # id-direct path at all. Both are handled here instead, once, ahead of every
+    # branch including the recursive id-direct call at the end of this function.
+    if max_moves <= 0:
+        return _nonpositive_max_moves_error(max_moves)
+    requested_max_moves = max_moves
+    max_moves = min(max_moves, MAX_MOVES_CEILING)
+
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = manage.validate_account_name(account, timeout=validation_timeout)
     if account_err:
@@ -224,7 +334,20 @@ def move_email(
             dry_run=dry_run,
             timeout=effective_timeout,
             dest_ref=dest_ref,
+            requested_max_moves=requested_max_moves,
         )
+
+    # A non-positive `older_than_days` is "absent", never "an empty window".
+    # `_date_to_for_older_than` already returns None for any value <= 0, while
+    # `effective_recent_days` below is zeroed whenever `older_than_days is not None`
+    # and the UNBOUNDED_SCAN_REQUIRED guard only fires when it `is None`. A negative
+    # value therefore reached the search with date_from=None AND date_to=None — no
+    # window at all — after discarding the caller's `recent_days`, so a request
+    # phrased "move mail older than N days" targeted the NEWEST messages instead.
+    # (`older_than_days=0` was already caught by the falsy check below; only negative
+    # values slipped through.) Normalizing here restores both behaviors at once.
+    if older_than_days is not None and older_than_days <= 0:
+        older_than_days = None
 
     subject_terms = normalize_search_terms(subject_keyword, subject_keywords)
     if not subject_terms and not sender and not older_than_days:
@@ -278,14 +401,20 @@ def move_email(
                 f"Error: move_email dry-run timed out on account '{account}'. "
                 "Retry with message_ids=[...] or a larger timeout."
             )
-        return _with_filter_scan_warning(
-            _format_dry_run_records(
-                f"DRY RUN - PREVIEW MOVE: {from_mailbox} -> {to_mailbox}",
-                records,
-                "Would move",
-                max_moves,
-            )
+        preview = _format_dry_run_records(
+            f"DRY RUN - PREVIEW MOVE: {from_mailbox} -> {to_mailbox}",
+            records,
+            "Would move",
+            max_moves,
         )
+        # The preview is what the caller reads before authorizing the real move, so
+        # it carries the same requested-vs-effective disclosure the execute path
+        # emits from AppleScript. Otherwise a clamped preview would understate the
+        # cap and then the execute call would appear to change the rules.
+        clamp_note = _max_moves_clamp_note(requested_max_moves, max_moves)
+        if clamp_note:
+            preview = f"{preview}\n{clamp_note}"
+        return _with_filter_scan_warning(preview)
 
     search_timeout = timeout if timeout is not None else min(effective_timeout, 120)
     try:
@@ -320,5 +449,6 @@ def move_email(
             dry_run=False,
             timeout=effective_timeout,
             dest_ref=dest_ref,
+            requested_max_moves=requested_max_moves,
         )
     )

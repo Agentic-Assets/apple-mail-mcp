@@ -34,13 +34,24 @@ update_email_status(
     max_updates=5,
 )
 
-# 4. Quick cleanup (ids from reviewed search/list)
+# 4. Preview the cleanup (ids from reviewed search/list; dry_run defaults to
+#    True, so nothing is trashed yet)
 manage_trash(
     account="Work",
     action="move_to_trash",
     message_ids=["<reviewed-message-id>"],
     mailbox="INBOX",
     max_deletes=10,
+)
+
+# 5. Trash for real, after reading the preview back to the user
+manage_trash(
+    account="Work",
+    action="move_to_trash",
+    message_ids=["<reviewed-message-id>"],
+    mailbox="INBOX",
+    max_deletes=10,
+    dry_run=False,
 )
 ```
 
@@ -592,11 +603,20 @@ export_emails(
     max_emails=50,
 )
 
-# 3. Empty trash (CAREFUL - irreversible)
+# 3. Preview the empty (dry_run defaults to True, so nothing is deleted yet)
 manage_trash(
     account="Work",
     action="empty_trash",
     confirm_empty=True
+)
+
+# 4. Empty trash for real, after reading the preview back to the user
+#    (CAREFUL - irreversible)
+manage_trash(
+    account="Work",
+    action="empty_trash",
+    confirm_empty=True,
+    dry_run=False
 )
 ```
 
@@ -983,7 +1003,8 @@ get_statistics(scope="account_overview", days_back=7)
 update_email_status(action="flag", message_ids=["<id>"], mailbox="INBOX", max_updates=1)
 
 # Cleanup operations
-manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10)
+manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10)  # previews
+manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10, dry_run=False)  # acts
 export_emails(scope="entire_mailbox", mailbox="...", max_emails=50, offset=N, ...)  # 50 is the per-call cap; page with offset
 export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)
 ```
