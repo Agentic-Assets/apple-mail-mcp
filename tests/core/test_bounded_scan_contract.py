@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -44,6 +45,16 @@ def _run(coro):
     if asyncio.iscoroutine(coro):
         return asyncio.run(coro)
     return coro
+
+
+def _raw_enumeration_lines(snippet: str) -> list[str]:
+    """Emitted lines that materialize a whole mailbox (AGENTIC-2355).
+
+    ``count of messages of MB`` is excluded because it is a cheap property read
+    rather than an enumeration — it is in fact the guard the builders rely on to
+    pick a bounded arm.
+    """
+    return [line.strip() for line in snippet.splitlines() if re.search(r"(?<!count of )\bmessages of \w+", line)]
 
 
 def _coerce_result_dict(result: Any) -> dict[str, Any]:
@@ -152,6 +163,56 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         snippet = build_bounded_message_scan("inboxMailbox", 50)
         self.assertIn("messages 1 thru 50 of inboxMailbox", snippet)
         self.assertNotIn("whose", snippet)
+
+    def test_build_bounded_message_scan_never_enumerates_a_mailbox(self):
+        """No arm of the emitted ``if`` may bind ``messages of <mailbox>``.
+
+        AGENTIC-2355. The small-mailbox arm used to emit
+        ``set candidateMessages to messages of inboxMailbox``, AppleScript's
+        other spelling of ``every message of inboxMailbox``. It stayed bounded in
+        practice only because the count guard above it had already proved the
+        mailbox was small — a correctness argument that lived entirely in the
+        reader's head, in the one module the bounded-scan lint could not see
+        (``bounded_scan.py`` sits above ``tools/``, which is where that lint used
+        to root). Copying this builder's shape is how the pattern spread to seven
+        call sites, so the reference implementation must not contain the banned
+        spelling at all.
+        """
+        snippet = build_bounded_message_scan("inboxMailbox", 50)
+
+        # Every bind is a slice or an explicit empty list.
+        self.assertIn("set candidateMessages to messages 1 thru 50 of inboxMailbox", snippet)
+        self.assertIn("set candidateMessages to messages 1 thru _mbCount of inboxMailbox", snippet)
+        self.assertIn("set candidateMessages to {}", snippet)
+        self.assertNotIn("set candidateMessages to messages of inboxMailbox", snippet)
+
+        # The only surviving `messages of` is the count guard.
+        raw = _raw_enumeration_lines(snippet)
+        self.assertEqual(raw, [], f"Raw mailbox enumeration in the bounded-scan builder: {raw}")
+        self.assertIn("set _mbCount to count of messages of inboxMailbox", snippet)
+
+    def test_build_bounded_message_scan_guards_the_empty_mailbox(self):
+        """``messages 1 thru 0`` raises, so 0 must take the ``{}`` arm."""
+        snippet = build_bounded_message_scan("inboxMailbox", 50)
+        big = snippet.index("set candidateMessages to messages 1 thru 50 of inboxMailbox")
+        small = snippet.index("set candidateMessages to messages 1 thru _mbCount of inboxMailbox")
+        empty = snippet.index("set candidateMessages to {}")
+        self.assertIn("else if _mbCount > 0 then", snippet)
+        self.assertLess(big, small)
+        self.assertLess(small, empty)
+
+    def test_build_bounded_filtered_scan_never_enumerates_a_mailbox(self):
+        """The filtered builder wraps the same bind, so it inherits the fix."""
+        snippet = build_bounded_filtered_scan(
+            mailbox_var="inboxMailbox",
+            scan_cap=100,
+            target_max=50,
+            condition_expr="read status of aMessage is false",
+        )
+        self.assertNotIn("set candidateMessages to messages of inboxMailbox", snippet)
+        self.assertIn("set candidateMessages to messages 1 thru _mbCount of inboxMailbox", snippet)
+        raw = _raw_enumeration_lines(snippet)
+        self.assertEqual(raw, [], f"Raw mailbox enumeration in the filtered builder: {raw}")
 
     def test_build_bounded_message_scan_rejects_bad_limit(self):
         with self.assertRaises(ToolError) as ctx:

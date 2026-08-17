@@ -10,13 +10,13 @@ The point of this codebase is reading real mailboxes, so real mail data is alway
 
 Commit **counts, timings, and redacted samples** instead. Fixtures use synthetic addresses (`sender@example.com`). A number measured from a real mailbox is publishable; the message it came from is not.
 
-Scan the diff before committing docs, `tasks/` artifacts, test fixtures, or anything carrying live-test output:
+**This is enforced, not advisory.** [`tools/validators/validate_no_committed_identity.py`](tools/validators/validate_no_committed_identity.py) scans every tracked text file and **exits non-zero** on a new email address at a non-placeholder domain, an absolute `/Users/<name>/...` path, or an uppercase account UUID. It runs in `bash tools/gates/dev-check.sh` (default and release tiers), so it runs on every commit through the pre-commit hook. Run it yourself before committing docs, `tasks/` artifacts, test fixtures, or anything carrying live-test output:
 
 ```bash
-git diff --cached -U0 | grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|/Users/|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-'
+python3 tools/validators/validate_no_committed_identity.py
 ```
 
-A hit is not automatically a failure (`sender@example.com` is fine), but every hit needs a look. Carry this constraint into every subagent prompt that writes files or commits.
+Hits that are already published are grandfathered per file in that validator's `KNOWN_IDENTITY_HITS` ratchet. Lowering a count is always a valid change; raising one is not — redact instead (synthetic address, elided path, placeholder UUID). Reserved and clearly synthetic placeholder domains never fire, so `sender@example.com` stays legal. Carry this constraint into every subagent prompt that writes files or commits.
 
 ## Marketplace identity boundary
 

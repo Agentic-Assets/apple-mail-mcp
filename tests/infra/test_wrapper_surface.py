@@ -97,7 +97,7 @@ class PatchMcporterWrapperTests(unittest.TestCase):
 
     def test_patch_plugin_root_repoints_embedded_start_script(self):
         source = (
-            '"args": ["/Users/cayman-mac-mini/Documents/GitHub/'
+            '"args": ["/Users/example/Documents/GitHub/'
             'apple-mail-mcp/plugin/start_mcp.sh", "--draft-safe"]'
         )
         patched, changed = patch_mcporter_wrapper.patch_plugin_root(

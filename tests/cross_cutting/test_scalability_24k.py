@@ -360,7 +360,18 @@ class SearchScanCapScalingTests(unittest.TestCase):
         self.assertLess(date_idx, break_idx)
         self.assertLess(break_idx, subject_idx)
 
-    def test_subject_only_search_filters_bounded_slice_without_date_reads(self):
+    def test_subject_only_search_honors_date_floor_but_skips_expensive_reads(self):
+        """The fast path reads `date received`, and nothing else beyond `subject`.
+
+        This test previously asserted the opposite — that the subject-only fast
+        path emitted no date read at all — which pinned AGENTIC-2356 rather than
+        catching it: `search_emails` reported a `searched_from` window while
+        emitting a scan carrying no date predicate, so callers got matches from
+        outside the window they asked for, labelled with the window they asked
+        for. What the fast path exists to avoid is the *expensive* per-message
+        reads (sender, read status, message id, content), not the cheap
+        `date received` property the caller's window depends on.
+        """
         script = search_tools._build_search_script(
             account="Work",
             mailbox="INBOX",
@@ -380,7 +391,18 @@ class SearchScanCapScalingTests(unittest.TestCase):
         self.assertIn("repeat with aMessage in candidateMessages", script)
         self.assertIn("set messageSubject to subject of aMessage", script)
         collection_block = script.split("set matchingCount to count of matchingMessages", 1)[0]
-        self.assertNotIn("set messageDate to date received of aMessage", collection_block)
+        # The window is actually enforced: bound loop-local, newest-first early
+        # break, and the comparison in the match condition.
+        self.assertIn("set messageDate to date received of aMessage", collection_block)
+        self.assertIn("if messageDate < fromDate then exit repeat", collection_block)
+        self.assertIn("messageDate >= fromDate", collection_block)
+        # ...and the fast path is still fast.
+        for expensive_read in (
+            "set messageSender to sender of aMessage",
+            "set messageRead to read status of aMessage",
+            "set msgContent to content of aMessage",
+        ):
+            self.assertNotIn(expensive_read, collection_block)
 
     def test_recent_days_7_caps_at_window_cap(self):
         # compute_scan_upper_bound(7.0) = 40 + 21 = 61, clamped to
