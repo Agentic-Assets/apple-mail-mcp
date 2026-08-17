@@ -48,6 +48,10 @@ def create_rich_email_draft(
     This is the preferred path for HTML or richly formatted emails because Mail reliably renders `.eml`
     content, while setting raw HTML through AppleScript often stores the literal markup instead.
 
+    Bare ``https://`` URLs on their own line in HTML compose may become Mail
+    link-preview cards in the open window; this tool does not create or verify
+    those cards.
+
     Args:
         account: Account name to use for the sender identity (e.g., "Work", "Oracle"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
         subject: Subject line for the draft (optional; defaults to empty)

@@ -55,6 +55,14 @@ def test_html_compose_focus_never_presses_tab_before_paste() -> None:
 
     assert "Email saved as draft (HTML)" in result
     assert_html_compose_focus_never_tabs_into_body(captured["script"])
+    script = captured["script"]
+    paste = script.index('keystroke "v" using command down')
+    restore = script.index('set subject of newMsg to "Referral agreement"')
+    save = script.index("save newMsg")
+    assert paste < restore < save
+    assert "set markedDrafts to" in script
+    assert restore < script.index("set markedDrafts to")
+    assert "set subject of newMsg to temporarySubjectMarker" not in script
 
 
 def test_html_compose_returns_immediately_when_body_editor_already_has_focus() -> None:

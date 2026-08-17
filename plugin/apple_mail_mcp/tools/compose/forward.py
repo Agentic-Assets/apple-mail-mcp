@@ -18,6 +18,7 @@ from apple_mail_mcp.tools.compose.forward_attachment_scripts import (
     forward_marker_draft_proof_call,
     forward_marker_draft_verification_handlers,
     forward_marker_finalize_script,
+    forward_restore_outgoing_subject_script,
 )
 from apple_mail_mcp.tools.compose.helpers import (
     _check_open_compose_window_cap,
@@ -207,6 +208,9 @@ def forward_email(
     discover candidate ids, then pass ``message_id``. Passing ``subject_keyword``
     without ``message_id`` returns ``TARGET_SELECTOR_DEPRECATED``.
 
+    A bare ``https://`` URL in ``message`` may become a Mail link-preview card
+    in the open window; this tool does not create or verify those cards.
+
     Args:
         account: Account name (e.g., "Gmail", "Work"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
         subject_keyword: Deprecated schema-compat selector. Returns
@@ -352,6 +356,7 @@ def forward_email(
     forward_marker_handlers = ""
     forward_marker_finalization_script = ""
     forward_attachment_proof_output = ""
+    restore_forward_subject_script = ""
     initial_forward_subject_script = "set initialForwardSubject to fwdSubject"
     if attachment_paths and mode in {"draft", "open"}:
         forward_subject_marker = f"__apple_mail_forward_{uuid.uuid4().hex}__"
@@ -361,10 +366,12 @@ def forward_email(
             to_addresses=_split_addresses(to),
             cc_addresses=_split_addresses(cc),
             bcc_addresses=_split_addresses(bcc),
+            marker=forward_subject_marker,
             body=message or "",
             attachment_paths=attachment_paths,
         )
         forward_marker_finalization_script = forward_marker_finalize_script(forward_subject_marker, marker_proof_script)
+        restore_forward_subject_script = forward_restore_outgoing_subject_script()
         initial_forward_subject_script = f'set initialForwardSubject to "{escape_applescript(forward_subject_marker)}"'
         forward_attachment_proof_output = (
             'set outputText to outputText & "Forward Attachment Proof: " & forwardAttachmentProof & return'
@@ -470,6 +477,7 @@ tell application "Mail"
             {attachment_script}
         end tell
 
+        {restore_forward_subject_script}
         {post_forward_action}
 
         {draft_id_capture_script}

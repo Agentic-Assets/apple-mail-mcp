@@ -78,6 +78,7 @@ Returned as JSON (`serialize_tool_error`) with `code`, `message`, and `remediati
 | `INVALID_SCAN_WINDOW` | Forged or out-of-policy `ScanWindow` token | Call `bounded_inbox_scan()` only |
 | `WHOSE_ID_LIST_TOO_LARGE` | `message_ids` longer than `MAX_WHOSE_IDS` (50) | `iter_id_chunks` + one call per batch |
 | `UNSAFE_WHOSE_ON_LIST` | `build_bounded_message_scan(..., whose_condition=...)` | Use `build_bounded_filtered_scan` |
+| `HTML_COMPOSE_SUBJECT_RESTORE_FAILED` | HTML compose left a visible `__apple_mail_mcp_` marker subject or could not restore/verify the real subject before save | Inspect Drafts and open compose windows for the requested real subject; do not send a marker subject |
 
 ## Forbidden AppleScript patterns
 
@@ -114,14 +115,39 @@ Workflow skills under [`../../skills/`](../../skills/) document **when** to call
 
 | Tool | Default | Notes |
 |------|---------|-------|
-| `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True` |
+| `compose_email` | `mode="draft"` | New standalone message only; refuses reply-like drafts unless `standalone_confirmed=True`. Bare `https://` URLs in HTML compose may become Mail link-preview cards in the open window; the tool does not create or verify those cards. |
 | `reply_to_email` | `mode="draft"` (via `send=False`), `native_format=True` | `native_format=True` is the only supported path: it opens Mail's reply window (rich quote bar + logo signature) and types `reply_body` above the quote, which needs window focus + **Accessibility permission** or returns `REPLY_WINDOW_FOCUS_FAILED` (no draft saved). `native_format=False` returns `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True` is explicitly passed (deliberate headless/CI only, never set by agents). Both verify exact Drafts id first with bounded fallback, expose `exact_id_verified` in JSON, and preserve known `draft_id` on verifier timeout/error |
 | `verify_draft` | read-only | Exact Drafts id snapshot for recipients, body, attachments, signatures, quoted original, and thread headers. Optional `resolve_source=True` (`resolve_recent_days=30.0` default) maps the reply's `In-Reply-To` header back to its source Inbox message via one bounded `search_emails(internet_message_id=...)` call, adding a `source` block (`resolved`/`not_found_in_window`/`no_in_reply_to_header`) |
 | `verify_drafts` | read-only | Batch exact Drafts id snapshots with per-draft JSON payloads; accepts the same `resolve_source` / `resolve_recent_days` options as `verify_draft` |
 | `forward_email` | `mode="draft"` | Same id-first rule as reply |
 | `create_rich_email_draft` | saves + closes | Standalone only; same reply-like guard; `review_in_mail=True` for saved-open review |
 
-Do not match outgoing rich drafts by subject — `_save_new_compose_window_as_draft()` saves the compose window opened by this call, identified by an id diff against the `outgoing messages` snapshot taken before the open (never `item 1`, never a pre-existing window). Detail: [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Compose and draft modes.
+### Compose package leaves (HTML / subject / attachments)
+
+| Module | Role |
+|--------|------|
+| `compose/send.py` | `compose_email` + `_send_html_email` (NSPasteboard HTML paste path) |
+| `compose/html_focus_scripts.py` | `focusComposeBody` — binds the marker-named compose window; AXFocus/click the editor; Tab only while Accessibility reports a header field, never in a WebKit body |
+| `compose/html_subject_scripts.py` | Post-paste subject restore on the writable `outgoing message`, leftover-marker sweep, fail-closed follow-up, `HTML_COMPOSE_SUBJECT_RESTORE_FAILED` |
+| `compose/standalone_draft_identity_scripts.py` | Pre-save Drafts snapshot, post-save bind by snapshot id or unique exact real subject, leftover-marker restore/delete (success path fails closed on a persisted marker) |
+| `compose/attachment_draft_verification.py` | `markerDraftProof` strict readback for attachment-bearing standalone compose (subject must equal the real subject) |
+| `compose/forward_attachment_scripts.py` | Forward restore-before-save, bounded proof/finalize (`__apple_mail_forward_{uuid}__` is pre-save only) |
+
+### HTML compose transaction (`_send_html_email`)
+
+Used when `body_html` is set, or when attachment-bearing `mode` is `draft`/`open` (plain `body` is escaped to minimal HTML). Order:
+
+1. Create `outgoing message` with internal marker subject `__apple_mail_mcp_{uuid}__` (window title for `focusComposeBody` only; **must never remain visible**).
+2. Focus the body via `html_compose_focus_handler()` — **never Tab into the WebKit body** (extra Tabs become first-line indent).
+3. Paste HTML (`Cmd+V`).
+4. Restore the caller's real subject on `newMsg` while it is still a writable outgoing message; verify the exact restored subject (match the operation's uuid marker token, not a bare prefix contains).
+5. `save` (draft/open) or `send`.
+6. Attachment path only: bind the saved row by pre-save snapshot id or a unique exact real subject (`draft_id_source` may be `operation_exact_subject`), run `markerDraftProof` (stored subject must equal the real subject, not the exact marker token), fail closed. **Never `set subject of markedDraft` after save** — Gmail Drafts `message.subject` is read-only once persisted.
+7. Sweep leftover marker outgoing windows. After save, a unique leftover marker Drafts row is a leak: fail closed; do not delete-and-succeed. Error and Python follow-up paths still delete a unique leftover marker row. Follow-up never converts marker absence (`cleared` / `deleted` / `outgoing_ok`) into a success banner.
+
+Errors: `COMPOSE_BODY_FOCUS_FAILED`, `HTML_COMPOSE_SUBJECT_RESTORE_FAILED`, `DRAFT_ATTACHMENT_PROOF_FAILED`. AppleScript throw/timeout runs `run_html_compose_subject_followup` cleanup before failing closed. Pre-restore / focus failure deletes the fixture outgoing (`delete newMsg`); it does not restore the real subject onto an empty draft.
+
+Standalone HTML/attachment compose never matches Drafts rows by a **persisted** marker subject. Forward attachment drafts use the same restore-before-save order on the live outgoing message (`forward_attachment_scripts.py`); they never `set subject` of a saved Drafts `message`. Detail: [`docs/CLAUDE-conventions.md`](../../../docs/CLAUDE-conventions.md) § Compose and draft modes.
 
 ## Module size
 

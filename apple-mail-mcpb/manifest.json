@@ -87,7 +87,7 @@
     },
     {
       "name": "compose_email",
-      "description": "Compose a new standalone email from a specific account. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Attachment-bearing calls reject mode=send and become ready only after immediate strict readback of recipient, subject, body, requested filename/count, readable sizes, and warnings at one transaction-scoped Drafts locator. Numeric Draft IDs are best-effort locators. Does not include original thread context and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, TO/CC/BCC, attachments, and optional HTML body."
+      "description": "Compose a new standalone email from a specific account. Default mode saves quietly to Drafts; mode=open saves first then leaves the window for review. Attachment-bearing calls reject mode=send and become ready only after immediate strict readback of recipient, subject, body, requested filename/count, readable sizes, and warnings at one transaction-scoped Drafts locator. Numeric Draft IDs are best-effort locators. Does not include original thread context and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Supports DEFAULT_MAIL_SIGNATURE, signature_name, include_signature, TO/CC/BCC, attachments, and optional HTML body. Bare https:// URLs on their own line in HTML compose may become Mail link-preview cards in the open window; the tool does not create or verify those cards."
     },
     {
       "name": "forward_email",
@@ -95,7 +95,7 @@
     },
     {
       "name": "create_rich_email_draft",
-      "description": "Build a standalone rich HTML multipart .eml with optional explicit local attachments. open_in_mail=false creates a prepared EML only, not a Mail-verified draft. open_in_mail=true preserves the EML and delegates to the focused HTML compose_email transaction, returning immediate strict readback or RICH_DRAFT_COMPOSE_FAILED. Does not include original thread context and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Prefer over injecting raw HTML into AppleScript content."
+      "description": "Build a standalone rich HTML multipart .eml with optional explicit local attachments. open_in_mail=false creates a prepared EML only, not a Mail-verified draft. open_in_mail=true preserves the EML and delegates to the focused HTML compose_email transaction, returning immediate strict readback or RICH_DRAFT_COMPOSE_FAILED. Does not include original thread context and refuses reply-like Re:/Fwd: drafts unless standalone_confirmed=True. Prefer over injecting raw HTML into AppleScript content. Bare https:// URLs on their own line in HTML compose may become Mail link-preview cards in the open window; the tool does not create or verify those cards."
     },
     {
       "name": "manage_drafts",

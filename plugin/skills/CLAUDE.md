@@ -20,7 +20,7 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `mailbox-taxonomy/` | Folder strategy, noise diagnosis, `create_mailbox` after approval |
 | `email-archive-cleanup/` | Staged archive / bulk move / trash with dry runs and exports |
 | `mail-rules-advisor/` | Mail filter / rule **proposals only** (no rule-creation MCP tool) |
-| `email-drafting/` | Compose, reply, forward, rich drafts; respects `--draft-safe` |
+| `email-drafting/` | Compose, reply, forward, rich/HTML drafts (`body_html`, focused paste, subject restore); respects `--draft-safe` |
 | `email-style-profile/` | Learn writing voice from Sent mail + `USER_EMAIL_PREFERENCES` |
 | `email-attachments/` | List + save attachments safely |
 | `calendar-operator/` | Bounded calendar reads, safe event CRUD, ID-first deletes, TCC troubleshooting |
@@ -64,6 +64,8 @@ Already-replied safeguard: canonical rules in [`references/pre-draft-verificatio
 | Meetings with others, free slots, invitations | `meeting-scheduler` |
 
 **Reply drafting after triage or operator navigation:** `inbox-triage` and `apple-mail-operator` stay read-first. When the user wants a reply, hand off to **`email-drafting`**: `reply_to_email(message_id=..., reply_body=..., mode="draft")` with default `native_format=True` (Mail focus + Accessibility). On `REPLY_WINDOW_FOCUS_FAILED`, retry with Mail visible; do not switch to `native_format=False` (gated: `WINDOWLESS_FALLBACK_DISABLED` unless `allow_windowless_fallback=True`, which agents must never set). If focus still cannot be acquired, stop and report the blocker. Never pass `subject_keyword` to action tools; discover via `search_emails` / `list_inbox_emails` first.
+
+**HTML / rich standalone compose:** hand off to **`email-drafting`** for `compose_email` (`body_html`) and `create_rich_email_draft`. The internal `__apple_mail_mcp_{uuid}__` window marker is pre-save binding only; saved drafts must show the caller's real subject. On `COMPOSE_BODY_FOCUS_FAILED` or `HTML_COMPOSE_SUBJECT_RESTORE_FAILED`, do not approve send; retry with Mail visible and check Drafts for leftover marker subjects. Focus failure deletes the empty fixture rather than leaving a blank real-subject draft; leftover-marker cleanup is not a saved draft. Bare `https://` URLs on their own line in HTML compose may become Mail link-preview cards in the open window; MCP does not create or verify those cards.
 
 ## SKILL.md conventions (summary)
 

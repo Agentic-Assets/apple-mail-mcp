@@ -1,7 +1,10 @@
 """Persisted Drafts identity scripts for standalone attachment drafts."""
 
+from apple_mail_mcp.core import escape_applescript
 from apple_mail_mcp.core.reply_state import drafts_mailbox_block
 from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
+
+HTML_SUBJECT_MARKER_PREFIX = "__apple_mail_mcp_"
 
 
 def _standalone_draft_identity_handlers() -> str:
@@ -35,7 +38,7 @@ on fullDraftRfcSnapshot(draftsMailbox, draftCap)
         repeat with aDraft in draftMessages
             set candidateDraftId to ""
             try
-                set candidateDraftId to id of aDraft as string
+                set candidateDraftId to (id of aDraft) as string
             end try
             set rfcMessageId to ""
             try
@@ -64,7 +67,7 @@ on persistedStandaloneDraftId(draftsMailbox, beforeSnapshot, draftCap)
         repeat with aDraft in afterDrafts
             set candidateDraftId to ""
             try
-                set candidateDraftId to id of aDraft as string
+                set candidateDraftId to (id of aDraft) as string
             end try
             set rfcMessageId to ""
             try
@@ -125,58 +128,232 @@ def standalone_draft_identity_resolver_script() -> str:
 """
 
 
-def standalone_marker_draft_finalize_script(marker: str, final_subject: str, proof_script: str) -> str:
-    """Resolve one saved marker draft, then set its requested visible subject.
+def _bounded_draft_candidate_messages_fragment() -> str:
+    """Head+tail bounded Drafts slice copied from ``_build_draft_lookup``."""
+    return f"""
+                        set totalDrafts to count of messages of draftsMailbox
+                        set headEnd to totalDrafts
+                        if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
+                        if totalDrafts is 0 then
+                            set candidateMessages to {{}}
+                        else
+                            set candidateMessages to messages 1 thru headEnd of draftsMailbox
+                            if totalDrafts > {DRAFT_LIST_CAP} then
+                                set tailStart to totalDrafts - {DRAFT_LIST_CAP} + 1
+                                if tailStart > headEnd then
+                                    set candidateMessages to candidateMessages & (messages tailStart thru totalDrafts of draftsMailbox)
+                                end if
+                            end if
+                        end if
+"""
 
-    A pre/post numeric-ID diff is conservative but can miss an iCloud row when
-    the provider reindexes around save. The random marker is unique to this
-    operation and is looked up only under the bounded Drafts cap. It is never a
-    broad subject fallback and is replaced before the strict saved-draft check.
+
+def _exact_subject_expr_draft_scan_fragment(subject_expr: str, list_var: str = "markedDrafts") -> str:
+    """Head+tail bounded exact-subject scan copied from ``_build_draft_lookup``.
+
+    ``subject_expr`` is an AppleScript expression such as ``"literal"`` or
+    ``fwdSubject``. Callers must require ``(count of list_var) is 1`` before
+    mutating. Uses ``contents of`` when collecting list-item references so
+    later mutations bind the message, not a dangling iterator.
     """
-    from apple_mail_mcp.core import escape_applescript
+    candidates = _bounded_draft_candidate_messages_fragment()
+    return f"""
+{candidates}
+                        set {list_var} to {{}}
+                        repeat with candidateDraft in candidateMessages
+                            try
+                                if (subject of candidateDraft as string) is {subject_expr} then
+                                    set end of {list_var} to contents of candidateDraft
+                                end if
+                            end try
+                        end repeat
+"""
 
+
+def _exact_marker_draft_scan_fragment(safe_marker: str, list_var: str = "markedDrafts") -> str:
+    """Head+tail bounded exact-marker scan; ``safe_marker`` is already escaped."""
+    return _exact_subject_expr_draft_scan_fragment(f'"{safe_marker}"', list_var)
+
+
+def _bind_marked_draft_by_saved_id_fragment(draft_var: str = "markedDraft") -> str:
+    """Bind ``draft_var`` to the snapshot id using the same bounded scan."""
+    candidates = _bounded_draft_candidate_messages_fragment()
+    return f"""
+{candidates}
+                        repeat with candidateDraft in candidateMessages
+                            try
+                                if (id of candidateDraft as string) is savedDraftId then
+                                    set {draft_var} to contents of candidateDraft
+                                    exit repeat
+                                end if
+                            end try
+                        end repeat
+"""
+
+
+def _unique_subject_bind_retry(scan: str, list_var: str, draft_var: str) -> str:
+    """Retry a unique exact-subject bind up to four times."""
+    return f"""
+                    repeat with subjectAttempt from 1 to 4
+                        {scan}
+                        if (count of {list_var}) is 1 then
+                            set {draft_var} to item 1 of {list_var}
+                            set savedDraftIdSource to "operation_exact_subject"
+                            exit repeat
+                        else if (count of {list_var}) is greater than 1 then
+                            exit repeat
+                        end if
+                        if subjectAttempt is less than 4 then delay 0.5
+                    end repeat
+"""
+
+
+def _refresh_numeric_saved_draft_id(draft_var: str) -> str:
+    """Keep a numeric Drafts id when the bound row still exposes one."""
+    return f"""
+                try
+                    set refreshedDraftId to (id of {draft_var}) as string
+                    if my isNumericStandaloneDraftId(refreshedDraftId) then
+                        set savedDraftId to refreshedDraftId
+                        if savedDraftIdSource is "" then set savedDraftIdSource to "operation_exact_subject"
+                    end if
+                end try
+"""
+
+
+def standalone_exact_marker_draft_scan(marker: str, *, list_var: str = "markedDrafts") -> str:
+    """Public exact-marker scan fragment for HTML compose and attachment finalize."""
+    return _exact_marker_draft_scan_fragment(escape_applescript(marker), list_var)
+
+
+def standalone_exact_subject_expr_draft_scan(subject_expr: str, *, list_var: str = "markedDrafts") -> str:
+    """Public exact-subject scan; ``subject_expr`` is an AppleScript expression."""
+    return _exact_subject_expr_draft_scan_fragment(subject_expr, list_var)
+
+
+def _delete_if_still_exact_marker(safe_marker: str) -> str:
+    """Delete the bound row only when its subject is still the exact marker."""
+    return f"""
+                                    if (subject of markedDraft as string) is "{safe_marker}" then
+                                        delete markedDraft
+                                        set markerSweepStatus to "deleted"
+                                    else
+                                        set markerSweepStatus to "failed"
+                                    end if
+"""
+
+
+def standalone_restore_leftover_marker_outgoing_script(marker: str, final_subject: str) -> str:
+    """Restore leftover fixture outgoing messages that still have the marker.
+
+    ``outgoing message.subject`` is writable. Saved Drafts ``message.subject``
+    is not. Close a leftover fixture window only when restore cannot stick.
+    Unrelated outgoing mail is left untouched because the marker is unique.
+    """
     safe_marker = escape_applescript(marker)
     safe_subject = escape_applescript(final_subject)
+    return f"""
+                set leftoverOutgoingStatus to "cleared"
+                try
+                    repeat with leftoverMsg in outgoing messages
+                        try
+                            if (subject of leftoverMsg as string) is "{safe_marker}" then
+                                set subject of leftoverMsg to "{safe_subject}"
+                                set leftoverCheck to subject of leftoverMsg as string
+                                if leftoverCheck is not "{safe_subject}" then
+                                    try
+                                        close (window of leftoverMsg) saving no
+                                    end try
+                                    set leftoverOutgoingStatus to "failed"
+                                else if leftoverOutgoingStatus is not "failed" then
+                                    set leftoverOutgoingStatus to "outgoing_ok"
+                                end if
+                            end if
+                        end try
+                    end repeat
+                on error
+                    set leftoverOutgoingStatus to leftoverOutgoingStatus
+                end try
+"""
+
+
+def standalone_exact_marker_restore_or_delete_script(
+    marker: str,
+    final_subject: str,
+    *,
+    persist_is_failure: bool = False,
+) -> str:
+    """Restore leftover marker outgoing messages; handle a unique marker Drafts row.
+
+    Saved Gmail Drafts ``message.subject`` is read-only, so this never writes
+    ``markedDraft``. Count 0 is ``cleared``. Count 2 or more is ``ambiguous``.
+    On the success path, ``persist_is_failure=True``: a unique leftover marker
+    row is a leak, so this fails closed without deleting. Error and follow-up
+    paths omit that flag and delete a unique leftover marker row.
+    """
+    safe_marker = escape_applescript(marker)
+    outgoing = standalone_restore_leftover_marker_outgoing_script(marker, final_subject)
+    scan = _exact_marker_draft_scan_fragment(safe_marker)
+    if persist_is_failure:
+        unique_action = """
+                            set markerSweepStatus to "failed"
+"""
+    else:
+        unique_action = f"""
+                            set markedDraft to item 1 of markedDrafts
+                            try
+                                {_delete_if_still_exact_marker(safe_marker)}
+                            on error
+                                set markerSweepStatus to "failed"
+                            end try
+"""
+    return f"""
+                {outgoing}
+                set markerSweepStatus to "cleared"
+                try
+                    if draftsMailbox is not missing value then
+                        {scan}
+                        set markerMatchCount to count of markedDrafts
+                        if markerMatchCount is greater than 1 then
+                            set markerSweepStatus to "ambiguous"
+                        else if markerMatchCount is 1 then
+                            {unique_action}
+                        end if
+                    end if
+                on error
+                    set markerSweepStatus to "failed"
+                end try
+"""
+
+
+def standalone_marker_draft_finalize_script(final_subject: str, proof_script: str) -> str:
+    """Bind the already-saved real-subject draft, then run attachment proof.
+
+    Caller must ``set subject of newMsg`` and ``save newMsg`` before this
+    fragment. After Gmail save, Drafts ``message.subject`` is read-only, so
+    this never writes subject. Identity prefers the pre-save snapshot, then
+    a unique exact real-subject row under the Drafts cap.
+    """
+    scan = standalone_exact_marker_draft_scan(final_subject)
+    bind_id = _bind_marked_draft_by_saved_id_fragment()
+    snapshot = standalone_draft_identity_resolver_script()
     return f"""
             set savedDraftId to ""
             set savedDraftIdSource to ""
             set attachmentTransactionProof to "identity_unavailable"
+            set markedDraft to missing value
             try
-                if draftsMailbox is not missing value then
-                    repeat with identityAttempt from 1 to 4
-                        set draftCount to count of messages of draftsMailbox
-                        if draftCount is greater than {DRAFT_LIST_CAP} then exit repeat
-                        set markedDrafts to {{}}
-                        if draftCount is greater than 0 then
-                            set draftMessages to messages 1 thru draftCount of draftsMailbox
-                            repeat with candidateDraft in draftMessages
-                                try
-                                    if (subject of candidateDraft as string) is "{safe_marker}" then
-                                        set end of markedDrafts to candidateDraft
-                                    end if
-                                end try
-                            end repeat
-                        end if
-                        if (count of markedDrafts) is 1 then
-                            set markedDraft to item 1 of markedDrafts
-                            set candidateDraftId to id of markedDraft as string
-                            if my isNumericStandaloneDraftId(candidateDraftId) then
-                                {proof_script}
-                                if attachmentTransactionProof is not "verified" then error "DRAFT_ATTACHMENT_PROOF_FAILED: " & attachmentTransactionProof
-                                set subject of newMsg to "{safe_subject}"
-                                save newMsg
-                                delay 0.3
-                                if (subject of markedDraft as string) is not "{safe_subject}" then error "DRAFT_ATTACHMENT_FINALIZATION_FAILED"
-                                set refreshedDraftId to id of markedDraft as string
-                                if my isNumericStandaloneDraftId(refreshedDraftId) then
-                                    set savedDraftId to refreshedDraftId
-                                    set savedDraftIdSource to "operation_subject_marker"
-                                end if
-                                exit repeat
-                            end if
-                        end if
-                        if identityAttempt is less than 4 then delay 0.5
-                    end repeat
+                {snapshot}
+                if savedDraftId is not "" and draftsMailbox is not missing value then
+                    {bind_id}
+                end if
+                if markedDraft is missing value and draftsMailbox is not missing value then
+                    {_unique_subject_bind_retry(scan, "markedDrafts", "markedDraft")}
+                end if
+                if markedDraft is not missing value then
+                    {proof_script}
+                    if attachmentTransactionProof is not "verified" then error "DRAFT_ATTACHMENT_PROOF_FAILED: " & attachmentTransactionProof
+                    {_refresh_numeric_saved_draft_id("markedDraft")}
                 end if
             on error errMsg
                 set savedDraftId to ""

@@ -42,6 +42,7 @@ Deliver a concise artifact (bullet list acceptable) containing:
 - Structural habits (lead with ask vs context-first).
 - Signature components and escalation paths (“when to CC legal/finance”).
 - Anti-patterns to avoid inferred from frustrations the user mentions.
+- Whether the operator wants Mail link-preview cards vs minimal mail.
 
 ### 4. Wire Into Draft Flow
 

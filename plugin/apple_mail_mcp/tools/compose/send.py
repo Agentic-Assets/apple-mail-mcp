@@ -1,10 +1,11 @@
-"""``compose_email`` tool and its ``_send_html_email`` SMTP helper for new outgoing messages."""
+"""``compose_email`` tool and its ``_send_html_email`` NSPasteboard HTML helper."""
 
 import html
 import uuid
 from pathlib import Path
 
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, inject_preferences
+from apple_mail_mcp.core.reply_state import drafts_mailbox_block
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import compose
 from apple_mail_mcp.tools.compose.attachment_draft_verification import (
@@ -20,6 +21,11 @@ from apple_mail_mcp.tools.compose.helpers import (
     _validate_from_address,
 )
 from apple_mail_mcp.tools.compose.html_focus_scripts import html_compose_focus_handler
+from apple_mail_mcp.tools.compose.html_subject_scripts import (
+    html_compose_error_handler_script,
+    html_compose_post_paste_script,
+    run_html_compose_subject_followup,
+)
 from apple_mail_mcp.tools.compose.lookup_scripts import _compose_signature_script
 from apple_mail_mcp.tools.compose.payload import (
     _build_recipient_loops,
@@ -29,6 +35,7 @@ from apple_mail_mcp.tools.compose.payload import (
     _strip_cdata_wrappers,
 )
 from apple_mail_mcp.tools.compose.standalone_draft_identity_scripts import (
+    HTML_SUBJECT_MARKER_PREFIX,
     _standalone_draft_identity_handlers,
     standalone_draft_identity_resolver_script,
     standalone_draft_identity_setup_script,
@@ -53,10 +60,7 @@ def _send_html_email(
 ) -> str:
     """Compose HTML through a focused NSPasteboard-backed Mail editor."""
     safe_account = escape_applescript(account)
-    escaped_subject = escape_applescript(subject)
-    temporary_subject_marker = f"__apple_mail_mcp_{uuid.uuid4().hex}__"
-    initial_subject = temporary_subject_marker
-    final_subject_before_send_script = f'set subject of newMsg to "{escaped_subject}"'
+    temporary_subject_marker = f"{HTML_SUBJECT_MARKER_PREFIX}{uuid.uuid4().hex}__"
     # Build recipient scripts
     to_lines = ""
     for addr in _split_addresses(to):
@@ -71,53 +75,36 @@ def _send_html_email(
     draft_id_capture_script = ""
     draft_id_output_script = ""
     marker_draft_proof_handlers = ""
-    if attachment_paths and mode in {"draft", "open"}:
+    identity_handlers = ""
+    draft_attachment_paths: list[str] = attachment_paths if attachment_paths and mode in {"draft", "open"} else []
+    attachment_draft = bool(draft_attachment_paths)
+    if attachment_draft:
         marker_draft_proof_handlers = marker_draft_verification_handlers()
+        identity_handlers = _standalone_draft_identity_handlers()
         marker_proof_script = marker_draft_proof_call(
             to_addresses=_split_addresses(to),
             cc_addresses=_split_addresses(cc),
             bcc_addresses=_split_addresses(bcc),
+            subject=subject,
+            marker=temporary_subject_marker,
             body=body_plain,
-            attachment_names=[Path(path).name for path in attachment_paths],
+            attachment_names=[Path(path).name for path in draft_attachment_paths],
         )
-        draft_id_capture_script = standalone_marker_draft_finalize_script(
-            temporary_subject_marker, subject, marker_proof_script
-        )
+        draft_id_capture_script = standalone_marker_draft_finalize_script(subject, marker_proof_script)
         draft_id_output_script = """ & return & "Draft ID: " & savedDraftId & return & "Draft ID Source: " & savedDraftIdSource & return & "Attachment Transaction Proof: " & attachmentTransactionProof"""
 
-    # Mode-specific behaviour after paste
+    drafts_setup = standalone_draft_identity_setup_script() if attachment_draft else drafts_mailbox_block()
+    post_paste_script = html_compose_post_paste_script(
+        mode=mode,
+        subject=subject,
+        marker=temporary_subject_marker,
+        attachment_finalize_script=draft_id_capture_script,
+    )
     if mode == "send":
-        post_paste_script = f"""
-            -- Send via Mail's object model after HTML paste lands.
-            delay 0.5
-            tell application "Mail"
-                {final_subject_before_send_script}
-                send newMsg
-            end tell
-        """
         success_text = "Email sent successfully (HTML)"
     elif mode == "draft":
-        post_paste_script = f"""
-            -- Save as draft: save then close the correct window (one persist only)
-            delay 0.5
-            tell application "Mail"
-                save newMsg
-                {draft_id_capture_script}
-                try
-                    close (window of newMsg) saving no
-                end try
-            end tell
-        """
         success_text = "Email saved as draft (HTML)"
-    else:  # open
-        post_paste_script = f"""
-            -- Save first, then leave open for review
-            delay 0.5
-            tell application "Mail"
-                save newMsg
-                {draft_id_capture_script}
-            end tell
-        """
+    else:
         success_text = "Email opened in Mail for review (HTML). Edit and send when ready."
 
     # Write HTML to temp file so the AppleScript can read it without
@@ -132,12 +119,18 @@ def _send_html_email(
         tmp.write(body_html)
         html_temp_path = tmp.name
 
+    error_handler = html_compose_error_handler_script(
+        marker=temporary_subject_marker,
+        subject=subject,
+        html_temp_path=html_temp_path,
+        mode=mode,
+    )
     script = f'''
 use framework "Foundation"
 use framework "AppKit"
 use scripting additions
 {marker_draft_proof_handlers}
-{_standalone_draft_identity_handlers() if attachment_paths and mode in {"draft", "open"} else ""}
+{identity_handlers}
 
 -- Step 1: Read HTML from temp file and place on clipboard
 set htmlString to do shell script "cat " & quoted form of "{html_temp_path}"
@@ -154,8 +147,8 @@ pb's setData:htmlData forType:(current application's NSPasteboardTypeHTML)
 -- Step 2: Create compose window (empty body so signature doesn't interfere)
 tell application "Mail"
     set targetAccount to account "{safe_account}"
-    {standalone_draft_identity_setup_script() if attachment_paths and mode in {"draft", "open"} else ""}
-    set newMsg to make new outgoing message with properties {{subject:"{initial_subject}", content:"", visible:true}}
+    {drafts_setup}
+    set newMsg to make new outgoing message with properties {{subject:"{temporary_subject_marker}", content:"", visible:true}}
     {sender_script}
     {signature_script}
     tell newMsg
@@ -204,62 +197,19 @@ try
 
     return "{success_text}"{draft_id_output_script}
 on error errMsg
-    -- Restore the unique subject marker before looking for the compose window:
-    -- the final subject is set immediately before save, so a save failure may
-    -- otherwise leave the marker absent from the window title.
-    try
-        tell application "Mail"
-            if temporarySubjectMarker is not "" then set subject of newMsg to temporarySubjectMarker
-        end tell
-    end try
-    -- Only close the AX window carrying this operation's marker. Never close
-    -- a positional window, which could belong to another in-progress draft.
-    try
-        if temporarySubjectMarker is not "" then
-            tell application "System Events"
-                tell process "Mail"
-                    repeat with composeWindow in windows
-                        try
-                            if name of composeWindow contains temporarySubjectMarker then
-                                perform action "AXClose" of composeWindow
-                                exit repeat
-                            end if
-                        end try
-                    end repeat
-                end tell
-            end tell
-        end if
-    end try
-    -- Mail can persist a visible outgoing message before its editor finishes
-    -- loading. This is the exact object created above, so remove it on any
-    -- focus/paste/save failure rather than leaving a partial self draft.
-    try
-        tell application "Mail"
-            delete newMsg
-        end tell
-    end try
-    try
-        do shell script "rm -f " & quoted form of "{html_temp_path}"
-    end try
-    if oldClip is not missing value then
-        try
-            pb's clearContents()
-            pb's setString:oldClip forType:(current application's NSPasteboardTypeString)
-        end try
-    end if
-    error errMsg
+{error_handler}
 end try
 '''
 
     try:
-        output = compose.run_applescript(script, timeout=timeout if timeout is not None else 30)
+        output = compose.run_applescript(script, timeout=timeout if timeout is not None else 120)
         # Build confirmation message
         confirm = f"{output}\n\nFrom: {account}\nTo: {to}\nSubject: {subject}"
         if cc:
             confirm += f"\nCC: {cc}"
         if bcc:
             confirm += f"\nBCC: {bcc}"
-        if attachment_paths and mode in {"draft", "open"}:
+        if attachment_draft:
             verification = verify_standalone_attachment_readiness(
                 output=output,
                 account=account,
@@ -268,7 +218,7 @@ end try
                 bcc=bcc or "",
                 subject=subject,
                 body=body_plain,
-                attachment_paths=attachment_paths,
+                attachment_paths=draft_attachment_paths,
                 timeout=timeout,
                 verify_draft=compose.verify_draft,
             )
@@ -276,10 +226,19 @@ end try
                 return verification
             confirm += "\n" + verification
         return confirm
-    except AppleScriptTimeout:
-        return "Error: HTML email script timed out"
-    except Exception as e:
-        return f"Error: HTML email send failed: {_clean_applescript_error(e)}"
+    except Exception as exc:
+        original_error = (
+            "HTML email script timed out" if isinstance(exc, AppleScriptTimeout) else _clean_applescript_error(exc)
+        )
+        return run_html_compose_subject_followup(
+            account=account,
+            marker=temporary_subject_marker,
+            final_subject=subject,
+            original_error=original_error,
+            timeout=timeout,
+            mode=mode,
+            to=to,
+        )
     finally:
         temp_path = Path(html_temp_path)
         if temp_path.exists():
@@ -309,6 +268,10 @@ def compose_email(
 
     This tool never includes the original email thread. Use ``reply_to_email``
     or ``forward_email`` with ``message_id`` when responding to existing mail.
+
+    Bare ``https://`` URLs on their own line in HTML compose may become Mail
+    link-preview cards in the open window; this tool does not create or verify
+    those cards.
 
     Args:
         account: Account name to send from (e.g., "Gmail", "Work", "Personal"). Defaults to `DEFAULT_MAIL_ACCOUNT` env var if `account` is omitted.
@@ -395,7 +358,8 @@ def compose_email(
     # object model assigns ``content`` before saving. Use the compose-window
     # writer for every attachment draft/open message, including plain text.
     # Attachment sends are rejected above, so this never expands send behavior.
-    if body_html or (validated_paths and mode in {"draft", "open"}):
+    attachment_draft = bool(validated_paths) and mode in {"draft", "open"}
+    if body_html or attachment_draft:
         pasted_html = body_html or html.escape(body).replace("\n", "<br>\n")
         return _send_html_email(
             account=account,
@@ -460,7 +424,7 @@ def compose_email(
 
     draft_id_capture_script = ""
     draft_id_output_script = ""
-    if validated_paths and mode in {"draft", "open"}:
+    if attachment_draft:
         draft_id_capture_script = standalone_draft_identity_resolver_script()
         draft_id_output_script = """
             set outputText to outputText & "Draft ID: " & savedDraftId & return
@@ -468,13 +432,13 @@ def compose_email(
         """
 
     script = f'''
-    {_standalone_draft_identity_handlers() if validated_paths and mode in {"draft", "open"} else ""}
+    {_standalone_draft_identity_handlers() if attachment_draft else ""}
     tell application "Mail"
         set outputText to "{header_text}" & return & return
 
         try
             set targetAccount to account "{safe_account}"
-            {standalone_draft_identity_setup_script() if validated_paths and mode in {"draft", "open"} else ""}
+            {standalone_draft_identity_setup_script() if attachment_draft else ""}
 
             -- Start with an empty standalone message. On Exchange, assigning
             -- authored content before Mail applies a native signature can make

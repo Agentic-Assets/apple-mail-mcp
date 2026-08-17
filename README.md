@@ -624,8 +624,9 @@ Use `create_rich_email_draft` when you need a visually formatted email, newslett
 - It generates an unsent `.eml` file with multipart plain-text + HTML bodies
 - It accepts explicit local attachment paths, which are embedded in the EML
 - It can write only the `.eml` artifact with `open_in_mail=False`; that artifact is prepared but not Mail-verified or ready to send
-- With `open_in_mail=True`, it preserves the EML and creates the Mail draft through the supported focused HTML compose transaction, never by importing the EML. Attachment-bearing drafts are always draft/open and retain `compose_email`'s immediate strict recipient/subject/body/filename/count/readability readback.
-- If the editor cannot focus or verification fails, it returns `RICH_DRAFT_COMPOSE_FAILED` with the EML path and no ready-to-send claim
+- With `open_in_mail=True`, it preserves the EML and creates the Mail draft through the supported focused HTML `compose_email` transaction, never by importing the EML. Mail may briefly use an internal `__apple_mail_mcp_…` window title during paste; the saved draft always gets your real subject restored before save.
+- Attachment-bearing drafts are always draft/open and retain `compose_email`'s immediate strict recipient/subject/body/filename/count/readability readback.
+- If body focus, subject restore, or verification fails (`COMPOSE_BODY_FOCUS_FAILED`, `HTML_COMPOSE_SUBJECT_RESTORE_FAILED`, or `RICH_DRAFT_COMPOSE_FAILED`), it returns structured errors with the preserved EML path and no ready-to-send claim
 - Blank subjects stay `.eml`-only until there is a subject for manual review
 - It accepts partial details, so you can start with just an account and subject and fill in the rest later
 

@@ -203,8 +203,8 @@ def test_forward_attachment_draft_accepts_marker_proof_when_icloud_hides_numeric
     assert "same-operation marker-bound persisted Drafts row" in result
 
 
-def test_forward_attachment_draft_uses_bounded_marker_proof_before_final_subject(attachment_file: Path) -> None:
-    """The iCloud fallback certifies this forward, not a similar Drafts row."""
+def test_forward_attachment_draft_restores_outgoing_subject_before_save(attachment_file: Path) -> None:
+    """The iCloud fallback certifies this forward after restoring the live outgoing subject."""
     scripts: list[str] = []
 
     def fake_mail(script: str, timeout: int = 120) -> str:
@@ -227,11 +227,18 @@ def test_forward_attachment_draft_uses_bounded_marker_proof_before_final_subject
     assert "on markerDraftProof(" in scripts[0]
     assert "on forwardMarkerDraftProof(" in scripts[0]
     assert "forwardMarkerInlineSignatureAsset" in scripts[0]
-    assert "set subject of markedForwardDraft to fwdSubject" in scripts[0]
+    restore = scripts[0].index("set subject of forwardMessage to fwdSubject")
+    save = scripts[0].index("save forwardMessage")
+    assert restore < save
+    assert "set subject of markedForwardDraft to fwdSubject" not in scripts[0]
     assert "delete markedForwardDraft" in scripts[0]
     assert "delete forwardMessage" in scripts[0]
     assert "every message of draftsMailbox whose subject" not in scripts[0]
     assert "Forward Attachment Proof:" in scripts[0]
+    assert (
+        'if (count of leakedForwardMarkerDrafts) is greater than 0 then error "FORWARD_SUBJECT_RESTORE_FAILED"'
+        in scripts[0]
+    )
 
 
 def test_forward_marker_lookup_failure_enters_exact_object_cleanup() -> None:

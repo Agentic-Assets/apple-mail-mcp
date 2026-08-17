@@ -3,7 +3,14 @@
 from pathlib import Path
 
 from apple_mail_mcp.core import escape_applescript
-from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
+from apple_mail_mcp.tools.compose.attachment_draft_verification import quoted_applescript_list
+from apple_mail_mcp.tools.compose.standalone_draft_identity_scripts import (
+    _bind_marked_draft_by_saved_id_fragment,
+    _refresh_numeric_saved_draft_id,
+    _unique_subject_bind_retry,
+    standalone_exact_marker_draft_scan,
+    standalone_exact_subject_expr_draft_scan,
+)
 
 
 def forward_marker_draft_verification_handlers() -> str:
@@ -16,8 +23,11 @@ on forwardMarkerInlineSignatureAsset(attachmentName)
     end ignoring
 end forwardMarkerInlineSignatureAsset
 
-on forwardMarkerDraftProof(draftMessage, expectedTo, expectedCc, expectedBcc, expectedBody, expectedAttachmentNames)
+on forwardMarkerDraftProof(draftMessage, expectedTo, expectedCc, expectedBcc, expectedSubject, expectedMarker, expectedBody, expectedAttachmentNames)
     try
+        set storedSubject to subject of draftMessage as string
+        if storedSubject is expectedMarker then return "subject_mismatch"
+        if storedSubject is not expectedSubject then return "subject_mismatch"
         if my markerRecipientSetMatches(to recipients of draftMessage, expectedTo) is false then return "recipient_mismatch"
         if my markerRecipientSetMatches(cc recipients of draftMessage, expectedCc) is false then return "cc_recipient_mismatch"
         if my markerRecipientSetMatches(bcc recipients of draftMessage, expectedBcc) is false then return "bcc_recipient_mismatch"
@@ -54,65 +64,63 @@ end using terms from
 """
 
 
+def forward_restore_outgoing_subject_script() -> str:
+    """Restore ``fwdSubject`` on the live outgoing message before the first save."""
+    return """
+        set subject of forwardMessage to fwdSubject
+        set restoredForwardSubject to subject of forwardMessage as string
+        if restoredForwardSubject is not fwdSubject then error "FORWARD_SUBJECT_RESTORE_FAILED"
+"""
+
+
 def forward_marker_draft_proof_call(
     *,
     to_addresses: list[str],
     cc_addresses: list[str],
     bcc_addresses: list[str],
+    marker: str,
     body: str,
     attachment_paths: list[str],
 ) -> str:
-    """Build the strict proof call for the single marked forward Drafts row."""
-
-    def address_list(addresses: list[str]) -> str:
-        return ", ".join(f'"{escape_applescript(address)}"' for address in addresses)
-
-    attachment_names = ", ".join(f'"{escape_applescript(Path(path).name)}"' for path in attachment_paths)
+    """Build the strict proof call for the saved real-subject forward Drafts row."""
+    attachment_names = quoted_applescript_list(Path(path).name for path in attachment_paths)
     return (
         "set forwardAttachmentProof to my forwardMarkerDraftProof(markedForwardDraft, "
-        f"{{{address_list(to_addresses)}}}, {{{address_list(cc_addresses)}}}, "
-        f'{{{address_list(bcc_addresses)}}}, "{escape_applescript(body)}", {{{attachment_names}}})'
+        f"{{{quoted_applescript_list(to_addresses)}}}, {{{quoted_applescript_list(cc_addresses)}}}, "
+        f"{{{quoted_applescript_list(bcc_addresses)}}}, fwdSubject, "
+        f'"{escape_applescript(marker)}", "{escape_applescript(body)}", {{{attachment_names}}})'
     )
 
 
 def forward_marker_finalize_script(marker: str, proof_script: str) -> str:
-    """Verify then finalize one marked draft, deleting this operation on failure."""
-    safe_marker = escape_applescript(marker)
+    """Bind the already-saved real-subject forward, then run attachment proof.
+
+    Caller must restore ``subject of forwardMessage`` to ``fwdSubject`` and
+    save before this fragment. Never writes saved ``message.subject``. A unique
+    leftover marker Drafts row is a leak: fail closed. Identity prefers the
+    pre-save snapshot, then a unique exact ``fwdSubject`` row.
+    """
+    marker_scan = standalone_exact_marker_draft_scan(marker, list_var="leakedForwardMarkerDrafts")
+    subject_scan = standalone_exact_subject_expr_draft_scan("fwdSubject", list_var="markedForwardDrafts")
+    bind_id = _bind_marked_draft_by_saved_id_fragment("markedForwardDraft")
     return f"""
         set forwardAttachmentProof to "identity_unavailable"
+        set markedForwardDraft to missing value
         try
             if draftsMailbox is not missing value then
-                repeat with markerAttempt from 1 to 4
-                    set draftCount to count of messages of draftsMailbox
-                    if draftCount is greater than {DRAFT_LIST_CAP} then exit repeat
-                    set markedForwardDrafts to {{}}
-                    if draftCount is greater than 0 then
-                        set draftMessages to messages 1 thru draftCount of draftsMailbox
-                        repeat with candidateDraft in draftMessages
-                            try
-                                if (subject of candidateDraft as string) is "{safe_marker}" then
-                                    set end of markedForwardDrafts to candidateDraft
-                                end if
-                            end try
-                        end repeat
-                    end if
-                    if (count of markedForwardDrafts) is 1 then
-                        set markedForwardDraft to item 1 of markedForwardDrafts
-                        {proof_script}
-                        if forwardAttachmentProof is not "verified" then error "FORWARD_ATTACHMENT_PROOF_FAILED: " & forwardAttachmentProof
-                        set subject of markedForwardDraft to fwdSubject
-                        save markedForwardDraft
-                        delay 0.3
-                        if (subject of markedForwardDraft as string) is not fwdSubject then error "FORWARD_ATTACHMENT_FINALIZATION_FAILED"
-                        set refreshedDraftId to id of markedForwardDraft as string
-                        if my isNumericStandaloneDraftId(refreshedDraftId) then
-                            set savedDraftId to refreshedDraftId
-                            set savedDraftIdSource to "operation_subject_marker"
-                        end if
-                        exit repeat
-                    end if
-                    if markerAttempt is less than 4 then delay 0.5
-                end repeat
+                {marker_scan}
+                if (count of leakedForwardMarkerDrafts) is greater than 0 then error "FORWARD_SUBJECT_RESTORE_FAILED"
+                if savedDraftId is not "" then
+                    {bind_id}
+                end if
+                if markedForwardDraft is missing value then
+                    {_unique_subject_bind_retry(subject_scan, "markedForwardDrafts", "markedForwardDraft")}
+                end if
+            end if
+            if markedForwardDraft is not missing value then
+                {proof_script}
+                if forwardAttachmentProof is not "verified" then error "FORWARD_ATTACHMENT_PROOF_FAILED: " & forwardAttachmentProof
+                {_refresh_numeric_saved_draft_id("markedForwardDraft")}
             end if
             if forwardAttachmentProof is not "verified" then error "FORWARD_ATTACHMENT_PROOF_FAILED: " & forwardAttachmentProof
         on error errMsg
