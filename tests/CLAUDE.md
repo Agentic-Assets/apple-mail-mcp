@@ -4,6 +4,8 @@ Mocked unit tests for the Apple Mail MCP server. The collected-test count is sin
 
 New tests and perf gates: delegate to a **`shell`** or **`generalPurpose`** subagent when available and permitted; parent runs the relevant suite after merge. See root [`CLAUDE.md`](../CLAUDE.md), Agent orchestration section.
 
+**This repo is PUBLIC.** Fixtures use synthetic addresses (`sender@example.com`) and synthetic subjects. Never build a fixture by pasting a real message, header block, or account UUID out of a live run, even when reproducing a real bug: reduce it to the shape that triggers the bug. See root [`AGENTS.md`](../AGENTS.md) § This repo is PUBLIC.
+
 ```bash
 .venv/bin/pytest tests/
 .venv/bin/pytest tests/cli/test_cli.py -q

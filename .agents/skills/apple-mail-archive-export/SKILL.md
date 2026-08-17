@@ -298,6 +298,22 @@ Do not delete the account from Mail Settings or Internet Accounts - uncheck
 **"Enable this account"** instead, which is reversible. Avoid `Erase Deleted
 Items`. Never call the MCP's `synchronize_account` on a decommissioned account.
 
+## The archive stays local. This skill's own repo is public.
+
+An export is somebody's entire mail history: every address they ever wrote to,
+every attachment, every subject line. It belongs on their disk and nowhere else.
+Never upload it, never sync it to a service, never attach a sample to an issue,
+and never copy it outside the destination the person named. The archive `README`
+and `report.json` live inside the archive, which is why they may carry real
+counts and real folder names.
+
+If you are editing this skill rather than running it, you are working in
+`Agentic-Assets/apple-mail-mcp`, a **public** GitHub repo. Measured numbers from
+a real export are fine to commit and are what make these docs trustworthy. The
+mail behind them is not: keep real addresses, subjects, account UUIDs, and
+absolute `/Users/...` paths out of `SKILL.md`, the `references/`, the scripts,
+and their tests. See root [`AGENTS.md`](../../../AGENTS.md) § This repo is PUBLIC.
+
 ## Bundled scripts
 
 | Script | Purpose |

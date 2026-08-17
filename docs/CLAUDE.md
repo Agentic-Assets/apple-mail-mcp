@@ -2,6 +2,8 @@
 
 Human- and agent-facing docs that survive outside the codebase. Plugin skills and root `README.md` cover user install; this folder covers **agent workflows** and **deep engineering conventions**.
 
+**This repo is PUBLIC.** Docs here are the easiest place to leak real mail data, because they are where live-verification output naturally gets written down. Commit counts, timings, and redacted samples, never a real address, subject, account UUID, or absolute `/Users/...` path. See root [`AGENTS.md`](../AGENTS.md) § This repo is PUBLIC.
+
 ## Agent orchestration
 
 - Use **subagents** for research **and** implementation when the host exposes them and the task lane permits them.
