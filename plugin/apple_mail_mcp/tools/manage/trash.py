@@ -10,7 +10,6 @@ from apple_mail_mcp.bounded_scan import build_whose_id_list
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     build_mailbox_ref,
-    contains_any_condition,
     escape_applescript,
     inject_preferences,
     normalize_message_ids,
@@ -273,14 +272,16 @@ def manage_trash(
         if not allow_filter_scan:
             return _filter_scan_disabled_error("manage_trash")
 
-        # Build search condition with escaped inputs
-        conditions = []
-        if subject_terms:
-            conditions.append(contains_any_condition("subject", subject_terms))
-        if sender:
-            conditions.append(f'sender contains "{escape_applescript(sender)}"')
-
-        if conditions:
+        # No AppleScript condition is assembled here on purpose. `_search_message_ids`
+        # takes `subject_terms` / `sender` directly and builds its own bounded,
+        # loop-variable-bound predicate. This block used to build
+        # `contains_any_condition("subject", ...)` -> `subject contains "x"` and then
+        # discard it, testing only its truthiness. That string is the AGENTIC-2344
+        # shape: a bare property reference, valid only inside a `whose` clause, which
+        # raises -1728 on every message inside a `repeat` loop and gets swallowed by
+        # the loop's `try`. Keeping a ready-made version of it one line away from a
+        # `delete_permanent` path was a standing invitation to splice it in.
+        if subject_terms or sender:
             search_timeout = timeout if timeout is not None else min(effective_timeout, 120)
             try:
                 resolved_ids = _search_message_ids(
