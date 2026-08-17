@@ -186,7 +186,7 @@ def _stub_has_content(part: Message) -> bool:
 
 
 def reassemble(
-    msg: Message, msg_id: int, messages_dir: Path, stats: "Stats"
+    msg: Message, msg_id: int, messages_dir: Path, stats: Stats
 ) -> tuple[int, int]:
     """Fill emptied attachment parts in place. Returns (filled, missing)."""
     bucket_dir = messages_dir.parent
@@ -582,7 +582,7 @@ def mailbox_nodes(account_root: Path):
             data = sub / "Data"
             if data.is_dir():
                 for root, dirs, _files in os.walk(data):
-                    if os.path.basename(root) == "Messages":
+                    if Path(root).name == "Messages":
                         msg_dirs.append(Path(root))
                         dirs[:] = []
         if trail:

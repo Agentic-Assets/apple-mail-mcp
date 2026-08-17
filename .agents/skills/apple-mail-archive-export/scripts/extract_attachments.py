@@ -128,7 +128,7 @@ class BlobConflict(Exception):
 # ---------------------------------------------------------------------------
 
 
-def declared_filename(part: Message, stats: "Stats", where: str = "") -> tuple[str | None, bool]:
+def declared_filename(part: Message, stats: Stats, where: str = "") -> tuple[str | None, bool]:
     """(filename as the sender wrote it, header was unreadable).
 
     `get_filename()` already reads Content-Disposition `filename` then
@@ -173,7 +173,7 @@ def truncate_bytes(s: str, limit: int) -> str:
     return encoded[:limit].decode("utf-8", "ignore")
 
 
-def sanitize_filename(raw: str | None, fallback: str, stats: "Stats") -> str:
+def sanitize_filename(raw: str | None, fallback: str, stats: Stats) -> str:
     r"""Reduce a sender-supplied string to one safe path component.
 
     Order matters. The basename step runs while the separators are still
@@ -376,7 +376,7 @@ def store_blob(dest: Path, sha: str, data: bytes, stats: Stats) -> tuple[Path, b
     blob.parent.mkdir(parents=True, exist_ok=True)
     tmp = blob.with_name(f".tmp.{os.getpid()}.{sha}")
     tmp.write_bytes(data)
-    os.replace(tmp, blob)  # a torn write can never be mistaken for a blob
+    tmp.replace(blob)  # a torn write can never be mistaken for a blob
     return blob, True
 
 
@@ -416,7 +416,7 @@ def link_into(view: Path, rel_dir: Path, blob: Path, names, stats: Stats) -> str
             os.link(blob, target)
             stats.links_created += 1
             return str(target.relative_to(view.parent))
-        if os.path.samefile(target, blob):
+        if target.samefile(blob):
             stats.links_deduped += 1
             return str(target.relative_to(view.parent))
     raise UnsafePath(f"no free name for {blob.name} in {directory}")
@@ -689,8 +689,7 @@ def main() -> int:
     if write:
         dest.mkdir(parents=True, exist_ok=True)
     manifest_path = dest / "manifest.jsonl"
-    manifest = manifest_path.open("w", encoding="utf-8") if write \
-        else open(os.devnull, "w")
+    manifest = (manifest_path if write else Path(os.devnull)).open("w", encoding="utf-8")
     try:
         for i, eml in enumerate(emls, 1):
             process_message(eml, out, dest, meta, stats, manifest, write)

@@ -30,7 +30,6 @@ Exits non-zero on any failure, so it can gate a release.
 from __future__ import annotations
 
 import hashlib
-import os
 import shutil
 import sys
 import tempfile
@@ -39,8 +38,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from extract_attachments import (  # noqa: E402
-    WIN_RESERVED, Stats, UnsafePath, assert_inside, declared_filename,
-    link_into, link_names, sanitize_filename, store_blob,
+    WIN_RESERVED,
+    Stats,
+    UnsafePath,
+    assert_inside,
+    declared_filename,
+    link_into,
+    link_names,
+    sanitize_filename,
+    store_blob,
 )
 
 # Grouped by what each one attacks. Every entry is exercised twice: once as a

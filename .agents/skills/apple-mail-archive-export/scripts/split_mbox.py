@@ -70,10 +70,11 @@ class SplitFailure(Exception):
 
 
 def human(n: float) -> str:
-    for unit in ("B", "KiB", "MiB", "GiB"):
-        if abs(n) < 1024 or unit == "GiB":
+    for unit in ("B", "KiB", "MiB"):
+        if abs(n) < 1024:
             return f"{n:.0f} B" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1024.0
+    return f"{n:.1f} GiB"
 
 
 def parse_size(text: str) -> int:
