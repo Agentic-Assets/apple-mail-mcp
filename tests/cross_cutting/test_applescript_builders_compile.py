@@ -40,7 +40,9 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -210,6 +212,32 @@ class OsacompileAvailableTests(unittest.TestCase):
             "Fix the builder before relying on tests.",
         )
 
+    def _assert_tool_script_compiles(self, patch_target: str, call: Callable[[], object], label: str):
+        """Capture the AppleScript a tool sends to *patch_target*, then compile it.
+
+        The sibling of ``_assert_compiles`` for tools that assemble their script
+        inline rather than through a discoverable ``_build_*_script`` function,
+        so there is no builder to call directly. *call* invokes the tool and
+        *label* names it in the failure messages.
+        """
+        captured: dict[str, str] = {}
+
+        def fake_run(script, timeout=120):
+            captured["script"] = script
+            return ""
+
+        with patch(patch_target, side_effect=fake_run):
+            call()
+
+        script = captured.get("script", "")
+        self.assertTrue(script, f"No script was captured from {label}")
+        ok, err = _osacompile_check(script)
+        self.assertTrue(
+            ok,
+            f"\n{label} produced script that osacompile rejected:\n{err}\n\n"
+            "Fix the inline script builder before releasing.",
+        )
+
     # --- smart_inbox builders ---
 
     def test_smart_inbox_build_awaiting_reply_inbox_script_compiles(self):
@@ -300,93 +328,52 @@ class OsacompileAvailableTests(unittest.TestCase):
         """Capture the script that get_statistics emits for account_overview
         and compile it.  This covers the inline script in analytics.py which
         has no named _build_* wrapper."""
-        from unittest.mock import patch
         from apple_mail_mcp.tools import analytics as m
 
-        captured: dict[str, str] = {}
-
-        def fake_run(script, timeout=120):
-            captured["script"] = script
-            return ""
-
-        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
-            m.get_statistics(account="Work", scope="account_overview", days_back=7)
-
-        script = captured.get("script", "")
-        self.assertTrue(script, "No script was captured from get_statistics")
-        ok, err = _osacompile_check(script)
-        self.assertTrue(
-            ok,
-            f"\nget_statistics(account_overview) produced script that osacompile rejected:\n"
-            f"{err}\n\n"
-            "Fix the script builder in analytics.get_statistics before releasing.",
+        self._assert_tool_script_compiles(
+            "apple_mail_mcp.tools.analytics.run_applescript",
+            lambda: m.get_statistics(account="Work", scope="account_overview", days_back=7),
+            "get_statistics(account_overview)",
         )
 
     def test_analytics_get_statistics_sender_stats_script_compiles(self):
-        from unittest.mock import patch
         from apple_mail_mcp.tools import analytics as m
 
-        captured: dict[str, str] = {}
-
-        def fake_run(script, timeout=120):
-            captured["script"] = script
-            return ""
-
-        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
-            m.get_statistics(
+        self._assert_tool_script_compiles(
+            "apple_mail_mcp.tools.analytics.run_applescript",
+            lambda: m.get_statistics(
                 account="Work",
                 scope="sender_stats",
                 sender="test@example.com",
                 days_back=7,
-            )
-
-        script = captured.get("script", "")
-        self.assertTrue(script, "No script captured from get_statistics(sender_stats)")
-        ok, err = _osacompile_check(script)
-        self.assertTrue(ok, f"sender_stats script failed osacompile:\n{err}")
+            ),
+            "get_statistics(sender_stats)",
+        )
 
     def test_analytics_get_statistics_mailbox_breakdown_script_compiles(self):
         """mailbox_breakdown builds its script inline too, and AGENTIC-2346
         added an if/else label branch plus an interpolated note string to it.
         Mocked tests only assert the emitted text, so this is the only check
         that the AppleScript is actually valid."""
-        from unittest.mock import patch
         from apple_mail_mcp.tools import analytics as m
 
-        captured: dict[str, str] = {}
-
-        def fake_run(script, timeout=120):
-            captured["script"] = script
-            return ""
-
-        with patch("apple_mail_mcp.tools.analytics.run_applescript", side_effect=fake_run):
-            m.get_statistics(account="Work", scope="mailbox_breakdown", mailbox="INBOX")
-
-        script = captured.get("script", "")
-        self.assertTrue(script, "No script captured from get_statistics(mailbox_breakdown)")
-        ok, err = _osacompile_check(script)
-        self.assertTrue(ok, f"mailbox_breakdown script failed osacompile:\n{err}")
+        self._assert_tool_script_compiles(
+            "apple_mail_mcp.tools.analytics.run_applescript",
+            lambda: m.get_statistics(account="Work", scope="mailbox_breakdown", mailbox="INBOX"),
+            "get_statistics(mailbox_breakdown)",
+        )
 
     def test_inbox_list_mailboxes_count_script_compiles(self):
         """list_mailboxes builds its script inline. AGENTIC-2346 added an
         if/else cached-count label branch inside the include_counts block,
         which is also string-substituted for child mailboxes."""
-        from unittest.mock import patch
         from apple_mail_mcp.tools import inbox as m
 
-        captured: dict[str, str] = {}
-
-        def fake_run(script, timeout=120):
-            captured["script"] = script
-            return ""
-
-        with patch("apple_mail_mcp.tools.inbox.run_applescript", side_effect=fake_run):
-            m.list_mailboxes(account="Work", include_counts=True)
-
-        script = captured.get("script", "")
-        self.assertTrue(script, "No script captured from list_mailboxes(include_counts=True)")
-        ok, err = _osacompile_check(script)
-        self.assertTrue(ok, f"list_mailboxes(include_counts) script failed osacompile:\n{err}")
+        self._assert_tool_script_compiles(
+            "apple_mail_mcp.tools.inbox.run_applescript",
+            lambda: m.list_mailboxes(account="Work", include_counts=True),
+            "list_mailboxes(include_counts=True)",
+        )
 
 
 # ---------------------------------------------------------------------------

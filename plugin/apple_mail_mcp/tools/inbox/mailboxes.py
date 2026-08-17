@@ -17,6 +17,7 @@ from apple_mail_mcp.tools import inbox
 from apple_mail_mcp.tools.unread_provenance import (
     UNREAD_SOURCE_CACHED,
     unread_count_disclosure,
+    unread_count_is_suspect,
     unread_count_text_footer,
     unread_count_text_label,
 )
@@ -292,10 +293,12 @@ def _list_mailboxes_json(
         if include_counts:
             item["message_count"] = msg_count
             item["unread_count"] = unread_count
-            # Label every cached number, and flag the impossible ones. -1 is
-            # the "count unavailable" sentinel, not a real count.
+            # Label every cached number, and flag the impossible ones. The rule
+            # (including -1, the "count unavailable" sentinel rather than a real
+            # count) lives in `unread_provenance` so this row flag and the
+            # envelope verdict below cannot disagree.
             item["unread_count_source"] = UNREAD_SOURCE_CACHED
-            if unread_count >= 0 and msg_count >= 0 and unread_count > msg_count:
+            if unread_count_is_suspect(cached_unread=unread_count, total_messages=msg_count):
                 item["unread_count_suspect"] = True
         mailboxes.append(item)
 

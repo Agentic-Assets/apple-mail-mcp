@@ -1,6 +1,8 @@
 # Changelog
 
-## 3.11.6 - 2026-07-15
+## Unreleased
+
+## 3.11.7 - 2026-08-17
 
 - **`search_emails` subject filtering returned 0 results on every account.**
   The subject-only fast path built its filter as a bare `subject contains "…"`
@@ -18,6 +20,46 @@
   `error_details`. Text output (the default `output_format`) reports mailbox
   issues even when no account-level error occurred, so a fully failed scan
   can no longer render as a clean `FOUND: 0`.
+- **Unread counts are labelled with their provenance instead of being presented
+  as measured.** Mail's `unread count` property is a cached aggregate, not a
+  computed one, and on a 25,012-message Exchange Inbox it reported 3,236 against
+  a per-message truth of 10,016 — 68% low. Computing the true count is not a
+  usable fix: `count of (messages of <mb> whose read status is false)` returned
+  no result at 300s on that mailbox while `count of messages` answered in ~1s, so
+  the measurement is affordable only where the cache is already right. All four
+  surfaces that read the property (`get_mailbox_unread_counts`, `list_mailboxes`,
+  `get_inbox_overview`, `get_statistics`) plus the two consumers that inherit it
+  (`inbox_dashboard`, the CLI) now emit `unread_count_source`,
+  `unread_count_measured`, and `unread_count_note`; text modes tag each number
+  `[Mail cached, unverified]`. `get_statistics` `sender_stats` genuinely measures
+  per-message `read status` and is labelled `per_message_read_status` /
+  `measured=true`, so the two provenances are distinguishable rather than both
+  silent. Additive contract change; no numeric field changed type.
+- **`get_statistics` over-reported `read` by the same margin as the unread
+  under-count**, because it derives `read = total - unread` from the cached
+  value.
+- **The bounded-scan AppleScript lint was silently disarmed and is now
+  re-armed.** `tests/core/test_no_unbounded_whose.py` iterated
+  `tools/` with a non-recursive glob, so once every tool surface became a package
+  it scanned 2 modules instead of 79 and all four forbidden-pattern checks passed
+  vacuously — including through the subject-filter bug above. It now scans
+  recursively, keys findings by package-relative path (`helpers.py` exists in
+  four packages), and a coverage test fails if the scanned set ever collapses
+  again. A new rule bans `messages of <mailbox>`, the previously unlinted twin of
+  `every message of`; six existing sites are grandfathered behind a
+  path-to-count ratchet with a staleness test, tracked in AGENTIC-2355.
+- **`manage_trash` no longer builds an unused bare-property AppleScript
+  condition** one line from its `delete_permanent` path. The value was computed
+  and discarded (only its truthiness was read), but it was the same shape that
+  caused the subject-filter bug. With that call gone,
+  `core.normalization.contains_any_condition` has no production caller, and a
+  new lint rule refuses any future call that passes a bare Mail property
+  (`subject`, `sender`, `content`, …) rather than a loop-bound variable. The rule
+  scans the whole package, not just `tools/`, because the helper lives in
+  `core/`.
+
+## 3.11.6 - 2026-07-15
+
 - **HTML compose no longer leaves the internal marker as the visible subject.**
   The temporary `__apple_mail_mcp_…` token is only for binding the compose
   window during focus and paste. After paste, the real subject is set on the

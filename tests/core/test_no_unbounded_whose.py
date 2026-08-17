@@ -40,6 +40,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS_DIR = ROOT / "plugin" / "apple_mail_mcp" / "tools"
+# Wider than TOOLS_DIR on purpose: the bare-property fragment builder lives in
+# ``core/``, so a scan rooted at ``tools/`` would miss a new caller added beside
+# it. Only BARE_PROPERTY_CONDITION uses this root; the mailbox-enumeration rules
+# stay scoped to the tool surfaces that emit scan loops.
+PACKAGE_DIR = ROOT / "plugin" / "apple_mail_mcp"
 
 # ---------------------------------------------------------------------------
 # Patterns
@@ -101,6 +106,33 @@ KNOWN_RAW_MESSAGES_ENUMERATION: dict[str, int] = {
     "manage/trash.py": 2,
     "search/script.py": 1,
 }
+
+# Mail properties that resolve only where an enclosing `whose` clause supplies the
+# implicit target. `core.normalization.contains_any_condition(field, values)` renders
+# `field contains "…"`, so passing one of these names produces exactly the
+# AGENTIC-2344 fragment: unbound inside `repeat with aMessage in …`, so Mail raises
+# -1728 on every message, the loop's `try` swallows it, and the tool reports a
+# confident empty result.
+#
+# The ban is on the *argument*, not the helper. `contains_any_condition` is correct
+# and safe against a loop-bound variable (`messageSubject`, `messageSender`), which
+# is how the tools use it. That is also why deleting the helper would be the weaker
+# fix: it would leave the next hand-rolled `f'{field} contains "…"'` uncaught, while
+# this rule covers both routes. As of this commit the helper has no production
+# caller at all — `manage/trash.py` was the last one, and it computed the fragment
+# only to test its truthiness before discarding it.
+BARE_MAIL_PROPERTIES = (
+    "subject",
+    "sender",
+    "content",
+    "all headers",
+    "reply to",
+    "recipient",
+)
+
+BARE_PROPERTY_CONDITION = re.compile(
+    r"contains_any_condition\(\s*[\"'](?:" + "|".join(BARE_MAIL_PROPERTIES) + r")[\"']"
+)
 
 # Normalize Python f-string placeholders so the static scan also catches
 # `every message of {mailbox_var} whose ...` patterns — the original
@@ -369,6 +401,69 @@ class NoRawMessagesEnumerationTests(unittest.TestCase):
         self.assertTrue(
             _is_docstring_or_comment_line("    Never binds the full ``messages of targetMailbox``."),
         )
+
+
+class NoBarePropertyConditionTests(unittest.TestCase):
+    """Ban `contains_any_condition("<bare Mail property>", …)`.
+
+    No allowlist: there are zero production call sites, so the honest baseline is
+    zero and any hit is new. An empty ratchet is the only kind that cannot rot.
+    """
+
+    def _scan(self) -> list[str]:
+        hits: list[str] = []
+        for path in sorted(PACKAGE_DIR.rglob("*.py")):
+            with path.open() as fh:
+                for lineno, line in enumerate(fh, 1):
+                    if _is_docstring_or_comment_line(line):
+                        continue
+                    if BARE_PROPERTY_CONDITION.search(line):
+                        hits.append(f"{path.relative_to(PACKAGE_DIR).as_posix()}:{lineno}: {line.strip()}")
+        return hits
+
+    def test_no_bare_property_contains_any_condition(self):
+        hits = self._scan()
+        self.assertFalse(
+            hits,
+            "`contains_any_condition` was passed a bare Mail property. That renders "
+            '`subject contains "…"`, which only binds inside a `whose` clause; inside a '
+            "`repeat` loop Mail raises -1728 on every message and the loop's `try` hides "
+            "it, so the tool returns an empty result with no error (AGENTIC-2344). Pass the "
+            "loop-bound variable instead (`messageSubject`), or let the callee build its own "
+            "bounded predicate.\n  - " + "\n  - ".join(hits),
+        )
+
+    def test_bare_property_rule_has_teeth(self):
+        """Verified in both directions: the safe spelling must stay legal."""
+        self.assertIsNotNone(
+            BARE_PROPERTY_CONDITION.search('condition = contains_any_condition("subject", subject_terms)'),
+        )
+        self.assertIsNotNone(
+            BARE_PROPERTY_CONDITION.search("contains_any_condition( 'sender', [sender])"),
+        )
+        # The correct use — a variable the enclosing loop binds — must not trip.
+        self.assertIsNone(
+            BARE_PROPERTY_CONDITION.search('contains_any_condition("messageSubject", subject_terms)'),
+        )
+        self.assertIsNone(
+            BARE_PROPERTY_CONDITION.search('contains_any_condition("messageSender", [sender])'),
+        )
+        # Prose describing the banned call is not a violation; `manage/trash.py`
+        # documents it in a comment to explain why it no longer builds one.
+        self.assertTrue(
+            _is_docstring_or_comment_line('        # `contains_any_condition("subject", ...)` -> unbound'),
+        )
+
+    def test_bare_property_scan_covers_core_and_tools(self):
+        """The rule's file set must span both packages, or it goes vacuous."""
+        scanned = {path.relative_to(PACKAGE_DIR).as_posix() for path in PACKAGE_DIR.rglob("*.py")}
+        self.assertIn(
+            "core/normalization.py",
+            scanned,
+            "The scan must reach core/, where contains_any_condition is defined.",
+        )
+        self.assertIn("tools/manage/trash.py", scanned)
+        self.assertGreater(len(scanned), 60, f"Only {len(scanned)} module(s) scanned; the file set regressed.")
 
 
 class NoDangerousWhoseTests(unittest.TestCase):

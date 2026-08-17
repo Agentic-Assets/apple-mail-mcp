@@ -139,6 +139,18 @@ def _suspect_fields(
     }
 
 
+def unread_count_is_suspect(*, cached_unread: int | None, total_messages: int | None) -> bool:
+    """True when these two numbers alone prove the cached unread count wrong.
+
+    For callers that emit only the boolean flag rather than the full block —
+    ``list_mailboxes``' per-mailbox rows, which keep reason and detail at the
+    payload envelope. Shares the rule (and the negative "count unavailable"
+    sentinel handling) with :func:`unread_count_disclosure` so the two cannot
+    disagree about the same row.
+    """
+    return bool(_suspect_fields(cached_unread, total_messages, None))
+
+
 def unread_count_disclosure(
     *,
     cached_unread: int | None = None,
