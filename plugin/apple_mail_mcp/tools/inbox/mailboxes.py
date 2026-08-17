@@ -14,6 +14,12 @@ from apple_mail_mcp.core import (
 )
 from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import inbox
+from apple_mail_mcp.tools.unread_provenance import (
+    UNREAD_SOURCE_CACHED,
+    unread_count_disclosure,
+    unread_count_text_footer,
+    unread_count_text_label,
+)
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -28,10 +34,21 @@ def list_mailboxes(
     """
     List all mailboxes (folders) for a specific account or all accounts.
 
+    ``include_counts=True`` unread numbers are Mail.app's **cached**
+    ``unread count`` aggregate, not measured counts. They drift low: measured
+    2026-08-17 on a 25,012-message Exchange Inbox, Mail reported 3,236 unread
+    where per-message truth was 10,016 (a 68% under-report). Text mode marks
+    each one ``[Mail cached, unverified]``; JSON mode sets
+    ``unread_count_source`` on every row. Because this tool also reads
+    ``count of messages``, it flags any mailbox whose cached unread count
+    exceeds its message count as ``unread_count_suspect``.
+
     Args:
         account: Optional account name to filter (e.g., "Gmail", "Work"). If None, shows all accounts.
         include_counts: Whether to include message counts for each mailbox (default: False).
             Counts are expensive on large accounts — pass True only for folder audits.
+            ``message_count`` comes from Mail's ``count of messages`` and is
+            reliable; ``unread_count`` is the cached aggregate described above.
         output_format: "text" (default, human-readable) or "json" (structured list of mailbox dicts)
         max_mailboxes: Cap on mailboxes returned per account. Defaults to 100. When the cap
             fires, text mode appends a truncation banner and JSON mode includes
@@ -41,6 +58,13 @@ def list_mailboxes(
     Returns:
         Formatted list of mailboxes with optional message counts.
         For nested mailboxes, shows both indented format and path format (e.g., "Projects/Amplify Impact")
+
+        With ``include_counts=True``, JSON rows carry ``unread_count_source``
+        (``"mail_cached_aggregate"``) and, when the cached count exceeds the
+        message count, ``unread_count_suspect``; the capped payload also carries
+        envelope-level ``unread_count_measured`` / ``unread_count_note`` and the
+        suspect fields. Text mode appends ``[Mail cached, unverified]`` or
+        ``[Mail cached, SUSPECT]`` to each unread number plus a closing note.
     """
     # Apply the default cap for both modes.
     effective_max_mailboxes = max_mailboxes if max_mailboxes is not None else 100
@@ -61,12 +85,20 @@ def list_mailboxes(
             timeout=timeout,
         )
 
+    # `unread count` is Mail's cached aggregate, so every emitted number is
+    # labelled inline. A cached count above the mailbox's own message count is
+    # impossible and is marked SUSPECT — free here because we already read both.
     count_script = (
-        """
+        f"""
         try
             set msgCount to count of messages of aMailbox
             set unreadCount to unread count of aMailbox
-            set outputText to outputText & " (" & msgCount & " total, " & unreadCount & " unread)"
+            if unreadCount > msgCount then
+                set unreadLabel to "{unread_count_text_label(suspect=True)}"
+            else
+                set unreadLabel to "{unread_count_text_label()}"
+            end if
+            set outputText to outputText & " (" & msgCount & " total, " & unreadCount & " unread" & unreadLabel & ")"
         on error
             set outputText to outputText & " (count unavailable)"
         end try
@@ -156,6 +188,8 @@ def list_mailboxes(
             "Error: list_mailboxes timed out while enumerating mailboxes. "
             "Retry with a specific account, include_counts=False, or a larger `timeout`."
         )
+    if include_counts:
+        return "\n".join([result, "", *unread_count_text_footer()])
     return result
 
 
@@ -258,10 +292,29 @@ def _list_mailboxes_json(
         if include_counts:
             item["message_count"] = msg_count
             item["unread_count"] = unread_count
+            # Label every cached number, and flag the impossible ones. -1 is
+            # the "count unavailable" sentinel, not a real count.
+            item["unread_count_source"] = UNREAD_SOURCE_CACHED
+            if unread_count >= 0 and msg_count >= 0 and unread_count > msg_count:
+                item["unread_count_suspect"] = True
         mailboxes.append(item)
 
     if max_mailboxes is None:
+        # Bare-list shape is part of this branch's contract, so there is no
+        # envelope to hang provenance on; per-row `unread_count_source` carries
+        # it here.
         return json.dumps(mailboxes, indent=2)
+
+    # Envelope-level provenance, seeded from the first impossible row (found
+    # before the cap trims the list) so the detail names real numbers instead of
+    # a generic warning; per-row `unread_count_suspect` flags all of them.
+    disclosure: dict[str, Any] = {}
+    if include_counts:
+        offender = next((row for row in mailboxes if row.get("unread_count_suspect")), None)
+        disclosure = unread_count_disclosure(
+            cached_unread=offender["unread_count"] if offender else None,
+            total_messages=offender["message_count"] if offender else None,
+        )
 
     total = len(mailboxes)
     # If the AppleScript emitted more rows than the cap (fence-post: parent row
@@ -276,5 +329,6 @@ def _list_mailboxes_json(
         "total": total,
         "returned": returned,
         "truncated": truncated,
+        **disclosure,
     }
     return json.dumps(payload, indent=2)
