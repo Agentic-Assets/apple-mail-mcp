@@ -174,6 +174,17 @@ def _format_search_records_text(
             lines.append(f"PARTIAL: {len(errors)} account issue(s): {detail_text}")
         else:
             lines.append(f"PARTIAL: {len(errors)} account issue(s): {', '.join(errors)}")
+    elif error_details:
+        # A single-account scan reports per-mailbox failures (including the
+        # per-message scan-failure counter from ``script._SCAN_FAILURE_REPORT``)
+        # in ``error_details`` with nothing in ``errors``. Surface them here too:
+        # text is the default ``output_format``, so without this a scan that
+        # threw on every candidate would still render as a clean "FOUND: 0"
+        # (AGENTIC-2344).
+        detail_text = "; ".join(
+            f"{item.get('mailbox', '?')} ({item['type']}: {item['message']})" for item in error_details
+        )
+        lines.append(f"PARTIAL: {len(error_details)} mailbox issue(s): {detail_text}")
     lines.append("========================================")
     return "\n".join(lines)
 
