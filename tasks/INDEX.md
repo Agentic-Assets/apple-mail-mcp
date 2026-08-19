@@ -17,6 +17,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
+| [`active/post-3.11.7-defect-audit/`](active/post-3.11.7-defect-audit/) | Ranked defects found by the post-merge audit and live read-only run that preceded the v3.11.7 tag: `search_emails` reporting `has_more: false` at the scan wall, `export_emails(scope="correspondent")` omitting messages under a success banner, dropped mailboxes in `get_mailbox_unread_counts`, and a partially vacuous `whose` lint | Findings only, nothing fixed. Deliberately excluded from v3.11.7: each is an AppleScript behavior change needing its own live verification. See [`findings-2026-08-19.md`](active/post-3.11.7-defect-audit/findings-2026-08-19.md) for the suggested order |
 | [`active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/) | Bounded Linear backlog fixes: export, mailbox resolution, calendar participant discovery, and compose/draft safety | Shipped in PR #83, merged to `origin/main` at `ed9e1ee`; retained here pending archival housekeeping |
 | [`active/native-reply/`](active/native-reply/) | Native-format reply drafts, including attachment preservation and fail-closed verification | Attachment fix verified offline; disposable-fixture live matrix pending |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 fuzzy-selector retirement, metadata-index spike, `allow_filter_scan` decision | Decision brief awaiting sign-off; follow-up branches not started |

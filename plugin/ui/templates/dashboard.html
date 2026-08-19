@@ -153,6 +153,22 @@
             margin-bottom: 12px;
         }
 
+        /* Provenance for the unread numbers on the account cards. Not a warning:
+           a cached count is the normal case, and styling it as an alarm would
+           train people to ignore it. It only has to stop the badge from reading
+           as measured truth. */
+        .count-provenance {
+            font-size: 12px;
+            line-height: 1.4;
+            color: var(--text-tertiary);
+            margin: -6px 0 12px;
+            cursor: help;
+        }
+
+        .count-provenance[hidden] {
+            display: none;
+        }
+
         .accounts-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -578,6 +594,8 @@
         <!-- Accounts Section -->
         <section class="accounts-section">
             <h2 class="section-title">Accounts</h2>
+            <!-- Count provenance: ships hidden, revealed only from unreadDisclosure -->
+            <p class="count-provenance" id="countProvenance" hidden></p>
             <div class="accounts-grid" id="accountsGrid">
                 <!-- Account cards will be rendered here -->
             </div>
@@ -617,6 +635,7 @@
         /* ACCOUNTS_DATA_PLACEHOLDER */
         /* EMAILS_DATA_PLACEHOLDER */
         /* SCAN_ERRORS_DATA_PLACEHOLDER */
+        /* UNREAD_DISCLOSURE_PLACEHOLDER */
 
         // Fallback if data not injected
         if (typeof accountsData === 'undefined') {
@@ -629,6 +648,12 @@
         // for "unknown": an absent list must not raise a false alarm.
         if (typeof scanErrors === 'undefined') {
             var scanErrors = [];
+        }
+        // Absent means the caller told us nothing about provenance, which is not
+        // the same as telling us the counts were measured. The renderer stays
+        // silent rather than claiming either way.
+        if (typeof unreadDisclosure === 'undefined') {
+            var unreadDisclosure = {};
         }
 
         // Account color palette
@@ -755,6 +780,32 @@
             });
 
             banner.hidden = false;
+        }
+
+        // Say where the account-card numbers came from. Only speaks up when the
+        // payload explicitly reports an unmeasured count: `unread_count_measured`
+        // absent means unknown, and inventing a disclaimer for an unknown is its
+        // own kind of wrong answer.
+        function renderCountProvenance() {
+            const note = document.getElementById('countProvenance');
+            if (!note) return;
+
+            const disclosure = unreadDisclosure || {};
+            if (disclosure.unread_count_measured !== false) {
+                note.hidden = true;
+                return;
+            }
+
+            // Lede sentence on screen, full note on hover. The full text explains
+            // how far the drift has actually been measured, which is too long for
+            // a subtitle but is exactly what someone questioning a number wants.
+            const full = disclosure.unread_count_note || '';
+            const lede = full
+                ? full.split('. ')[0] + '.'
+                : 'Unread totals are Mail\'s cached count, not a measured one.';
+            note.textContent = lede;
+            note.title = full || lede;
+            note.hidden = false;
         }
 
         // Render email list
@@ -979,6 +1030,7 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             renderAccounts();
+            renderCountProvenance();
             renderScanWarning();
             renderEmails();
 

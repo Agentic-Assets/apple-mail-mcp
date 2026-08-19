@@ -34,6 +34,7 @@ def create_inbox_dashboard_ui(
     accounts_data: dict[str, int],
     recent_emails: list[dict[str, Any]],
     scan_errors: list[dict[str, str]] | None = None,
+    disclosure: dict[str, Any] | None = None,
 ) -> Any:
     """
     Create a UI resource for the Apple Mail inbox dashboard.
@@ -56,6 +57,11 @@ def create_inbox_dashboard_ui(
                       a failed scan returns the same empty list as a quiet
                       mailbox. Default/empty renders no warning at all, so a
                       quiet mailbox never looks broken.
+        disclosure: Optional unread-count provenance, as built by
+                      ``unread_count_disclosure()``. The numbers on the account
+                      cards are Mail's cached aggregate, which drifts low; without
+                      this the dashboard renders a stale count as a bare badge and
+                      the JSON branch is the only surface that says so.
 
     Returns:
         UIResource with uri "ui://apple-mail/inbox-dashboard"
@@ -69,8 +75,8 @@ def create_inbox_dashboard_ui(
     # Inject data into the template.
     #
     # `var`, not `const`, and not by preference: the template's
-    # "fallback if data not injected" block declares the same three identifiers
-    # with `var` inside an `if`, and `var` hoists out of the block to script
+    # "fallback if data not injected" block declares every one of these
+    # identifiers with `var` inside an `if`, and `var` hoists to script
     # scope. `const x` here plus `var x` there is a duplicate lexical
     # declaration, which is a **parse-time** SyntaxError — the entire inline
     # script never runs, so accounts, emails, and diagnostics all render as an
@@ -89,6 +95,10 @@ def create_inbox_dashboard_ui(
         .replace(
             "/* SCAN_ERRORS_DATA_PLACEHOLDER */",
             f"var scanErrors = {_embed_json(scan_errors or [])};",
+        )
+        .replace(
+            "/* UNREAD_DISCLOSURE_PLACEHOLDER */",
+            f"var unreadDisclosure = {_embed_json(disclosure or {})};",
         )
     )
 

@@ -304,6 +304,21 @@
   U+2029 line terminators JS honors and JSON does not. DOM-boundary escaping was
   already correct via the template's `escapeHtml()`; the hole was one layer up, at
   the script-element boundary.
+- **The unread-count provenance stopped at the JSON payload.** The release note
+  below lists `inbox_dashboard` among the surfaces that report where an unread
+  number came from, and that was true only on `output_format="json"` — a format
+  no default caller passes. The UI branch popped the provenance sentinel out of
+  the account map (so it would not render as a phantom account card) and then
+  called the renderer without it, so the page a person actually looks at showed
+  a count measured 68% low on a real 25K-message Exchange Inbox as a bare badge
+  with nothing to question. `create_inbox_dashboard_ui` now takes the
+  `disclosure` dict and the template renders its lede sentence under the Accounts
+  heading, with the full note on hover. It speaks only when
+  `unread_count_measured` is explicitly `false`: an absent disclosure means
+  unknown provenance, and manufacturing a disclaimer for an unknown is its own
+  wrong answer. Styled as a note rather than a warning, because a cached count is
+  the normal case and alarming on the normal case teaches people to ignore it.
+
 - **`inbox_dashboard` scan failures now reach the default UI output too.**
   `create_inbox_dashboard_ui` takes an optional `scan_errors` list, defaulting to
   empty so every existing caller is unchanged. A failed scan reveals a warning
