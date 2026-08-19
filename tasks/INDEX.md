@@ -25,6 +25,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 | [`active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/) | Explicit Cursor plugin-root launcher and host-specific validator | Shipped on `main` in v3.11.6; local 41-tool Cursor Agent acceptance passed; Marketplace/UI distribution evidence remains open |
 | [`active/central-marketplace-source-contract/`](active/central-marketplace-source-contract/) | Source payload, identity, signed-tag, and local-gate contract for the shared multi-plugin marketplace | PR #80 merged; shared Marketplace admission and client-registration remediation remain separately authorized external gates |
 | [`active/fast-search-index/`](active/fast-search-index/) | Index-backed fast path for metadata search: `Envelope Index` capability envelope, safe-read pattern, phased tool plan (AGENTIC-2345) | Research complete and measured; implementation not started. Phase 0 (AGENTIC-2344) shipped fixed in v3.11.7; its AGENTIC-2356 date-window follow-up is live-verified on a large Exchange mailbox |
+| [`active/trash-safety-and-zero-bounds/`](active/trash-safety-and-zero-bounds/) | Eleven silent-failure defects: trash `dry_run`/`max_deletes`/date-window, draft-cleanup deletes, `move_email` bounds, dashboard silent-zero and dead UI page, search bound validation (AGENTIC-2359) | Local gates green at 1932 tests. **No destructive path live-verified**; disposable-fixture pass is the outstanding gate. Expect small conflicts with PR #90 |
 
 ## Reference
 

@@ -141,10 +141,23 @@ RAW_MESSAGES_ENUMERATION = re.compile(r"(?<!count of )(?<!outgoing )\bmessages o
 # ``bounded_scan.py`` never appeared here, being fixed in the same change that
 # brought it into scope.
 KNOWN_RAW_MESSAGES_ENUMERATION: dict[str, int] = {
-    "tools/analytics/dashboard.py": 1,
+    # Keys are PACKAGE_DIR-relative (AGENTIC-2355 widened the scan root); the
+    # ratchets below came in against the older TOOLS_DIR namespace and are
+    # restated here under the current one.
+    #
+    # Ratcheted 1 -> 0 (entry removed): the dashboard's recent-email scan no
+    # longer falls back to `messages of inboxMailbox` when the mailbox holds
+    # fewer messages than the cap. It slices `messages 1 thru inboxTotal`
+    # instead, guarded by a zero check (every slice form raises -1719 on an
+    # empty mailbox) and its own handler (`count of messages` can read
+    # stale-high), and reports the throw as an ERROR_MAILBOX diagnostic.
     "tools/analytics/export_helpers.py": 1,
     "tools/inbox/overview.py": 1,
-    "tools/manage/trash.py": 2,
+    # Ratcheted 2 -> 1: the delete_permanent apply_to_all path no longer hand-rolls
+    # a raw `messages of trashMailbox` fallback; it resolves ids through the bounded
+    # search (which carries the caller's date window) and recurses into the
+    # id-direct purge. The remaining site is the empty_trash branch.
+    "tools/manage/trash.py": 1,
 }
 
 # Mail properties that resolve only where an enclosing `whose` clause supplies the

@@ -119,10 +119,17 @@ async def search_emails(
             subject_keyword) to keep wall time predictable on large mailboxes.
         allow_body_scan: Opt in to body_text scans (default False). When False,
             passing body_text returns a structured ``BODY_SCAN_DISABLED`` error.
-        max_results: Backward-compatible alias for limit
+        max_results: Backward-compatible alias for limit. Same positive-value
+            requirement as `limit`.
         output_format: Output format: "text" or "json" (default: "text")
-        offset: Number of matching results to skip before returning data
-        limit: Maximum number of results to return per page
+        offset: Number of matching results to skip before returning data.
+            Must be >= 0; a negative offset returns
+            ``"Error: offset must be >= 0"`` before any AppleScript runs.
+        limit: Maximum number of results to return per page. Must be > 0; a
+            zero or negative `limit` (or `max_results`) is refused with a
+            structured ``UNBOUNDED_SCAN_REQUIRED`` error before any AppleScript
+            runs, rather than returning an empty result set that would be
+            indistinguishable from "no matches".
         sort: Result sort order: "date_desc" or "date_asc"
         exclude_replied: When True, filter out emails whose native
             `was_replied_to` flag is true (Mail's own read-only "was replied
@@ -187,6 +194,49 @@ async def search_emails(
 
     if limit is None:
         limit = max_results if max_results is not None else 100
+
+    # Pagination validation, ahead of the account probe and the script builder,
+    # so a malformed page request never reaches Mail.app.
+    #
+    # `script._build_search_script` derives its scan bound as
+    # `base_cap = limit + 1 + offset`, so a non-positive `limit` (or an `offset`
+    # negative enough to cancel it) produces `messages 1 thru 0` — a slice a
+    # read-only live probe across four Mail backends showed does NOT raise on a
+    # non-empty mailbox: AppleScript clamps index 0 up to 1 and hands back one
+    # real message. `dispatch._search_mail_records` does guard both cases, but it
+    # absorbs them instead of reporting them (`limit <= 0` returns an empty
+    # tuple; `offset < 0` raises a `ValueError` this function flattens to a bare
+    # string), so a nonsense page size rendered as an authoritative
+    # `{"items": [], "returned": 0}` — indistinguishable from an empty mailbox —
+    # and `limit=-1` also reported `has_more: true` with `next_offset: 0`
+    # (`len([]) > -1`), a pagination loop with no exit. Validating here also
+    # stops leaning on that downstream guard for correctness:
+    # `dispatch._search_mail_records_sync(account=...)` reaches the same builder
+    # while skipping it entirely.
+    if offset < 0:
+        # Bare string matches the sibling `export_emails` / `list_events` offset
+        # guards and preserves the exact text the `ValueError` path already
+        # returned. No structured code: none of the documented codes describes a
+        # negative offset, and minting one here alone would split the pagination
+        # contract across two shapes.
+        return "Error: offset must be >= 0"
+    if limit <= 0:
+        # Reuses `UNBOUNDED_SCAN_REQUIRED` rather than adding a code: the closest
+        # sibling, `list_inbox_emails`, already answers `max_emails <= 0` with
+        # exactly this code, and `tools/CLAUDE.md` documents its trigger as
+        # "`recent_days=0` / `max_emails=0`" — a zero page size is already inside
+        # the code's meaning. The remediation names the page-size knob rather
+        # than the date window, matching that sibling.
+        return serialize_tool_error(
+            ToolError(
+                code="UNBOUNDED_SCAN_REQUIRED",
+                message=(f"search_emails refuses a non-positive limit (got limit={limit}); pass limit=20"),
+                remediation={
+                    "preferred": "Pass limit=20 (or max_results=20)",
+                    "note": "Page with offset to reach older messages; full-mailbox scans are disabled.",
+                },
+            )
+        )
 
     effective_recent_days = float(recent_days) if recent_days else 0.0
     if date_from is None and effective_recent_days <= 0:

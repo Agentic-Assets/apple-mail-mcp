@@ -111,7 +111,7 @@ list_inbox_emails(max_emails=50, include_content=False)
 - **CCs you're on**: Quickly assess relevance
 
 **Batch operations**:
-- Trash newsletters: collect ids with `search_emails(sender_domain="newsletter.example.com", ...)`, then `manage_trash(action="move_to_trash", message_ids=[...])`
+- Trash newsletters: collect ids with `search_emails(sender_domain="newsletter.example.com", ...)`, then preview with `manage_trash(action="move_to_trash", message_ids=[...])` and repeat the same call with `dry_run=False` to act
 - Mark read automated: collect ids with `search_emails(sender_domain="notifications.example.com", ...)`, then `update_email_status(action="mark_read", message_ids=[...])`
 
 ### Step 5: Set Context for Later (1-2 min)
@@ -135,7 +135,10 @@ get_mailbox_unread_counts(summary_only=True)
    - Promotions, old automated emails, spam
    ```
    search_emails(sender_domain="promotions.example.com", read_status="unread")
+   # Preview first (dry_run defaults to True, so nothing is trashed yet)
    manage_trash(action="move_to_trash", message_ids=[...], max_deletes=20)
+   # Trash for real, after reading the preview back to the user
+   manage_trash(action="move_to_trash", message_ids=[...], max_deletes=20, dry_run=False)
    ```
 
 2. **Second Pass - Flag Urgent (5 min)**
@@ -366,7 +369,7 @@ update_email_status(action="unflag", message_ids=[...], max_updates=10)
 | Find urgent | `search_emails()` | subject_keyword="urgent" |
 | Check VIPs | `search_emails()` | sender_exact="boss@company.com" |
 | Bulk flag | `update_email_status()` | action="flag" |
-| Bulk trash | `manage_trash()` | action="move_to_trash" |
+| Bulk trash | `manage_trash()` | action="move_to_trash"; previews, so repeat the same call with dry_run=False to act |
 | Bulk mark read | `update_email_status()` | action="mark_read" |
 | Recent scan | `list_inbox_emails()` | max_emails=50 |
 | Check counts | `get_mailbox_unread_counts(summary_only=True)` | See progress |

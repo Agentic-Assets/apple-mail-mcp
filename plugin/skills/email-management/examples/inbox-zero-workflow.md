@@ -15,7 +15,7 @@ For every email in your inbox, choose ONE action:
 
 ### 1. Delete (or Trash)
 **When**: Email has no value, spam, unwanted newsletters
-**Tool**: collect `message_id` from `list_inbox_emails` or `search_emails`, then `manage_trash(action="move_to_trash", message_ids=[...])`. Do not pass `subject_keyword=` or `sender=` to `manage_trash` (returns `TARGET_SELECTOR_DEPRECATED`).
+**Tool**: collect `message_id` from `list_inbox_emails` or `search_emails`, then preview with `manage_trash(action="move_to_trash", message_ids=[...])` and repeat the same call with `dry_run=False` to act. Do not pass `subject_keyword=` or `sender=` to `manage_trash` (returns `TARGET_SELECTOR_DEPRECATED`).
 **Examples**:
 - Spam and promotional emails you'll never read
 - Automated notifications you don't need
@@ -165,7 +165,7 @@ Inbox (empty)
 **Solution**:
 1. Unsubscribe from newsletters: `get_statistics(scope="account_overview")` to see top senders
 2. Set up filters in Mail app for auto-filing
-3. Process in batches: `search_emails(sender_domain="newsletter.example.com", recent_days=30, limit=50)` → collect `message_id`s → `manage_trash(action="move_to_trash", message_ids=[...])`
+3. Process in batches: `search_emails(sender_domain="newsletter.example.com", recent_days=30, limit=50)` → collect `message_id`s → `manage_trash(action="move_to_trash", message_ids=[...])` to preview, then repeat the same call with `dry_run=False` to act
 4. Delegate more: Forward emails that others can handle
 
 ### "I'm afraid to delete emails"
@@ -275,7 +275,7 @@ Track these to measure success:
 | Check urgent | `search_emails(subject_keyword="urgent")` |
 | Quick reply | `get_email_thread(account="Work", message_id="...")` then `reply_to_email(reply_body="...", message_id="...")`; load **`email-drafting`** for native reply |
 | Create draft (in-thread defer) | `reply_to_email(message_id="...", mode="draft", reply_body="...")`; load **`email-drafting`** for native reply defaults |
-| Move to trash | `manage_trash(action="move_to_trash", message_ids=[...])` |
+| Move to trash | `manage_trash(action="move_to_trash", message_ids=[...])` previews; repeat the same call with `dry_run=False` to act |
 | Archive | `move_email(message_ids=[...], to_mailbox="Archive")` |
 | Flag for later | `update_email_status(action="flag", message_ids=[...])` |
 | List drafts | `manage_drafts(action="list")` |
