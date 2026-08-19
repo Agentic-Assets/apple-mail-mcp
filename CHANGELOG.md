@@ -2,7 +2,25 @@
 
 ## Unreleased
 
-## 3.11.7 - 2026-08-17
+## 3.11.7 - 2026-08-19
+
+- **The tracked plugin zip was not reproducible, so a release that changed
+  nothing still failed its own gate.** `zip` stamps every entry with its
+  source file's mtime and walks the tree in readdir order, so one commit built
+  in two checkouts produced two different archives: a `git checkout` writes
+  fresh mtimes, and mtimes are exactly what the archive records. Rebuilding
+  `apple-mail-plugin.zip` in a fresh clone therefore drifted the tracked
+  artifact with zero content difference — 40 entry timestamps moved and not a
+  single CRC did — and `source-release-gate.sh`'s zero-drift check refused to
+  stamp the release until someone committed a no-op 15 MB binary. The build
+  now stages the payload, normalises every mtime to the 1980-01-01 zip epoch,
+  and hands `zip` an `LC_ALL=C`-sorted entry list, so the bytes depend on
+  content alone; touching every `.py` file, the launcher, and the manifest to
+  three different times now rebuilds the identical archive. Entry names, CRCs,
+  sizes, and permissions are unchanged from the previous build, including the
+  `0755` on `start_mcp.sh` that an install needs to launch at all. Symlinks
+  are enumerated rather than skipped so a newly added one fails the build
+  loudly instead of silently vanishing from the payload.
 
 - **A native-format reply could be saved from an identity the caller never
   asked for.** When `from_address` was supplied, `set sender of replyMessage`
@@ -34,7 +52,7 @@
   blocks, but a naive `ast.Constant` walk finds only 39, so 88% of this
   codebase's AppleScript is written in f-strings and would have been invisible
   to a text-level check. That is the same way the `whose`-clause lint went
-  vacuous in v3.11.7. The sanctioned P1 error channel emits a *dangling*
+  vacuous through v3.11.6. The sanctioned P1 error channel emits a *dangling*
   `on error` arm spliced in at the call site; the detector resolves those
   builders so the lint cannot fail contributors for adopting the very pattern
   its remediation message recommends.
@@ -48,8 +66,31 @@
   before running any search, and checks the bound before each append, so all
   four call sites are covered. `update_email_status` additionally refuses a
   non-positive `max_updates` at the boundary with `INVALID_ACTION_CAP`;
-  `manage_trash` and `move_email` adopt the same guard under AGENTIC-2374.
+  `manage_trash` and `move_email` adopt the same guard, which is the whole of
+  AGENTIC-2374 and ships here rather than waiting on it.
   Source-verified; no destructive call was executed to confirm the reach.
+- **`move_email` accepted a `max_moves` and an `older_than_days` it could not
+  honor.** A non-positive `max_moves` is now refused with
+  `UNBOUNDED_SCAN_REQUIRED` before any Mail I/O rather than clamped up to 1 —
+  clamping a mutation bound the caller set to "none" is the same defect class
+  as the AppleScript index clamp, just relocated into Python where it is
+  harder to see. An oversized bound has an obvious partial intent to honor, so
+  it clamps to the 50-message ceiling and names both numbers in the preview and
+  the result (`max_moves=10000 requested, clamped to 50; valid range 1-50`),
+  which keeps `TOTAL: 50 email(s) moved` from reading as the caller's own
+  10000. Separately, a *negative* `older_than_days` used to null both window
+  bounds and discard the caller's `recent_days` along with them, so a request
+  phrased "move mail older than N days" moved the newest messages instead; it
+  now normalises to no age filter and leaves the rest of the window intact.
+  (`older_than_days=0` was already caught by an existing falsy check.)
+- **A `cleanup_empty` run whose Drafts window could not be read still reported
+  a clean summary.** The slice that fetches the draft head sat in a bare `try`,
+  so a failed read left the candidate list empty and the run reported nothing to
+  clean — indistinguishable from a Drafts mailbox that genuinely had no empty
+  drafts. The failure is now named in the report (`drafts window unavailable
+  (…); 0 of N draft(s) examined`) and the summary says outright that no drafts
+  were examined, so the result cannot be read as confirmation that Drafts is
+  clean.
 - **`update_email_status` reported a count that was not the mutation count.**
   On the id path the mutation ran in one loop and `updateCount` was incremented
   in a *separate* loop, as the last statement after three property reads inside
@@ -103,9 +144,10 @@
   so an enumeration failure became zero names, then zero events, and
   `calendar_errors: []`. It reached five read tools plus `resolve_create_target`
   and `manage_calendars`; with an explicit `calendar=` it produced a misleading
-  `CALENDAR_NOT_FOUND` when the truth was that enumeration broke. The guard
-  requires the engine to have *reported* an error, so a host that genuinely has
-  no calendars still returns zero with no error.
+  `CALENDAR_NOT_FOUND` when the truth was that enumeration broke. Callers now
+  get `CALENDAR_ENUMERATION_FAILED`, which says which of the two it was. The
+  guard requires the engine to have *reported* an error, so a host that
+  genuinely has no calendars still returns zero with no error.
 - **`get_email_thread` JSON mode fed the script's own error string into the row
   parser** and returned `{"items": [], "returned": 0}`. Text mode was correct.
   **`get_email_by_ids` conflated "this id is not in the mailbox" with "the read
