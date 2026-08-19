@@ -18,6 +18,7 @@ Start at [`../todo.md`](../todo.md) and [`../INDEX.md`](../INDEX.md).
 | [`2026-07/shipped/agentic-1277-compose-draft-verification/`](2026-07/shipped/agentic-1277-compose-draft-verification/) | AGENTIC-1277 exact-recipient smoke cleanup and AGENTIC-1191 bounded Drafts/perf hardening, integrated for v3.11.5 |
 | [`2026-07/shipped/branch-review-v3.11.3/`](2026-07/shipped/branch-review-v3.11.3/) | v3.11.3 branch review and completed fix plan; its deferred product decisions remain historical forward-queue context |
 | [`2026-07/shipped/v3.11.5-consolidated-release/`](2026-07/shipped/v3.11.5-consolidated-release/) | v3.11.5 consolidation, merged and tagged; successor distribution evidence is tracked in the active v3.11.6 lane |
+| [`2026-08/shipped/`](2026-08/shipped/) | The three 2026-08-19 merges to `main`: identity gate + `search_emails` date window (PR #90, `dc56b3c`), trash-safety and zero-bounds (PR #91, `ab04304`), silent error channels + bare-`try` lint ratchet (PR #92, `b30d9c4`). Shipped on 3.11.7, which is still untagged |
 
 ## When archiving
 
