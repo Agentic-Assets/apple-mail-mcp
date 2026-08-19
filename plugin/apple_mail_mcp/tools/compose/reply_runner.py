@@ -4,9 +4,9 @@ Leaf module split out of ``reply.py`` (AGENTIC-1214) so the retry loop there
 does not have to carry these self-contained pieces and push the module over
 the 600 LOC budget. The BODY-verification failure mapping (``body_missing`` /
 ``body_after_quote`` / ``not_found`` / timeouts) still lives in
-``verification.py`` and is dispatched from ``reply.py``; only the pre-typing
-and mid-typing ABORT sentinels (``GUARD_ABORT*``, ``TYPING_INTERRUPTED``) are
-mapped here, since ``reply.py`` calls the same dispatcher for both the first
+``verification.py`` and is dispatched from ``reply.py``; only the pre-save ABORT
+sentinels (``SENDER_OVERRIDE_FAILED``, ``GUARD_ABORT*``, ``TYPING_INTERRUPTED``)
+are mapped here, since ``reply.py`` calls the same dispatcher for both the first
 compose attempt and a retype attempt.
 """
 
@@ -22,6 +22,7 @@ from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
     _native_reply_draft_resolver_handlers_applescript,
 )
 from apple_mail_mcp.tools.compose.reply_identity import NativeReplyDraftIdentity
+from apple_mail_mcp.tools.compose.reply_window_identity_scripts import NATIVE_REPLY_SENDER_OVERRIDE_ABORT
 from apple_mail_mcp.tools.compose.saved_draft_checks import _verify_saved_reply_draft
 from apple_mail_mcp.tools.compose.verification import _extract_output_field
 
@@ -167,6 +168,34 @@ def _probe_abort_artifact(
     return probe.status, suspected, guard_reply_subject, derived_reply_subject
 
 
+_EXACT_ARTIFACT_CLEANUP = (
+    "If suspected_draft_id is present, inspect or delete that exact Drafts artifact "
+    "with verify_draft or manage_drafts(action='delete', draft_id=...)."
+)
+
+
+def _abort_artifact_remediation(
+    artifact_status: str,
+    suspected: str | None,
+    result: str,
+    *,
+    cleanup: str = _EXACT_ARTIFACT_CLEANUP,
+) -> dict[str, str | None]:
+    """Return the artifact-report tail every native-reply abort remediation ends with.
+
+    Spread last (``{"preferred": ..., **_abort_artifact_remediation(...)}``) so the
+    caller-facing key order stays preferred → alternative → artifact report. Each
+    abort explains a different failure in its own words but reports the possible
+    stray Drafts row identically, so that half is written once.
+    """
+    return {
+        "draft_artifact_status": artifact_status,
+        "suspected_draft_id": suspected,
+        "cleanup": cleanup,
+        "detail": result,
+    }
+
+
 def _native_reply_abort_response(
     result: str,
     *,
@@ -177,8 +206,10 @@ def _native_reply_abort_response(
     """Return a structured error for a native-reply abort sentinel, or None.
 
     Handles ``TYPING_INTERRUPTED`` (focus lost mid-chunk-typing; the partial
-    compose window was already discarded by the AppleScript) and
-    ``GUARD_ABORT`` / ``GUARD_ABORT_SUBJECT`` (pre-typing focus failures).
+    compose window was already discarded by the AppleScript),
+    ``SENDER_OVERRIDE_FAILED`` (Mail refused an explicitly requested
+    ``from_address`` before anything was saved), and ``GUARD_ABORT`` /
+    ``GUARD_ABORT_SUBJECT`` (pre-typing focus failures).
     Returns None when ``result`` is not one of these sentinels so the caller
     proceeds to the normal success/verification handling. Callable for both
     the first compose attempt and a retype attempt so a second-run abort is
@@ -201,13 +232,43 @@ def _native_reply_abort_response(
                         "Retry with native_format=True (the default) and Mail visible and not being "
                         "clicked; native replies type into the reply window and need it to hold focus."
                     ),
-                    "draft_artifact_status": artifact_status,
-                    "suspected_draft_id": suspected,
-                    "cleanup": (
-                        "If suspected_draft_id is present, a stray artifact may still exist; inspect or "
-                        "delete it with verify_draft or manage_drafts(action='delete', draft_id=...)."
+                    **_abort_artifact_remediation(
+                        artifact_status,
+                        suspected,
+                        result,
+                        cleanup=(
+                            "If suspected_draft_id is present, a stray artifact may still exist; inspect or "
+                            "delete it with verify_draft or manage_drafts(action='delete', draft_id=...)."
+                        ),
                     ),
-                    "detail": result,
+                },
+            )
+        )
+    if result.startswith(NATIVE_REPLY_SENDER_OVERRIDE_ABORT):
+        artifact_status, suspected, _guard_subject, _derived_subject = _probe_abort_artifact(
+            result, account=account, reply_body=reply_body, timeout=timeout
+        )
+        return serialize_tool_error(
+            ToolError(
+                code="REPLY_SENDER_OVERRIDE_FAILED",
+                message=(
+                    "Mail refused the requested from_address on the reply window, so the reply was "
+                    "abandoned before being saved rather than drafted from a different identity. The "
+                    "open reply window was discarded, no draft was saved, and no email was sent."
+                ),
+                remediation={
+                    "preferred": (
+                        "Confirm the requested address is enabled for sending on this account (Mail > "
+                        "Settings > Accounts), then retry. Omitting from_address lets Mail use the "
+                        "account's own default send-from identity."
+                    ),
+                    "alternative": (
+                        "On Exchange or a delegated mailbox, send-as for the requested alias can be "
+                        "blocked by server policy; that cannot be worked around from this tool. Do not "
+                        "retry without from_address unless sending from the default identity is "
+                        "acceptable to the user."
+                    ),
+                    **_abort_artifact_remediation(artifact_status, suspected, result),
                 },
             )
         )
@@ -238,13 +299,7 @@ def _native_reply_abort_response(
                     ),
                     "expected_subject": guard_reply_subject or derived_reply_subject,
                     "derived_subject": derived_reply_subject or None,
-                    "draft_artifact_status": artifact_status,
-                    "suspected_draft_id": suspected_artifact_id,
-                    "cleanup": (
-                        "If suspected_draft_id is present, inspect or delete that exact Drafts "
-                        "artifact with verify_draft or manage_drafts(action='delete', draft_id=...)."
-                    ),
-                    "detail": result,
+                    **_abort_artifact_remediation(artifact_status, suspected_artifact_id, result),
                 },
             )
         )
@@ -265,13 +320,7 @@ def _native_reply_abort_response(
                     "default) once Mail can take focus. If focus still cannot be acquired, stop and "
                     "report the blocker."
                 ),
-                "draft_artifact_status": artifact_status,
-                "suspected_draft_id": suspected_artifact_id,
-                "cleanup": (
-                    "If suspected_draft_id is present, inspect or delete that exact Drafts artifact "
-                    "with verify_draft or manage_drafts(action='delete', draft_id=...)."
-                ),
-                "detail": result,
+                **_abort_artifact_remediation(artifact_status, suspected_artifact_id, result),
             },
         )
     )

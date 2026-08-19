@@ -56,6 +56,23 @@ def _forward_attachment_verification_error(detail: str) -> str:
     )
 
 
+# A bare ``try`` around ``content of foundMessage`` used to leave ``origContent``
+# as "" whenever the read threw, so the forward carried only the
+# "---------- Forwarded message ----------" header block with the quoted
+# original silently missing — and still reported "Forward saved as draft."
+# Emptiness cannot be the signal, because a genuinely empty original body is a
+# legitimate case (subject-only mail, invitations), so the script records
+# whether the read itself succeeded and fails closed before any outgoing
+# message exists. Same fail-closed shape as the reply path's
+# ``QUOTE_PROOF_UNAVAILABLE`` guard in ``compose/reply_scripts.py``.
+_FORWARD_QUOTE_UNAVAILABLE_RETURN = (
+    'return "Error: FORWARD_QUOTE_UNAVAILABLE" & return & '
+    '"Detail: Mail could not read the original message body, so the forward would have contained only the '
+    "forwarded-header block with the quoted original missing. No draft was saved and nothing was sent. "
+    'Retry after Mail finishes downloading the message."'
+)
+
+
 def _is_known_inline_signature_asset(filename: str) -> bool:
     """Return whether Mail identified a provider-inserted Outlook image asset.
 
@@ -437,10 +454,18 @@ tell application "Mail"
         try
             set origDate to (date received of foundMessage) as string
         end try
+        -- Tri-state read: "" alone cannot distinguish a failed body read from a
+        -- genuinely empty original, so track the read itself and fail closed
+        -- only on failure (see _FORWARD_QUOTE_UNAVAILABLE_RETURN).
         set origContent to ""
+        set origContentRead to false
         try
             set origContent to content of foundMessage
+            set origContentRead to true
         end try
+        if not origContentRead then
+            {_FORWARD_QUOTE_UNAVAILABLE_RETURN}
+        end if
         if (count of characters of origContent) > 4000 then
             set origContent to (text 1 thru 4000 of origContent) & return & "[... forwarded original truncated ...]"
         end if

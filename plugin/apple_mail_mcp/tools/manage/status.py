@@ -4,6 +4,7 @@ Patched names (``run_applescript``, ``validate_account_name``) are referenced vi
 ``manage`` facade so existing ``patch('...tools.manage.<name>')`` seams keep working."""
 
 from apple_mail_mcp import server as _server
+from apple_mail_mcp.applescript_snippets import indent_block
 from apple_mail_mcp.backend.base import target_selector_deprecated_error
 from apple_mail_mcp.bounded_scan import build_whose_id_list
 from apple_mail_mcp.core import (
@@ -17,6 +18,7 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.server import IDEMPOTENT_WRITE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import manage
 from apple_mail_mcp.tools.manage.helpers import (
+    _check_action_cap,
     _check_message_ids_cap,
     _date_from_for_recent_days,
     _date_to_for_older_than,
@@ -25,6 +27,61 @@ from apple_mail_mcp.tools.manage.helpers import (
     _search_message_ids,
     _with_filter_scan_warning,
 )
+
+
+def _mutation_report_block(action_label: str, *, indent: str) -> str:
+    """Count one mutated message, then describe it under its own ``on error`` arm.
+
+    Both branches of ``update_email_status`` emit this. ``updateCount`` is
+    incremented at the mutation site rather than after the three property reads,
+    because a message whose status changed but whose subject could not be read is
+    still mutated on the server; counting the read made ``TOTAL UPDATED`` a count
+    of successful *descriptions*. The reads keep their own arm so a failure there
+    lands on ``detailFailureCount`` and never silently subtracts from the
+    mutation count.
+    """
+    return indent_block(
+        f"""if mutatedThisMessage then
+    set updateCount to updateCount + 1
+    try
+        set messageSubject to subject of aMessage
+        set messageSender to sender of aMessage
+        set messageDate to date received of aMessage
+
+        set outputText to outputText & "- {action_label}: " & messageSubject & return
+        set outputText to outputText & "   From: " & messageSender & return
+        set outputText to outputText & "   Date: " & (messageDate as string) & return & return
+    on error
+        set detailFailureCount to detailFailureCount + 1
+    end try
+end if""",
+        indent,
+    )
+
+
+def _failure_summary_lines(*, include_selection: bool, indent: str) -> str:
+    """Report each failure counter, but only when it is non-zero.
+
+    Guarded so a clean run stays quiet: an unconditional "0 failures" line would
+    train callers to skim past the section that matters. ``include_selection`` is
+    for the filter branch only, whose candidate loop can lose a message before it
+    is ever considered a match; the id branch has no selection step.
+    """
+    selection_block = ""
+    if include_selection:
+        selection_block = """if selectionFailureCount > 0 then
+    set outputText to outputText & "SELECTION READ FAILURES: " & selectionFailureCount & " candidate(s) could not be read and were never considered; results are incomplete" & return
+end if
+"""
+    return indent_block(
+        f"""{selection_block}if updateFailureCount > 0 then
+    set outputText to outputText & "UPDATE FAILURES: " & updateFailureCount & " matched message(s) could not be updated" & return
+end if
+if detailFailureCount > 0 then
+    set outputText to outputText & "DETAILS UNAVAILABLE: " & detailFailureCount & " updated message(s) could not be described above; the status change still applied" & return
+end if""",
+        indent,
+    )
 
 
 @mcp.tool(annotations=IDEMPOTENT_WRITE_TOOL_ANNOTATIONS)
@@ -97,6 +154,10 @@ def update_email_status(
             exact_selector="message_ids",
         )
 
+    action_cap_error = _check_action_cap(max_updates, "max_updates", "update_email_status")
+    if action_cap_error:
+        return action_cap_error
+
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = manage.validate_account_name(account, timeout=validation_timeout)
     if account_err:
@@ -141,6 +202,8 @@ def update_email_status(
             with timeout of {effective_timeout} seconds
                 set outputText to "UPDATING EMAIL STATUS BY IDS: {action_label}" & return & return
                 set updateCount to 0
+                set updateFailureCount to 0
+                set detailFailureCount to 0
 
                 try
                     set targetAccount to account "{safe_account}"
@@ -148,34 +211,37 @@ def update_email_status(
 
                     set targetMessages to every message of targetMailbox whose {id_condition}
                     set requestedCount to {len(normalized_ids)}
+                    set matchedCount to count of targetMessages
 
-                    if (count of targetMessages) > 0 then
+                    if matchedCount > 0 then
+                        set bulkSucceeded to false
                         try
                             {bulk_action_script}
+                            set bulkSucceeded to true
                         on error errMsg number errNum
                             set outputText to outputText & "BULKERR|errNum=" & errNum & " errMsg=" & errMsg & return
-                            repeat with aMessage in targetMessages
-                                {single_action_script}
-                            end repeat
                         end try
 
                         repeat with aMessage in targetMessages
-                            try
-                                set messageSubject to subject of aMessage
-                                set messageSender to sender of aMessage
-                                set messageDate to date received of aMessage
+                            set mutatedThisMessage to bulkSucceeded
+                            if not bulkSucceeded then
+                                try
+                                    {single_action_script}
+                                    set mutatedThisMessage to true
+                                on error
+                                    set updateFailureCount to updateFailureCount + 1
+                                end try
+                            end if
 
-                                set outputText to outputText & "- {action_label}: " & messageSubject & return
-                                set outputText to outputText & "   From: " & messageSender & return
-                                set outputText to outputText & "   Date: " & (messageDate as string) & return & return
-                                set updateCount to updateCount + 1
-                            end try
+                            {_mutation_report_block(action_label, indent=" " * 28)}
                         end repeat
                     end if
 
                     set outputText to outputText & "========================================" & return
                     set outputText to outputText & "REQUESTED IDS: " & requestedCount & return
+                    set outputText to outputText & "MATCHED MESSAGES: " & matchedCount & return
                     set outputText to outputText & "TOTAL UPDATED: " & updateCount & " email(s)" & return
+                    {_failure_summary_lines(include_selection=False, indent=" " * 20)}
                     set outputText to outputText & "========================================" & return
 
                 on error errMsg
@@ -265,6 +331,10 @@ def update_email_status(
         with timeout of {effective_timeout} seconds
             set outputText to "UPDATING EMAIL STATUS: {action_label}" & return & return
             set updateCount to 0
+            set examinedCount to 0
+            set selectionFailureCount to 0
+            set updateFailureCount to 0
+            set detailFailureCount to 0
 
             try
                 set targetAccount to account "{safe_account}"
@@ -285,6 +355,7 @@ def update_email_status(
 
                 repeat with aMessage in candidateMessages
                     if (count of matchingMessages) >= {max_updates} then exit repeat
+                    set examinedCount to examinedCount + 1
                     try
                         set messageSubject to subject of aMessage
                         set messageSender to sender of aMessage
@@ -292,25 +363,30 @@ def update_email_status(
                         if {combined_condition} then
                             set end of matchingMessages to aMessage
                         end if
+                    on error
+                        set selectionFailureCount to selectionFailureCount + 1
                     end try
                 end repeat
 
+                set matchedCount to count of matchingMessages
+
                 repeat with aMessage in matchingMessages
+                    set mutatedThisMessage to false
                     try
                         {single_action_script}
-                        set messageSubject to subject of aMessage
-                        set messageSender to sender of aMessage
-                        set messageDate to date received of aMessage
-
-                        set outputText to outputText & "- {action_label}: " & messageSubject & return
-                        set outputText to outputText & "   From: " & messageSender & return
-                        set outputText to outputText & "   Date: " & (messageDate as string) & return & return
-                        set updateCount to updateCount + 1
+                        set mutatedThisMessage to true
+                    on error
+                        set updateFailureCount to updateFailureCount + 1
                     end try
+
+                    {_mutation_report_block(action_label, indent=" " * 20)}
                 end repeat
 
                 set outputText to outputText & "========================================" & return
+                set outputText to outputText & "CANDIDATES EXAMINED: " & examinedCount & return
+                set outputText to outputText & "MATCHED MESSAGES: " & matchedCount & return
                 set outputText to outputText & "TOTAL UPDATED: " & updateCount & " email(s)" & return
+                {_failure_summary_lines(include_selection=True, indent=" " * 16)}
                 set outputText to outputText & "========================================" & return
 
             on error errMsg

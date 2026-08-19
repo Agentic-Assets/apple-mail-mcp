@@ -69,7 +69,9 @@ from apple_mail_mcp.tools.inbox.overview_formatting import (
     _overview_suggestions,
 )
 from apple_mail_mcp.tools.inbox.parsing import (
+    _INBOX_ERROR_PREFIX,
     _VALID_READ_FILTERS,
+    _parse_inbox_error_lines,
     _parse_pipe_delimited_emails,
     _read_filter_condition,
     _resolve_read_filter,
@@ -83,6 +85,7 @@ __all__ = [
     "READ_ONLY_TOOL_ANNOTATIONS",
     "SCAN_BOUNDS",
     "ToolError",
+    "_INBOX_ERROR_PREFIX",
     "_VALID_READ_FILTERS",
     "_account_unread_provenance",
     "_attach_warnings_to_json",
@@ -99,6 +102,7 @@ __all__ = [
     "_list_mailboxes_json",
     "_overview_json_error",
     "_overview_suggestions",
+    "_parse_inbox_error_lines",
     "_parse_overview_account",
     "_parse_pipe_delimited_emails",
     "_read_filter_condition",

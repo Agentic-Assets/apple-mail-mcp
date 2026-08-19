@@ -71,8 +71,14 @@ def validate_save_path(
                 f"Error: {path_label} contains an invalid control character "
                 f"(U+{cp:04X}). Null bytes and control characters are not allowed in paths."
             )
-    home_dir = str(Path.home().resolve())
-    resolved = str(Path(path).expanduser().resolve())
+    # ``expanduser`` raises RuntimeError for an unresolvable ``~user`` prefix and
+    # ``resolve`` can raise OSError/ValueError on hostile input. Every caller is a
+    # tool boundary that must return an error string rather than raise.
+    try:
+        home_dir = str(Path.home().resolve())
+        resolved = str(Path(path).expanduser().resolve())
+    except (RuntimeError, ValueError, OSError) as exc:
+        return f"Error: {path_label} is not a valid filesystem path: {exc}"
 
     if not resolved.startswith(home_dir + os.sep) and resolved != home_dir:
         return f"Error: {path_label} must be under your home directory ({home_dir}). Got: {resolved}"

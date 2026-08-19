@@ -12,7 +12,7 @@ from apple_mail_mcp.core import (
     sanitize_pipe_delimited_field,
 )
 from apple_mail_mcp.core.reply_state import was_replied_fragment
-from apple_mail_mcp.tools.inbox.parsing import _read_filter_condition
+from apple_mail_mcp.tools.inbox.parsing import _INBOX_ERROR_PREFIX, _read_filter_condition
 
 
 def _build_inbox_collection_block(max_emails: int, read_filter: str) -> str:
@@ -169,6 +169,12 @@ def _build_list_inbox_json_script(
     *read_filter* selects ``"all"`` / ``"read"`` / ``"unread"``; the
     filtered modes use the in-loop ``if`` pattern from
     ``build_bounded_filtered_scan`` (safe on Gmail and large Exchange).
+
+    A top-level failure (missing account, unreachable mailbox, AppleScript
+    error) appends one ``__APPLE_MAIL_MCP_ERROR__|||account|||detail`` line
+    instead of returning silently empty output, so the JSON consumer can
+    report the failure rather than present it as an empty inbox. See
+    ``parsing._parse_inbox_error_lines``.
     """
     assert max_emails > 0, "caller must enforce bounded slice (max_emails > 0)"
     escaped_account = escape_applescript(account)
@@ -242,6 +248,17 @@ def _build_list_inbox_json_script(
                     set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailAppId & "|||" & wasRepliedToken{message_id_suffix}{content_suffix}
                 end try
             end repeat
+        on error errMsg
+            -- The text builder above already reports this same failure inline
+            -- ("⚠ Error accessing inbox for account ..."). JSON mode used to
+            -- swallow it: resultLines stayed empty, the script returned "",
+            -- the parser produced [], and a calling agent read a failed probe
+            -- as "inbox empty, triage complete". Emit the in-band error marker
+            -- analytics/statistics.py already uses so the JSON consumer can
+            -- route it into the response's `errors` list.
+            set errorDetail to errMsg as string
+            {sanitize_pipe_delimited_field("errorDetail")}
+            set end of resultLines to "{_INBOX_ERROR_PREFIX}{escaped_account}|||" & errorDetail
         end try
         set AppleScript's text item delimiters to linefeed
         return resultLines as string

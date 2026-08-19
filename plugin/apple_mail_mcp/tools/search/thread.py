@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
-from apple_mail_mcp.applescript_snippets import sanitize_field_handler, thread_headers_block
+from apple_mail_mcp.applescript_snippets import iso_datetime_handlers, sanitize_field_handler, thread_headers_block
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.constants import THREAD_PREFIXES
 from apple_mail_mcp.core import (
@@ -23,7 +23,12 @@ from apple_mail_mcp.server import READ_ONLY_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import search
 from apple_mail_mcp.tools.reply_state_wiring import annotate_rows_with_reply_state, build_draft_scan_status
 from apple_mail_mcp.tools.search.by_id import _fetch_email_record_by_id
-from apple_mail_mcp.tools.search.records import _build_applescript_date, _parse_search_records
+from apple_mail_mcp.tools.search.records import (
+    _build_applescript_date,
+    _mailbox_error_texts,
+    _parse_search_records,
+    _script_error_message,
+)
 
 
 def _thread_strip_prefixes_handler() -> str:
@@ -193,6 +198,10 @@ def get_email_thread(
           always present) and `has_draft` (true/false/null, governed by
           `include_draft_state`). `draft_scan` is `{"status": "ok" | "error" |
           "skipped", "scanned": N, "accounts": [...], "error"?: "..."}`.
+          A scan that failed inside AppleScript adds `error` and `errors` to
+          the JSON payload instead of reporting an empty thread; per-mailbox
+          failures add `errors` plus `error_details`. Neither key appears on
+          a genuinely empty thread.
     """
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = search.validate_account_name(account, timeout=validation_timeout)
@@ -344,32 +353,7 @@ def get_email_thread(
     {sanitize_script}
     {_thread_strip_prefixes_handler()}
 
-    on pad2(numberValue)
-        if numberValue < 10 then
-            return "0" & (numberValue as string)
-        end if
-        return numberValue as string
-    end pad2
-
-    on month_number(monthValue)
-        set monthValues to {{January, February, March, April, May, June, July, August, September, October, November, December}}
-        repeat with monthIndex from 1 to 12
-            if item monthIndex of monthValues is monthValue then
-                return monthIndex
-            end if
-        end repeat
-        return 0
-    end month_number
-
-    on iso_datetime(dateValue)
-        set yearValue to year of dateValue as integer
-        set monthValue to my month_number(month of dateValue)
-        set dayValue to day of dateValue as integer
-        set hourValue to hours of dateValue
-        set minuteValue to minutes of dateValue
-        set secondValue to seconds of dateValue
-        return (yearValue as string) & "-" & my pad2(monthValue) & "-" & my pad2(dayValue) & "T" & my pad2(hourValue) & ":" & my pad2(minuteValue) & ":" & my pad2(secondValue)
-    end iso_datetime
+    {iso_datetime_handlers()}
 
     tell application "Mail"
         set outputText to "EMAIL THREAD VIEW" & return & return
@@ -521,11 +505,18 @@ def get_email_thread(
     if output_format == "json":
         selection_strategy = thread_strategy
         parse_result = result
+        script_error: str | None = None
         if result.startswith("THREAD_STRATEGY|||"):
             first_line, _, remaining = result.partition("\n")
             selection_strategy = first_line.split("|||", 1)[1].strip() or selection_strategy
             parse_result = remaining
-        records, _mailbox_errors = _parse_search_records(parse_result)
+        else:
+            # The script's own `on error` handler returns "Error: <msg>" as the
+            # whole result, which parses to zero rows. Without this check a
+            # thread scan that threw is indistinguishable from an empty thread
+            # (text mode already returns the raw error string below).
+            script_error = _script_error_message(result)
+        records, mailbox_errors = _parse_search_records(parse_result)
         snapshots = annotate_rows_with_reply_state(
             records,
             runner=search.run_applescript,
@@ -549,6 +540,15 @@ def get_email_thread(
             "max_messages": max_messages,
             "draft_scan": draft_scan,
         }
+        if script_error is not None:
+            payload["error"] = script_error
+            payload["errors"] = [script_error]
+        if mailbox_errors:
+            payload.setdefault("errors", []).extend(_mailbox_error_texts(mailbox_errors))
+            payload["error_details"] = [
+                {"mailbox": item["mailbox"], "type": "mailbox_error", "message": item["message"]}
+                for item in mailbox_errors
+            ]
         if anchor is not None:
             payload["anchor"] = {
                 "message_id": anchor.get("message_id", ""),

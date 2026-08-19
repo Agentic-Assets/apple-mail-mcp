@@ -40,6 +40,33 @@ def _read_filter_condition(read_filter: str) -> str | None:
     return None
 
 
+# In-band marker for a top-level failure inside the JSON inbox script, using
+# the same spelling as ``analytics/statistics_parsing._STATISTICS_ERROR_PREFIX``.
+# The text builder reports its failures inline ("⚠ Error accessing inbox for
+# account ..."); before this marker existed the JSON builder swallowed them, so
+# a failed probe returned "" and parsed to a clean, authoritative-looking [].
+_INBOX_ERROR_PREFIX = "__APPLE_MAIL_MCP_ERROR__|||"
+
+
+def _parse_inbox_error_lines(raw: str) -> list[str]:
+    """Return ``"<account>: <detail>"`` strings for in-band inbox error markers.
+
+    Empty list when *raw* carries no marker, so a genuinely empty inbox stays
+    a clean empty result with no spurious error. A marker missing its detail
+    (or account) is still reported — dropping a malformed marker would
+    reintroduce the silent zero it exists to prevent.
+    """
+    errors: list[str] = []
+    for line in raw.splitlines():
+        if not line.startswith(_INBOX_ERROR_PREFIX):
+            continue
+        parts = line.split("|||", 2)
+        scope = (parts[1].strip() if len(parts) > 1 else "") or "unknown account"
+        detail = (parts[2].strip() if len(parts) > 2 else "") or "unknown error"
+        errors.append(f"{scope}: {detail}")
+    return errors
+
+
 def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> list[dict[str, Any]]:
     """Parse '|||'-delimited AppleScript output into a list of email dicts.
 
@@ -83,6 +110,10 @@ def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> l
     maxsplit = 8 if has_message_id else 7
     for line in raw.split("\n"):
         if "|||" not in line:
+            continue
+        # Error markers are pipe-delimited too; route them through
+        # `_parse_inbox_error_lines`, never through the email-row field map.
+        if line.startswith(_INBOX_ERROR_PREFIX):
             continue
         parts = line.split("|||", maxsplit)
         if len(parts) < 6:

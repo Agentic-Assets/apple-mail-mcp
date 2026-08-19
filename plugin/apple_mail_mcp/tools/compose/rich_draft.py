@@ -1,12 +1,11 @@
 """``create_rich_email_draft`` tool: build a standalone rich (HTML) draft via the Mail object model."""
 
-import os
 from email.message import EmailMessage
 from mimetypes import guess_type
 from pathlib import Path
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.core import SENSITIVE_DIRS, AppleScriptTimeout, inject_preferences
+from apple_mail_mcp.core import AppleScriptTimeout, inject_preferences, validate_save_path
 from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import compose
 from apple_mail_mcp.tools.compose.helpers import (
@@ -141,22 +140,20 @@ def create_rich_email_draft(
         )
 
     if output_path:
-        # Resolve and validate the caller-supplied path before writing.
-        # validate_save_path also enforces a home-dir restriction which is
-        # intentionally narrower here — we only guard sensitive dirs.
-        try:
-            draft_path = Path(output_path).expanduser()
-            _resolved = str(draft_path.resolve())
-        except (RuntimeError, ValueError, OSError) as exc:
-            return f"Error: output_path is not a valid filesystem path: {exc}"
-        _home = Path.home().resolve()
-        for _rel in SENSITIVE_DIRS:
-            _sensitive = str(_home / _rel)
-            if _resolved.startswith(_sensitive + os.sep) or _resolved == _sensitive:
-                return (
-                    f"Error: output_path targets a sensitive directory and cannot be "
-                    f"used as a draft destination: {_sensitive}"
-                )
+        # One shared guard for every caller-supplied write target: home
+        # containment first, then the sensitive-directory denylist. This used to
+        # be an inlined SENSITIVE_DIRS-only loop, which silently accepted any
+        # absolute path outside the home directory (/etc, /Library/LaunchDaemons,
+        # a pre-existing file anywhere on the volume) because every
+        # SENSITIVE_DIRS entry is home-relative and cannot match such a path.
+        path_error = validate_save_path(
+            output_path,
+            path_label="output_path",
+            sensitive_action="write a draft .eml to",
+        )
+        if path_error:
+            return path_error
+        draft_path = Path(output_path).expanduser()
     else:
         draft_path = _default_rich_draft_path(subject)
 

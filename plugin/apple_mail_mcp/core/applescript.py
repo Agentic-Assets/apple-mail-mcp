@@ -4,13 +4,26 @@ import subprocess
 import threading
 from typing import Protocol
 
+from apple_mail_mcp.backend.base import ToolError
 from apple_mail_mcp.core.escaping import _sanitize_for_json
+
+DEFAULT_TIMEOUT_S = 120
+# Upper bound on a single call's deadline. Two measured reasons, not style:
+# (1) ``subprocess.run`` raises a bare ``OverflowError`` ("timeout is too
+#     large") above 2_147_483 s (INT_MAX ms in poll()). That is neither
+#     SubprocessError nor OSError, so the handlers below re-raise it unwrapped
+#     and the caller sees an error naming neither AppleScript nor the argument.
+# (2) ``_LOCK_WAIT_TIMEOUT`` bounds how long a caller *waits* for the
+#     single-flight lock but nothing bounds how long one *holds* it. An
+#     unbounded deadline lets one call starve every other Mail call in the
+#     process. 3600 s is 12x the largest default any tool passes (300).
+MAX_TIMEOUT_S = 3600
 
 
 class AppleScriptRunner(Protocol):
     """Callable shape for injectable AppleScript runners."""
 
-    def __call__(self, script: str, timeout: int | None = 120) -> str: ...
+    def __call__(self, script: str, timeout: int | None = DEFAULT_TIMEOUT_S) -> str: ...
 
 
 class AppleScriptTimeout(Exception):
@@ -29,7 +42,45 @@ _MAIL_LOCK = threading.Lock()
 _LOCK_WAIT_TIMEOUT = 300
 
 
-def run_applescript(script: str, timeout: int | None = 120) -> str:
+def _resolve_timeout(timeout: int | None) -> int | float:
+    """Return the per-call deadline, refusing values osascript cannot honour.
+
+    ``None`` means "use the default", not "no deadline". Non-positive values
+    are refused rather than clamped: ``subprocess.run`` treats them as already
+    expired and kills osascript within ~2 ms, then this module reports
+    ``AppleScriptTimeout("AppleScript execution timed out")`` — blaming Mail.app
+    for what is really a caller bug. Clamping would swap that misdirection for
+    a silently different deadline; refusing names the actual cause. AppleScript
+    itself never objects: ``with timeout of -5 seconds`` compiles and runs
+    clean, so no osascript-side check can ever catch this.
+    """
+    if timeout is None:
+        return DEFAULT_TIMEOUT_S
+    # ``bool`` is a subclass of ``int``, so a bare isinstance check would let
+    # ``timeout=True`` through as a 1-second deadline — a near-instant, silent
+    # timeout blamed on Mail. Reject it as the non-number it is.
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise ToolError(
+            code="INVALID_TIMEOUT",
+            message=f"timeout must be a number of seconds or None; got {timeout!r}.",
+            remediation={"hint": f"Pass an integer in (0, {MAX_TIMEOUT_S}], or None for {DEFAULT_TIMEOUT_S}s."},
+        )
+    if timeout <= 0:
+        raise ToolError(
+            code="INVALID_TIMEOUT",
+            message=f"timeout must be greater than 0 seconds; got {timeout!r}.",
+            remediation={"hint": f"Pass a positive number of seconds, or None for the {DEFAULT_TIMEOUT_S}s default."},
+        )
+    if timeout > MAX_TIMEOUT_S:
+        raise ToolError(
+            code="INVALID_TIMEOUT",
+            message=f"timeout must be at most {MAX_TIMEOUT_S} seconds; got {timeout!r}.",
+            remediation={"hint": "Split the work into bounded calls instead of raising the per-call deadline."},
+        )
+    return timeout
+
+
+def run_applescript(script: str, timeout: int | None = DEFAULT_TIMEOUT_S) -> str:
     """Execute AppleScript via stdin pipe for reliable multi-line handling.
 
     Raises ``AppleScriptTimeout`` (subclass of Exception) on per-call timeout
@@ -40,8 +91,12 @@ def run_applescript(script: str, timeout: int | None = 120) -> str:
     only one AppleScript call runs against Mail.app at a time; callers that
     wait longer than ``_LOCK_WAIT_TIMEOUT`` seconds for their turn raise
     ``AppleScriptTimeout`` instead of queuing indefinitely.
+
+    Raises ``ToolError(code="INVALID_TIMEOUT")`` for a non-positive or
+    out-of-range ``timeout``, before the lock is taken, so a bad argument
+    never queues behind live Mail work and never reaches ``osascript``.
     """
-    effective_timeout = 120 if timeout is None else timeout
+    effective_timeout = _resolve_timeout(timeout)
     if not _MAIL_LOCK.acquire(timeout=_LOCK_WAIT_TIMEOUT):
         raise AppleScriptTimeout("AppleScript queued too long waiting for Mail.app to become available")
     try:

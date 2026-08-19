@@ -4,6 +4,167 @@
 
 ## 3.11.7 - 2026-08-17
 
+- **A native-format reply could be saved from an identity the caller never
+  asked for.** When `from_address` was supplied, `set sender of replyMessage`
+  was wrapped in a bare `try` described in-source as a "best-effort identity
+  tweak". If Mail refused the override, the error was swallowed and the reply
+  was saved from the account's default identity, reported as success. The
+  refusal now aborts before `save replyMessage`, closes the compose window with
+  `saving no`, removes the temp artifact, and returns a structured
+  `REPLY_SENDER_OVERRIDE_FAILED` rather than a draft the caller must notice is
+  wrong. The default path (no `from_address`) emits no sender statement and no
+  abort branch, and its AppleScript is unchanged apart from two comment lines.
+  A sender that is silently *not applied* rather than refused still passes
+  undetected; catching that needs a `From` readback and is not in this change.
+- **The bare-`try` defect class is now lint-enforced.**
+  `run_applescript` raises on a nonzero `osascript` exit, so a script with *no*
+  `try` fails loudly and is correct; a `try` with no `on error` arm is precisely
+  what turns a loud failure into an exit-0 wrong answer. Every fix in this
+  release is one instance of that shape. `tests/core/test_no_bare_applescript_try.py`
+  now scans the whole package (not just `tools/` — the shared emitters in
+  `core/`, `bounded_scan.py`, and `calendar_core/` account for about a quarter
+  of all sites, including the fragment builder that raises the deliberate
+  `error "No inbox mailbox found…"` this rule exists to protect) and ratchets
+  two rules: `bare` (no arm, or an empty arm) and `silent` (an arm with no
+  observable signal). Baseline: 236 sites across 50 modules, 178 bare and 58
+  silent, keyed by repo-relative path because `helpers.py` exists in four
+  packages. A staleness test fails when a count comes in *under* baseline, so a
+  fix must remove its entry rather than leave headroom for the next one.
+  Detection is `ast`-based and reconstructs f-strings: the package has 331 try
+  blocks, but a naive `ast.Constant` walk finds only 39, so 88% of this
+  codebase's AppleScript is written in f-strings and would have been invisible
+  to a text-level check. That is the same way the `whose`-clause lint went
+  vacuous in v3.11.7. The sanctioned P1 error channel emits a *dangling*
+  `on error` arm spliced in at the call site; the detector resolves those
+  builders so the lint cannot fail contributors for adopting the very pattern
+  its remediation message recommends.
+- **A non-positive action cap acted on one message instead of none.**
+  `_search_message_ids` appended a resolved id *before* testing its bound, so
+  `limit=0` returned one id — the Python-side twin of the `messages 1 thru 0`
+  footgun, which also yields one message rather than zero. No lower-bound guard
+  existed on `max_deletes`, `max_moves`, or `max_updates`, so
+  `manage_trash(max_deletes=0, allow_filter_scan=True)` resolved a message and
+  deleted it. The shared helper now returns `[]` for a non-positive limit
+  before running any search, and checks the bound before each append, so all
+  four call sites are covered. `update_email_status` additionally refuses a
+  non-positive `max_updates` at the boundary with `INVALID_ACTION_CAP`;
+  `manage_trash` and `move_email` adopt the same guard under AGENTIC-2374.
+  Source-verified; no destructive call was executed to confirm the reach.
+- **`update_email_status` reported a count that was not the mutation count.**
+  On the id path the mutation ran in one loop and `updateCount` was incremented
+  in a *separate* loop, as the last statement after three property reads inside
+  a bare `try` — so the number reported as "updated" was the number of messages
+  Mail could describe. On the filter-scan path the mutation was the first
+  statement inside the bare `try` and every read after it could throw. Either
+  way a read failure left mail flagged on the server and reported
+  `TOTAL UPDATED: 0`. Counting now happens at the mutation site, gated on an
+  explicit per-message success flag, before any property read; display is gated
+  on the same flag, so a message that failed to mutate is no longer printed
+  under a "Marked as read:" heading. Messages that were updated but could not
+  be described are reported separately as `DETAILS UNAVAILABLE`. The
+  filter-scan branch gains `CANDIDATES EXAMINED` and `MATCHED MESSAGES`
+  denominators (the id branch had `REQUESTED IDS` but no matched count), so
+  `TOTAL UPDATED: 0` is no longer ambiguous between "nothing matched" and
+  "everything matched and every read threw". The candidate-selection loop's own
+  bare `try`, which silently dropped a message from consideration entirely, now
+  counts selection failures. All failure lines are guarded, so a clean run
+  emits none of them.
+- **`forward_email` could send mail with the quoted original silently
+  missing.** `set origContent to content of foundMessage` sat inside a bare
+  `try` initialised to `""`, so a failed body read produced a forward
+  consisting of the lead text and header block with nothing beneath it, and
+  reported "Forward saved as draft." `mode="send"` had the same hole and
+  actually sent the gutted message. The read is now tracked by an explicit
+  success flag rather than by testing the content for emptiness, which would
+  have rejected every legitimately empty original (subject-only mail, meeting
+  invitations).
+- **`list_inbox_emails` in JSON mode returned a payload byte-identical to a
+  genuinely empty inbox when the scan failed.** Text mode reported the failure
+  all along; the JSON builder's bare `try` left the result map empty, which
+  parsed to zero rows against a hardcoded `errors: []`. Both modes now report
+  the same thing.
+- **`export_emails` reported a success count of messages it never wrote.**
+  All four export builders incremented the reported counter *before* the
+  `write` call, inside a loop whose error arm was a bare `on error` with no
+  variable, no counter, and no output, so a failed write still printed
+  `✓ Mailbox exported successfully!` and counted the message. Exports now
+  report the count that reached disk, plus a `Failed:` count, per-message
+  `Error exporting message_id <id>: <err>` lines, and a `PARTIAL:` summary;
+  the mailbox banner degrades to `⚠ … with errors`. For the offset-paged
+  `correspondent` scope the failure was worse than a wrong number: the failed
+  message consumed an offset slot, so the next page stepped over it and it was
+  never exported. That scope now halts at the first message that consumed a
+  slot and produced no file, making the reported count an exact resume offset.
+  The halt is gated on a per-iteration flag so a failed *read* before the
+  offset gate reports and keeps scanning instead of wedging the scope
+  permanently.
+- **Failed calendar enumeration rendered as an empty calendar.**
+  `list_calendar_names` discarded the error list its engine already returned,
+  so an enumeration failure became zero names, then zero events, and
+  `calendar_errors: []`. It reached five read tools plus `resolve_create_target`
+  and `manage_calendars`; with an explicit `calendar=` it produced a misleading
+  `CALENDAR_NOT_FOUND` when the truth was that enumeration broke. The guard
+  requires the engine to have *reported* an error, so a host that genuinely has
+  no calendars still returns zero with no error.
+- **`get_email_thread` JSON mode fed the script's own error string into the row
+  parser** and returned `{"items": [], "returned": 0}`. Text mode was correct.
+  **`get_email_by_ids` conflated "this id is not in the mailbox" with "the read
+  threw"**, reporting both as `missing_ids`; a failed read is now reported
+  separately. The row parser itself is deliberately unchanged: reclassifying
+  short lines as errors would fire on any content preview beginning `"Error: "`.
+- **`create_rich_email_draft` could overwrite any file outside the home
+  directory.** It carried its own inlined denylist instead of the shared
+  `validate_save_path`, and every `SENSITIVE_DIRS` entry is home-relative and
+  only ever joined onto `Path.home()` — so the check could not match any
+  absolute path. It accepted `/etc/hosts` and `/Library/LaunchDaemons/…`, the
+  latter being a path the denylist names but only ever resolved under `~`. The
+  inlined check is deleted and the tool now uses the shared helper.
+  **Behaviour change:** `output_path` outside the home directory is now
+  refused, matching `export_emails` and `save_email_attachment`, which have
+  behaved this way since v3.9.1. Whether home-only is the right policy for all
+  three is AGENTIC-2375.
+- **`export_emails(export_scope="single_email")` wrote a bare subject-named
+  file directly into the caller's directory** and truncated whatever was
+  already there. All four sibling scopes write into a per-scope subdirectory
+  with an index prefix; this one did not. It now writes to
+  `single_email_export/{index}_{message_id}_{subject}.{fmt}`.
+- **`validate_save_path` raised out of the tool boundary** for an
+  unresolvable path such as `~nosuchuser/x`, and both existing callers invoked
+  it unguarded. It now returns an error string. Strictly more permissive;
+  no accept/reject decision changed.
+- **`timeout` was never range-checked at the only place that runs
+  AppleScript.** `run_applescript` substituted a default for `None` and passed
+  every other value straight through. Measured: AppleScript accepts any numeric
+  `with timeout` without complaint — negative, zero, fractional, and absurd all
+  compile and run clean — while `subprocess.run` treats a non-positive timeout
+  as already expired and kills osascript in about 2 ms. That `TimeoutExpired`
+  was then re-raised as `AppleScriptTimeout`, so a caller-side argument bug
+  arrived looking like a slow mailbox. Above 2,147,483 s `subprocess` raises a
+  bare `OverflowError` that no handler wrapped. Non-positive and out-of-range
+  timeouts are now refused with `INVALID_TIMEOUT` before the Mail lock is
+  acquired, matching the `ToolError` precedent in `bounded_scan.py`. Valid
+  values pass through unmodified; `3600` is the new ceiling, 12× the largest
+  default any tool passes. `timeout=True` no longer becomes a 1-second
+  deadline (`bool` is a subclass of `int`).
+- **Uncaught `ToolError` now reaches agents as the documented envelope rather
+  than a transport exception.** Only the calendar surface had `except ToolError`
+  arms, so the new `INVALID_TIMEOUT` raise escaped every mail tool unserialized
+  — the right message in the wrong shape, where the previous behaviour had been
+  the wrong message ("timed out after 0 seconds", blaming Mail for a caller
+  bug) in the right shape. `server.py` now converts at the single `@mcp.tool`
+  registration seam. Three tools are excluded: `list_accounts`,
+  `list_account_addresses`, and `get_mailbox_unread_counts` declare container
+  return types, and FastMCP validates the returned value against a
+  structured-output schema derived from that annotation, so a JSON string there
+  produces a pydantic error with the real code buried inside `input_value`.
+  Those three raise with an accurate message instead; a test pins the set so it
+  cannot grow silently. The published tool registry — all 41 tools' `name`,
+  `description`, `inputSchema`, `outputSchema`, and `annotations` — is
+  byte-identical before and after (verified by hashing the serialized
+  `list_tools()` payload), and the 8 `async def` tools stay coroutine
+  functions. Exceptions that are not `ToolError` still propagate: converting
+  arbitrary failures into tidy JSON is the pattern this release exists to
+  remove.
 - **`manage_trash(action="empty_trash")` deleted mail under the default
   `dry_run=True`.** The branch read `confirm_empty` and never read `dry_run`, so
   `confirm_empty=True` alone permanently deleted. It now derives its mode from

@@ -148,6 +148,7 @@ def _build_manage_drafts_cleanup_script(
             set actedCount to 0
             set skippedCount to 0
             set failedCount to 0
+            set windowFailed to false
 
             try
                 set targetAccount to account "{safe_account}"
@@ -167,6 +168,9 @@ def _build_manage_drafts_cleanup_script(
                     set draftMessages to {{}}
                     try
                         set draftMessages to messages 1 thru headEnd of draftsMailbox
+                    on error errDraftWindow
+                        set windowFailed to true
+                        set reportLines to reportLines & "   • drafts window unavailable (" & errDraftWindow & "); 0 of " & headEnd & " draft(s) examined" & return
                     end try
                 end if
 
@@ -187,9 +191,12 @@ def _build_manage_drafts_cleanup_script(
                         set draftSubject to subject of aDraft
                         set bodyReadOk to false
                         set draftBody to ""
+                        set bodyReadError to ""
                         try
                             set draftBody to content of aDraft
                             set bodyReadOk to true
+                        on error errBodyRead
+                            set bodyReadError to errBodyRead as string
                         end try
                         set AppleScript's text item delimiters to {{return, linefeed, tab, space}}
                         set bodyParts to text items of draftBody
@@ -197,7 +204,7 @@ def _build_manage_drafts_cleanup_script(
                         set bodyStripped to bodyParts as string
                         if not bodyReadOk then
                             set skippedCount to skippedCount + 1
-                            set reportLines to reportLines & "   • skipped draft (body unreadable, not classified)" & return
+                            set reportLines to reportLines & "   • skipped draft (body unreadable: " & bodyReadError & "); not classified, not removed" & return
                         end if
                         if bodyReadOk and draftSubject is "" and bodyStripped is "" then
                             set end of emptyDrafts to aDraft
@@ -242,6 +249,9 @@ def _build_manage_drafts_cleanup_script(
             end if
             if failedCount > 0 then
                 set reportSummary to reportSummary & " " & failedCount & " blank draft(s) could not be removed."
+            end if
+            if windowFailed then
+                set reportSummary to reportSummary & " The Drafts window could not be read, so no drafts were examined; this is not a confirmation that Drafts is clean."
             end if
             return reportHeader & reportSummary & return & return & reportLines
         end tell

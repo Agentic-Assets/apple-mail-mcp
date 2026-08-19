@@ -14,6 +14,7 @@ from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
     _native_reply_draft_resolver_script,
     _native_reply_draft_resolver_setup_script,
 )
+from apple_mail_mcp.tools.compose.reply_window_identity_scripts import native_reply_identity_tweak_script
 from apple_mail_mcp.tools.compose.reply_window_scripts import native_reply_window_handlers_applescript
 from apple_mail_mcp.tools.compose.typing_scripts import build_chunked_typing_handler
 
@@ -370,6 +371,7 @@ def _build_reply_native_window_applescript(
         chunk_size=TYPING_CHUNK_SIZE,
         inter_chunk_delay=TYPING_INTER_CHUNK_DELAY,
     )
+    identity_tweaks_script = native_reply_identity_tweak_script(sender_script, signature_script, cleanup_script)
     return f'''
 {subject_helpers}
 {window_handlers}
@@ -468,13 +470,9 @@ try
             end if
         end try
 
-        -- Best-effort identity tweaks on the already-good native window.
-        try
-            {sender_script}
-        end try
-        try
-            {signature_script}
-        end try
+        -- Identity tweaks on the already-good native window (see
+        -- reply_window_identity_scripts: the sender fails closed, the signature does not).
+        {identity_tweaks_script}
         {cc_script}
         {bcc_script}
     end tell

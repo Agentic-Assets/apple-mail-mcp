@@ -40,6 +40,34 @@ def _check_message_ids_cap(normalized_ids: list[str], tool_name: str) -> str | N
     return serialize_tool_error(err)
 
 
+def _check_action_cap(value: int, param_name: str, tool_name: str) -> str | None:
+    """Return a structured error string when a mutation cap is non-positive.
+
+    ``max_updates`` / ``max_moves`` / ``max_deletes`` bound how much mail a single
+    call may mutate. Zero or negative is not "mutate nothing" to the layers below —
+    it is an incoherent request that historically resolved one message anyway. The
+    tool boundary refuses it outright so the caller sees why nothing happened
+    instead of discovering one mutated message. Returns ``None`` when *value* is a
+    usable positive cap.
+    """
+    if value > 0:
+        return None
+    return serialize_tool_error(
+        ToolError(
+            code="INVALID_ACTION_CAP",
+            message=(
+                f"{tool_name} received {param_name}={value}; the cap must be a positive "
+                "integer. A non-positive cap does not mean 'act on nothing' — it is "
+                "rejected before any mailbox is touched."
+            ),
+            remediation={
+                "preferred": f"Pass {param_name} >= 1, or omit it to use the tool default",
+                "no_op": f"To perform no mutation, do not call {tool_name} at all",
+            },
+        )
+    )
+
+
 def _date_to_for_older_than(days: int | None) -> str | None:
     """Return YYYY-MM-DD cutoff date for older-than filters."""
     if days is None or days <= 0:
@@ -135,7 +163,19 @@ def _search_message_ids(
     timeout: int | None = None,
     recent_days: float = 0.0,
 ) -> list[str]:
-    """Resolve message IDs through the bounded search helper."""
+    """Resolve message IDs through the bounded search helper.
+
+    A non-positive *limit* resolves **zero** ids and runs no search. That guard is
+    load-bearing, not defensive: every caller feeds this list straight into a
+    mutation (``manage_trash`` delete, ``move_email``, ``update_email_status``), so
+    returning even one id for a "resolve nothing" request destroys mail the caller
+    did not ask to touch. The bound is also re-checked before each append rather
+    than after, so the loop cannot overshoot on its own. This is the Python twin of
+    the ``messages 1 thru 0`` AppleScript footgun, which likewise yields one row
+    where zero were requested.
+    """
+    if limit <= 0:
+        return []
     records = manage._search_mail_records(
         account=account,
         mailbox=mailbox,
@@ -152,10 +192,10 @@ def _search_message_ids(
     )
     ids: list[str] = []
     for record in records:
+        if len(ids) >= limit:
+            break
         message_id = record.get("message_id")
         if message_id is None:
             continue
         ids.append(str(message_id))
-        if len(ids) >= limit:
-            break
     return ids

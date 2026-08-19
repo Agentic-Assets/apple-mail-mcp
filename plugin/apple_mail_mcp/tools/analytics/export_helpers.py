@@ -6,6 +6,16 @@ from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import iter_id_chunks
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, normalize_message_ids, run_applescript
 from apple_mail_mcp.core.replied import sent_mailbox_resolve_script
+from apple_mail_mcp.tools.analytics.export_failure_reporting import (
+    ID_EXPORT_RETRY_HINT,
+    PAGE_EXPORT_RETRY_HINT,
+    correspondent_retry_hint,
+    export_count_report,
+    export_failure_arm,
+    export_failure_init,
+    export_result_banner,
+    export_write_recorded,
+)
 from apple_mail_mcp.tools.analytics.export_formatting import (
     attachment_bundle_save_block,
     attachment_bundle_setup_block,
@@ -65,6 +75,7 @@ def build_exact_message_export_script(
                 set requestedIds to {{{requested_ids}}}
                 set exportCount to 0
                 set exportAttachmentBytes to 0
+                {export_failure_init()}
 
                 try
                     set targetAccount to account "{safe_account}"
@@ -103,21 +114,19 @@ def build_exact_message_export_script(
                                 set eof of fileRef to 0
                                 write exportContent to fileRef as «class utf8»
                                 close access fileRef
+                                {export_write_recorded()}
                                 {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
                                 set outputText to outputText & "✓ Exported message_id " & requestedIdText & ": " & messageSubject & return
-                            on error exportErr
-                                try
-                                    close access fileRef
-                                end try
-                                set outputText to outputText & "Error exporting message_id " & requestedIdText & ": " & exportErr & return
+                            {export_failure_arm(id_var="requestedIdText")}
                             end try
                         else
                             set outputText to outputText & "⚠ No email found for message_id " & requestedIdText & return
                         end if
                     end repeat
 
-                    set outputText to outputText & return & "Exported: " & exportCount & return
+                    set outputText to outputText & return
+                    {export_count_report(retry_hint=ID_EXPORT_RETRY_HINT)}
                     set outputText to outputText & "Location: " & exportDir & return
                 on error errMsg
                     return "Error: " & errMsg
@@ -148,6 +157,12 @@ def build_entire_mailbox_export_script(
     Never binds the full ``messages of targetMailbox``. ``date_filter`` runs
     WITHIN the page window, so out-of-range messages still count against
     the page but are skipped from the on-disk export.
+
+    Paging here is positional: the next page starts at ``offset + max_emails``
+    regardless of how many messages were written, so a per-message failure
+    cannot desynchronize it. The failure is still reported (id + error + a
+    ``PARTIAL:`` line) so the caller can re-export that id rather than
+    discovering the gap on disk.
     """
     safe_mailbox = escape_applescript(mailbox)
     return f'''
@@ -166,6 +181,7 @@ def build_entire_mailbox_export_script(
             if pageEnd > messageCount then set pageEnd to messageCount
             set exportCount to 0
             set exportAttachmentBytes to 0
+            {export_failure_init()}
 
             -- Create export directory
             set exportDir to "{safe_save_dir}/{safe_mailbox}_export"
@@ -207,24 +223,21 @@ def build_entire_mailbox_export_script(
                             set eof of fileRef to 0
                             write exportContent to fileRef as «class utf8»
                             close access fileRef
+                            {export_write_recorded()}
                             {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
                             set outputText to outputText & "Exported message_id: " & (messageId as string) & return
                         end if
 
-                    on error
-                        -- Close file handle before continuing to avoid fd leak
-                        try
-                            close access fileRef
-                        end try
+                    {export_failure_arm()}
                     end try
                 end repeat
             end if
 
-            set outputText to outputText & "✓ Mailbox exported successfully!" & return & return
+            {export_result_banner(ok_text="✓ Mailbox exported successfully!", warn_text="⚠ Mailbox exported with errors")}
             set outputText to outputText & "Mailbox: {safe_mailbox}" & return
             set outputText to outputText & "Total emails in mailbox: " & messageCount & return
             set outputText to outputText & "Offset: {offset}" & return
-            set outputText to outputText & "Exported: " & exportCount & return
+            {export_count_report(retry_hint=PAGE_EXPORT_RETRY_HINT)}
             set outputText to outputText & "(bounded page: offset={offset}, max_emails={max_emails})" & return
             set outputText to outputText & "Location: " & exportDir & return
 
@@ -285,6 +298,7 @@ def build_multi_mailbox_id_export_script(
         set openMailboxes to {{}}
         set exportCount to 0
         set exportAttachmentBytes to 0
+        {export_failure_init()}
 
         try
             set targetAccount to account "{safe_account}"
@@ -328,21 +342,19 @@ def build_multi_mailbox_id_export_script(
                         set eof of fileRef to 0
                         write exportContent to fileRef as «class utf8»
                         close access fileRef
+                        {export_write_recorded()}
                         {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
                         set outputText to outputText & "✓ Exported message_id " & requestedIdText & ": " & messageSubject & return
-                    on error exportErr
-                        try
-                            close access fileRef
-                        end try
-                        set outputText to outputText & "Error exporting message_id " & requestedIdText & ": " & exportErr & return
+                    {export_failure_arm(id_var="requestedIdText")}
                     end try
                 else
                     set outputText to outputText & "⚠ No email found for message_id " & requestedIdText & return
                 end if
             end repeat
 
-            set outputText to outputText & return & "Exported: " & exportCount & return
+            set outputText to outputText & return
+            {export_count_report(retry_hint=ID_EXPORT_RETRY_HINT)}
             set outputText to outputText & "Location: " & exportDir & return
         on error errMsg
             return "Error: " & errMsg
@@ -467,8 +479,10 @@ def build_correspondent_export_script(
                 set totalExportCount to 0
                 set globalMatchedCount to 0
                 set exportAttachmentBytes to 0
+                {export_failure_init()}
 
                 repeat with currentMailbox in searchMailboxes
+                    if exportHalted then exit repeat
                     if totalExportCount >= {max_emails} then exit repeat
                     set mailboxName to name of currentMailbox
                     set messageCount to count of messages of currentMailbox
@@ -481,6 +495,7 @@ def build_correspondent_export_script(
 
                     repeat with aMessage in mailboxMessages
                         if totalExportCount >= {max_emails} then exit repeat
+                        set exportAttempted to false
                         try
                             set messageDate to date received of aMessage
                             set shouldExport to my messageHasCorrespondent(aMessage, "{safe_email_address}")
@@ -488,11 +503,11 @@ def build_correspondent_export_script(
                             if shouldExport then
                                 set globalMatchedCount to globalMatchedCount + 1
                                 if globalMatchedCount > {offset} then
+                                    set exportAttempted to true
                                     set messageSubject to subject of aMessage
                                     set messageSender to sender of aMessage
                                     set messageContent to content of aMessage
 
-                                    set mailboxExportCount to mailboxExportCount + 1
                                     set totalExportCount to totalExportCount + 1
                                     set fileName to totalExportCount & "_" & mailboxName & "_" & messageSubject & ".{safe_format}"
                                     {sanitize_delimiter_block("fileName")}
@@ -505,13 +520,12 @@ def build_correspondent_export_script(
                                     set eof of fileRef to 0
                                     write exportContent to fileRef as «class utf8»
                                     close access fileRef
+                                    {export_write_recorded()}
+                                    set mailboxExportCount to mailboxExportCount + 1
                                     {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
                                 end if
                             end if
-                        on error
-                            try
-                                close access fileRef
-                            end try
+                        {export_failure_arm(halt=True)}
                         end try
                     end repeat
 
@@ -519,7 +533,7 @@ def build_correspondent_export_script(
                 end repeat
 
                 set outputText to outputText & return & "Email address: {safe_email_address}" & return
-                set outputText to outputText & "Exported: " & totalExportCount & return
+                {export_count_report(retry_hint=correspondent_retry_hint(offset))}
                 set outputText to outputText & "Location: " & exportDir & return
             on error errMsg
                 return "Error: " & errMsg

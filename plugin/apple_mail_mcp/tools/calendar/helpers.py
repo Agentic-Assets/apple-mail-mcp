@@ -140,9 +140,30 @@ def attendee_gate(
 
 
 def list_calendar_names(timeout: int | None = None) -> list[str]:
-    """Live calendar names via the active read engine (conftest patches this)."""
-    calendars, _errors = _calendar.get_engine().list_calendars(timeout=timeout)
-    return [str(c["name"]) for c in calendars]
+    """Live calendar names via the active read engine (conftest patches this).
+
+    Enumeration errors are never dropped. Every unscoped calendar read
+    resolves its scope through this helper, so returning ``[]`` after a
+    failed enumeration makes each of them fan out across zero calendars and
+    answer "no events" with an empty ``calendar_errors`` — a failed scan
+    reported as an empty calendar. When the engine reports errors and yields
+    no usable name, raise instead; the calendar tools already map ``ToolError``
+    to their JSON error envelope. A genuinely empty calendar list with no
+    errors still returns ``[]``.
+    """
+    calendars, errors = _calendar.get_engine().list_calendars(timeout=timeout)
+    names = [str(c["name"]) for c in calendars]
+    if errors and not names:
+        raise ToolError(
+            code="CALENDAR_ENUMERATION_FAILED",
+            message="Calendar.app returned no readable calendars; enumeration itself failed.",
+            remediation={
+                "preferred": "Call list_calendars to see the per-calendar failures, then retry.",
+                "calendar_errors": errors,
+                "note": AUTOMATION_PANE_NOTE,
+            },
+        )
+    return names
 
 
 def resolve_read_calendars(

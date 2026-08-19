@@ -236,20 +236,25 @@ def export_emails(
                     set safeSubject to messageSubject
                     {sanitize_delimiter_block("safeSubject")}
 
-                    set fileName to safeSubject & ".{safe_format}"
-                    set filePath to "{safe_save_dir}/" & fileName
-                    set exportDir to "{safe_save_dir}"
                     set exportCount to 1
                     set exportAttachmentBytes to 0
+                    set exportIdText to "{target_message_id}"
+
+                    -- Write into a per-scope export subdirectory with an index
+                    -- and message-id prefix, exactly like every other scope. A
+                    -- bare "<subject>.<format>" in save_directory used to be
+                    -- opened with `set eof to 0`, truncating any pre-existing
+                    -- user file whose name happened to match the subject.
+                    set exportDir to "{safe_save_dir}/single_email_export"
+                    do shell script "mkdir -p " & quoted form of exportDir
+
+                    set fileName to (exportCount as string) & "_" & exportIdText & "_" & safeSubject & ".{safe_format}"
+                    set filePath to exportDir & "/" & fileName
                     {attachment_bundle_setup_block(include_attachments=include_attachments)}
 
                     -- Prepare export content. EML uses raw Mail source so
                     -- RFC 822 headers and MIME structure survive export.
                     {export_content_block(safe_format)}
-
-                    -- Ensure the flat save_directory exists (this scope writes
-                    -- directly into it, unlike other scopes' export subdirectory).
-                    do shell script "mkdir -p " & quoted form of "{safe_save_dir}"
 
                     -- Write to file
                     set fileRef to open for access POSIX file filePath with write permission
