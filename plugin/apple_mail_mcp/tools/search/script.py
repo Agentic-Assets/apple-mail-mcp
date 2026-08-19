@@ -95,6 +95,21 @@ def _build_search_script(
     escaped_internet_message_id = escape_applescript(normalized_internet_message_id)
     use_body_search = body_text is not None
 
+    # The one query shape that drives both decisions below: the narrowed scan_cap
+    # and the subject-only fast path. The fast path additionally requires
+    # ``not date_to`` because it emits no upper-bound comparison; every other
+    # clause is shared, so naming the test once keeps the two in step.
+    subject_only_header_search = (
+        bool(subject_terms)
+        and not sender
+        and not sender_exact
+        and not sender_domain
+        and not internet_message_id
+        and not use_body_search
+        and has_attachments is None
+        and read_status == "all"
+    )
+
     collect_limit = limit + 1  # +1 for has_more probe; offset is decremented separately
     base_cap = collect_limit + offset
     # Window cap from the shared bounded-scan helper (Phase A of the
@@ -108,19 +123,7 @@ def _build_search_script(
         # a no-hit subject does not exist can exceed wrapper timeouts. Keep the
         # scan bounded by the caller's requested page, and only widen as the
         # requested recent window widens.
-        if (
-            subject_terms
-            and not sender
-            and not sender_exact
-            and not sender_domain
-            and not internet_message_id
-            and body_text is None
-            and has_attachments is None
-            and read_status == "all"
-        ):
-            scan_cap = base_cap
-        else:
-            scan_cap = max(base_cap, window_cap)
+        scan_cap = base_cap if subject_only_header_search else max(base_cap, window_cap)
     else:
         scan_cap = base_cap
 
@@ -149,6 +152,17 @@ def _build_search_script(
     # accounts with many labels (e.g. Gmail with 200+ labels).
     mailbox_count_capped = mailbox == "All"
 
+    # Candidate binding is bounded in every arm (AGENTIC-2355). The recovery arm
+    # cannot be deleted — `messages 1 thru scanUpperBound` raises whenever the
+    # mailbox holds fewer messages than the cap, which is ordinary for small
+    # folders and for most of a `mailbox="All"` fan-out — and it must not fall back
+    # to `messages of currentMailbox`, AppleScript's other spelling of `every
+    # message of currentMailbox`. So it re-slices against `count of messages` (a
+    # cheap property read, the same guard `bounded_scan.build_bounded_message_scan`
+    # uses), and if even that fails it emits an ERROR_MAILBOX marker rather than
+    # leaving an empty candidate set that renders as an authoritative `FOUND: 0`.
+    # A count of 0 stays silent: a true empty result is not a failure.
+    # Full rationale and contract: tests/search/test_search_bounded_candidate_binding.py
     bounded_candidate_script = f"""
                             set matchingMessages to {{}}
                             set candidateMessages to {{}}
@@ -157,7 +171,15 @@ def _build_search_script(
                                 set candidateMessages to messages 1 thru scanUpperBound of currentMailbox
                             on error
                                 try
-                                    set candidateMessages to messages of currentMailbox
+                                    set boundedSliceCount to count of messages of currentMailbox
+                                    if boundedSliceCount > scanUpperBound then
+                                        set boundedSliceCount to scanUpperBound
+                                    end if
+                                    if boundedSliceCount > 0 then
+                                        set candidateMessages to messages 1 thru boundedSliceCount of currentMailbox
+                                    end if
+                                on error candidateBindError
+                                    set end of recordLines to "ERROR_MAILBOX|||" & mailboxName & "|||bounded candidate slice unavailable (" & candidateBindError & "); 0 of " & (scanUpperBound as string) & " requested message(s) scanned, so this mailbox contributed no results"
                                 end try
                             end try
     """
@@ -228,12 +250,11 @@ def _build_search_script(
     early_date_break = "if messageDate < fromDate then exit repeat" if date_from and not date_to else ""
     escaped_body = escape_applescript(body_text) if body_text else ""
     per_msg_conditions: list[str] = []
-    # Bound to the loop-local ``messageSubject`` variable, never to a bare
-    # ``subject`` property reference: every consumer of this string interpolates
-    # it into an explicit ``repeat with aMessage in ...`` loop, which supplies no
-    # implicit target (AGENTIC-2344).
-    subject_checks = ""
     if subject_terms:
+        # Bound to the loop-local ``messageSubject`` variable, never to a bare
+        # ``subject`` property reference: every consumer of this string
+        # interpolates it into an explicit ``repeat with aMessage in ...`` loop,
+        # which supplies no implicit target (AGENTIC-2344).
         subject_checks = " or ".join(f'messageSubject contains "{escape_applescript(t)}"' for t in subject_terms)
         per_msg_conditions.append(f"({subject_checks})")
     if sender:
@@ -263,27 +284,37 @@ def _build_search_script(
     if use_body_search:
         per_msg_conditions.append(f'msgContent contains "{escaped_body}"')
 
-    if (
-        subject_terms
-        and not sender
-        and not sender_exact
-        and not sender_domain
-        and not internet_message_id
-        and has_attachments is None
-        and read_status == "all"
-        and not use_body_search
-        and not date_to
-    ):
+    combined_condition = " and ".join(per_msg_conditions)
+
+    if subject_only_header_search and not date_to:
         # Fast no-hit/needle path: filter the already-bounded newest slice
         # with the cheapest possible per-message reads. Avoid `whose` here:
         # AppleScript does not reliably apply it to a list of message objects
         # returned by `messages 1 thru N`. The slice is deliberately tiny for
         # default subject lookups, so a subject-only loop is fast and avoids
-        # date/sender/read-status/body fetches on large Exchange inboxes.
+        # sender/read-status/message-id/body fetches on large Exchange inboxes.
         #
         # The condition MUST test the loop-local `messageSubject` bound on the
         # line above. A bare `subject contains ...` is only valid inside a
         # `whose` clause; here it is unbound and throws -1728 on every message.
+        #
+        # AGENTIC-2356: the condition is the whole `combined_condition`, not the
+        # subject clause alone. `subject_only_header_search` already excludes every
+        # filter needing a sender / read-status / message-id / body read, so the
+        # list holds at most the subject clause and `messageDate >= fromDate`.
+        # Interpolating only the subject clause threw the caller's date floor away
+        # while `search_emails` still reported `searched_from`, so a subject-only
+        # search returned matches from outside the window it claimed to search.
+        #
+        # `date received` is therefore read here too — but only when the caller
+        # asked for a floor. `fromDate` is declared only for a truthy `date_from`
+        # (`_build_applescript_date` emits nothing otherwise) and `manage/` +
+        # `analytics/` callers pass `date_from=None`, so an unconditional read
+        # would reference an undeclared variable and throw on every message.
+        # `early_date_break` is non-empty under exactly the same condition (the
+        # guard above guarantees `date_to` is falsy) and pays for the extra read
+        # by ending the scan at the first message older than `fromDate`.
+        fast_path_date_read = "set messageDate to date received of aMessage" if date_from else ""
         message_collection = f"""
                                 {bounded_candidate_script}
                                 {_SCAN_FAILURE_INIT}
@@ -291,8 +322,10 @@ def _build_search_script(
                                 repeat with aMessage in candidateMessages
                                     if (count of matchingMessages) >= {scan_cap} then exit repeat
                                     try
+                                        {fast_path_date_read}
+                                        {early_date_break}
                                         set messageSubject to subject of aMessage
-                                        if {subject_checks} then
+                                        if {combined_condition} then
                                             set end of matchingMessages to aMessage
                                         end if
                                     {_SCAN_FAILURE_ARM}
@@ -302,7 +335,6 @@ def _build_search_script(
                             {_SCAN_FAILURE_REPORT}
         """
     elif per_msg_conditions:
-        combined_condition = " and ".join(per_msg_conditions)
         content_read_block = (
             """
                                         set msgContent to ""

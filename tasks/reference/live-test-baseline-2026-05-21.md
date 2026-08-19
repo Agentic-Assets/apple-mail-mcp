@@ -70,7 +70,7 @@ The latest generated-wrapper sweep saw the same pattern:
 
 - Generated mcporter wrapper: `get-inbox-overview` help only shows `--raw`; repo CLI exposes full flags. Raw JSON path works (~2.7s).
 - Historical note: this baseline originally found the generated wrapper missing `get-email-by-id`; the current robustness pass repaired it and `tools/check_wrapper_surface.py` now guards the command. Manifest validation remains necessary but not sufficient for wrapper parity.
-- The wrapper is generated at `/Users/cayman-mac-mini/.local/bin/apple-mail` by `mcporter@0.11.3`; `apple-mail --help` is the command-surface source of truth for wrapper availability.
+- The wrapper is generated at `~/.local/bin/apple-mail` by `mcporter@0.11.3`; `apple-mail --help` is the command-surface source of truth for wrapper availability.
 - Some wrapper tools still wrap JSON under `content`/`structuredContent.result` vs direct dict — automation inconsistency.
 
 ## Recommended gates going forward
