@@ -1,11 +1,12 @@
-"""Pure AppleScript builders for the ``manage_drafts`` list/find actions.
+"""Pure AppleScript builders for the ``manage_drafts`` list/find/cleanup actions.
 
-No ``run_applescript`` call lives here; ``manage_drafts`` in ``compose.py``
+No ``run_applescript`` call lives here; ``manage_drafts`` in ``manage.py``
 builds these scripts and executes them.
 """
 
 from apple_mail_mcp.applescript_snippets import recipient_addresses_block, thread_headers_block
 from apple_mail_mcp.core import escape_applescript
+from apple_mail_mcp.tools.compose.constants import DRAFT_LIST_CAP
 
 
 def _indent_applescript_block(block: str, spaces: int) -> str:
@@ -125,6 +126,134 @@ def _build_manage_drafts_list_script(
             end try
 
             return "DRAFT EMAILS - {safe_account}" & return & return & "Found " & shownCount & " draft(s)" & return & return & draftLines
+        end tell
+        '''
+
+
+def _build_manage_drafts_cleanup_script(
+    *,
+    safe_account: str,
+    dry_run: bool,
+    max_deletes: int,
+) -> str:
+    """Build AppleScript for the bounded blank-Drafts cleanup sweep."""
+    dry_run_flag = "true" if dry_run else "false"
+    mode_label = "PREVIEW (dry run)" if dry_run else "DELETING"
+    return f'''
+        tell application "Mail"
+            set isDryRun to {dry_run_flag}
+            set maxDeletes to {max_deletes}
+            set reportLines to ""
+            set emptyCount to 0
+            set actedCount to 0
+            set skippedCount to 0
+            set failedCount to 0
+            set windowFailed to false
+
+            try
+                set targetAccount to account "{safe_account}"
+                set draftsMailbox to mailbox "Drafts" of targetAccount
+
+                -- Bounded newest-first window clamped to the live count: an
+                -- out-of-range upper bound raises -1719 ("Invalid index.")
+                -- instead of clamping, an empty mailbox raises for every slice
+                -- form, and `count of messages` can still read stale-high, so
+                -- the slice keeps its own guard and degrades to an empty window.
+                set totalDrafts to count of messages of draftsMailbox
+                set headEnd to totalDrafts
+                if headEnd > {DRAFT_LIST_CAP} then set headEnd to {DRAFT_LIST_CAP}
+                if totalDrafts is 0 then
+                    set draftMessages to {{}}
+                else
+                    set draftMessages to {{}}
+                    try
+                        set draftMessages to messages 1 thru headEnd of draftsMailbox
+                    on error errDraftWindow
+                        set windowFailed to true
+                        set reportLines to reportLines & "   • drafts window unavailable (" & errDraftWindow & "); 0 of " & headEnd & " draft(s) examined" & return
+                    end try
+                end if
+
+                -- Collect empty drafts first (subject blank AND body empty), then
+                -- act on them by reference so deletion does not shift indices.
+                --
+                -- Emptiness must be positively established before anything is
+                -- deleted. A failed `content` read is absence of evidence, not
+                -- evidence of emptiness: leaving draftBody as "" on a throw
+                -- classified a real draft with real content as blank and
+                -- permanently deleted it. bodyReadOk separates the three states
+                -- (read-ok-and-empty, read-ok-and-non-empty, read-failed) so
+                -- only the first is ever deletable, and every swallowed read is
+                -- counted instead of dropped.
+                set emptyDrafts to {{}}
+                repeat with aDraft in draftMessages
+                    try
+                        set draftSubject to subject of aDraft
+                        set bodyReadOk to false
+                        set draftBody to ""
+                        set bodyReadError to ""
+                        try
+                            set draftBody to content of aDraft
+                            set bodyReadOk to true
+                        on error errBodyRead
+                            set bodyReadError to errBodyRead as string
+                        end try
+                        set AppleScript's text item delimiters to {{return, linefeed, tab, space}}
+                        set bodyParts to text items of draftBody
+                        set AppleScript's text item delimiters to ""
+                        set bodyStripped to bodyParts as string
+                        if not bodyReadOk then
+                            set skippedCount to skippedCount + 1
+                            set reportLines to reportLines & "   • skipped draft (body unreadable: " & bodyReadError & "); not classified, not removed" & return
+                        end if
+                        if bodyReadOk and draftSubject is "" and bodyStripped is "" then
+                            set end of emptyDrafts to aDraft
+                        end if
+                    on error
+                        set skippedCount to skippedCount + 1
+                        set reportLines to reportLines & "   • skipped draft (subject or body unreadable)" & return
+                    end try
+                end repeat
+
+                set emptyCount to count of emptyDrafts
+                repeat with aDraft in emptyDrafts
+                    if actedCount >= maxDeletes then exit repeat
+                    try
+                        set draftId to (id of aDraft) as string
+                        if isDryRun then
+                            set reportLines to reportLines & "   • would delete blank draft id " & draftId & return
+                        else
+                            delete aDraft
+                            set reportLines to reportLines & "   • deleted blank draft id " & draftId & return
+                        end if
+                        set actedCount to actedCount + 1
+                    on error errDraftAction
+                        set failedCount to failedCount + 1
+                        set reportLines to reportLines & "   • blank draft not removed: " & errDraftAction & return
+                    end try
+                end repeat
+
+            on error errMsg
+                return "Error: " & errMsg
+            end try
+
+            set reportHeader to "DRAFT CLEANUP - {safe_account} ({mode_label})" & return & return
+            set reportSummary to "Found " & emptyCount & " blank draft(s); "
+            if isDryRun then
+                set reportSummary to reportSummary & "would remove " & actedCount & " (cap " & maxDeletes & "). Re-run with dry_run=False to delete."
+            else
+                set reportSummary to reportSummary & "deleted " & actedCount & " (cap " & maxDeletes & ")."
+            end if
+            if skippedCount > 0 then
+                set reportSummary to reportSummary & " Skipped " & skippedCount & " draft(s) whose subject or body could not be read; they were not classified and not removed."
+            end if
+            if failedCount > 0 then
+                set reportSummary to reportSummary & " " & failedCount & " blank draft(s) could not be removed."
+            end if
+            if windowFailed then
+                set reportSummary to reportSummary & " The Drafts window could not be read, so no drafts were examined; this is not a confirmation that Drafts is clean."
+            end if
+            return reportHeader & reportSummary & return & return & reportLines
         end tell
         '''
 

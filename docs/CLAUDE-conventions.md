@@ -291,6 +291,19 @@ After adding or editing any skill: run **`plugin-dev:skill-reviewer`** when avai
 
 ---
 
+## Committed-identity gate (public repo)
+
+Root [`AGENTS.md`](../AGENTS.md) § This repo is PUBLIC states the rule; [`tools/validators/validate_no_committed_identity.py`](../tools/validators/validate_no_committed_identity.py) enforces it. It scans every tracked text file from `git ls-files` and **exits 1** on an email address at a non-placeholder domain, an absolute `/Users/<name>/...` path, or an uppercase account UUID. It runs **first** in `dev-check.sh` `default` and `release`: it is the cheapest step, and it is the only gate here whose miss cannot be undone, because a push to a public remote is not retractable by a later force-push.
+
+Two design points that matter when you touch it:
+
+- **Allowlist vs ratchet is not a judgment call.** A domain joins `SYNTHETIC_TEST_DOMAINS` only when an address there is *inherently* not identity, so no allowlist rot is possible (`bar.com`, `vendor.com`, the single-letter `Message-ID` stubs). Every domain where an address *is* identity — the company domain, any founder's personal domain, any `.edu`, every real vendor or mail provider — goes in the per-file `KNOWN_IDENTITY_HITS` ratchet instead, so existing published text stays legal while the next occurrence fails.
+- **The ratchet only tightens.** Counts are keyed by path, never by line number. Lowering one is always valid; raising one is not — redact instead. A separate staleness test in [`tests/infra/test_no_committed_identity.py`](../tests/infra/test_no_committed_identity.py) fails when an entry claims more hits than the tree actually contains, so a redaction that is not accompanied by a baseline decrement is caught rather than silently banked.
+
+Violation output names the file, line, and rule but never echoes the matched value: a gate that prints the leak into terminal scrollback and CI logs has made a second copy of it. Detail: [`tools/CLAUDE.md`](../tools/CLAUDE.md) § `validate_no_committed_identity`.
+
+---
+
 ## Module line budget (600 LOC)
 
 Keep production modules focused and splittable. The repo enforces a **600 physical-line** soft target on `plugin/apple_mail_mcp/` and `tools/` (test modules under `tests/` are not budgeted; aligned with agent guidance and the `python-project-structure` skill's 300–500 line split heuristic).
@@ -303,7 +316,7 @@ Keep production modules focused and splittable. The repo enforces a **600 physic
 | **`tests/infra/test_module_line_budget.py`** | Pytest warning on oversize production modules; **hard fail** on baseline regression |
 | **`validate_manifests.py`** | Same regression check during manifest validation; prints WARN lines |
 | **`dev-check.sh`** | Prints budget report before pytest (default, release, live, surface, all) |
-| **GitHub CI** | Dedicated step + pytest `-rw` (warnings visible in log) |
+| **Local pre-push** | GitHub-hosted Actions are **disabled by repo policy** (`.github/workflows-disabled/`), so there is no hosted CI step. The checked-in `.githooks/pre-push` gate plus `tools/gates/source-release-gate.sh` are the CI-equivalent blockers |
 | **Pre-commit** | Via `dev-check.sh default` |
 
 ### Baseline fixture

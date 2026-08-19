@@ -88,6 +88,26 @@ python3 tools/validators/validate_repo_root.py
 
 Runs in `bash tools/gates/dev-check.sh` (default and release tiers).
 
+## validate_no_committed_identity
+
+| Script | Role |
+|--------|------|
+| `validators/validate_no_committed_identity.py` | Fails closed on personal/machine identity committed into this public repo; covered by `tests/infra/test_no_committed_identity.py` |
+
+Root [`AGENTS.md`](../AGENTS.md) § This repo is PUBLIC used to describe a manual `git diff --cached | grep`. This makes it a gate. Files come from `git ls-files -z`; three rules run over every tracked text file:
+
+1. **Email address** whose domain is not RFC 2606/6761 reserved (`example.com`, `example.invalid`, …) or a known synthetic placeholder (`company.com`, `bar.com`, `x.com`, …). Real provider, publisher, `.edu`, company, and personal domains are **not** allowlisted — existing ones are grandfathered per file so new ones fail.
+2. **Absolute `/Users/<name>/…` path** with a real-looking username segment. A bare `/Users/` mention with no following segment is prose and never fires, which is why the gate can scan its own rulebook without a file-level exemption.
+3. **Uppercase account/calendar UUID** (`[0-9A-F]{8}-…-[0-9A-F]{12}`). Uppercase-only on purpose: Apple Mail account directories and EventKit item identifiers are uppercase, while case-insensitive would sweep in every lowercase plugin/bundle/MCPB id.
+
+Skips only `plugin/wheelhouse/` (vendored wheels) and `archive/` (frozen history), plus binary/archive suffixes, `.coverage`, and any blob with a NUL in its first 8 KiB. **`.agents/` is deliberately in scope** — it holds this repo's own first-party skill sources, so excluding it was a 68-file blind spot over files we write; do not re-add it (`tests/infra/test_no_committed_identity.py` asserts a scanned-file floor that fails if you do). Enforcement is a **ratchet**: `KNOWN_IDENTITY_HITS` (repo-relative path → occurrence count) grandfathers what is already published, and any file over its count — or any unlisted file with a hit — fails. Lowering a number is always valid; raising one is not. A separate staleness test forces a redacted hit out of the baseline so the ratchet only tightens. Violation output names file, line, and rule but never echoes the matched value.
+
+```bash
+python3 tools/validators/validate_no_committed_identity.py
+```
+
+Runs in `bash tools/gates/dev-check.sh` (default and release tiers).
+
 ## validate_manifests
 
 | Script | Role |
@@ -216,12 +236,12 @@ Tiered local gate (no live Mail except `live` tier). Requires root `.venv/`.
 
 | Tier | Runs |
 |------|------|
-| `default` | `validate_manifests.sh` + `validate_tasks_layout.py` + `validate_repo_root.py` + module line budget report + `pytest` + `run_test_count_check`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
+| `default` | `validate_no_committed_identity.py` **first** (cheapest step, and the only failure that is irreversible once pushed) + `validate_manifests.sh` + `validate_tasks_layout.py` + `validate_repo_root.py` + module line budget report + `pytest` + `run_test_count_check`; adds `check_wrapper_surface.py` when **staged** files touch `plugin/apple_mail_mcp/tools/`, tool registration, or MCPB `manifest.json` |
 | `lint` | Fatal package quality gate: `ruff check plugin/apple_mail_mcp/`, `ruff format --check plugin/apple_mail_mcp/`, and `mypy --strict plugin/apple_mail_mcp/` |
 | `surface` | default + wrapper check always |
 | `manifest` | manifests only |
 | `live` | default + `.venv/bin/apple-mail quick-check --json` |
-| `release` | `lint` first, then `tools/gates/build-artifacts.sh` (rebuilds `apple-mail-plugin.zip` + `apple-mail.plugin` + `.mcpb`, then runs `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS` validate and `mcpb unpack`/`validate` smoke), pytest, and wrapper. **Run before every commit that touches `plugin/`, manifests, `pyproject.toml`, `requirements.txt`, or release artifacts** — finalize-apple-mail-mcp skill enforces this. |
+| `release` | `validate_no_committed_identity.py` first (fail before spending a build on a tree that cannot ship), then `lint`, then `tools/gates/build-artifacts.sh` (rebuilds `apple-mail-plugin.zip` + `apple-mail.plugin` + `.mcpb`, then runs `APPLE_MAIL_REQUIRE_DIST_ARTIFACTS` validate and `mcpb unpack`/`validate` smoke), `validate_tasks_layout.py` + `validate_repo_root.py`, pytest, and wrapper. The tiers are not supersets of each other, so a new validator must be added to both `run_default()` and the `release)` arm. **Run before every commit that touches `plugin/`, manifests, `pyproject.toml`, `requirements.txt`, or release artifacts** — finalize-apple-mail-mcp skill enforces this. |
 | `all` | default + wrapper check always |
 
 ```bash
@@ -247,7 +267,7 @@ bash tools/gates/install-git-hooks.sh
 test "$(git config --get core.hooksPath)" = ".githooks"
 ```
 
-Runs `bash tools/gates/dev-check.sh default` on every commit (manifests + pytest; wrapper check when staged tool surface changes). Manual equivalent:
+Runs `bash tools/gates/dev-check.sh default` on every commit (committed-identity scan first, then manifests + tasks layout + repo root + module budget + pytest + test-count check; wrapper check when staged tool surface changes). Manual equivalent:
 
 ```bash
 bash tools/gates/pre-commit-validate.sh

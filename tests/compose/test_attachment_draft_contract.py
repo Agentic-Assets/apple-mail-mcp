@@ -499,7 +499,7 @@ def test_windowless_reply_attachment_send_is_rejected_before_mail_is_called():
             account="Work",
             message_id="12345",
             reply_body="Reply body",
-            attachments="/Users/caymanseagraves/report.pdf",
+            attachments="/Users/example/report.pdf",
             native_format=False,
             allow_windowless_fallback=True,
             mode="send",

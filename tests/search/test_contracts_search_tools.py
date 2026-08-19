@@ -364,5 +364,169 @@ class GetEmailThreadContractTests(unittest.TestCase):
         self.assertTrue(parsed["remediation"].get("preferred"))
 
 
+class SearchEmailsPaginationValidationTests(unittest.TestCase):
+    """`search_emails` must refuse a non-positive `limit` / negative `offset`.
+
+    Before this contract existed, `search_emails` leaned entirely on the guards
+    in ``search.dispatch._search_mail_records`` (``limit <= 0`` returned an empty
+    tuple, ``offset < 0`` raised ``ValueError``). That made a nonsense page size
+    indistinguishable from a genuinely empty mailbox: ``limit=0`` / ``limit=-1``
+    returned an authoritative ``{"items": [], "returned": 0}`` with no error at
+    all, and ``limit=-1`` additionally reported ``has_more: true`` with
+    ``next_offset: 0`` (``len([]) > -1``), which is a pagination loop that never
+    terminates. Both cases also burned a live ``validate_account_name``
+    AppleScript round trip first.
+
+    The refusal therefore has to live in ``search_emails`` itself, ahead of
+    account validation, so nothing reaches Mail.app and every caller gets a
+    structured code instead of a confident zero.
+    """
+
+    def _run_search(self, **kwargs):
+        """Invoke search_emails with both Mail.app doors mocked and observable.
+
+        `search_emails` reaches Mail through two seams, and a refusal has to beat
+        both. `run_applescript` is the search scan itself. `validate_account_name`
+        is the earlier account probe, which resolves account names through
+        `core.list_mail_account_names` (its own osascript call) and is therefore
+        just as live — it is stubbed by the autouse conftest fixture, so a test
+        that only watched `run_applescript` would see a refusal that had already
+        talked to Mail and call it clean. Returns both mocks.
+        """
+        with (
+            patch("apple_mail_mcp.tools.search.run_applescript") as mock_run,
+            patch("apple_mail_mcp.tools.search.validate_account_name", return_value=None) as mock_validate,
+        ):
+            result = _run(
+                search_tools.search_emails(
+                    account="Work",
+                    subject_keyword="Project",
+                    output_format="json",
+                    recent_days=7.0,
+                    **kwargs,
+                )
+            )
+        return result, mock_run, mock_validate
+
+    def _assert_structured_refusal(self, raw: str) -> dict:
+        """A refusal must be the standard serialize_tool_error JSON envelope."""
+        self.assertIsInstance(raw, str)
+        parsed = json.loads(raw)
+        self.assertTrue(parsed.get("error"), f"expected error envelope, got {parsed}")
+        self.assertIn("code", parsed)
+        self.assertTrue(parsed.get("remediation", {}).get("preferred"))
+        return parsed
+
+    def test_negative_limit_is_refused_before_any_applescript(self):
+        raw, mock_run, mock_validate = self._run_search(limit=-1)
+        parsed = self._assert_structured_refusal(raw)
+        self.assertEqual(parsed["code"], "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("limit", parsed["message"])
+        mock_run.assert_not_called()
+        mock_validate.assert_not_called()
+
+    def test_zero_limit_is_refused_before_any_applescript(self):
+        raw, mock_run, mock_validate = self._run_search(limit=0)
+        parsed = self._assert_structured_refusal(raw)
+        self.assertEqual(parsed["code"], "UNBOUNDED_SCAN_REQUIRED")
+        self.assertIn("limit", parsed["message"])
+        mock_run.assert_not_called()
+        mock_validate.assert_not_called()
+
+    def test_zero_max_results_alias_is_refused(self):
+        """`max_results` is the back-compat alias for `limit`; 0 must refuse too."""
+        raw, mock_run, mock_validate = self._run_search(max_results=0)
+        parsed = self._assert_structured_refusal(raw)
+        self.assertEqual(parsed["code"], "UNBOUNDED_SCAN_REQUIRED")
+        mock_run.assert_not_called()
+        mock_validate.assert_not_called()
+
+    def test_negative_offset_is_refused_before_any_applescript(self):
+        """Matches the sibling `export_emails` / `list_events` string convention.
+
+        Those tools return a bare ``"Error: offset must be >= 0"``. `search_emails`
+        already surfaced that exact text, but only by catching a ``ValueError``
+        thrown from `dispatch` *after* the account probe had already talked to
+        Mail — so the text is unchanged while the ordering is not.
+        """
+        raw, mock_run, mock_validate = self._run_search(offset=-1)
+        self.assertIsInstance(raw, str)
+        self.assertTrue(raw.startswith("Error:"), raw)
+        self.assertIn("offset", raw)
+        mock_run.assert_not_called()
+        mock_validate.assert_not_called()
+
+    def test_refusals_never_emit_a_zero_or_negative_scan_bound(self):
+        """No refused call may build `messages 1 thru 0` or a negative bound.
+
+        `base_cap = limit + 1 + offset` in `search.script`, so `limit=-1` yields
+        `scanUpperBound = 0`. A live read-only probe across four Mail backends
+        established that `messages 1 thru 0` does **not** raise on a non-empty
+        mailbox — AppleScript clamps index 0 up to 1 and returns exactly one
+        message, so an unvalidated negative limit would hand back a single real
+        message as an authoritative result.
+
+        Note: this assertion was already green before the `search_emails`
+        validation landed, because `dispatch._search_mail_records` independently
+        short-circuits `limit <= 0`. It is a defense-in-depth guard against that
+        downstream check being relaxed, not evidence of the original defect. The
+        same builder *is* reachable with a zero bound through
+        `dispatch._search_mail_records_sync(account=...)`, which skips that
+        guard — a separate surface, owned by its own callers.
+        """
+        for kwargs in ({"limit": -1}, {"limit": 0}, {"offset": -1}, {"max_results": 0}):
+            with self.subTest(**kwargs):
+                _raw, mock_run, _mock_validate = self._run_search(**kwargs)
+                emitted = "\n".join(str(call) for call in mock_run.call_args_list)
+                self.assertNotIn("messages 1 thru 0", emitted)
+                self.assertNotIn("set scanUpperBound to 0", emitted)
+                self.assertNotIn("set scanUpperBound to -", emitted)
+
+    def test_valid_pagination_still_works_unchanged(self):
+        """Regression guard: the refusal must not narrow the working range."""
+        with patch(
+            "apple_mail_mcp.tools.search.run_applescript",
+            return_value=SEARCH_PAYLOAD,
+        ):
+            raw = _run(
+                search_tools.search_emails(
+                    account="Work",
+                    subject_keyword="Project",
+                    output_format="json",
+                    recent_days=7.0,
+                    limit=10,
+                    offset=0,
+                )
+            )
+        parsed = json.loads(raw)
+        jsonschema.validate(instance=parsed, schema=SEARCH_EMAILS_JSON_SCHEMA)
+        self.assertNotIn("code", parsed)
+        self.assertEqual(parsed["limit"], 10)
+        self.assertEqual(parsed["offset"], 0)
+        self.assertEqual(parsed["returned"], len(parsed["items"]))
+        self.assertEqual(parsed["returned"], 3)
+
+    def test_limit_of_one_and_positive_offset_are_still_accepted(self):
+        """The smallest legal page and a nonzero offset must both survive."""
+        with patch(
+            "apple_mail_mcp.tools.search.run_applescript",
+            return_value=SEARCH_PAYLOAD,
+        ):
+            raw = _run(
+                search_tools.search_emails(
+                    account="Work",
+                    subject_keyword="Project",
+                    output_format="json",
+                    recent_days=7.0,
+                    limit=1,
+                    offset=2,
+                )
+            )
+        parsed = json.loads(raw)
+        self.assertNotIn("code", parsed)
+        self.assertEqual(parsed["limit"], 1)
+        self.assertEqual(parsed["offset"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

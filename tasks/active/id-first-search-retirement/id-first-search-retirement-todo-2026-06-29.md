@@ -381,7 +381,7 @@ Evidence: `id-first-search-retirement-completion-audit-2026-06-29.md` (same fold
 Use this shape when dispatching subagents:
 
 ```text
-Repo: /Users/caymanseagraves/.codex/worktrees/79e8/apple-mail-mcp
+Repo: /Users/.../.codex/worktrees/79e8/apple-mail-mcp
 Task: <one focused lane>
 Read first: AGENTS.md, relevant CLAUDE.md, `tasks/active/id-first-search-retirement/id-first-search-retirement-todo-2026-06-29.md`, and relevant skill docs.
 Scope: <exact files or modules>

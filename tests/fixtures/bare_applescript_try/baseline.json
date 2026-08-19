@@ -40,7 +40,7 @@
       "silent": 1
     },
     "plugin/apple_mail_mcp/tools/analytics/dashboard.py": {
-      "bare": 4
+      "bare": 2
     },
     "plugin/apple_mail_mcp/tools/analytics/export.py": {
       "bare": 1
@@ -88,7 +88,7 @@
       "bare": 2
     },
     "plugin/apple_mail_mcp/tools/compose/manage.py": {
-      "bare": 6
+      "bare": 3
     },
     "plugin/apple_mail_mcp/tools/compose/reply_draft_resolver_scripts.py": {
       "bare": 3,
@@ -156,13 +156,13 @@
       "silent": 1
     },
     "plugin/apple_mail_mcp/tools/manage/trash.py": {
-      "bare": 2
+      "bare": 1
     },
     "plugin/apple_mail_mcp/tools/search/by_id.py": {
       "bare": 5
     },
     "plugin/apple_mail_mcp/tools/search/script.py": {
-      "bare": 5,
+      "bare": 4,
       "silent": 3
     },
     "plugin/apple_mail_mcp/tools/search/thread.py": {

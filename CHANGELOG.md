@@ -165,6 +165,198 @@
   functions. Exceptions that are not `ToolError` still propagate: converting
   arbitrary failures into tidy JSON is the pattern this release exists to
   remove.
+- **`manage_trash(action="empty_trash")` deleted mail under the default
+  `dry_run=True`.** The branch read `confirm_empty` and never read `dry_run`, so
+  `confirm_empty=True` alone permanently deleted. It now derives its mode from
+  `dry_run` the way the id-direct branch already did: `dry_run=True` emits no
+  `delete` command, labels the output `DRY RUN - PREVIEW EMPTY TRASH`, and states
+  that `dry_run=False` is required to act. `confirm_empty` is unchanged and still
+  checked independently. **Behavior change:** a caller passing `confirm_empty=True`
+  and relying on the default now gets a preview instead of a deletion. The bundled
+  `email-management` skill documented exactly that call, so its
+  `SKILL.md`, `references/bulk-cleanup.md`, and `templates/common-workflows.md`
+  now pass `dry_run=False` on the step that actually empties.
+- **`manage_trash(action="delete_permanent")` accepted a date window and applied
+  none of it, deleting the newest messages when asked for the oldest.** The
+  `apply_to_all` path hand-rolled a script whose selection was a bare newest-first
+  `messages 1 thru max_deletes of trashMailbox`, with no date condition emitted;
+  `older_than_days=365` and the default `recent_days=2.0` produced byte-identical
+  scripts. The `UNBOUNDED_SCAN_REQUIRED` guard that demanded a window was
+  satisfied by the *default* `recent_days`, so it enforced nothing downstream.
+  That script is deleted. The path now routes through the same bounded
+  `_search_message_ids(mailbox="Trash", date_from=…, date_to=…)` call its sibling
+  branches already used, then recurses into the id-direct path, which honors
+  `dry_run` correctly. `delete_permanent` can no longer permanently delete a
+  message outside the caller's requested window. Known limitation, in the safe
+  direction: with `older_than_days` set, the scan cap is `max_deletes + 1` clamped
+  to 50, so the call examines only the newest 6 to 50 messages in Trash and
+  resolves nothing when those are all recent. It under-deletes and says so.
+- **`max_deletes=-1` permanently deleted the entire Trash.** With no floor and no
+  ceiling on the parameter documented as a "safety limit", `messageCount > -1`
+  passed and the emitted slice became `messages 1 thru -1`, which spans the whole
+  mailbox because `thru -1` is end-relative. `max_deletes=0` emitted
+  `messages 1 thru 0`, which does not raise on a non-empty mailbox and instead
+  returns exactly one message, so a request for zero deletions deleted one. Both
+  were verified against Mail on four backends. `max_deletes` is now clamped once,
+  before every branch, to `max(1, min(max_deletes, SCAN_BOUNDS["TRASH_SCAN"]))`
+  — adopting the `TRASH_SCAN = 100` constant that already existed and was
+  referenced nowhere. A clamped call names both numbers rather than silently
+  echoing the corrected one.
+- **A non-positive `max_deletes` is now refused rather than clamped up to 1.** An
+  earlier pass in this release floored the value with `max(1, …)`, which meant
+  `manage_trash(action="delete_permanent", max_deletes=0, dry_run=False)`
+  permanently deleted **one** message for a caller who had asked for none.
+  Captured from the pre-fix build: `if messageCount > 1 then` /
+  `set trashMessages to messages 1 thru 1 of trashMailbox` / `delete aMessage`.
+  That is the `messages 1 thru 0` defect this release fixes, re-created in Python
+  where no AppleScript probe would catch it. `manage_trash` now returns the same
+  `UNBOUNDED_SCAN_REQUIRED` refusal `move_email` and `manage_drafts` already
+  returned for the equivalent bound, on every action including `empty_trash`, and
+  before any account probe or AppleScript. Oversized values still clamp.
+- **`manage_trash`'s advertised `max_deletes` range was fiction on two of its
+  three paths.** The clamp used `SCAN_BOUNDS["TRASH_SCAN"]` (100), but 51 to 100
+  is unreachable by ids — `_check_message_ids_cap` caps at `MAX_WHOSE_IDS` (50) —
+  and unreachable by filter, where `SEARCH_HARD_CEILING` (50) bounds the resolved
+  records. The ceiling is now selected per path: `TRASH_SCAN` for `empty_trash`,
+  which genuinely slices Mail's own `messages` element, and `MAX_WHOSE_IDS` for
+  the id and filter paths. This is the same coupling `move_email` chose so the
+  clamp and the id cap cannot drift apart.
+- **A non-positive `older_than_days` walked straight around the date fix above,
+  on both trash actions.** The refusal guard tests `older_than_days is None`,
+  which is false for `-1` and `0`; `effective_recent_days` is then zeroed because
+  the value is not `None`, silently discarding the caller's `recent_days`; and
+  `_date_to_for_older_than` returns `None` for anything `<= 0`. Net result:
+  `date_from=None` and `date_to=None`, no window at all, so a request phrased
+  "purge mail older than N days" permanently deleted the **newest** messages —
+  the exact defect this release fixes for positive values. Measured before the
+  fix: `older_than_days` of `-1`, `-365`, and `0` all produced an unwindowed scan
+  with the caller's `recent_days=2.0` reduced to `0`. `move_to_trash` shared the
+  hole on both its live and its dry-run path, so its preview described the wrong
+  messages too. A non-positive `older_than_days` now normalizes to `None` before
+  the guard runs, which restores the caller's `recent_days` window and lets
+  `recent_days=0` correctly return `UNBOUNDED_SCAN_REQUIRED`. Positive values are
+  byte-identical to before. Note `older_than_days=0` was **not** already safe
+  here: unlike `move_email`, these paths gate on `apply_to_all` rather than on a
+  falsy `older_than_days`.
+- **An invalid `action` silently performed a trash-move.** The non-`message_ids`
+  path fell through `empty_trash` and `delete_permanent` into `move_to_trash`, so
+  a typo'd action moved mail while the `message_ids` path caught the same typo
+  with `Error: Invalid action`. Both paths now validate against the same action
+  set and return the same message, before any AppleScript runs.
+- **`inbox_dashboard`'s default UI mode was serving a dead page.** The template's
+  "fallback if data not injected" block declares `var accountsData` inside an
+  `if`, and `var` hoists to script scope, so the renderer's injected
+  `const accountsData` made the whole inline `<script>` a **parse-time**
+  SyntaxError. Nothing in it ran: no data render, no search, no actions. The page
+  served its static shell with empty containers and a literal `0 emails`, which
+  reads as an empty inbox. Confirmed with `node --check` against the committed
+  template and renderer. The injection now emits `var` to match the fallback, and
+  three `node --check` tests plus a declaration-collision test lock it. This is
+  why the diagnostics work above needed a UI path as well as a JSON one: on the
+  default output format, the code meant to display an error could not execute.
+- **A subject or mailbox name containing `</script>` could break out of the
+  dashboard's inline script.** `json.dumps` output was injected raw, and
+  `json.dumps` does not escape `</`, so user-controlled text closed the script
+  element and the remainder rendered as live markup. All three injected payloads
+  now pass through an `_embed_json()` helper that escapes `</` and the U+2028 /
+  U+2029 line terminators JS honors and JSON does not. DOM-boundary escaping was
+  already correct via the template's `escapeHtml()`; the hole was one layer up, at
+  the script-element boundary.
+- **`inbox_dashboard` scan failures now reach the default UI output too.**
+  `create_inbox_dashboard_ui` takes an optional `scan_errors` list, defaulting to
+  empty so every existing caller is unchanged. A failed scan reveals a warning
+  banner, labels the count `0 emails (incomplete)`, and replaces the `Inbox Zero`
+  empty state with `Scan Incomplete`; a genuinely quiet mailbox still renders the
+  clean empty state with no warning.
+- **The search dispatch layer had a sync bridge that skipped every bound check
+  the async path performed.** `_search_mail_records_sync` called
+  `_search_one_account` directly, bypassing the `offset`, `limit`, `sort`, and
+  `read_status` validation four lines above it. Because `base_cap = limit + 1 +
+  offset`, a caller could drive the emitted slice to any value: `limit=0` bound
+  `messages 1 thru 1` and returned one real message for a page sized zero, and
+  `offset=-102, limit=100` bound `messages 1 thru -1`, a full-mailbox
+  materialization of the kind this package bans everywhere else. Both checks now
+  live in one `_validate_dispatch_args` seam that both paths call, which makes
+  `base_cap >= 2` an invariant of every script the package builds. The async
+  path's `limit <= 0` arm no longer returns a silent empty either: that shape is
+  itself the silent-zero defect, and it was already unreachable from its only
+  tool caller once `search_emails` began refusing non-positive bounds upstream.
+  The stale docstring claiming `list_email_attachments` as a caller is corrected;
+  the third caller is `export_emails`, which already handled the raise.
+- **Eleven bundled skill examples told agents to trash mail with a call that only
+  previewed it.** `manage_trash` defaults to `dry_run=True`, so a `dry_run`-less
+  example produces a preview; an agent following it reports the mail trashed when
+  nothing happened. Sites across `email-management/SKILL.md`,
+  `references/bulk-cleanup.md`, `templates/common-workflows.md`,
+  `examples/inbox-zero-workflow.md`, `examples/email-triage.md`, and
+  `email-archive-cleanup/SKILL.md` now show the two-step shape: preview with the
+  default, then repeat the same call with `dry_run=False`. Workflows that had no
+  action step gained one rather than having their preview relabelled. The 45
+  `move_email` examples were audited and deliberately left unchanged: `move_email`
+  defaults to `dry_run=False` and genuinely acts, so labelling those as previews
+  would have documented a mutation as a no-op.
+- **`inbox_dashboard` rendered every failure as an authoritative empty inbox.**
+  Its script-level `try` had no `on error` arm, so any throw returned `""`, which
+  parsed to `[]` and surfaced as `"recent_emails": [], "errors": []` — with
+  `errors` a hardcoded literal, its only occurrence in the file. An agent reading
+  that concludes there is no mail and reports no action needed. Measured live
+  against a non-existent account: previously 0 rows and **0 errors** in 115 ms;
+  now 0 rows and one `mailbox_error`. The outer `try` gained an `on error` arm,
+  the per-message loop counts swallowed read failures, and both emit the same
+  `ERROR_MAILBOX` marker rows `search_emails` already used, surfaced as `errors`
+  plus a new `error_details` list in JSON mode. A genuinely empty inbox still
+  reports empty with no error.
+- **`inbox_dashboard` emitted unsanitized subjects and senders into a
+  `|||`-delimited row.** A subject containing the delimiter shifted every
+  downstream field, which is the documented wrong-`message_id` footgun. Both
+  fields now pass through `sanitize_pipe_delimited_field`, and the marker-row
+  parser requires an exact 3-field shape so a message whose subject is literally
+  `ERROR_MAILBOX` cannot forge a diagnostic and suppress its own row.
+- **`inbox_dashboard`'s `max_per_account` had no floor and no ceiling.**
+  `max_per_account=0` emitted `messages 1 thru 0`, which returns one message
+  rather than raising, so a request for zero recent emails fabricated one row;
+  `-5` bound essentially the whole inbox. Now clamped in the script builder to
+  `max(1, min(max_per_account, SCAN_BOUNDS["INBOX_HARD_CEILING"]))`, which covers
+  all three callers rather than the tool function alone. The raw
+  `messages of inboxMailbox` fallback arm is gone, replaced by a count-clamped
+  slice with an explicit empty-mailbox arm and its own error handler for a
+  stale-high count; its lint allowlist entry drops to zero.
+- **`manage_drafts(action="cleanup_empty")` failed on most real Drafts folders.**
+  It emitted a fixed, unguarded `messages 1 thru 75 of draftsMailbox` with no
+  clamp to the live count. An out-of-range upper bound raises -1719
+  `Invalid index.` rather than clamping, so any Drafts mailbox holding fewer than
+  75 messages errored out. Measured live across six accounts at draft counts of
+  11, 262, 1014, 45, 3, and 5: **four of the six raised -1719**; only the two
+  above 75 worked. The slice now clamps to `count of messages` with an explicit
+  empty-mailbox arm, following the pattern its sibling builders already used, and
+  keeps a surrounding `try` because Mail's `count of messages` can itself read
+  stale-high — a clamp alone is necessary but not sufficient.
+- **`cleanup_empty` permanently deleted non-empty drafts when a body read
+  failed.** The `content` read sat in a bare `try`, so a throw left `draftBody`
+  empty and a draft with a blank subject was then classified as empty and
+  deleted. Classification is now fail-closed: it binds a read-success sentinel
+  and a draft is deletable only when its emptiness was positively established.
+  Drafts skipped because their body could not be read, and deletes that failed,
+  are counted and reported instead of vanishing from the tally. Covers the throw
+  path only; if the read *hangs* rather than raising, no `on error` arm helps and
+  only the call timeout bounds it. The `cleanup_empty` script builder moved from
+  `compose/manage.py` to `compose/drafts_scripts.py` alongside its siblings,
+  which took `manage.py` from 596 to 522 lines; the move was verified
+  byte-identical in emission before the behavior changes were applied.
+- **`search_emails(limit=-1)` told the caller to keep paginating forever.** A
+  non-positive `limit` returned an empty page with `has_more: true` and
+  `next_offset: 0`, because `has_more` was computed as `len(items) > limit` and
+  `0 > -1` holds. An agent paginating on `has_more` re-issues the identical call
+  indefinitely. A zero `limit` returned a clean empty result indistinguishable
+  from "no matches," and both spent a live `validate_account_name` AppleScript
+  round trip before returning. `search_emails` was the only one of its four
+  siblings with no bound validation of its own. A non-positive
+  `limit`/`max_results` now returns `UNBOUNDED_SCAN_REQUIRED` — the same code
+  `list_inbox_emails` already uses for `max_emails <= 0`, whose documented
+  trigger already covered a zero page size — and a negative `offset` returns
+  `Error: offset must be >= 0`, matching `export_emails` and `list_events`
+  verbatim. Both refuse before any AppleScript is built, confirmed live at
+  sub-second latency.
 - **`search_emails` subject filtering returned 0 results on every account.**
   The subject-only fast path built its filter as a bare `subject contains "…"`
   and spliced it into `repeat with aMessage in candidateMessages`. A bare
@@ -174,6 +366,45 @@
   swallowed the error, so the tool reported an empty result set with
   `has_more: false` and no errors. The fast path now tests `messageSubject`,
   the loop-local the preceding line already binds.
+- **The same subject-only fast path ignored `date_from` and `recent_days`.**
+  Binding the filter to `messageSubject` made subject matching work, but the
+  subject-only shape then tested subject and nothing else: it never read
+  `date received`, so a caller asking for "subject contains X in the last 7 days"
+  got matches from any date, silently outside the window they asked for. The fast
+  path now reads the date into a loop-local, ANDs the floor into the per-message
+  condition, and keeps the descending-order `exit repeat` so the scan still stops
+  at the first message older than the window. Sender, read-status, and content
+  reads stay out of the fast path, which is the entire reason it is fast.
+- **Bounded mailbox scans no longer fall back to enumerating the whole mailbox.**
+  `build_bounded_message_scan` and `search_emails`'s `bounded_candidate_script`
+  each had an arm that bound `messages of <mailbox>` when a bounded slice was not
+  taken. Every arm now slices. The search recovery path re-reads
+  `count of messages`, clamps to the smaller of that count and the scan cap, and
+  emits a structured `ERROR_MAILBOX` diagnostic only if the clamped slice also
+  fails, so a mailbox smaller than the cap still returns its results instead of
+  reporting a spurious error. The extra count read is paid only on the arm that
+  previously enumerated, never on the fast path. Message sets are unchanged in
+  every case.
+- **The bounded-scan lint now covers the whole package, not just `tools/`.**
+  `tests/core/test_no_unbounded_whose.py` scanned
+  `plugin/apple_mail_mcp/tools/` only, so `bounded_scan.py`,
+  `core/script_fragments.py`, and the two `calendar_core/` script modules were
+  unlinted: the bounded-scan builder itself sat outside the bounded-scan lint.
+  Now rooted at `plugin/apple_mail_mcp/` (115 modules) with a coverage assertion
+  that fails if the scanned set ever collapses again, and the ratchet re-keyed
+  package-relative so same-named modules in different packages cannot share one
+  allowlist entry.
+- **New gate: committed-identity scan for this public repo.**
+  `tools/validators/validate_no_committed_identity.py` fails closed on an email
+  address at a non-placeholder domain, an absolute `/Users/<name>/...` path, or an
+  uppercase account UUID in any tracked text file. Root `AGENTS.md` documented the
+  equivalent scan as a manual habit; it is now the first step of
+  `tools/gates/dev-check.sh` `default` and `release`, and therefore of the
+  pre-commit hook. It runs first because it is the cheapest step and the only one
+  whose miss cannot be undone in the working tree. Enforcement is a path-keyed
+  ratchet, so already-published hits do not block work while no new one can land,
+  and violation output names the file, line, and rule without ever echoing the
+  matched value.
 - **A scan that throws on every message no longer looks like a legitimate
   empty result.** All three `search_emails` scan loops now count swallowed
   per-message failures and emit one `ERROR_MAILBOX` diagnostic per mailbox

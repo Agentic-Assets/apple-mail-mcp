@@ -73,11 +73,13 @@ The MCP server enforces conservative defaults. Confirm with the user before rais
 |-----------|-------------|---------------------------|
 | `manage_trash(action="move_to_trash")` | 5 messages | Any time `max_deletes` exceeds 20 |
 | `manage_trash(action="delete_permanent")` | 5 messages | Always; this is irreversible |
-| `manage_trash(action="empty_trash")` | hard confirm via `confirm_empty=True` | Always |
+| `manage_trash(action="empty_trash")` | hard confirm via `confirm_empty=True`, and `dry_run=False` to act | Always |
 | `move_email` | 50 messages | Any bulk move (`max_moves` > 10); use explicit `max_moves=1` for single-message filing |
 | `update_email_status` | 10 messages | Any bulk update (`max_updates` > 50) |
 
 Pattern: identify candidates with `search_emails()`, preview the count and sample, confirm the user's intent, then run the destructive call with an explicit cap.
+
+Every `manage_trash` action defaults to `dry_run=True` and previews without touching mail, `empty_trash` included. Read the preview back to the user, then repeat the same call with `dry_run=False` to act. A preview that reports what would go is not proof that anything was deleted.
 
 ## Core Principles
 
@@ -100,7 +102,7 @@ Goal: process inbox to zero or near-zero in 15 to 30 minutes. For a **5–10 min
    - For responses, defer to **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail.
    - To defer, flag with `update_email_status(action="flag", message_ids=["..."])`.
    - To file, use `move_email(message_ids=["..."], to_mailbox="...", dry_run=True)` then execute.
-   - To delete, use `manage_trash(action="move_to_trash", message_ids=["..."])` with an explicit cap.
+   - To delete, preview with `manage_trash(action="move_to_trash", message_ids=["..."])` and an explicit cap, then repeat the same call with `dry_run=False` to act.
 5. Mark processed batches read: `update_email_status(action="mark_read", message_ids=[...])`.
 6. End the session by re-running `get_inbox_overview()` to confirm the queue is drained.
 
@@ -134,7 +136,7 @@ Goal: drain the inbox by processing every message exactly once.
 
 1. Survey: `get_inbox_overview()` and `get_statistics(scope="account_overview")` to size the problem.
 2. Process top-down with the five-D framework on each message:
-   - Delete: spam, expired notifications; `manage_trash(action="move_to_trash", message_ids=[...])`.
+   - Delete: spam, expired notifications; preview with `manage_trash(action="move_to_trash", message_ids=[...])`, then repeat the same call with `dry_run=False` to act.
    - Delegate: forward; use **`email-drafting`** (`forward_email` tool) after user confirms recipients.
    - Defer: flag and move to a "Follow Up" mailbox.
    - Do: respond now if under two minutes; use **`email-drafting`** → `reply_to_email(message_id=...)` for thread replies; `compose_email` only for new standalone mail. Never auto-send under `--draft-safe`. `compose_email`, `create_rich_email_draft`, and `manage_drafts(action="create")` are standalone-only and refuse `Re:`/`Fwd:` subjects or quoted bodies unless `standalone_confirmed=True`.
@@ -166,7 +168,7 @@ Mindset:
 | View a conversation | `get_email_thread(account="...", message_id="...")` | **Discovery-only:** if no id yet, run bounded `search_emails` or `list_inbox_emails` first, then pass returned `message_id` |
 | Move messages | `move_email(message_ids=[...], max_moves=N)` | ID-first; filter scans need `allow_filter_scan=True` |
 | Flag / mark read | `update_email_status(action="...", message_ids=[...])` | ID-first; default cap 10 |
-| Move to trash / delete | `manage_trash(action="...", message_ids=[...])` | See `references/bulk-cleanup.md` |
+| Move to trash / delete | `manage_trash(action="...", message_ids=[...])` | Previews by default; repeat the same call with `dry_run=False` to act. See `references/bulk-cleanup.md` |
 | Analytics | `get_statistics()` and `get_top_senders()` | See `references/analytics.md` |
 | Export for backup | `export_emails(message_ids=[...])` or `export_emails(scope="...", mailbox="...")` | Prefer reviewed ids for batches; run before any large delete. Use `format="eml"` when raw source headers and MIME are needed; see `references/bulk-cleanup.md` for attachment and timeout limits. |
 | Sync stale account | `synchronize_account(account="...", confirm_sync=True)` | Only after the user explicitly accepts that Mail may fetch a large backlog |

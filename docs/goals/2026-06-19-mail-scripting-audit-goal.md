@@ -10,7 +10,7 @@ Audit Apple Mail MCP for Mail.app AppleScript design quality using the repo-loca
 
 ## Boundaries
 
-Work in `/Users/caymanseagraves/Documents/GitHub/agentic-assets/apple-mail-mcp` on a feature branch. Read `AGENTS.md`, relevant `CLAUDE.md` files, `.agents/skills/mail-scripting-dictionary/SKILL.md`, and its source reference before changing code. Use `/System/Applications/Mail.app/Contents/Resources/Mail.sdef` as the local contract for Mail terms and read/write access. Keep this developer-only skill out of packaged plugin skills and manifests. Never auto-send email. Do not use AppleScript fallback outside the MCP implementation. Preserve unrelated dirty files. Do not push to `main` or open a PR by API.
+Work in `/Users/.../Documents/GitHub/agentic-assets/apple-mail-mcp` on a feature branch. Read `AGENTS.md`, relevant `CLAUDE.md` files, `.agents/skills/mail-scripting-dictionary/SKILL.md`, and its source reference before changing code. Use `/System/Applications/Mail.app/Contents/Resources/Mail.sdef` as the local contract for Mail terms and read/write access. Keep this developer-only skill out of packaged plugin skills and manifests. Never auto-send email. Do not use AppleScript fallback outside the MCP implementation. Preserve unrelated dirty files. Do not push to `main` or open a PR by API.
 
 ## Iteration Policy
 

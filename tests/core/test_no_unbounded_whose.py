@@ -40,10 +40,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS_DIR = ROOT / "plugin" / "apple_mail_mcp" / "tools"
-# Wider than TOOLS_DIR on purpose: the bare-property fragment builder lives in
-# ``core/``, so a scan rooted at ``tools/`` would miss a new caller added beside
-# it. Only BARE_PROPERTY_CONDITION uses this root; the mailbox-enumeration rules
-# stay scoped to the tool surfaces that emit scan loops.
+# THE SCOPE DECISION for the two package-wide rules, stated once here.
+#
+# Root for BARE_PROPERTY_CONDITION (its fragment builder lives in ``core/``, so a
+# scan rooted at ``tools/`` would miss a new caller added beside it) and, since
+# AGENTIC-2355, for RAW_MESSAGES_ENUMERATION. That rule was scoped to TOOLS_DIR on
+# the theory that only tool surfaces emit scan loops, which was wrong in the one
+# way that mattered: ``bounded_scan.build_bounded_message_scan`` — the helper
+# every caller trusts to bound its scan — sits one directory ABOVE ``tools/``, so
+# the bounded-scan lint could not read the bounded-scan builder, and its
+# small-mailbox arm emitted a raw ``messages of <mailbox>`` with nothing flagging
+# it.
+#
+# Rooting at the package rather than a named list also reaches the other
+# AppleScript-emitting modules outside ``tools/`` (``core/script_fragments.py``,
+# ``calendar_core/scripts_read.py``, ``calendar_core/scripts_write.py``) plus any
+# future one. Widening cost nothing: ``bounded_scan.py`` held the only hit outside
+# ``tools/`` and was fixed in the same change, so nothing needed grandfathering.
+#
+# DANGEROUS_WHOSE / WHOSE_ON_SLICE_VAR / RAW_ENUMERATION stay scoped to
+# TOOLS_DIR; widening those is a separate decision with its own baseline.
 PACKAGE_DIR = ROOT / "plugin" / "apple_mail_mcp"
 
 # ---------------------------------------------------------------------------
@@ -72,11 +88,27 @@ DANGEROUS_WHOSE = re.compile(
 RAW_ENUMERATION = re.compile(r"\bevery message of (?:\w+|__VAR__)\b(?!\s+whose)")
 
 # Same failure, different spelling. AppleScript treats `messages of MB` as
-# identical to `every message of MB`: both materialize the entire mailbox. The
-# rule above only ever matched the `every message of` form, so this spelling went
-# unlinted while seven live sites used it — most as `on error` fallbacks that
-# abandon a bounded slice and enumerate everything, which on a 24K+ Exchange
-# mailbox is the exact hang the bounded-scan contract exists to prevent.
+# identical to `every message of MB`: both materialize the entire mailbox, and on
+# a 24K+ Exchange mailbox that is the exact hang the bounded-scan contract exists
+# to prevent. The rule above only ever matched the `every message of` form, so
+# this spelling went unlinted while seven live sites used it.
+#
+# Two shapes, and the difference matters when you go to fix one (AGENTIC-2355):
+#
+#   * ONE `on error` fallback (`search/script.py`), which abandoned a bounded
+#     slice and enumerated everything precisely when the bound had already failed.
+#     Fixed: it now re-slices against `count of messages` and emits an
+#     `ERROR_MAILBOX` diagnostic if that fails too.
+#   * SIX `else` arms of an `if (count of messages of MB) > N` guard — the shape
+#     `bounded_scan.build_bounded_message_scan` emitted and every copy inherited.
+#     These stay bounded only because the guard proved the mailbox holds ≤ N
+#     first, so the arm is reachable on a 24K mailbox only when N is itself
+#     unclamped. `bounded_scan.py` is fixed (all arms slice; 0 binds `{}`); the
+#     five remaining sites below are that same `else` arm.
+#
+# So do not go looking for an `on error` at the five sites in the baseline: there
+# isn't one. Their real exposure is the unclamped cap that makes the arm
+# reachable, which is a separate change from the spelling.
 #
 # Two spellings are excluded deliberately, because flagging either would make the
 # rule noisy enough that people route around it:
@@ -89,6 +121,11 @@ RAW_MESSAGES_ENUMERATION = re.compile(r"(?<!count of )(?<!outgoing )\bmessages o
 
 # Ratchet baseline, keyed by package-relative path -> occurrence count.
 #
+# Keys are relative to PACKAGE_DIR (``tools/manage/trash.py``), not TOOLS_DIR,
+# because the scan now spans the whole package and the two roots would otherwise
+# share a key namespace — ``bounded_scan.py`` and a hypothetical
+# ``tools/bounded_scan.py`` must not collide.
+#
 # Deliberately NOT keyed by line number: these files get edited for unrelated
 # reasons, and a line-keyed allowlist would fail the build every time something
 # above a site moved, which trains people to update the allowlist without reading
@@ -99,12 +136,28 @@ RAW_MESSAGES_ENUMERATION = re.compile(r"(?<!count of )(?<!outgoing )\bmessages o
 # call site instead, or bring a reason to AGENTIC review. Driving this dict to
 # empty is tracked separately; each site needs its own decision about whether the
 # honest fallback is "enumerate everything" or "return a structured error".
+#
+# AGENTIC-2355 removed ``search/script.py`` (fixed — see shape 1 above);
+# ``bounded_scan.py`` never appeared here, being fixed in the same change that
+# brought it into scope.
 KNOWN_RAW_MESSAGES_ENUMERATION: dict[str, int] = {
-    "analytics/dashboard.py": 1,
-    "analytics/export_helpers.py": 1,
-    "inbox/overview.py": 1,
-    "manage/trash.py": 2,
-    "search/script.py": 1,
+    # Keys are PACKAGE_DIR-relative (AGENTIC-2355 widened the scan root); the
+    # ratchets below came in against the older TOOLS_DIR namespace and are
+    # restated here under the current one.
+    #
+    # Ratcheted 1 -> 0 (entry removed): the dashboard's recent-email scan no
+    # longer falls back to `messages of inboxMailbox` when the mailbox holds
+    # fewer messages than the cap. It slices `messages 1 thru inboxTotal`
+    # instead, guarded by a zero check (every slice form raises -1719 on an
+    # empty mailbox) and its own handler (`count of messages` can read
+    # stale-high), and reports the throw as an ERROR_MAILBOX diagnostic.
+    "tools/analytics/export_helpers.py": 1,
+    "tools/inbox/overview.py": 1,
+    # Ratcheted 2 -> 1: the delete_permanent apply_to_all path no longer hand-rolls
+    # a raw `messages of trashMailbox` fallback; it resolves ids through the bounded
+    # search (which carries the caller's date window) and recurses into the
+    # id-direct purge. The remaining site is the empty_trash branch.
+    "tools/manage/trash.py": 1,
 }
 
 # Mail properties that resolve only where an enclosing `whose` clause supplies the
@@ -224,8 +277,31 @@ def _iter_tool_files() -> Iterable[Path]:
         yield path
 
 
+def _iter_package_files() -> Iterable[Path]:
+    """Yield every module in the package, recursively.
+
+    The file set for the two package-wide rules (RAW_MESSAGES_ENUMERATION and
+    BARE_PROPERTY_CONDITION) — see the scope decision at ``PACKAGE_DIR``.
+
+    ``__init__.py`` is NOT skipped here, unlike in ``_iter_tool_files()``: the
+    package facades are ordinary modules that could grow a script builder, and
+    excluding them would be a hole with nothing behind it.
+    """
+    return sorted(PACKAGE_DIR.rglob("*.py"))
+
+
+def _pkg_rel(path: Path) -> str:
+    """PACKAGE_DIR-relative key, e.g. ``tools/manage/trash.py``.
+
+    Distinct from ``_rel`` on purpose: the package-wide scans must not key a
+    module above ``tools/`` by a path that a module inside ``tools/`` could also
+    produce.
+    """
+    return path.relative_to(PACKAGE_DIR).as_posix()
+
+
 def _rel(path: Path) -> str:
-    """Package-relative key, e.g. ``manage/helpers.py``.
+    """Tools-relative key, e.g. ``manage/helpers.py``.
 
     Never ``path.name``: ``helpers.py`` exists in ``calendar/``, ``compose/``,
     ``manage/``, and ``smart_inbox/``, and ``attachments.py`` in ``analytics/``
@@ -309,6 +385,57 @@ class LintCoverageTests(unittest.TestCase):
             "so the scanner's file set has regressed.",
         )
 
+    def test_raw_messages_lint_reaches_applescript_modules_outside_tools(self):
+        """The bounded-scan rule must be able to read the bounded-scan builder.
+
+        The scope decision at ``PACKAGE_DIR``, recorded as an assertion because a
+        comment cannot fail. Narrowing the root back to TOOLS_DIR would restore
+        exactly the AGENTIC-2355 hole while every other assertion in this module
+        kept passing — the same failure mode as the non-recursive glob described
+        in this class's docstring.
+        """
+        scanned = {_pkg_rel(path) for path in _iter_package_files()}
+
+        # The AppleScript-emitting modules outside ``tools/``. Spot-anchored
+        # rather than derived: these are the exact files the widening was for, so
+        # a regression must name them.
+        for required in (
+            "bounded_scan.py",
+            "core/script_fragments.py",
+            "calendar_core/scripts_read.py",
+            "calendar_core/scripts_write.py",
+        ):
+            self.assertIn(
+                required,
+                scanned,
+                f"{required} emits AppleScript but is outside the raw-enumeration scan. "
+                "That scan must root at PACKAGE_DIR, not TOOLS_DIR (AGENTIC-2355).",
+            )
+
+        # Widening must not have dropped anything the tools-only scan covered.
+        tool_keys = {f"tools/{_rel(path)}" for path in _iter_tool_files()}
+        missing_tools = tool_keys - scanned
+        self.assertFalse(
+            missing_tools,
+            f"The package-wide scan no longer covers tool modules it used to: {sorted(missing_tools)}.",
+        )
+        self.assertGreater(
+            len(scanned),
+            len(tool_keys),
+            "The package-wide scan must cover strictly more modules than the tools-only scan; "
+            f"got {len(scanned)} vs {len(tool_keys)}.",
+        )
+
+        # A baseline key that names no scanned module silently retires a
+        # grandfathered site (e.g. after a rename, or after a key-namespace
+        # change like the TOOLS_DIR -> PACKAGE_DIR move).
+        unknown = set(KNOWN_RAW_MESSAGES_ENUMERATION) - scanned
+        self.assertFalse(
+            unknown,
+            f"KNOWN_RAW_MESSAGES_ENUMERATION keys no scanned module: {sorted(unknown)}. "
+            "Keys are PACKAGE_DIR-relative, e.g. 'tools/manage/trash.py'.",
+        )
+
     def test_rel_keys_are_unambiguous_across_packages(self):
         """Basename keys would collide; ``helpers.py`` exists in four packages."""
         keys = [_rel(path) for path in _iter_tool_files()]
@@ -330,8 +457,8 @@ class NoRawMessagesEnumerationTests(unittest.TestCase):
     def _scan(self) -> tuple[dict[str, int], list[str]]:
         counts: dict[str, int] = {}
         details: list[str] = []
-        for path in _iter_tool_files():
-            rel = _rel(path)
+        for path in _iter_package_files():
+            rel = _pkg_rel(path)
             with path.open() as fh:
                 for lineno, line in enumerate(fh, 1):
                     if _is_docstring_or_comment_line(line):
@@ -412,13 +539,13 @@ class NoBarePropertyConditionTests(unittest.TestCase):
 
     def _scan(self) -> list[str]:
         hits: list[str] = []
-        for path in sorted(PACKAGE_DIR.rglob("*.py")):
+        for path in _iter_package_files():
             with path.open() as fh:
                 for lineno, line in enumerate(fh, 1):
                     if _is_docstring_or_comment_line(line):
                         continue
                     if BARE_PROPERTY_CONDITION.search(line):
-                        hits.append(f"{path.relative_to(PACKAGE_DIR).as_posix()}:{lineno}: {line.strip()}")
+                        hits.append(f"{_pkg_rel(path)}:{lineno}: {line.strip()}")
         return hits
 
     def test_no_bare_property_contains_any_condition(self):
@@ -456,7 +583,7 @@ class NoBarePropertyConditionTests(unittest.TestCase):
 
     def test_bare_property_scan_covers_core_and_tools(self):
         """The rule's file set must span both packages, or it goes vacuous."""
-        scanned = {path.relative_to(PACKAGE_DIR).as_posix() for path in PACKAGE_DIR.rglob("*.py")}
+        scanned = {_pkg_rel(path) for path in _iter_package_files()}
         self.assertIn(
             "core/normalization.py",
             scanned,
