@@ -2554,15 +2554,18 @@ class SubjectFilterUnboundReferenceTests(unittest.TestCase):
         loop = self._candidate_loop(script)
 
         self.assertIn("set messageSubject to subject of aMessage", loop)
-        self.assertIn('if messageSubject contains "Invoice" then', loop)
+        self.assertIn('if (messageSubject contains "Invoice") and messageDate >= fromDate then', loop)
 
     def test_fast_path_condition_operands_are_all_locally_bound(self):
         """Regression guard: every operand in the fast-path condition must be a
         variable the loop itself assigned with `set <name> to ...`.
 
-        Before the fix the operand was the bare property `subject`, which no
-        `set` statement binds, so this assertion fails on the shipped v3.11.6
-        script and passes on the fixed one.
+        Before the AGENTIC-2344 fix the subject operand was the bare property
+        `subject`, which no `set` statement binds, so this assertion fails on the
+        shipped v3.11.6 script and passes on the fixed one. AGENTIC-2356 added the
+        caller's date floor to the same condition, so the date clause is split off
+        explicitly and `messageDate` is held to the identical binding rule — a bare
+        `date received >= fromDate` is the same -1728 crash in a different operand.
         """
         script = self._fast_path_script(["Invoice", "Receipt"])
         loop = self._candidate_loop(script)
@@ -2572,8 +2575,25 @@ class SubjectFilterUnboundReferenceTests(unittest.TestCase):
             self.fail(f"no `if … then` condition found in the fast-path loop:\n{loop}")
         condition = condition_match.group(1)
         bound_vars = set(re.findall(r"\bset ([A-Za-z_][A-Za-z0-9_]*) to ", loop))
-        operands = [clause.split(" contains ")[0].strip() for clause in condition.split(" or ")]
 
+        # `_fast_path_script` passes a `date_from`, so the emitted condition is
+        # `(<subject or-chain>) and messageDate >= fromDate`. Peel the trailing
+        # date clause off rather than loosening the operand check.
+        subject_clause, _sep, date_clause = condition.rpartition(" and ")
+        self.assertEqual(
+            date_clause,
+            "messageDate >= fromDate",
+            f"expected the fast-path condition to end in the date floor, got {condition!r}",
+        )
+        self.assertIn(
+            "messageDate",
+            bound_vars,
+            "`messageDate` must be bound by a `set messageDate to ...` line inside the same "
+            "loop; a bare `date received >= fromDate` has no implicit target inside "
+            f"`repeat with ... in ...` and throws -1728 on every message. Loop:\n{loop}",
+        )
+
+        operands = [clause.split(" contains ")[0].strip() for clause in subject_clause.strip("()").split(" or ")]
         self.assertEqual(len(operands), 2, f"expected one clause per subject term, got {condition!r}")
         for operand in operands:
             self.assertIn(
@@ -2582,6 +2602,70 @@ class SubjectFilterUnboundReferenceTests(unittest.TestCase):
                 f"condition operand {operand!r} is not bound by any `set` in the loop; "
                 f"a bare Mail property throws -1728 inside `repeat with ... in ...`. Loop:\n{loop}",
             )
+
+    def test_fast_path_applies_the_requested_date_floor(self):
+        """AGENTIC-2356: the fast path interpolated `subject_checks` alone, so the
+        `messageDate >= fromDate` entry that `per_msg_conditions` already carried
+        was silently dropped — a subject-only search scanned the newest <=50
+        messages regardless of age while `search_emails` still reported
+        `searched_from`. The date read must be bound inside the loop and the
+        comparison must reach the emitted condition."""
+        loop = self._candidate_loop(self._fast_path_script(["Invoice"]))
+
+        self.assertIn("set messageDate to date received of aMessage", loop)
+        self.assertIn("messageDate >= fromDate", loop)
+
+    def test_fast_path_keeps_the_early_date_break(self):
+        """The early break is what makes the extra date read affordable: Mail hands
+        back mailbox messages newest-first, so the first message older than
+        `fromDate` ends the useful part of the slice."""
+        loop = self._candidate_loop(self._fast_path_script(["Invoice"]))
+
+        self.assertIn("if messageDate < fromDate then exit repeat", loop)
+        # The break must precede the subject read, or it saves nothing.
+        self.assertLess(
+            loop.index("if messageDate < fromDate then exit repeat"),
+            loop.index("set messageSubject to subject of aMessage"),
+        )
+
+    def test_fast_path_still_avoids_sender_read_status_and_content_reads(self):
+        """The date fix must not turn the fast path into the general loop: reading
+        sender / read status / content per candidate is what it exists to avoid on
+        large Exchange inboxes."""
+        loop = self._candidate_loop(self._fast_path_script(["Invoice"]))
+
+        self.assertNotIn("sender of aMessage", loop)
+        self.assertNotIn("read status of aMessage", loop)
+        self.assertNotIn("content of aMessage", loop)
+
+    def test_fast_path_without_date_from_never_references_from_date(self):
+        """`_build_search_script` is also called from `manage/` and `analytics/`
+        with `date_from=None`. The emitted script only declares `fromDate` when a
+        date was passed (`records._build_applescript_date` returns "" for a falsy
+        date), so both the date read and the comparison must stay conditional —
+        referencing an undeclared `fromDate` throws on every message."""
+        script, _body_capped, _mb_capped = _build_search_script(
+            account="Work",
+            mailbox="Inbox",
+            subject_terms=["Invoice"],
+            sender=None,
+            has_attachments=None,
+            read_status="all",
+            date_from=None,
+            date_to=None,
+            include_content=False,
+            content_length=0,
+            offset=0,
+            limit=20,
+            body_text=None,
+            recent_days=0,
+        )
+
+        loop = self._candidate_loop(script)
+        self.assertNotIn("fromDate", script)
+        self.assertNotIn("set messageDate to date received of aMessage", loop)
+        # The subject filter itself still has to be there and still bound.
+        self.assertIn('if (messageSubject contains "Invoice") then', loop)
 
     def test_no_bare_mail_property_comparison_outside_whose(self):
         """No emitted line may compare a bare Mail property unless it is a `whose` clause."""
@@ -2608,9 +2692,11 @@ class SubjectFilterUnboundReferenceTests(unittest.TestCase):
         self.assertEqual(response["returned"], 1)
         self.assertEqual(response["items"][0]["subject"], "Invoice 901 for August")
         # The fast path is the one that was broken; confirm we took it and that
-        # its condition is bound to the loop variable.
+        # its condition is bound to the loop variable. The default 48h window
+        # supplies a `date_from`, so the auto-applied floor rides along
+        # (AGENTIC-2356).
         self.assertIn("set messageSubject to subject of aMessage", script)
-        self.assertIn('if messageSubject contains "Invoice" then', script)
+        self.assertIn('(messageSubject contains "Invoice") and messageDate >= fromDate', script)
 
     def test_scan_loops_count_per_message_failures(self):
         """Amplifier guard: a swallowed per-message throw must be counted, and a

@@ -25,6 +25,15 @@ FORBIDDEN PATTERNS — lint-enforced by ``tests/test_no_unbounded_whose.py``:
     downstream bounded slice. Use ``build_bounded_message_scan`` plus
     in-loop filtering.
 
+4.  ``messages of MB``. AppleScript treats it as identical to ``every
+    message of MB``, so it is the same full-mailbox materialization under
+    a spelling the lint's ``every message of`` rule never matched. On a
+    24K+ Exchange mailbox it presents as a hang rather than an error,
+    which is worse than failing. Bind ``messages 1 thru N of MB`` — and
+    when ``N`` may exceed the mailbox size, clamp it against
+    ``count of messages of MB`` (a cheap property read, not an
+    enumeration) rather than falling back to the unbounded spelling.
+
 USE INSTEAD: ``build_bounded_filtered_scan(mailbox_var, scan_cap,
 target_max, condition_expr)`` — emits the safe bounded-slice + in-loop
 ``repeat ... if`` pattern by construction.
@@ -137,6 +146,13 @@ def build_bounded_message_scan(
     ``build_bounded_filtered_scan`` — `whose` over the resulting list
     crashes on remote IMAP accounts where the underlying message refs
     span multiple physical folders (e.g. Gmail's ``[Gmail]/All Mail``).
+
+    Every arm of the emitted ``if`` binds a slice; none enumerates
+    (AGENTIC-2355, forbidden pattern 4 in the module docstring). ``messages
+    1 thru N`` raises when the mailbox holds fewer than ``N`` messages, so
+    the count guard picks the arm: above ``N`` it slices to ``N``, otherwise
+    to ``_mbCount``, and an empty mailbox binds ``{}`` rather than reaching
+    for ``messages of <mailbox>``.
     """
     if not isinstance(limit, int) or limit <= 0:
         raise ToolError(
@@ -161,8 +177,10 @@ def build_bounded_message_scan(
         f"set _mbCount to count of messages of {mailbox_var}\n"
         f"            if _mbCount > {limit} then\n"
         f"                set candidateMessages to messages 1 thru {limit} of {mailbox_var}\n"
+        f"            else if _mbCount > 0 then\n"
+        f"                set candidateMessages to messages 1 thru _mbCount of {mailbox_var}\n"
         f"            else\n"
-        f"                set candidateMessages to messages of {mailbox_var}\n"
+        f"                set candidateMessages to {{}}\n"
         f"            end if"
     )
 

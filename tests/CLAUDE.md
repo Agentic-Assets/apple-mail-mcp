@@ -42,7 +42,7 @@ The live module inventory below is intentionally names-only; use `find tests -ty
 - **`infra/`**: `test_compare_perf_results`, `test_git_hooks`, `test_inspect_envelope_index_schema`, `test_marketplace_identity`, `test_marketplace_payload`, `test_measure_metadata_hydration`, `test_module_line_budget`, `test_offline_runtime`, `test_packaged_skill_paths`, `test_perf_budget`, `test_refresh_central_marketplace`, `test_repo_root`, `test_source_release_trust`, `test_tasks_layout`, `test_validate_manifests`, `test_wrapper_surface`
 - **`manage/`**: `test_manage_bulk_action_errors`, `test_manage_create_mailbox`
 - **`property/`** (property-based): `test_escape_applescript_properties`, `test_validate_account_name_properties`
-- **`search/`**: `test_contracts_search_tools`, `test_mail_search_tools`, `test_search_escaping`, `test_search_split_characterization`
+- **`search/`**: `test_contracts_search_tools`, `test_mail_search_tools`, `test_search_bounded_candidate_binding`, `test_search_escaping`, `test_search_split_characterization`
 - **`smart_inbox/`**: `test_contracts_smart_inbox`, `test_smart_inbox_json`, `test_smart_inbox_top_senders_domain`
 
 ## v3.2.0 contract suite (capability-token + unbounded-scan refusal — keep green before any release)

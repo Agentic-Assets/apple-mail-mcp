@@ -205,6 +205,45 @@
   swallowed the error, so the tool reported an empty result set with
   `has_more: false` and no errors. The fast path now tests `messageSubject`,
   the loop-local the preceding line already binds.
+- **The same subject-only fast path ignored `date_from` and `recent_days`.**
+  Binding the filter to `messageSubject` made subject matching work, but the
+  subject-only shape then tested subject and nothing else: it never read
+  `date received`, so a caller asking for "subject contains X in the last 7 days"
+  got matches from any date, silently outside the window they asked for. The fast
+  path now reads the date into a loop-local, ANDs the floor into the per-message
+  condition, and keeps the descending-order `exit repeat` so the scan still stops
+  at the first message older than the window. Sender, read-status, and content
+  reads stay out of the fast path, which is the entire reason it is fast.
+- **Bounded mailbox scans no longer fall back to enumerating the whole mailbox.**
+  `build_bounded_message_scan` and `search_emails`'s `bounded_candidate_script`
+  each had an arm that bound `messages of <mailbox>` when a bounded slice was not
+  taken. Every arm now slices. The search recovery path re-reads
+  `count of messages`, clamps to the smaller of that count and the scan cap, and
+  emits a structured `ERROR_MAILBOX` diagnostic only if the clamped slice also
+  fails, so a mailbox smaller than the cap still returns its results instead of
+  reporting a spurious error. The extra count read is paid only on the arm that
+  previously enumerated, never on the fast path. Message sets are unchanged in
+  every case.
+- **The bounded-scan lint now covers the whole package, not just `tools/`.**
+  `tests/core/test_no_unbounded_whose.py` scanned
+  `plugin/apple_mail_mcp/tools/` only, so `bounded_scan.py`,
+  `core/script_fragments.py`, and the two `calendar_core/` script modules were
+  unlinted: the bounded-scan builder itself sat outside the bounded-scan lint.
+  Now rooted at `plugin/apple_mail_mcp/` (115 modules) with a coverage assertion
+  that fails if the scanned set ever collapses again, and the ratchet re-keyed
+  package-relative so same-named modules in different packages cannot share one
+  allowlist entry.
+- **New gate: committed-identity scan for this public repo.**
+  `tools/validators/validate_no_committed_identity.py` fails closed on an email
+  address at a non-placeholder domain, an absolute `/Users/<name>/...` path, or an
+  uppercase account UUID in any tracked text file. Root `AGENTS.md` documented the
+  equivalent scan as a manual habit; it is now the first step of
+  `tools/gates/dev-check.sh` `default` and `release`, and therefore of the
+  pre-commit hook. It runs first because it is the cheapest step and the only one
+  whose miss cannot be undone in the working tree. Enforcement is a path-keyed
+  ratchet, so already-published hits do not block work while no new one can land,
+  and violation output names the file, line, and rule without ever echoing the
+  matched value.
 - **A scan that throws on every message no longer looks like a legitimate
   empty result.** All three `search_emails` scan loops now count swallowed
   per-message failures and emit one `ERROR_MAILBOX` diagnostic per mailbox

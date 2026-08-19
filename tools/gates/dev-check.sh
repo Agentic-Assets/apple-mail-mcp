@@ -42,10 +42,9 @@ run_module_line_budget() {
   "$PY" tools/validators/check_module_line_budget.py
 }
 
-run_skill_reference_sync() {
-  echo "→ packaged skill reference sync (canonical plugin/skills/references → */references/)"
-  "$PY" tools/validators/sync_skill_references.py --check
-}
+# No run_skill_reference_sync() here on purpose: `sync_skill_references.py --check`
+# already runs inside pytest (tests/infra/test_packaged_skill_paths.py), which every
+# tier that would want it runs, so a shell wrapper would only duplicate it.
 
 run_tasks_layout() {
   echo "→ tasks/ layout (active/reference/archive buckets; enforced for agent handoffs)"
@@ -55,6 +54,11 @@ run_tasks_layout() {
 run_repo_root() {
   echo "→ repo root hygiene (allowlisted navigation + release artifacts only)"
   "$PY" tools/validators/validate_repo_root.py
+}
+
+run_identity_scan() {
+  echo "→ committed identity (public repo: no real addresses, /Users paths, or account UUIDs)"
+  "$PY" tools/validators/validate_no_committed_identity.py
 }
 
 run_pytest() {
@@ -117,6 +121,11 @@ staged_touches_tool_surface() {
 }
 
 run_default() {
+  # Identity scan first on purpose: cheapest step, only irreversible failure (a
+  # leaked address or /Users path that reaches a public push cannot be
+  # unpublished), and behind run_manifests it was unreachable in the common
+  # mid-work state where artifacts are merely stale.
+  run_identity_scan
   run_manifests
   run_tasks_layout
   run_repo_root
@@ -160,7 +169,13 @@ case "$TIER" in
     run_wrapper
     ;;
   release)
+    run_identity_scan
     run_lint
+    # The 600-LOC *regression* is already hard-gated inside validate_manifests.py,
+    # which build-artifacts.sh runs below. What was missing on this tier is the
+    # warn report: a module sitting just under the ceiling is exactly what you
+    # want printed on the gate you run before shipping, and it costs one call.
+    run_module_line_budget
     bash tools/gates/build-artifacts.sh
     run_tasks_layout
     run_repo_root
