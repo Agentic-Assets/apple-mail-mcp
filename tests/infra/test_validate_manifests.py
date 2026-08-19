@@ -1229,6 +1229,73 @@ packages = ["plugin/apple_mail_mcp"]
             ),
         )
 
+    def test_plugin_zip_is_built_reproducibly(self):
+        # Regression: `zip` stamps each entry with its source file's mtime and
+        # walks the tree in readdir order, so the same commit built in two
+        # checkouts produced two different archives — `git checkout` writes
+        # fresh mtimes. The tracked artifact then read as drifted on a clean
+        # tree and source-release-gate.sh refused to stamp a release that
+        # changed nothing. The build now stages the payload, normalises every
+        # mtime to the zip epoch, and feeds `zip` a sorted list. Rebuilding to
+        # check that costs a minute, so assert the two observable fingerprints
+        # of a reproducible build instead.
+        archive = ROOT / "apple-mail-plugin.zip"
+        if not archive.exists():
+            self.skipTest("apple-mail-plugin.zip not built; run tools/gates/build-artifacts.sh")
+        import zipfile as _zf
+
+        with _zf.ZipFile(archive) as zf:
+            infos = zf.infolist()
+        stamps = sorted({info.date_time for info in infos})
+        self.assertEqual(
+            stamps,
+            [(1980, 1, 1, 0, 0, 0)],
+            msg=(
+                "every plugin-zip entry must carry the 1980-01-01 zip epoch; "
+                f"found {len(stamps)} distinct timestamps. A build that stamps real "
+                "mtimes is not reproducible across checkouts — rebuild with "
+                "tools/gates/build-artifacts.sh."
+            ),
+        )
+        names = [info.filename for info in infos]
+        self.assertEqual(
+            names,
+            sorted(names),
+            msg=(
+                "plugin-zip entries must be written in LC_ALL=C order so the archive "
+                "does not depend on filesystem readdir order; rebuild with "
+                "tools/gates/build-artifacts.sh."
+            ),
+        )
+
+    def test_plugin_zip_preserves_launcher_execute_bits(self):
+        # The staged, timestamp-normalised build copies the payload before
+        # zipping it. If that copy ever loses permissions, `start_mcp.sh` ships
+        # non-executable and every install fails at launch — a far louder
+        # failure than the drift this build shape exists to fix, so pin it.
+        archive = ROOT / "apple-mail-plugin.zip"
+        if not archive.exists():
+            self.skipTest("apple-mail-plugin.zip not built; run tools/gates/build-artifacts.sh")
+        import zipfile as _zf
+
+        with _zf.ZipFile(archive) as zf:
+            modes = {info.filename: (info.external_attr >> 16) & 0o777 for info in zf.infolist()}
+            systems = {info.create_system for info in zf.infolist()}
+        for launcher in ("start_mcp.sh", "apple_mail_mcp.py"):
+            self.assertIn(launcher, modes, msg=f"{launcher} missing from plugin zip")
+            self.assertTrue(
+                modes[launcher] & 0o111,
+                msg=(
+                    f"{launcher} must stay executable in the plugin zip "
+                    f"(found {oct(modes[launcher])}); rebuild with tools/gates/build-artifacts.sh"
+                ),
+            )
+        self.assertEqual(
+            systems,
+            {3},
+            msg="plugin-zip entries must record Unix (3) create_system or permissions are dropped on extract",
+        )
+
     def test_artifact_freshness_rejects_plugin_zip_directory_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

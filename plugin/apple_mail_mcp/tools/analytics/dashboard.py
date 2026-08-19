@@ -457,4 +457,7 @@ async def inbox_dashboard(
         # Same sink the JSON branch turns into `errors` / `error_details`. Without
         # it the default path renders a failed scan as an empty inbox.
         scan_errors=recent_errors,
+        # Same provenance the JSON branch spreads into its payload. Without it the
+        # default path renders Mail's cached count as a bare, unqualified badge.
+        disclosure=disclosure,
     )

@@ -91,7 +91,7 @@ Those three **raise** `ToolError` with an accurate message rather than returning
 | `HTML_COMPOSE_SUBJECT_RESTORE_FAILED` | HTML compose left a visible `__apple_mail_mcp_` marker subject or could not restore/verify the real subject before save | Inspect Drafts and open compose windows for the requested real subject; do not send a marker subject |
 | `REPLY_SENDER_OVERRIDE_FAILED` | `reply_to_email(from_address=...)` and Mail refused `set sender of replyMessage` | Nothing was saved and the compose window was closed with `saving no`. Confirm the address is a configured Mail identity (`list_account_addresses`), then retry; omit `from_address` to use the account default |
 | `INVALID_TIMEOUT` | Any tool passed `timeout` <= 0 or > 3600 to `run_applescript` | Raised before the Mail lock is acquired, so nothing ran. Pass a positive value in seconds, or omit for the tool default. `0` does not mean "no deadline" — omit the parameter instead |
-| `INVALID_ACTION_CAP` | `update_email_status` called with `max_updates` <= 0 | Refused before any Mail I/O. Pass a positive cap, or omit for the default. A non-positive cap is not "act on nothing": the id-resolution helper used to return one message for `limit=0` (AGENTIC-2374). `manage_trash` / `move_email` adopt this guard once PR #91 lands |
+| `INVALID_ACTION_CAP` | `update_email_status` called with `max_updates` <= 0 | Refused before any Mail I/O. Pass a positive cap, or omit for the default. A non-positive cap is not "act on nothing": the id-resolution helper used to return one message for `limit=0` (AGENTIC-2374). `manage_trash` / `move_email` carry the same guard and refuse a non-positive `max_deletes` / `max_moves` with `UNBOUNDED_SCAN_REQUIRED` |
 
 ## Forbidden AppleScript patterns
 

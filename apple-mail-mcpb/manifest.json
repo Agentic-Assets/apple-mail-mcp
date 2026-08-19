@@ -139,7 +139,7 @@
     },
     {
       "name": "manage_trash",
-      "description": "Trash lifecycle: move_to_trash, delete_permanent, empty_trash. Prefer message_ids; allow_filter_scan=true plus older_than_days only for date/bulk paths \u2014 subject_keyword and sender always return TARGET_SELECTOR_DEPRECATED. empty_trash requires confirm_empty=True. Default max 5."
+      "description": "Trash lifecycle: move_to_trash, delete_permanent, empty_trash. Prefer message_ids; allow_filter_scan=true plus older_than_days only for date/bulk paths \u2014 subject_keyword and sender always return TARGET_SELECTOR_DEPRECATED. empty_trash requires confirm_empty=True. dry_run defaults to true and only previews \u2014 pass dry_run=false to actually delete. Default max 5."
     },
     {
       "name": "create_mailbox",

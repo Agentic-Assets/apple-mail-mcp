@@ -197,17 +197,68 @@ class DashboardUiRenderTests(unittest.TestCase):
     def test_injected_declarations_do_not_collide_with_the_template_fallbacks(self):
         """`const x` injected + the template's `var x` fallback is a SyntaxError.
 
-        The fallback block declares all three data identifiers with ``var``
+        The fallback block declares every injected data identifier with ``var``
         inside an ``if``, and ``var`` hoists out of the block to script scope.
         Mixing keywords for one identifier fails at **parse** time, so nothing
         in the inline script runs: no accounts, no emails, and no diagnostics
         banner. Every declaration of these identifiers must use ``var``.
         """
-        script = _inline_script(self._render_with_errors([{"account": "Work", "type": "timeout", "message": "slow"}]))
+        script = _inline_script(
+            self._render_with_errors(
+                [{"account": "Work", "type": "timeout", "message": "slow"}],
+                disclosure={"unread_count_measured": False, "unread_count_note": "Cached. Drifts low."},
+            )
+        )
 
-        for name in ("accountsData", "recentEmails", "scanErrors"):
+        for name in ("accountsData", "recentEmails", "scanErrors", "unreadDisclosure"):
             keywords = {kind for kind, ident in _DECLARATION_RE.findall(script) if ident == name}
             self.assertEqual(keywords, {"var"}, f"{name} declared with {sorted(keywords)}")
+
+
+class DashboardUiCarriesUnreadProvenanceTests(unittest.TestCase):
+    """The account-card numbers are Mail's cached aggregate, and must say so.
+
+    ``unread_count_disclosure()`` reached the JSON payload and stopped there: the
+    UI branch popped the sentinel out of the account map and then called the
+    renderer without it. So the release note claiming ``inbox_dashboard`` reports
+    provenance was true only on a format nobody passes, while the default page —
+    the one a person actually looks at — rendered a count measured 68% low on a
+    real Exchange mailbox as a bare badge.
+    """
+
+    def test_ui_branch_forwards_the_disclosure(self):
+        _result, captured = _dashboard_ui(lambda script, timeout=None: "")
+
+        disclosure = captured.get("disclosure")
+        self.assertIsInstance(disclosure, dict, f"UI call carried no disclosure; got keys {sorted(captured)}")
+        self.assertIn("unread_count_source", disclosure)
+        self.assertIs(disclosure["unread_count_measured"], False)
+
+    @unittest.skipIf(create_inbox_dashboard_ui is None, f"dashboard UI runtime unavailable ({_UI_IMPORT_ERROR})")
+    def test_rendered_page_carries_the_note_text(self):
+        note = "Unread totals are Mail.app's cached aggregate. It drifts low."
+        html = create_inbox_dashboard_ui(
+            {"Work": 3},
+            [],
+            disclosure={
+                "unread_count_source": "mail_cached_aggregate",
+                "unread_count_measured": False,
+                "unread_count_note": note,
+            },
+        ).resource.text
+
+        self.assertIn("unreadDisclosure", html)
+        self.assertIn("mail_cached_aggregate", html)
+        self.assertIn('id="countProvenance"', html)
+        self.assertIn("renderCountProvenance", html)
+
+    @unittest.skipIf(create_inbox_dashboard_ui is None, f"dashboard UI runtime unavailable ({_UI_IMPORT_ERROR})")
+    def test_absent_disclosure_claims_nothing_either_way(self):
+        """Unknown provenance is not the same as measured, and not a reason to warn."""
+        html = create_inbox_dashboard_ui({"Work": 3}, []).resource.text
+
+        self.assertIn("var unreadDisclosure = {}", html)
+        self.assertRegex(html, r"measured !== false")
 
 
 @unittest.skipIf(create_inbox_dashboard_ui is None, f"dashboard UI runtime unavailable ({_UI_IMPORT_ERROR})")
@@ -242,6 +293,19 @@ class DashboardUiScriptParsesTests(unittest.TestCase):
             {"Work": 2},
             [{"subject": "Subject", "sender": "sender@example.com", "date": "Date", "is_read": False}],
             scan_errors=[{"account": "Work", "type": "mailbox_error", "message": "scan failed"}],
+        ).resource.text
+
+        self._assert_parses(html)
+
+    def test_render_with_a_disclosure_parses(self):
+        html = create_inbox_dashboard_ui(
+            {"Work": 2},
+            [],
+            disclosure={
+                "unread_count_source": "mail_cached_aggregate",
+                "unread_count_measured": False,
+                "unread_count_note": "Cached. It drifts low. Do not derive a read count from it.",
+            },
         ).resource.text
 
         self._assert_parses(html)
