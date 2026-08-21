@@ -34,6 +34,7 @@ An MCP server that gives AI assistants full access to Apple Mail and Apple Calen
 | [`tests/CLAUDE.md`](tests/CLAUDE.md) | Test layout & AppleScript mocks |
 | [`tools/CLAUDE.md`](tools/CLAUDE.md) | Manifest validation scripts |
 | [`tools/marketplace_identity.json`](tools/marketplace_identity.json) | Central marketplace identity, standalone compatibility identity, and promotion ownership |
+| [`docs/marketplace-release-handoff.md`](docs/marketplace-release-handoff.md) | Compact signed-tag to central Marketplace update path |
 | [`docs/CLAUDE.md`](docs/CLAUDE.md) | Docs folder index + plugin skill map |
 | [`tasks/CLAUDE.md`](tasks/CLAUDE.md) | Phase plans & backlog |
 | [`apple-mail-mcpb/CLAUDE.md`](apple-mail-mcpb/CLAUDE.md) | Desktop bundle build |
