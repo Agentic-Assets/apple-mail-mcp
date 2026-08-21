@@ -192,14 +192,31 @@ class AppleScriptHelperEmissionTests(unittest.TestCase):
         self.assertIn("set _mbCount to count of messages of inboxMailbox", snippet)
 
     def test_build_bounded_message_scan_guards_the_empty_mailbox(self):
-        """``messages 1 thru 0`` raises, so 0 must take the ``{}`` arm."""
+        """A zero count must not bind ``{}`` on its own authority.
+
+        ``messages 1 thru 0`` does not return an empty list — it silently
+        returns the *first* message on all four backends — so a zero upper
+        bound must never be emitted at all, and the ``{}`` result has to be
+        the pre-initialized default reached only once the ``message 1`` probe
+        has thrown. Behavioural coverage of each stale-count case lives in
+        ``tests/core/test_bounded_scan_stale_count_guard.py``.
+        """
         snippet = build_bounded_message_scan("inboxMailbox", 50)
-        big = snippet.index("set candidateMessages to messages 1 thru 50 of inboxMailbox")
-        small = snippet.index("set candidateMessages to messages 1 thru _mbCount of inboxMailbox")
-        empty = snippet.index("set candidateMessages to {}")
-        self.assertIn("else if _mbCount > 0 then", snippet)
-        self.assertLess(big, small)
-        self.assertLess(small, empty)
+        self.assertNotIn("thru 0 of", snippet)
+        self.assertTrue(
+            snippet.startswith("set candidateMessages to {}"),
+            "The empty bind must be the pre-initialized default, not a count-picked arm.",
+        )
+        full = snippet.index("set candidateMessages to messages 1 thru 50 of inboxMailbox")
+        count_read = snippet.index("set _mbCount to count of messages of inboxMailbox")
+        probe = snippet.index("set _mbProbe to id of message (_mbCount + 1) of inboxMailbox")
+        short = snippet.index("set candidateMessages to messages 1 thru _mbCount of inboxMailbox")
+        # Full window first, count only as a recovery hint, probe before the
+        # short bind, and the short bind guarded by `_mbCount > 0`.
+        self.assertLess(full, count_read)
+        self.assertLess(count_read, probe)
+        self.assertLess(probe, short)
+        self.assertIn("if _mbCount > 0 then", snippet)
 
     def test_build_bounded_filtered_scan_never_enumerates_a_mailbox(self):
         """The filtered builder wraps the same bind, so it inherits the fix."""

@@ -124,7 +124,8 @@ def create_event(
         start: Event start, ISO 8601.
         end: Event end, ISO 8601 (or use duration_minutes).
         duration_minutes: Event length in minutes (alternative to end).
-        calendar: Target calendar name (fuzzy-resolved).
+        calendar: Target selector. Prefer calendar_id from list_calendars; a
+            display name must be exact and unique.
         timezone: IANA zone interpreting naive datetimes.
         all_day: Create an all-day event.
         location: Optional location text.
@@ -168,7 +169,7 @@ def create_event(
         conflicts: list[dict[str, Any]] = []
         if on_conflict != "allow":
             conflicts = find_conflicts(
-                calendar_name=target,
+                calendar_id=str(target["calendar_id"]),
                 start=start_dt,
                 end=end_dt,
                 timezone_name=timezone,
@@ -187,7 +188,7 @@ def create_event(
             )
         engine = calendar_tools.get_write_engine()
         event_id = engine.create_event(
-            calendar_name=target,
+            calendar_id=str(target["calendar_id"]),
             title=title,
             start=start_dt,
             end=end_dt,
@@ -216,7 +217,8 @@ def create_event(
     payload: dict[str, Any] = {
         "created": True,
         "event_id": event_id,
-        "calendar": target,
+        "calendar": target["name"],
+        "calendar_id": target["calendar_id"],
         "title": title,
         "start": start_local,
         "start_utc": start_utc,

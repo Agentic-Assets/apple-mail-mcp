@@ -13,8 +13,15 @@ from apple_mail_mcp.calendar_core.records import (
 UTC = timezone.utc
 
 
-def _evt_row(uid="UID-1", cal="Work", title="Standup", start="2026-7-10 9:0:0", end="2026-7-10 9:30:0"):
-    return f"EVT|||{uid}|||{cal}|||{title}|||{start}|||{end}|||false|||confirmed|||Room 1|||https://x.example|||FREQ=DAILY|||some notes"
+def _evt_row(
+    uid="UID-1",
+    calendar_id="CAL-WORK",
+    cal="Work",
+    title="Standup",
+    start="2026-7-10 9:0:0",
+    end="2026-7-10 9:30:0",
+):
+    return f"EVT|||{uid}|||{calendar_id}|||{cal}|||{title}|||{start}|||{end}|||false|||confirmed|||Room 1|||https://x.example|||FREQ=DAILY|||some notes"
 
 
 class TestParseNumericDatetime:
@@ -30,15 +37,15 @@ class TestParseNumericDatetime:
 
 
 class TestParseCalendarRows:
-    def test_parses_uid_and_name_kinds(self):
-        raw = "CAL|||UID-A|||Work|||true|||desc\nCAL||||||Home|||false|||"
+    def test_parses_calendar_identifier_without_name_fallback(self):
+        raw = "CAL|||CAL-A|||Work|||true|||desc\nCAL|||CAL-B|||Home|||false|||"
         calendars, errors = parse_calendar_rows(raw)
         assert errors == []
-        assert calendars[0]["calendar_id"] == "UID-A"
-        assert calendars[0]["id_kind"] == "uid"
+        assert calendars[0]["calendar_id"] == "CAL-A"
+        assert calendars[0]["id_kind"] == "calendarIdentifier"
         assert calendars[0]["writable"] is True
-        assert calendars[1]["calendar_id"] == "Home"
-        assert calendars[1]["id_kind"] == "name"
+        assert calendars[1]["calendar_id"] == "CAL-B"
+        assert calendars[1]["id_kind"] == "calendarIdentifier"
         assert calendars[1]["writable"] is False
 
     def test_error_rows_diverted(self):
@@ -58,6 +65,8 @@ class TestParseEventRows:
         assert errors == []
         event = events[0]
         assert event["event_id"] == "UID-1"
+        assert event["calendar_id"] == "CAL-WORK"
+        assert event["calendar"] == "Work"
         assert event["start"] == datetime(2026, 7, 10, 9, 0, tzinfo=UTC)
         assert event["recurrence"] == "FREQ=DAILY"
         assert event["all_day"] is False

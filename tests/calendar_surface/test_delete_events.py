@@ -55,7 +55,7 @@ class TestDryRunDefault:
         _read, write = fake_engines(read=_engine(events))
         payload = _run(calendar=None, dry_run=False)
         assert payload["deleted_count"] == 2
-        assert {d["calendar"] for d in write.deleted} == {"Work", "Home"}
+        assert {d["calendar_id"] for d in write.deleted} == {"UID-WORK", "UID-HOME"}
 
 
 class TestSpanAndCaps:
@@ -138,7 +138,12 @@ class _VanishingRecurringEngine(FakeReadEngine):
 
     def fetch_window(self, window, calendar_name, *, scan_cap, include_detail=False, event_ids=None, timeout=None):
         rows, errs = super().fetch_window(
-            window, calendar_name, scan_cap=scan_cap, include_detail=include_detail, event_ids=event_ids, timeout=timeout
+            window,
+            calendar_name,
+            scan_cap=scan_cap,
+            include_detail=include_detail,
+            event_ids=event_ids,
+            timeout=timeout,
         )
         if event_ids:
             if getattr(self, "_served", False):

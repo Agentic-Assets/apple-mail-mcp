@@ -6,11 +6,20 @@ from typing import Any
 
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.tools.unread_provenance import (
+    READ_COUNT_NOTE_LINE,
+    READ_DERIVED_FLAG_KEY,
+    derived_read_disclosure,
+    derived_read_text_label,
     measured_unread_disclosure,
     unread_count_disclosure,
     unread_count_text_footer,
     unread_count_text_label,
 )
+
+#: Scopes whose ``read`` figure is ``total - cached unread`` rather than a
+#: measurement. ``sender_stats`` counts per-message ``read status`` and emits no
+#: ``read`` key at all, so it is deliberately absent.
+_DERIVED_READ_SCOPES = frozenset({"account_overview", "mailbox_breakdown"})
 
 
 def _statistics_recent_days_applied(days_back: int, scope: str) -> float:
@@ -158,9 +167,10 @@ def _format_statistics_json(
         "scope": scope,
         "days_back": days_back,
         "recent_days_applied": _statistics_recent_days_applied(days_back, scope),
-        "statistics": statistics,
+        "statistics": _statistics_with_read_flag(scope, statistics),
         "errors": errors or [],
         **_statistics_unread_provenance(scope, statistics),
+        **_statistics_read_provenance(scope, statistics),
     }
     if sender is not None:
         payload["sender"] = sender
@@ -184,6 +194,45 @@ def _statistics_unread_provenance(scope: str, statistics: dict[str, Any]) -> dic
         cached_unread=statistics.get("unread"),
         total_messages=statistics.get(total_key),
     )
+
+
+def _has_derived_read(scope: str, statistics: dict[str, Any]) -> bool:
+    """True when this payload carries a ``read`` figure derived from cached unread.
+
+    ``account_overview`` and ``mailbox_breakdown`` compute ``read`` as
+    ``total - unread`` from Mail's cached ``unread count``; ``sender_stats``
+    counts per-message ``read status`` and emits no ``read`` key at all. Both
+    disclosures below key off this one predicate so the envelope block and the
+    inline flag can never disagree about whether a number is derived.
+    """
+    return scope in _DERIVED_READ_SCOPES and "read" in statistics
+
+
+def _statistics_read_provenance(scope: str, statistics: dict[str, Any]) -> dict[str, Any]:
+    """Say where this scope's ``read`` number came from, when it emits one.
+
+    The payload already warned "do not derive a read count from it" via
+    ``unread_count_note`` while shipping exactly that derivation as an
+    unlabelled integer; this block gives the derived field its own provenance
+    instead of leaving it to inherit a caveat aimed at a different field.
+    """
+    if not _has_derived_read(scope, statistics):
+        return {}
+    return derived_read_disclosure()
+
+
+def _statistics_with_read_flag(scope: str, statistics: dict[str, Any]) -> dict[str, Any]:
+    """Return ``statistics`` with the derived-read flag set beside ``read``.
+
+    The envelope block above is invisible to a consumer that reads only
+    ``payload["statistics"]["read"]`` — the exact access pattern that made the
+    unlabelled number dangerous. This inline boolean travels with the value, the
+    same way ``list_mailboxes`` carries a per-row ``unread_count_suspect`` while
+    the prose note stays at the envelope.
+    """
+    if not _has_derived_read(scope, statistics):
+        return statistics
+    return {**statistics, READ_DERIVED_FLAG_KEY: True}
 
 
 def _statistics_json_error(
@@ -279,6 +328,7 @@ def _build_account_overview_report(raw_overview: str, escaped_account: str) -> s
     total_read = total_emails - total_unread
     unread_suspect = total_unread > total_emails
     cached_label = unread_count_text_label(suspect=unread_suspect)
+    derived_read_label = derived_read_text_label()
     header = (
         "╔══════════════════════════════════════════╗\n"
         f"║      EMAIL STATISTICS - {escaped_account}       ║\n"
@@ -290,18 +340,19 @@ def _build_account_overview_report(raw_overview: str, escaped_account: str) -> s
     lines_out.append(f"Total Emails: {total_emails}\n")
     if total_emails > 0:
         lines_out.append(f"Unread: {total_unread} ({round(total_unread / total_emails * 100)}%){cached_label}\n")
-        lines_out.append(f"Read: {total_read} ({round(total_read / total_emails * 100)}%){cached_label}\n")
+        lines_out.append(f"Read: {total_read} ({round(total_read / total_emails * 100)}%){derived_read_label}\n")
         lines_out.append(f"Flagged: {sample_flagged}\n")
         lines_out.append(
             f"With Attachments: {sample_with_attachments} ({round(sample_with_attachments / total_emails * 100)}%)\n"
         )
     else:
-        lines_out.append(f"Unread: 0{cached_label}\nRead: 0{cached_label}\nFlagged: 0\nWith Attachments: 0\n")
+        lines_out.append(f"Unread: 0{cached_label}\nRead: 0{derived_read_label}\nFlagged: 0\nWith Attachments: 0\n")
     # Keep the note inside VOLUME METRICS: the senders / mailbox-distribution
     # parsers only scan lines after their own section headers, so a note here
     # can never be mistaken for a data row.
     for note_line in unread_count_text_footer():
         lines_out.append(note_line + "\n")
+    lines_out.append(READ_COUNT_NOTE_LINE + "\n")
     lines_out.append("\n")
     lines_out.append("👥 SAMPLE SENDERS\n")
     lines_out.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")

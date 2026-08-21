@@ -14,6 +14,38 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.core.reply_state import was_replied_fragment
 from apple_mail_mcp.tools.inbox.parsing import _INBOX_ERROR_PREFIX, _read_filter_condition
 
+# The script-level swallow in both builders below has an ``on error`` arm now,
+# but the per-message ``try`` one level in stayed bare: a row whose property
+# read threw simply vanished, and the caller was handed a short list rendered
+# as a complete one. Sharpest with ``read_status="unread"``, which
+# ``unread_counts.py`` names as the ground truth to fall back on when Mail's
+# cached unread count is suspect — so the fallback authority under-reported too.
+#
+# Count the throws and report them through the channel each format already has:
+# text mode carries the honest rendered count *and* the count the loop expected
+# to render in its ``__COUNT__`` marker (``parsing._strip_count_marker``
+# compares them), JSON mode emits the same in-band ``__APPLE_MAIL_MCP_ERROR__``
+# marker the script-level arm uses (``parsing._parse_inbox_error_lines``).
+#
+# ``_ROW_FAILURE_ARM`` is a dangling ``on error`` clause, not a standalone
+# statement: splice it directly before the message loop's own ``end try``.
+_ROW_FAILURE_INIT = "set rowFailures to 0"
+
+_ROW_FAILURE_ARM = """on error
+                        set rowFailures to rowFailures + 1"""
+
+
+def _expected_row_count_block(max_emails: int) -> str:
+    """Bind ``expectedCount`` to the number of rows the loop should render.
+
+    ``messageCount`` is the bound slice; the loop also stops at *max_emails*,
+    so the honest expectation is the smaller of the two. Comparing the rendered
+    count against this (rather than against ``messageCount``) is what keeps a
+    legitimately capped list from being reported as a partial one.
+    """
+    return f"""set expectedCount to messageCount
+                if expectedCount > {max_emails} then set expectedCount to {max_emails}"""
+
 
 def _build_inbox_collection_block(max_emails: int, read_filter: str) -> str:
     """Build the AppleScript that sets ``inboxMessages`` to a bounded slice.
@@ -102,6 +134,8 @@ def _build_list_inbox_text_script(
 
                 set currentIndex to 0
                 set sentCount to 0
+                {_ROW_FAILURE_INIT}
+                {_expected_row_count_block(max_emails)}
                 repeat with aMessage in inboxMessages
                     set currentIndex to currentIndex + 1
                     if currentIndex > {max_emails} then exit repeat
@@ -134,9 +168,10 @@ def _build_list_inbox_text_script(
 
                         set outputText to outputText & return
                         set sentCount to sentCount + 1
+                    {_ROW_FAILURE_ARM}
                     end try
                 end repeat
-                set outputText to outputText & "__COUNT__|||" & sentCount & return
+                set outputText to outputText & "__COUNT__|||" & sentCount & "|||" & expectedCount & "|||" & rowFailures & return
             end if
         on error errMsg
             set outputText to outputText & "⚠ Error accessing inbox for account {escaped_account}" & return & "   " & errMsg & return & return
@@ -222,6 +257,10 @@ def _build_list_inbox_json_script(
             {inbox_mailbox_script("inboxMailbox", "anAccount")}
             {collection}
             set currentIndex to 0
+            {_ROW_FAILURE_INIT}
+            set idReadFailures to 0
+            set messageCount to count of inboxMessages
+            {_expected_row_count_block(max_emails)}
             repeat with aMessage in inboxMessages
                 set currentIndex to currentIndex + 1
                 if currentIndex > {max_emails} then exit repeat
@@ -231,11 +270,18 @@ def _build_list_inbox_json_script(
                     set messageDate to date received of aMessage
                     set messageRead to read status of aMessage
                     -- Wrap id read in its own try so a transient failure during
-                    -- sync doesn't drop the entire row (matches search_emails
-                    -- sanitize_field fallback behaviour).
+                    -- sync doesn't abort the rest of the row's reads (matches
+                    -- search_emails sanitize_field fallback behaviour). The row
+                    -- is still emitted, but `_parse_pipe_delimited_emails`
+                    -- drops any row without a numeric id — carrying a wrong id
+                    -- into a destructive op is worse — so count the failure or
+                    -- that drop is invisible for exactly the reason the
+                    -- per-message swallow above was.
                     set mailAppId to ""
                     try
                         set mailAppId to id of aMessage
+                    on error
+                        set idReadFailures to idReadFailures + 1
                     end try
                     -- Strip ||| and embedded newlines from subject/sender so the
                     -- Python parser can't be confused into mapping the wrong
@@ -246,8 +292,15 @@ def _build_list_inbox_json_script(
                     {content_field}
                     {message_id_field}
                     set end of resultLines to messageSubject & "|||" & messageSender & "|||" & (messageDate as string) & "|||" & messageRead & "|||" & accountName & "|||" & mailAppId & "|||" & wasRepliedToken{message_id_suffix}{content_suffix}
+                {_ROW_FAILURE_ARM}
                 end try
             end repeat
+            if rowFailures > 0 then
+                set end of resultLines to "{_INBOX_ERROR_PREFIX}{escaped_account}|||read failed for " & (rowFailures as string) & " of " & (expectedCount as string) & " message(s); this list is incomplete"
+            end if
+            if idReadFailures > 0 then
+                set end of resultLines to "{_INBOX_ERROR_PREFIX}{escaped_account}|||message id unreadable for " & (idReadFailures as string) & " of " & (expectedCount as string) & " message(s); those rows were dropped and this list is incomplete"
+            end if
         on error errMsg
             -- The text builder above already reports this same failure inline
             -- ("⚠ Error accessing inbox for account ..."). JSON mode used to

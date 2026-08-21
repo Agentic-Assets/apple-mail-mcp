@@ -146,25 +146,58 @@ def _parse_pipe_delimited_emails(raw: str, *, has_message_id: bool = False) -> l
     return emails
 
 
-def _strip_count_marker(raw: str) -> tuple[str, int]:
-    """Split out the `__COUNT__|||N` marker line if present.
+_COUNT_MARKER_PREFIX = "__COUNT__|||"
 
-    Returns (clean_text_without_marker, count). Count defaults to 0 when
-    no marker is present (e.g. an empty-inbox account).
+
+def _marker_int(fields: list[str], index: int, default: int = 0) -> int:
+    """Field *index* of a marker line as an int, or *default* when absent/junk."""
+    if index >= len(fields):
+        return default
+    try:
+        return int(fields[index])
+    except ValueError:
+        return default
+
+
+def _strip_count_marker(raw: str) -> tuple[str, int]:
+    """Split out the ``__COUNT__|||sent[|||expected[|||failures]]`` marker line.
+
+    Returns ``(clean_text_without_marker, count)`` where *count* is the number
+    of rows the script actually rendered. Count defaults to 0 when no marker is
+    present (e.g. an empty-inbox account).
+
+    The marker carries a second number: how many rows the loop *expected* to
+    render (``min(bound slice, max_emails)``). The two used to be emitted side
+    by side and never compared, so a per-message read that threw dropped its
+    row and the caller was handed a short list rendered as a complete one — the
+    header even quoted the pre-drop message count. When they disagree, a
+    ``PARTIAL:`` line is appended to the returned body, matching how
+    ``list_emails`` already reports a timed-out account. The rendered count is
+    left honest (never inflated to the expectation); only the discrepancy is
+    added.
     """
     if not raw:
         return "", 0
-    lines = raw.splitlines()
     count = 0
+    expected = 0
+    failures = 0
     kept: list[str] = []
-    for line in lines:
-        if line.startswith("__COUNT__|||"):
-            try:
-                count = int(line.split("|||", 1)[1])
-            except (IndexError, ValueError):
-                count = 0
+    for line in raw.splitlines():
+        if line.startswith(_COUNT_MARKER_PREFIX):
+            fields = line[len(_COUNT_MARKER_PREFIX) :].split("|||")
+            count = _marker_int(fields, 0)
+            # Older marker shape (one field) carried no expectation; treat it
+            # as "expected == rendered" so it can never invent a discrepancy.
+            expected = _marker_int(fields, 1, default=count)
+            failures = _marker_int(fields, 2)
         else:
             kept.append(line)
+    dropped = max(expected - count, 0) or failures
+    if dropped:
+        kept.append(
+            f"PARTIAL: {count} of {expected} message(s) rendered; {dropped} row(s) failed to read "
+            "and were omitted. This list is incomplete — do not treat it as the full set."
+        )
     return "\n".join(kept), count
 
 

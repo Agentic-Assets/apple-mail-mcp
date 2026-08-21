@@ -30,9 +30,21 @@ FORBIDDEN PATTERNS — lint-enforced by ``tests/test_no_unbounded_whose.py``:
     a spelling the lint's ``every message of`` rule never matched. On a
     24K+ Exchange mailbox it presents as a hang rather than an error,
     which is worse than failing. Bind ``messages 1 thru N of MB`` — and
-    when ``N`` may exceed the mailbox size, clamp it against
+    when ``N`` may exceed the mailbox size, recover against
     ``count of messages of MB`` (a cheap property read, not an
     enumeration) rather than falling back to the unbounded spelling.
+
+5.  Trusting ``count of messages`` as an authority. It is a *cached*
+    property that reads stale-high (the slice then throws, loudly) and
+    stale-low (the slice then silently under-scans, or binds ``{}`` on a
+    mailbox that is not empty). Slice for the window you want first and
+    treat the count as a recovery hint. Never bind ``{}`` on the strength
+    of a zero count alone: probe ``message 1`` and raise an
+    ``ERROR_MAILBOX|||`` marker when the count is contradicted, so "the
+    mailbox is empty" and "the count read zero and nothing was scanned"
+    stay distinguishable. Never emit a slice whose upper bound may be 0 —
+    ``messages 1 thru 0`` silently returns the *first* message on all
+    four backends rather than an empty list.
 
 USE INSTEAD: ``build_bounded_filtered_scan(mailbox_var, scan_cap,
 target_max, condition_expr)`` — emits the safe bounded-slice + in-loop
@@ -147,12 +159,40 @@ def build_bounded_message_scan(
     crashes on remote IMAP accounts where the underlying message refs
     span multiple physical folders (e.g. Gmail's ``[Gmail]/All Mail``).
 
-    Every arm of the emitted ``if`` binds a slice; none enumerates
-    (AGENTIC-2355, forbidden pattern 4 in the module docstring). ``messages
-    1 thru N`` raises when the mailbox holds fewer than ``N`` messages, so
-    the count guard picks the arm: above ``N`` it slices to ``N``, otherwise
-    to ``_mbCount``, and an empty mailbox binds ``{}`` rather than reaching
-    for ``messages of <mailbox>``.
+    Every bind is a slice; none enumerates (AGENTIC-2355, forbidden pattern 4
+    in the module docstring). ``messages 1 thru N`` raises when the mailbox
+    holds fewer than ``N`` messages, so the emitted script tries the full
+    window first and only consults ``count of messages`` in the recovery arm.
+
+    That ordering is the point. ``count of messages`` is a *cached* property
+    and Mail is documented here to read it both stale-high and stale-low (a
+    shipped tool reported 3,236 unread against a true 10,016 — see
+    ``tools/unread_provenance.py``). Reading the count first and slicing to
+    it made every stale-low read a silent under-scan; asking for the full
+    window first means a low count is never consulted when the mailbox
+    actually holds ``limit`` messages.
+
+    The recovery arm carries the same per-slice guard as the two sibling
+    call sites (``tools/search/script.py``,
+    ``tools/compose/drafts_scripts.py``) and raises an ``ERROR_MAILBOX|||``
+    marker instead of binding a false empty:
+
+    * count ≥ ``limit`` yet the slice threw — the count and the mailbox
+      disagree; raise rather than re-issue the identical failing slice.
+    * count < ``limit`` and ``message <count>+1`` is still reachable — the
+      count under-reports, so raise rather than bind a short window.
+      ``messages 1 thru 0`` silently returns the *first* message on all four
+      backends, so this probe is an explicit single-message reference, never
+      a slice, and no slice is emitted unless ``_mbCount > 0``.
+    * the probe throws — nothing exists past the count, so the count is
+      corroborated: bind ``messages 1 thru _mbCount``, or leave the
+      pre-initialized ``{}`` when the mailbox is genuinely empty. A true
+      empty result is not a failure and stays silent.
+
+    A slice that still throws after the count corroborated it propagates
+    uncaught, which is deliberate: ``run_applescript`` raises on a nonzero
+    ``osascript`` exit, so the caller sees a loud failure rather than a
+    confident empty list.
     """
     if not isinstance(limit, int) or limit <= 0:
         raise ToolError(
@@ -173,15 +213,38 @@ def build_bounded_message_scan(
             ),
         )
 
+    # `_mbCountProbeFailed` is named for the failure it records on purpose: a
+    # throw from the probe is the *good* outcome (nothing exists past the
+    # count), and the flag is what lets the empty bind below stay silent for a
+    # genuinely empty mailbox while a stale-low count raises instead.
     return (
-        f"set _mbCount to count of messages of {mailbox_var}\n"
-        f"            if _mbCount > {limit} then\n"
+        f"set candidateMessages to {{}}\n"
+        f"            try\n"
         f"                set candidateMessages to messages 1 thru {limit} of {mailbox_var}\n"
-        f"            else if _mbCount > 0 then\n"
-        f"                set candidateMessages to messages 1 thru _mbCount of {mailbox_var}\n"
-        f"            else\n"
-        f"                set candidateMessages to {{}}\n"
-        f"            end if"
+        f"            on error _mbSliceError\n"
+        f"                set _mbCount to count of messages of {mailbox_var}\n"
+        f"                if _mbCount ≥ {limit} then\n"
+        f'                    error "ERROR_MAILBOX|||" & (name of {mailbox_var}) & "|||bounded slice 1 thru {limit} '
+        f'failed (" & _mbSliceError & ") while count of messages reads " & (_mbCount as string) & '
+        f'"; the cached count and the mailbox disagree, so 0 of {limit} requested message(s) were scanned"\n'
+        f"                end if\n"
+        f"                -- Does a message exist just past what the count admits?\n"
+        f"                set _mbCountProbeFailed to false\n"
+        f"                try\n"
+        f"                    set _mbProbe to id of message (_mbCount + 1) of {mailbox_var}\n"
+        f"                on error\n"
+        f"                    set _mbCountProbeFailed to true\n"
+        f"                end try\n"
+        f"                if not _mbCountProbeFailed then\n"
+        f'                    error "ERROR_MAILBOX|||" & (name of {mailbox_var}) & "|||count of messages reads " & '
+        f'(_mbCount as string) & " but message " & ((_mbCount + 1) as string) & " is reachable, so the cached count '
+        f"under-reports; 0 of {limit} requested message(s) were scanned rather than reporting a false empty mailbox "
+        f'(" & _mbSliceError & ")"\n'
+        f"                end if\n"
+        f"                if _mbCount > 0 then\n"
+        f"                    set candidateMessages to messages 1 thru _mbCount of {mailbox_var}\n"
+        f"                end if\n"
+        f"            end try"
     )
 
 

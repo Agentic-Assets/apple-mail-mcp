@@ -34,8 +34,10 @@ class TestHappyPath:
     def test_calendar_scoping_limits_fetch(self, fake_engines):
         read = FakeReadEngine(events=[raw_event("UID-1", start=_soon())])
         fake_engines(read=read)
-        payload = _run(calendar="work")  # fuzzy, case-insensitive
+        payload = _run(calendar="Work")
         assert payload["calendars_scanned"] == ["Work"]
+        assert payload["calendar_ids_scanned"] == ["UID-WORK"]
+        assert [c["calendar_id"] for c in read.fetch_calls] == ["UID-WORK"]
         assert [c["calendar"] for c in read.fetch_calls] == ["Work"]
 
     def test_calendars_list_scoping(self, fake_engines):

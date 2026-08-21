@@ -1,11 +1,14 @@
-"""Thread reconstruction tool plus its pure header/subject/mailbox script helpers.
+"""Thread reconstruction tool plus its mailbox-selection script helper.
+
+Subject/header matching helpers and the candidate-scan failure channel live
+in ``thread_helpers``; they are re-exported here so the historical
+``apple_mail_mcp.tools.search.thread.<name>`` attribute surface still works.
 
 ``run_applescript`` and ``validate_account_name`` are routed through the
 ``search`` package facade so the corresponding test patch seams keep firing.
 """
 
 import json
-import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -26,64 +29,30 @@ from apple_mail_mcp.tools.search.by_id import _fetch_email_record_by_id
 from apple_mail_mcp.tools.search.records import (
     _build_applescript_date,
     _mailbox_error_texts,
+    _non_ceiling_errors,
     _parse_search_records,
     _script_error_message,
 )
-
-
-def _thread_strip_prefixes_handler() -> str:
-    """AppleScript handler to strip Re:/Fwd:/etc. prefixes from subjects."""
-    prefix_checks = ""
-    for prefix in THREAD_PREFIXES:
-        escaped = escape_applescript(prefix)
-        prefix_checks += f'''
-                ignoring case
-                    if baseSubj starts with "{escaped}" then
-                        set baseSubj to text {len(prefix) + 1} thru -1 of baseSubj
-                        repeat while baseSubj starts with " "
-                            set baseSubj to text 2 thru -1 of baseSubj
-                        end repeat
-                        set didStrip to true
-                    end if
-                end ignoring
-'''
-    return f"""
-    on stripThreadPrefixes(subj)
-        set baseSubj to subj
-        set didStrip to true
-        repeat while didStrip
-            set didStrip to false
-            {prefix_checks}
-        end repeat
-        return baseSubj
-    end stripThreadPrefixes
-"""
-
-
-_HEADER_MESSAGE_ID_RE = re.compile(r"<([^<>]+)>|([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)")
-
-
-def _normalize_thread_header_id(value: str) -> str:
-    """Normalize a Message-ID-like token for thread graph comparisons."""
-    return value.strip().strip("<>").strip().lower()
-
-
-def _extract_thread_header_tokens(*values: str | None) -> list[str]:
-    """Return normalized header Message-ID tokens from Message-ID/References fields."""
-    tokens: set[str] = set()
-    for value in values:
-        if not value:
-            continue
-        for bracketed, bare in _HEADER_MESSAGE_ID_RE.findall(value):
-            token = _normalize_thread_header_id(bracketed or bare)
-            if token:
-                tokens.add(token)
-    return sorted(tokens)
-
-
-def _applescript_string_list(values: list[str]) -> str:
-    """Render a Python string list as an AppleScript list literal."""
-    return "{" + ", ".join(f'"{escape_applescript(value)}"' for value in values) + "}"
+from apple_mail_mcp.tools.search.thread_helpers import (
+    _HEADER_MESSAGE_ID_RE as _HEADER_MESSAGE_ID_RE,
+)
+from apple_mail_mcp.tools.search.thread_helpers import (
+    _applescript_string_list as _applescript_string_list,
+)
+from apple_mail_mcp.tools.search.thread_helpers import (
+    _extract_thread_header_tokens as _extract_thread_header_tokens,
+)
+from apple_mail_mcp.tools.search.thread_helpers import (
+    _normalize_thread_header_id as _normalize_thread_header_id,
+)
+from apple_mail_mcp.tools.search.thread_helpers import (
+    _thread_error_type,
+    candidate_failure_report,
+    render_failure_report,
+)
+from apple_mail_mcp.tools.search.thread_helpers import (
+    _thread_strip_prefixes_handler as _thread_strip_prefixes_handler,
+)
 
 
 def _thread_mailbox_script(mailbox: str, mailboxes: list[str] | None) -> str:
@@ -201,7 +170,17 @@ def get_email_thread(
           A scan that failed inside AppleScript adds `error` and `errors` to
           the JSON payload instead of reporting an empty thread; per-mailbox
           failures add `errors` plus `error_details`. Neither key appears on
-          a genuinely empty thread.
+          a genuinely empty thread. JSON also carries `matched` (text mode's
+          `FOUND N`) beside `returned` (rows rendered) and `render_incomplete`
+          (`matched > returned`); a render that threw is attributed as a
+          `render failed for N of M` entry in `errors`/`error_details` (text
+          mode prints `PARTIAL:`), an unattributed shortfall as
+          `render_mismatch`. A candidate read that threw *before* matching is
+          reported separately as `candidate_scan_incomplete` plus a
+          `candidate scan failed for ...` entry in `errors`/`error_details`
+          (`type: "candidate_scan_error"`; text mode prints its own `PARTIAL:`
+          line). It is invisible to `matched`/`returned`, which are short
+          together, so the thread may be missing messages entirely.
     """
     validation_timeout = 30 if timeout is None else min(timeout, 30)
     account_err = search.validate_account_name(account, timeout=validation_timeout)
@@ -323,6 +302,7 @@ def get_email_thread(
                                 end if
     """
     mailbox_script = _thread_mailbox_script(resolved_mailbox, mailboxes)
+    escaped_render_scope = escape_applescript(", ".join(mailboxes) if mailboxes else resolved_mailbox)
     preview_collect_block = ""
     preview_text_block = ""
     if include_preview:
@@ -366,6 +346,11 @@ def get_email_thread(
         set threadMessages to {{}}
         set threadHeaderTokens to {header_tokens_literal}
         set selectedStrategy to "subject"
+        set threadMatchedCount to 0
+        set threadRenderFailures to 0
+        set threadCandidateScanned to 0
+        set threadCandidateFailures to 0
+        set threadMailboxFailures to 0
         {date_setup}
 
         try
@@ -379,6 +364,7 @@ def get_email_thread(
 
                 try
                     {candidate_collection}
+                    set threadCandidateScanned to threadCandidateScanned + (count of candidateMessages)
 
                     ignoring case
                         repeat with aMessage in candidateMessages
@@ -418,11 +404,16 @@ def get_email_thread(
                                 else if subjectMatched and (count of subjectFallbackMessages) < {max_messages} then
                                     set end of subjectFallbackMessages to aMessage
                                 end if
+                            on error
+                                set threadCandidateFailures to threadCandidateFailures + 1
                             end try
                         end repeat
                     end ignoring
+                on error
+                    set threadMailboxFailures to threadMailboxFailures + 1
                 end try
             end repeat
+{candidate_failure_report(escaped_render_scope)}
 
             if {str(header_matching_enabled).lower()} and (count of headerThreadMessages) > 0 then
                 set threadMessages to headerThreadMessages
@@ -435,9 +426,9 @@ def get_email_thread(
             end if
 
             -- Display thread messages
-            set messageCount to count of threadMessages
+            set threadMatchedCount to count of threadMessages
             set outputText to outputText & "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" & return
-            set outputText to outputText & "FOUND " & messageCount & " MESSAGE(S) IN THREAD" & return
+            set outputText to outputText & "FOUND " & threadMatchedCount & " MESSAGE(S) IN THREAD" & return
             set outputText to outputText & "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" & return & return
 
             repeat with aMessage in threadMessages
@@ -477,8 +468,10 @@ def get_email_thread(
                     {preview_text_block}
 
                     set outputText to outputText & return
+                on error
+                    set threadRenderFailures to threadRenderFailures + 1
                 end try
-            end repeat
+            end repeat{render_failure_report(escaped_render_scope)}
 
         on error errMsg
             return "Error: " & errMsg
@@ -488,7 +481,7 @@ def get_email_thread(
             set AppleScript's text item delimiters to return
             set outputRows to recordRows as string
             set AppleScript's text item delimiters to ""
-            return "THREAD_STRATEGY|||" & selectedStrategy & return & outputRows
+            return "THREAD_STRATEGY|||" & selectedStrategy & "|||" & (threadMatchedCount as string) & return & outputRows
         end if
 
         return outputText
@@ -506,9 +499,15 @@ def get_email_thread(
         selection_strategy = thread_strategy
         parse_result = result
         script_error: str | None = None
+        matched_count: int | None = None
         if result.startswith("THREAD_STRATEGY|||"):
             first_line, _, remaining = result.partition("\n")
-            selection_strategy = first_line.split("|||", 1)[1].strip() or selection_strategy
+            header_fields = first_line.split("|||")
+            selection_strategy = header_fields[1].strip() or selection_strategy
+            # Field 3 is the FOUND count. Text mode printed it and JSON mode
+            # dropped it, so a JSON caller could not detect a truncated thread.
+            if len(header_fields) > 2 and header_fields[2].strip().isdigit():
+                matched_count = int(header_fields[2].strip())
             parse_result = remaining
         else:
             # The script's own `on error` handler returns "Error: <msg>" as the
@@ -525,9 +524,22 @@ def get_email_thread(
             date_field="received_date",
         )
         draft_scan = build_draft_scan_status(snapshots)
+        rendered = len(records)
+        if matched_count is None:
+            matched_count = rendered
+        # A candidate read that threw never entered ``threadMessages``, so it is
+        # missing from ``FOUND N`` too: ``matched`` and ``returned`` are short
+        # together and reconcile cleanly. This flag is the only thing that says
+        # the thread itself may be incomplete.
+        candidate_incomplete = any(
+            _thread_error_type(item.get("message", "")) == "candidate_scan_error" for item in mailbox_errors
+        )
         payload: dict[str, Any] = {
             "items": records,
-            "returned": len(records),
+            "returned": rendered,
+            "matched": matched_count,
+            "render_incomplete": matched_count > rendered,
+            "candidate_scan_incomplete": candidate_incomplete,
             "account": account,
             "mailbox": resolved_mailbox,
             "mailboxes": mailboxes or [resolved_mailbox],
@@ -543,12 +555,24 @@ def get_email_thread(
         if script_error is not None:
             payload["error"] = script_error
             payload["errors"] = [script_error]
-        if mailbox_errors:
-            payload.setdefault("errors", []).extend(_mailbox_error_texts(mailbox_errors))
+        # Keyed off the real failures, not the raw list: ``mailbox_errors`` can
+        # carry ``SCAN_CEILING`` marker rows, which ``_non_ceiling_errors`` drops
+        # because a saturated scan is a bound, not a failure. Keying off the raw
+        # list would attach an EMPTY ``errors`` to a ceiling-only payload and
+        # suppress the render reconciliation below.
+        failures = _non_ceiling_errors(mailbox_errors)
+        if failures:
+            payload.setdefault("errors", []).extend(_mailbox_error_texts(failures))
             payload["error_details"] = [
-                {"mailbox": item["mailbox"], "type": "mailbox_error", "message": item["message"]}
-                for item in mailbox_errors
+                {"mailbox": item["mailbox"], "type": _thread_error_type(item["message"]), "message": item["message"]}
+                for item in failures
             ]
+        elif matched_count > rendered:
+            # More thread messages counted than rows returned, with no
+            # attribution from the script (e.g. a row the parser dropped).
+            shortfall = f"thread render returned {rendered} of {matched_count} matched message(s); results incomplete"
+            payload.setdefault("errors", []).append(shortfall)
+            payload["error_details"] = [{"mailbox": resolved_mailbox, "type": "render_mismatch", "message": shortfall}]
         if anchor is not None:
             payload["anchor"] = {
                 "message_id": anchor.get("message_id", ""),

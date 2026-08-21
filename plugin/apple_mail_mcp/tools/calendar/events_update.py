@@ -155,7 +155,8 @@ def update_event(
 
     Args:
         event_id: Exact event id from a prior list/get call.
-        calendar: Lookup hint (fuzzy-resolved); bounds the scan.
+        calendar: Lookup selector that bounds the scan. Prefer calendar_id
+            from list_calendars; a display name must be exact and unique.
         lookup_days_back: Lookup window days back (default 30).
         lookup_days_ahead: Lookup window days ahead (default 90).
         title: New title.
@@ -204,12 +205,12 @@ def update_event(
             days_ahead=lookup_days_ahead,
             timezone_name=timezone,
         )
-        names, _fan_out_capped = resolve_read_calendars(calendar, None, timeout=timeout)
+        scopes, _fan_out_capped = resolve_read_calendars(calendar, None, timeout=timeout)
         read_engine = calendar_tools.get_engine()
         found, _errors, _exhausted = collect_window_events(
             engine=read_engine,
             window=window,
-            calendar_names=names,
+            calendar_ids=[str(scope["calendar_id"]) for scope in scopes],
             expand_recurring=False,
             include_detail=True,
             event_ids=[target_id],
@@ -227,6 +228,9 @@ def update_event(
         _require_span(bool(current.get("recurring")), span)
 
         target_calendar = str(current.get("calendar"))
+        target_calendar_id = str(current.get("calendar_id") or "")
+        if not target_calendar_id:
+            raise ToolError(code="CALENDAR_NOT_FOUND", message="The event did not retain its calendar_id.")
         stored_start = datetime.fromisoformat(str(current["start"]))
         stored_end = datetime.fromisoformat(str(current["end"])) if current.get("end") else stored_start
 
@@ -269,7 +273,7 @@ def update_event(
         conflicts: list[dict[str, Any]] = []
         if (new_start is not None or new_end is not None) and on_conflict != "allow":
             conflicts = find_conflicts(
-                calendar_name=target_calendar,
+                calendar_id=target_calendar_id,
                 start=effective_start,
                 end=effective_end,
                 timezone_name=timezone,
@@ -319,6 +323,7 @@ def update_event(
                 "updated": False,
                 "event_id": target_id,
                 "calendar": target_calendar,
+                "calendar_id": target_calendar_id,
                 "note": (
                     _ATTENDEE_REMOVAL_NOTE
                     if attendee_removal_ignored
@@ -335,6 +340,7 @@ def update_event(
                 "updated": False,
                 "event_id": target_id,
                 "calendar": target_calendar,
+                "calendar_id": target_calendar_id,
                 "changes": changes,
                 "has_conflicts": bool(conflicts),
                 "conflicts": conflicts,
@@ -361,7 +367,7 @@ def update_event(
         )
         write_window = widen_write_window_for_recurring(window, bool(current.get("recurring")))
         updated_id = write_engine.update_event(
-            calendar_name=target_calendar,
+            calendar_id=target_calendar_id,
             event_id=target_id,
             window=write_window,
             set_lines=set_lines,
@@ -378,6 +384,7 @@ def update_event(
         "updated": True,
         "event_id": updated_id,
         "calendar": target_calendar,
+        "calendar_id": target_calendar_id,
         "changes": changes,
         "span": span,
         "has_conflicts": bool(conflicts),

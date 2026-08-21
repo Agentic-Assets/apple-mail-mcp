@@ -37,22 +37,33 @@ def _resolve_exact_target(
     calendar_id: str | None,
     *,
     timeout: int | None,
-) -> str:
-    """Exact-only selector for rename/delete: no fuzzy matching, by design."""
+) -> dict[str, Any]:
+    """Exact-only selector for rename/delete, retaining the stable ID."""
     engine = calendar_tools.get_engine()
     calendars, _errors = engine.list_calendars(timeout=timeout)
     if calendar_id:
         for cal in calendars:
             if str(cal.get("calendar_id")) == calendar_id:
-                return str(cal.get("name"))
+                return cal
         raise ToolError(
             code="CALENDAR_NOT_FOUND",
             message=f"No calendar has calendar_id {calendar_id!r}. Call list_calendars first.",
         )
     if name:
-        for cal in calendars:
-            if str(cal.get("name")) == name:
-                return name
+        matches = [cal for cal in calendars if str(cal.get("name")) == name]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ToolError(
+                code="AMBIGUOUS_CALENDAR_SELECTOR",
+                message=f"Calendar name {name!r} identifies {len(matches)} calendars.",
+                remediation={
+                    "candidates": [
+                        {"name": str(cal.get("name")), "calendar_id": str(cal.get("calendar_id"))} for cal in matches
+                    ],
+                    "preferred": "Pass calendar_id from list_calendars.",
+                },
+            )
         raise ToolError(
             code="CALENDAR_NOT_FOUND",
             message=(
@@ -89,15 +100,16 @@ def manage_calendars(
     calendar surface: first a ``dry_run=True`` preview (the default) reports
     the exact event count; then ``dry_run=False`` requires
     ``confirm_delete_calendar=True``, plus ``force_nonempty=True`` when the
-    count is non-zero. Rename and delete accept the exact current ``name`` or
-    a ``calendar_id`` only; fuzzy matching is disabled for destructive
-    targets by design. Delete is blocked under --draft-safe
+    count is non-zero. Rename and delete prefer the opaque ``calendar_id``
+    returned by ``list_calendars``; an exact current ``name`` is accepted only
+    when unique, so duplicate names fail safely. Delete is blocked under --draft-safe
     (``CALENDAR_DELETE_BLOCKED``) unless the operator launched with
     ``CALENDAR_ALLOW_DESTRUCTIVE=1``.
 
     Args:
         action: "create", "rename", or "delete".
-        name: create: the new calendar name; rename/delete: exact existing name.
+        name: create: the new calendar name; rename/delete: exact, unique
+            existing name.
         calendar_id: rename/delete: preferred exact selector from list_calendars.
         new_name: rename: the new name.
         dry_run: delete only: True (default) previews the cascade event count.
@@ -148,9 +160,17 @@ def manage_calendars(
                     code="CALENDAR_ALREADY_EXISTS",
                     message=f"A calendar named {wanted!r} already exists; pick another new_name.",
                 )
-            renamed = calendar_tools.get_write_engine().rename_calendar(name=target, new_name=wanted, timeout=timeout)
+            renamed = calendar_tools.get_write_engine().rename_calendar(
+                calendar_id=str(target["calendar_id"]), new_name=wanted, timeout=timeout
+            )
             return finish(
-                {"action": "rename", "renamed": True, "from": target, "calendar": renamed},
+                {
+                    "action": "rename",
+                    "renamed": True,
+                    "from": target["name"],
+                    "calendar": renamed,
+                    "calendar_id": target["calendar_id"],
+                },
                 output_format,
                 _render_manage_text,
             )
@@ -161,13 +181,14 @@ def manage_calendars(
             return blocked
         target = _resolve_exact_target(name, calendar_id, timeout=timeout)
         write_engine = calendar_tools.get_write_engine()
-        event_count = write_engine.count_events(target, timeout=timeout)
+        event_count = write_engine.count_events(str(target["calendar_id"]), timeout=timeout)
         if dry_run:
             payload_preview: dict[str, Any] = {
                 "action": "delete",
                 "dry_run": True,
                 "deleted": False,
-                "calendar": target,
+                "calendar": target["name"],
+                "calendar_id": target["calendar_id"],
                 "event_count": event_count,
                 "next_step": (
                     "Re-run with dry_run=False and confirm_delete_calendar=True"
@@ -181,7 +202,7 @@ def manage_calendars(
                 ToolError(
                     code="CALENDAR_CONFIRMATION_REQUIRED",
                     message=(
-                        f"Deleting calendar {target!r} removes it and all {event_count} event(s) on it. "
+                        f"Deleting calendar {target['name']!r} removes it and all {event_count} event(s) on it. "
                         "Pass confirm_delete_calendar=True after reviewing the dry_run preview."
                     ),
                 )
@@ -191,18 +212,19 @@ def manage_calendars(
                 ToolError(
                     code="CALENDAR_CONFIRMATION_REQUIRED",
                     message=(
-                        f"Calendar {target!r} still holds {event_count} event(s); pass force_nonempty=True "
+                        f"Calendar {target['name']!r} still holds {event_count} event(s); pass force_nonempty=True "
                         "to confirm the cascade delete."
                     ),
                 )
             )
-        deleted_name = write_engine.delete_calendar(name=target, timeout=timeout)
+        deleted_name = write_engine.delete_calendar(calendar_id=str(target["calendar_id"]), timeout=timeout)
         return finish(
             {
                 "action": "delete",
                 "dry_run": False,
                 "deleted": True,
                 "calendar": deleted_name,
+                "calendar_id": target["calendar_id"],
                 "event_count": event_count,
             },
             output_format,

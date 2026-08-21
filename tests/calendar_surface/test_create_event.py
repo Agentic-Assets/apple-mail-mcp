@@ -3,9 +3,8 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 import apple_mail_mcp.server as server
+import pytest
 from apple_mail_mcp.tools.calendar import create_event
 
 from .conftest import HOST_TZ, FakeReadEngine, raw_event
@@ -73,7 +72,8 @@ class TestHappyPath:
         monkeypatch.setattr(server, "DEFAULT_CALENDAR", "Home")
         payload = _run(calendar=None)
         assert payload["calendar"] == "Home"
-        assert write.created[0]["calendar_name"] == "Home"
+        assert payload["calendar_id"] == "UID-HOME"
+        assert write.created[0]["calendar_id"] == "UID-HOME"
 
     def test_no_target_and_no_default_refused(self, fake_engines, monkeypatch):
         read = FakeReadEngine(default=None)

@@ -49,7 +49,7 @@
       "bare": 2
     },
     "plugin/apple_mail_mcp/tools/analytics/export_helpers.py": {
-      "bare": 8
+      "bare": 3
     },
     "plugin/apple_mail_mcp/tools/analytics/statistics.py": {
       "bare": 6,
@@ -88,7 +88,7 @@
       "bare": 2
     },
     "plugin/apple_mail_mcp/tools/compose/manage.py": {
-      "bare": 3
+      "bare": 1
     },
     "plugin/apple_mail_mcp/tools/compose/reply_draft_resolver_scripts.py": {
       "bare": 3,
@@ -130,7 +130,7 @@
       "silent": 1
     },
     "plugin/apple_mail_mcp/tools/inbox/list_scripts.py": {
-      "bare": 6
+      "bare": 3
     },
     "plugin/apple_mail_mcp/tools/inbox/mailboxes.py": {
       "bare": 5
@@ -139,7 +139,6 @@
       "bare": 4
     },
     "plugin/apple_mail_mcp/tools/inbox/unread_counts.py": {
-      "bare": 3,
       "silent": 1
     },
     "plugin/apple_mail_mcp/tools/manage/attachments.py": {
@@ -162,11 +161,11 @@
       "bare": 5
     },
     "plugin/apple_mail_mcp/tools/search/script.py": {
-      "bare": 4,
-      "silent": 3
+      "bare": 3,
+      "silent": 2
     },
     "plugin/apple_mail_mcp/tools/search/thread.py": {
-      "bare": 6,
+      "bare": 3,
       "silent": 1
     },
     "plugin/apple_mail_mcp/tools/smart_inbox/awaiting_reply.py": {

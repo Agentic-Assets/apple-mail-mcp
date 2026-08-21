@@ -218,7 +218,7 @@ replace `VERSION` or the path below if the details output shows a different
 install path:
 
 ```bash
-VERSION=3.11.7
+VERSION=3.11.8
 .venv/bin/python tools/probes/mcp_tool_smoke.py \
   --command /bin/bash \
   --arg "$HOME/.claude/plugins/cache/apple-mail-mcp/apple-mail/$VERSION/start_mcp.sh" \

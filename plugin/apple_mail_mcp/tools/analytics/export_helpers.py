@@ -6,6 +6,13 @@ from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import iter_id_chunks
 from apple_mail_mcp.core import AppleScriptTimeout, escape_applescript, normalize_message_ids, run_applescript
 from apple_mail_mcp.core.replied import sent_mailbox_resolve_script
+from apple_mail_mcp.tools.analytics.correspondent_matching import (
+    correspondent_match_block,
+    correspondent_match_handler,
+    correspondent_read_failure_count,
+    correspondent_read_failure_init,
+    correspondent_read_failure_report,
+)
 from apple_mail_mcp.tools.analytics.export_failure_reporting import (
     ID_EXPORT_RETRY_HINT,
     PAGE_EXPORT_RETRY_HINT,
@@ -432,36 +439,7 @@ def build_correspondent_export_script(
                     if sentMailbox is not missing value then set end of searchMailboxes to sentMailbox
         """
     return f'''
-        using terms from application "Mail"
-            on messageHasCorrespondent(aMessage, emailNeedle)
-                ignoring case
-                    try
-                        if sender of aMessage contains emailNeedle then return true
-                    end try
-                    try
-                        repeat with aRecipient in recipients of aMessage
-                            if address of aRecipient contains emailNeedle then return true
-                        end repeat
-                    end try
-                    try
-                        repeat with aRecipient in to recipients of aMessage
-                            if address of aRecipient contains emailNeedle then return true
-                        end repeat
-                    end try
-                    try
-                        repeat with aRecipient in cc recipients of aMessage
-                            if address of aRecipient contains emailNeedle then return true
-                        end repeat
-                    end try
-                    try
-                        repeat with aRecipient in bcc recipients of aMessage
-                            if address of aRecipient contains emailNeedle then return true
-                        end repeat
-                    end try
-                end ignoring
-                return false
-            end messageHasCorrespondent
-        end using terms from
+{correspondent_match_handler()}
 
         tell application "Mail"
             set outputText to "EXPORTING CORRESPONDENT" & return & return
@@ -480,6 +458,7 @@ def build_correspondent_export_script(
                 set globalMatchedCount to 0
                 set exportAttachmentBytes to 0
                 {export_failure_init()}
+                {correspondent_read_failure_init()}
 
                 repeat with currentMailbox in searchMailboxes
                     if exportHalted then exit repeat
@@ -498,8 +477,9 @@ def build_correspondent_export_script(
                         set exportAttempted to false
                         try
                             set messageDate to date received of aMessage
-                            set shouldExport to my messageHasCorrespondent(aMessage, "{safe_email_address}")
+                            {correspondent_match_block(safe_email_address)}
                             {date_filter}
+                            {correspondent_read_failure_count()}
                             if shouldExport then
                                 set globalMatchedCount to globalMatchedCount + 1
                                 if globalMatchedCount > {offset} then
@@ -534,6 +514,7 @@ def build_correspondent_export_script(
 
                 set outputText to outputText & return & "Email address: {safe_email_address}" & return
                 {export_count_report(retry_hint=correspondent_retry_hint(offset))}
+                {correspondent_read_failure_report()}
                 set outputText to outputText & "Location: " & exportDir & return
             on error errMsg
                 return "Error: " & errMsg

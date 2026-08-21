@@ -362,8 +362,14 @@ def get_email_by_id(
 
     Returns:
         One matching email as text (prefixed with `[REPLIED]` / `[HAS DRAFT]`
-        when applicable), or JSON with {"item": ..., "draft_scan": {...}}. If
-        no message is found, JSON returns {"item": null}. JSON items include
+        when applicable), or JSON with {"item": ..., "draft_scan": {...}}.
+        JSON always carries `found`, `requested_id`, `missing_ids`, and
+        `errors`, mirroring `get_email_by_ids`: an id that is not in the
+        mailbox returns `item: null` with an empty `errors`, while an id whose
+        read threw or timed out returns `item: null` with that failure in
+        `error`, `errors`, and an `error_details` entry typed `read_error` or
+        `timeout` (JSON mode no longer answers those with a bare error
+        string). JSON items include
         ``content``, ``content_available``, ``content_truncated``,
         ``content_status``, ``to``, ``cc``, ``bcc``, ``in_reply_to``,
         ``references``, ``has_quoted_original``, ``was_replied_to``, and
@@ -391,6 +397,13 @@ def get_email_by_id(
     numeric_id = normalized_ids[0]
     effective_timeout = timeout if timeout is not None else 120
 
+    # A read that threw and an id that is simply not here both used to end as
+    # `{"item": null}` (or a bare, unparseable error string), so a JSON caller
+    # could not tell them apart. Mirror the plural sibling instead: the id is
+    # reported in `missing_ids` either way, and `errors` is what separates
+    # "not in this mailbox" from "matched but could not be read".
+    item: dict[str, Any] | None = None
+    error_detail: dict[str, str] | None = None
     try:
         item = _fetch_email_record_by_id(
             account=account,
@@ -401,12 +414,17 @@ def get_email_by_id(
             timeout=effective_timeout,
         )
     except AppleScriptTimeout:
-        return (
-            f"Error: AppleScript timed out while fetching message_id={numeric_id} "
+        message = (
+            f"AppleScript timed out while fetching message_id={numeric_id} "
             f"on account {account!r}. Try again or pass a larger `timeout`."
         )
+        if output_format != "json":
+            return f"Error: {message}"
+        error_detail = {"mailbox": mailbox, "type": "timeout", "message": message}
     except ValueError as exc:
-        return f"Error: {exc}"
+        if output_format != "json":
+            return f"Error: {exc}"
+        error_detail = {"mailbox": mailbox, "type": "read_error", "message": str(exc)}
 
     snapshots = annotate_rows_with_reply_state(
         [item] if item is not None else [],
@@ -418,7 +436,23 @@ def get_email_by_id(
     draft_scan = build_draft_scan_status(snapshots)
 
     if output_format == "json":
-        return json.dumps({"item": item, "draft_scan": draft_scan})
+        payload: dict[str, Any] = {
+            "item": item,
+            "found": item is not None,
+            "requested_id": numeric_id,
+            "missing_ids": [] if item is not None else [numeric_id],
+            "account": account,
+            "mailbox": mailbox,
+            "draft_scan": draft_scan,
+            "errors": _mailbox_error_texts([error_detail]) if error_detail else [],
+        }
+        if error_detail:
+            # Singular ``error`` as well, matching get_email_thread: this is a
+            # whole-result failure, not a partial one, and the CLI's envelope
+            # (cli/formatting.py) keys its non-zero exit off that field.
+            payload["error"] = error_detail["message"]
+            payload["error_details"] = [error_detail]
+        return json.dumps(payload)
 
     if item is None:
         return f"Error: No email found for message_id={numeric_id} in {mailbox}"

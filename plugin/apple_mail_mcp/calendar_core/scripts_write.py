@@ -92,7 +92,7 @@ def build_event_set_lines(
 
 def create_event_script(
     *,
-    calendar_name: str,
+    calendar_id: str,
     title: str,
     start_block: str,
     end_block: str,
@@ -100,11 +100,11 @@ def create_event_script(
     timeout_seconds: int = 120,
 ) -> str:
     """Create one event; *start_block*/*end_block* bind windowStart/windowEnd."""
-    safe_calendar = escape_applescript(calendar_name)
+    safe_calendar = escape_applescript(calendar_id)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         try
-            set targetCal to calendar "{safe_calendar}"
+            set targetCal to first calendar whose calendarIdentifier is "{safe_calendar}"
             if writable of targetCal is false then return "ERROR_READONLY|||{safe_calendar}"
             {start_block}
             {end_block}
@@ -121,7 +121,7 @@ end tell"""
 
 def update_event_script(
     *,
-    calendar_name: str,
+    calendar_id: str,
     uid_condition: str,
     start_block: str,
     end_block: str,
@@ -129,11 +129,11 @@ def update_event_script(
     timeout_seconds: int = 120,
 ) -> str:
     """Locate one event by bounded uid predicate and apply PATCH set lines."""
-    safe_calendar = escape_applescript(calendar_name)
+    safe_calendar = escape_applescript(calendar_id)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         try
-            set targetCal to calendar "{safe_calendar}"
+            set targetCal to first calendar whose calendarIdentifier is "{safe_calendar}"
             if writable of targetCal is false then return "ERROR_READONLY|||{safe_calendar}"
             {start_block}
             {end_block}
@@ -151,19 +151,19 @@ end tell"""
 
 def delete_events_script(
     *,
-    calendar_name: str,
+    calendar_id: str,
     uid_condition: str,
     start_block: str,
     end_block: str,
     timeout_seconds: int = 120,
 ) -> str:
     """Delete events matched by bounded uid predicate; emits DELETED rows."""
-    safe_calendar = escape_applescript(calendar_name)
+    safe_calendar = escape_applescript(calendar_id)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         set outputRows to {{}}
         try
-            set targetCal to calendar "{safe_calendar}"
+            set targetCal to first calendar whose calendarIdentifier is "{safe_calendar}"
             if writable of targetCal is false then return "ERROR_READONLY|||{safe_calendar}"
             {start_block}
             {end_block}
@@ -204,13 +204,13 @@ def create_calendar_script(*, calendar_name: str, timeout_seconds: int = 120) ->
 end tell"""
 
 
-def rename_calendar_script(*, calendar_name: str, new_name: str, timeout_seconds: int = 120) -> str:
-    """Rename a calendar addressed by exact current name."""
-    safe_calendar = escape_applescript(calendar_name)
+def rename_calendar_script(*, calendar_id: str, new_name: str, timeout_seconds: int = 120) -> str:
+    """Rename a calendar addressed by its stable Calendar identifier."""
+    safe_calendar = escape_applescript(calendar_id)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         try
-            set targetCal to calendar "{safe_calendar}"
+            set targetCal to first calendar whose calendarIdentifier is "{safe_calendar}"
             if writable of targetCal is false then return "ERROR_READONLY|||{safe_calendar}"
             set name of targetCal to {_quoted(new_name)}
             return "RENAMED_CAL|||" & (name of targetCal)
@@ -221,7 +221,7 @@ def rename_calendar_script(*, calendar_name: str, new_name: str, timeout_seconds
 end tell"""
 
 
-def delete_calendar_script(*, calendar_name: str, timeout_seconds: int = 120) -> str:
+def delete_calendar_script(*, calendar_id: str, timeout_seconds: int = 120) -> str:
     """Delete a calendar via the inline whose-specifier form (cascade deletes its events).
 
     The variable-bound form (``set targetCal to calendar "X"`` then ``delete
@@ -230,11 +230,11 @@ def delete_calendar_script(*, calendar_name: str, timeout_seconds: int = 120) ->
     name is ...)`` specifier deletes cleanly (verified live, including on a
     non-empty calendar whose events cascade away with it).
     """
-    safe_calendar = escape_applescript(calendar_name)
+    safe_calendar = escape_applescript(calendar_id)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         try
-            delete (first calendar whose name is "{safe_calendar}")
+            delete (first calendar whose calendarIdentifier is "{safe_calendar}")
             return "DELETED_CAL|||{safe_calendar}"
         on error errMsg
             return "ERROR_CALENDAR_WRITE|||" & errMsg

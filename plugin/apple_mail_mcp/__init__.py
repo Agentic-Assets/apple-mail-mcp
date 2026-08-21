@@ -1,6 +1,7 @@
 """Apple Mail MCP - Modular package."""
 
 from apple_mail_mcp.server import mcp
+from apple_mail_mcp.version import __version__
 
 # UI availability flag
 try:
@@ -25,4 +26,4 @@ from apple_mail_mcp.tools import (
     smart_inbox,  # noqa: F401
 )
 
-__all__ = ["UI_AVAILABLE", "mcp"]
+__all__ = ["UI_AVAILABLE", "__version__", "mcp"]

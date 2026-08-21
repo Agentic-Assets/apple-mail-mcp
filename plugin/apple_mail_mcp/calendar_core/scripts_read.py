@@ -121,14 +121,14 @@ def _event_row_block(*, include_detail: bool) -> str:
                     {sanitize_pipe_delimited_field("evUrl")}
                     {sanitize_pipe_delimited_field("evRecurrence")}
                     {sanitize_pipe_delimited_field("evNotes")}
-                    set end of outputRows to "EVT|||" & evUid & "|||" & targetCalName & "|||" & evTitle & "|||" & evStart & "|||" & evEnd & "|||" & evAllday & "|||" & evStatus & "|||" & evLocation & "|||" & evUrl & "|||" & evRecurrence & "|||" & evNotes{detail}
+                    set end of outputRows to "EVT|||" & evUid & "|||" & targetCalId & "|||" & targetCalName & "|||" & evTitle & "|||" & evStart & "|||" & evEnd & "|||" & evAllday & "|||" & evStatus & "|||" & evLocation & "|||" & evUrl & "|||" & evRecurrence & "|||" & evNotes{detail}
                 on error errMsg
                     set end of outputRows to "ERROR_EVENT|||" & errMsg
                 end try"""
 
 
 def list_calendars_script(*, timeout_seconds: int) -> str:
-    """List every calendar as ``CAL`` rows (uid, name, writable, description)."""
+    """List every calendar as ``CAL`` rows keyed by its stable identifier."""
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         set outputRows to {{}}
@@ -136,7 +136,7 @@ def list_calendars_script(*, timeout_seconds: int) -> str:
             try
                 set calUid to ""
                 try
-                    set calUid to uid of aCal
+                    set calUid to calendarIdentifier of aCal
                 end try
                 set calName to name of aCal
                 set calWritable to (writable of aCal) as string
@@ -160,7 +160,7 @@ end tell
 
 def fetch_window_events_script(
     *,
-    calendar_name: str,
+    calendar_id: str,
     start_block: str,
     end_block: str,
     scan_cap: int,
@@ -170,19 +170,20 @@ def fetch_window_events_script(
 ) -> str:
     """Bounded window fetch: events whose start date falls inside the window.
 
-    *calendar_name* is escaped here (raw user text is safe to pass);
+    *calendar_id* is escaped here (raw user text is safe to pass);
     *start_block*/*end_block* come from ``applescript_date_block`` binding
     ``windowStart``/``windowEnd``. An optional *uid_condition* (from
     ``build_uid_condition``) narrows the same bounded predicate to exact ids.
     """
-    calendar_name = escape_applescript(calendar_name)
+    calendar_id = escape_applescript(calendar_id)
     uid_clause = f" and {uid_condition}" if uid_condition else ""
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         set outputRows to {{}}
         try
-            set targetCal to calendar "{calendar_name}"
+            set targetCal to first calendar whose calendarIdentifier is "{calendar_id}"
             set targetCalName to name of targetCal
+            set targetCalId to calendarIdentifier of targetCal
             {sanitize_pipe_delimited_field("targetCalName")}
             {start_block}
             {end_block}
@@ -205,7 +206,7 @@ end tell
 
 def fetch_recurring_masters_script(
     *,
-    calendar_name: str,
+    calendar_id: str,
     start_block: str,
     end_block: str,
     scan_cap: int,
@@ -217,13 +218,14 @@ def fetch_recurring_masters_script(
     The window predicate stays date-bounded on both ends; the recurrence
     filter runs inside the repeat loop, never in the ``whose`` predicate.
     """
-    calendar_name = escape_applescript(calendar_name)
+    calendar_id = escape_applescript(calendar_id)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         set outputRows to {{}}
         try
-            set targetCal to calendar "{calendar_name}"
+            set targetCal to first calendar whose calendarIdentifier is "{calendar_id}"
             set targetCalName to name of targetCal
+            set targetCalId to calendarIdentifier of targetCal
             {sanitize_pipe_delimited_field("targetCalName")}
             {start_block}
             {end_block}
@@ -247,16 +249,16 @@ end tell
 {_FMT_DATE_HANDLER}"""
 
 
-def count_events_script(*, calendar_name: str, timeout_seconds: int) -> str:
+def count_events_script(*, calendar_id: str, timeout_seconds: int) -> str:
     """Count events on one calendar (used by the calendar-delete preview)."""
-    calendar_name = escape_applescript(calendar_name)
+    calendar_id = escape_applescript(calendar_id)
     return f"""tell application "Calendar"
     with timeout of {int(timeout_seconds)} seconds
         try
-            set targetCal to calendar "{calendar_name}"
+            set targetCal to first calendar whose calendarIdentifier is "{calendar_id}"
             return "COUNT|||" & ((count of events of targetCal) as string)
         on error errMsg
-            return "ERROR_CALENDAR|||{calendar_name}|||" & errMsg
+            return "ERROR_CALENDAR|||{calendar_id}|||" & errMsg
         end try
     end timeout
 end tell"""

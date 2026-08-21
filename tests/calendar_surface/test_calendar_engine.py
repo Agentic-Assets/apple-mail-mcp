@@ -2,9 +2,8 @@
 
 from datetime import datetime, timezone
 
-import pytest
-
 import apple_mail_mcp.calendar_core.engine as engine_mod
+import pytest
 from apple_mail_mcp.backend.base import ToolError
 from apple_mail_mcp.calendar_core.engine import AppleScriptCalendarEngine, get_engine, get_write_engine
 from apple_mail_mcp.calendar_core.window import bounded_calendar_window
@@ -113,7 +112,7 @@ class TestWriteErrorMapping:
         monkeypatch.setattr(engine_mod, "run_applescript", _Capture("ERROR_READONLY|||Subscribed"))
         with pytest.raises(ToolError) as exc:
             AppleScriptCalendarEngine().create_event(
-                calendar_name="Subscribed",
+                calendar_id="CAL-SUBSCRIBED",
                 title="T",
                 start=datetime(2026, 7, 10, 9, tzinfo=UTC),
                 end=datetime(2026, 7, 10, 10, tzinfo=UTC),
@@ -124,14 +123,12 @@ class TestWriteErrorMapping:
         monkeypatch.setattr(engine_mod, "run_applescript", _Capture("ERROR_NOT_FOUND|||nothing matched"))
         with pytest.raises(ToolError) as exc:
             AppleScriptCalendarEngine().update_event(
-                calendar_name="Work", event_id="UID-1", window=_window(), set_lines=""
+                calendar_id="CAL-WORK", event_id="UID-1", window=_window(), set_lines=""
             )
         assert exc.value.code == "EVENT_NOT_FOUND"
 
     def test_minus_1743_maps_to_access_denied(self, monkeypatch):
-        monkeypatch.setattr(
-            engine_mod, "run_applescript", _Capture("ERROR_CALENDAR_WRITE|||error -1743 not permitted")
-        )
+        monkeypatch.setattr(engine_mod, "run_applescript", _Capture("ERROR_CALENDAR_WRITE|||error -1743 not permitted"))
         with pytest.raises(ToolError) as exc:
             AppleScriptCalendarEngine().create_calendar(name="X")
         assert exc.value.code == "CALENDAR_ACCESS_DENIED"
@@ -140,14 +137,14 @@ class TestWriteErrorMapping:
     def test_generic_write_error_maps_to_structured_error(self, monkeypatch):
         monkeypatch.setattr(engine_mod, "run_applescript", _Capture("ERROR_CALENDAR_WRITE|||boom"))
         with pytest.raises(ToolError) as exc:
-            AppleScriptCalendarEngine().rename_calendar(name="A", new_name="B")
+            AppleScriptCalendarEngine().rename_calendar(calendar_id="CAL-A", new_name="B")
         assert exc.value.code == "CALENDAR_WRITE_FAILED"
         assert "boom" in exc.value.message
 
     def test_create_event_returns_uid(self, monkeypatch):
         monkeypatch.setattr(engine_mod, "run_applescript", _Capture("CREATED|||NEW-UID"))
         uid = AppleScriptCalendarEngine().create_event(
-            calendar_name="Work",
+            calendar_id="CAL-WORK",
             title="T",
             start=datetime(2026, 7, 10, 9, tzinfo=UTC),
             end=datetime(2026, 7, 10, 10, tzinfo=UTC),
@@ -159,7 +156,7 @@ class TestWriteErrorMapping:
         monkeypatch.setattr(engine_mod, "run_applescript", capture)
         ids = [f"UID-{i}" for i in range(30)]
         deleted, errors = AppleScriptCalendarEngine().delete_events(
-            calendar_name="Work", event_ids=ids, window=_window()
+            calendar_id="CAL-WORK", event_ids=ids, window=_window()
         )
         assert len(capture.scripts) == 2  # 25 + 5
         assert errors == []
@@ -168,13 +165,9 @@ class TestWriteErrorMapping:
     def test_delete_access_denied_raises_not_soft_error(self, monkeypatch):
         # F3: a -1743 / not-authorized delete must surface CALENDAR_ACCESS_DENIED,
         # not land in a soft errors list with a "successful" empty delete.
-        monkeypatch.setattr(
-            engine_mod, "run_applescript", _Capture("ERROR_EVENT|||error -1743 not authorized")
-        )
+        monkeypatch.setattr(engine_mod, "run_applescript", _Capture("ERROR_EVENT|||error -1743 not authorized"))
         with pytest.raises(ToolError) as exc:
-            AppleScriptCalendarEngine().delete_events(
-                calendar_name="Work", event_ids=["UID-1"], window=_window()
-            )
+            AppleScriptCalendarEngine().delete_events(calendar_id="CAL-WORK", event_ids=["UID-1"], window=_window())
         assert exc.value.code == "CALENDAR_ACCESS_DENIED"
         assert "Automation" in str(exc.value.remediation)
 
@@ -182,7 +175,7 @@ class TestWriteErrorMapping:
         # A non-authorization per-event error is still collected, not raised.
         monkeypatch.setattr(engine_mod, "run_applescript", _Capture("ERROR_EVENT|||event vanished"))
         deleted, errors = AppleScriptCalendarEngine().delete_events(
-            calendar_name="Work", event_ids=["UID-1"], window=_window()
+            calendar_id="CAL-WORK", event_ids=["UID-1"], window=_window()
         )
         assert deleted == []
         assert errors == ["event vanished"]

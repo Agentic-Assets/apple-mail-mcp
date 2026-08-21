@@ -52,6 +52,17 @@ def _build_applescript_date(var_name: str, date_value: str | None, end_of_day: b
 
 
 _ERROR_MAILBOX_PREFIX = "ERROR_MAILBOX|||"
+# Emitted by `script._SCAN_CEILING_MARKER` when a mailbox's candidate slice
+# filled the hard scan ceiling. Deliberately not an ERROR_MAILBOX row: nothing
+# failed, the scan simply stopped looking, and rendering it as an error would
+# put a PARTIAL: line on ordinary healthy searches.
+_SCAN_CEILING_PREFIX = "SCAN_CEILING|||"
+
+#: ``type`` tag :func:`_parse_search_records` stamps on a ceiling row, and the
+#: single name every consumer tests against. Whether a ceiling row counts as a
+#: failure is decided once, in :func:`_non_ceiling_errors`; ``thread.py`` and
+#: :func:`_build_search_response` both defer to it rather than re-deciding.
+_SCAN_CEILING_ERROR_TYPE = "scan_ceiling"
 
 _SCRIPT_ERROR_PREFIXES = ("ERROR|||", "Error: ")
 
@@ -93,9 +104,20 @@ def _read_failure_row(mailbox: str) -> str:
 """
 
 
+def _non_ceiling_errors(mailbox_errors: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Drop scan-ceiling rows, leaving only rows that represent a real failure.
+
+    A saturated scan is a bound, not a failure: the filter was applied to every
+    message the scan looked at, and nothing threw. Rendering a ceiling row as an
+    error would put a ``PARTIAL:`` line on ordinary healthy searches, so it is
+    reported separately (``scan_ceiling_reached`` / a ``warnings`` entry).
+    """
+    return [item for item in mailbox_errors if item.get("type") != _SCAN_CEILING_ERROR_TYPE]
+
+
 def _mailbox_error_texts(mailbox_errors: list[dict[str, str]]) -> list[str]:
     """Render parser mailbox errors as flat ``<mailbox>: <message>`` strings."""
-    return [f"{item.get('mailbox') or '?'}: {item.get('message', '')}" for item in mailbox_errors]
+    return [f"{item.get('mailbox') or '?'}: {item.get('message', '')}" for item in _non_ceiling_errors(mailbox_errors)]
 
 
 def _parse_search_records(
@@ -124,6 +146,20 @@ def _parse_search_records(
             tail = line[len(_ERROR_MAILBOX_PREFIX) :]
             mb, _, msg = tail.partition("|||")
             mailbox_errors.append({"mailbox": mb.strip(), "message": msg.strip()})
+            continue
+        if line.startswith(_SCAN_CEILING_PREFIX):
+            tail = line[len(_SCAN_CEILING_PREFIX) :]
+            mb, _, scanned = tail.partition("|||")
+            mailbox_errors.append(
+                {
+                    "mailbox": mb.strip(),
+                    "type": _SCAN_CEILING_ERROR_TYPE,
+                    "message": (
+                        f"scan stopped at the {scanned.strip()}-message ceiling for this mailbox; "
+                        "results are bounded by the scan, not by the filter"
+                    ),
+                }
+            )
             continue
         parts = line.split("|||", 14)
         if len(parts) < 8:
@@ -303,6 +339,35 @@ def _build_search_response(
     items = sorted_records[:limit]
     next_offset = offset + len(items) if has_more else None
 
+    # A saturated scan is a bound, not a failure, so it is split back out of
+    # error_details before anything renders it as a PARTIAL: line.
+    #
+    # `has_more` is deliberately left alone. It answers "is another page
+    # reachable", and it already answers that correctly — paging does advance
+    # through matches inside the scanned window. Flipping it to True whenever
+    # the ceiling fired would make it True on every page forever, since the
+    # mailbox saturates the scan every time, and a caller looping until
+    # `has_more` goes false would never stop. The lie was never the pagination
+    # bit; it was that `has_more: false` reads as "that is everything in the
+    # mailbox" when it can only mean "that is everything in the newest N
+    # messages". So the fix is to say which one it is.
+    _scan_ceiling = SCAN_BOUNDS["SEARCH_HARD_CEILING"]
+    ceiling_details = [d for d in error_details or [] if d.get("type") == _SCAN_CEILING_ERROR_TYPE]
+    _ceiling_mailboxes: list[str] = []
+    _ceiling_warning = ""
+    if ceiling_details:
+        error_details = _non_ceiling_errors(error_details or []) or None
+        _ceiling_mailboxes = sorted({d.get("mailbox", "") for d in ceiling_details if d.get("mailbox")})
+        _named = f": {', '.join(_ceiling_mailboxes)}" if _ceiling_mailboxes else ""
+        _ceiling_warning = (
+            f"Scan ceiling reached: only the newest {_scan_ceiling} message(s) per mailbox were examined "
+            f"({len(ceiling_details)} mailbox(es) hit it{_named}). "
+            f"has_more={str(has_more).lower()} describes the scanned window only, not the mailbox — "
+            "more matches may exist beyond it, and paging cannot reach them because each call re-clamps "
+            "to the same ceiling. Narrow the search with date_from/date_to, a specific mailbox, or a "
+            "tighter filter to bring the matches inside the window."
+        )
+
     _max_mb_all = SCAN_BOUNDS["MAX_MAILBOXES_PER_SEARCH_ALL"]
     if output_format == "json":
         payload: dict[str, Any] = {
@@ -316,6 +381,12 @@ def _build_search_response(
             "recent_days_applied": recent_days_applied if recent_days_applied is not None else 0.0,
             "searched_from": searched_from,
         }
+        if ceiling_details:
+            payload["scan_ceiling_reached"] = True
+            payload["scan_ceiling"] = _scan_ceiling
+            payload["scan_ceiling_mailboxes"] = _ceiling_mailboxes
+            payload["scan_bounded"] = True
+            payload.setdefault("warnings", []).append(_ceiling_warning)
         if body_search_capped:
             payload["body_search_capped"] = True
             _body_cap = SCAN_BOUNDS["BODY_SEARCH_AUTO_CAP"]
@@ -354,6 +425,8 @@ def _build_search_response(
         error_details=error_details,
         recent_days_applied=recent_days_applied,
     )
+    if ceiling_details:
+        text_result = f"WARNING: {_ceiling_warning}\n" + text_result
     if body_search_capped:
         _body_cap = SCAN_BOUNDS["BODY_SEARCH_AUTO_CAP"]
         warning = (

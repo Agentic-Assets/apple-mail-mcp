@@ -224,6 +224,11 @@ class GetStatisticsJsonTests(unittest.TestCase):
                 "total_messages": 100,
                 "unread": 20,
                 "read": 80,
+                # `read` is `total - cached unread`, never a measurement, so the
+                # caveat rides inside `statistics` next to the value rather than
+                # only at the payload envelope. See
+                # tests/analytics/test_statistics_read_provenance.py.
+                "read_derived_from_cached_unread": True,
             },
         )
 

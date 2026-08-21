@@ -91,7 +91,8 @@ def delete_events(
 
     Args:
         event_ids: 1..100 exact event ids from a prior list/get call.
-        calendar: Lookup hint (fuzzy-resolved); bounds the scan.
+        calendar: Lookup selector that bounds the scan. Prefer calendar_id
+            from list_calendars; a display name must be exact and unique.
         start: Optional absolute lookup window start, ISO 8601 (requires end).
         end: Optional absolute lookup window end.
         days_back: Relative lookup window days back (default 30).
@@ -134,12 +135,12 @@ def delete_events(
             days_ahead=days_ahead,
             timezone_name=None,
         )
-        names, _fan_out_capped = resolve_read_calendars(calendar, None, timeout=timeout)
+        scopes, _fan_out_capped = resolve_read_calendars(calendar, None, timeout=timeout)
         read_engine = calendar_tools.get_engine()
         found, lookup_errors, _exhausted = collect_window_events(
             engine=read_engine,
             window=window,
-            calendar_names=names,
+            calendar_ids=[str(scope["calendar_id"]) for scope in scopes],
             expand_recurring=False,
             event_ids=ids,
             timeout=timeout,
@@ -167,6 +168,7 @@ def delete_events(
                 "title": by_id[event_id].get("title"),
                 "start": by_id[event_id].get("start"),
                 "calendar": by_id[event_id].get("calendar"),
+                "calendar_id": by_id[event_id].get("calendar_id"),
                 "recurring": bool(by_id[event_id].get("recurring")),
             }
             for event_id in ids
@@ -197,16 +199,18 @@ def delete_events(
         delete_errors: list[str] = []
         ids_by_calendar: dict[str, list[str]] = {}
         for event_id in ids:
-            ids_by_calendar.setdefault(str(by_id[event_id].get("calendar")), []).append(event_id)
-        for calendar_name, calendar_ids in ids_by_calendar.items():
+            ids_by_calendar.setdefault(str(by_id[event_id].get("calendar_id")), []).append(event_id)
+        for calendar_id, calendar_ids in ids_by_calendar.items():
             chunk_deleted, chunk_errors = write_engine.delete_events(
-                calendar_name=calendar_name,
+                calendar_id=calendar_id,
                 event_ids=calendar_ids,
                 window=write_window,
                 timeout=timeout,
             )
             deleted.extend(chunk_deleted)
-            delete_errors.extend(f"{calendar_name}: {err}" for err in chunk_errors)
+            for row in chunk_deleted:
+                row["calendar_id"] = calendar_id
+            delete_errors.extend(f"{calendar_id}: {err}" for err in chunk_errors)
         # Verify-after-delete for recurring targets: Calendar.app scripting removes
         # only the targeted occurrence, so re-query the series and never claim a
         # whole-series delete the write did not achieve.
@@ -215,7 +219,7 @@ def delete_events(
             recurring_survivors = surviving_recurring_occurrences(
                 engine=read_engine,
                 window=write_window,
-                calendar_names=names,
+                calendar_ids=[str(scope["calendar_id"]) for scope in scopes],
                 recurring_ids=recurring_targets,
                 timeout=timeout,
             )

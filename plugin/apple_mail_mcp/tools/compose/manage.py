@@ -84,7 +84,12 @@ def manage_drafts(
             Drafts, whose numeric ids can drift.
         expected_subject: Exact subject expected by the guarded delete path.
         expected_to: Comma-separated recipient set expected by the guarded
-            delete path. Comparison is case-insensitive and set-based.
+            delete path. Comparison is case-insensitive and set-based, and runs
+            in both directions: every expected recipient must be present, and no
+            unexpected recipient may be. The guard fails closed — if any current
+            recipient cannot be read, the delete is refused with
+            ``DRAFT_DELETE_RECIPIENTS_UNREADABLE`` rather than counting the
+            unreadable one as absent.
 
     Returns:
         Formatted output based on action. For action="list" each draft now reports
@@ -420,14 +425,31 @@ def manage_drafts(
                     {headers_script}
                     set expectedRfcToken to "<{safe_expected_in_reply_to}>"
                     if currentInReplyTo does not contain expectedRfcToken and currentReferences does not contain expectedRfcToken then set deleteIdentityMatches to false
+                    -- Every current To recipient must be READ before the two
+                    -- membership checks below mean anything. The reverse check
+                    -- ("no actual recipient outside the expected set") is what
+                    -- catches a drifted draft carrying an EXTRA recipient, and
+                    -- a recipient that cannot be read is exactly what such a
+                    -- draft would plausibly carry. Silently skipping it made an
+                    -- unreadable recipient indistinguishable from "no extra
+                    -- recipient present" — a guard weakening on a destructive
+                    -- path. Both arms below therefore fail closed: an
+                    -- unreadable recipient aborts the delete instead of
+                    -- satisfying the check by absence.
                     set actualToAddresses to {{}}
+                    set recipientReadFailure to ""
                     try
                         repeat with aRecipient in (to recipients of foundDraft)
                             try
                                 set end of actualToAddresses to (address of aRecipient as string)
+                            on error recipientErrMsg
+                                set recipientReadFailure to "recipient address unreadable: " & (recipientErrMsg as string)
                             end try
                         end repeat
+                    on error recipientListErrMsg
+                        set recipientReadFailure to "recipient list unreadable: " & (recipientListErrMsg as string)
                     end try
+                    if recipientReadFailure is not "" then return "DRAFT_DELETE_RECIPIENTS_UNREADABLE|||" & draftId & "|||" & recipientReadFailure
                     set expectedToAddresses to {expected_to_literal}
                     repeat with expectedToAddress in expectedToAddresses
                         set expectedRecipientFound to false
@@ -504,6 +526,25 @@ def manage_drafts(
         return (
             f"Error: AppleScript timed out for manage_drafts action {action!r} on "
             f"account {account!r}. Try again or pass a larger `timeout`."
+        )
+    if action == "delete" and result.strip().startswith("DRAFT_DELETE_RECIPIENTS_UNREADABLE|||"):
+        parts = result.strip().split("|||", 2)
+        current_id = parts[1]
+        detail = parts[2] if len(parts) > 2 else "unknown AppleScript error"
+        return serialize_tool_error(
+            ToolError(
+                code="DRAFT_DELETE_RECIPIENTS_UNREADABLE",
+                message=(
+                    "At least one current To recipient of the draft could not be read, so the identity guard "
+                    "cannot prove the draft carries no unexpected recipient; no draft was deleted."
+                ),
+                remediation={
+                    "draft_id": current_id,
+                    "applescript_error": detail,
+                    "preferred": "Re-run manage_drafts(action='find', in_reply_to=...) and inspect the draft's current recipients before deleting.",
+                    "note": "An unreadable recipient is not evidence of absence: the guarded delete fails closed rather than treating it as 'no extra recipient present'.",
+                },
+            )
         )
     if action == "delete" and result.strip().startswith("DRAFT_DELETE_IDENTITY_DRIFT|||"):
         current_id = result.strip().split("|||", 1)[1]

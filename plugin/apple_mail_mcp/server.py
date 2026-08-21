@@ -11,6 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
+from apple_mail_mcp.version import __version__
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -144,28 +145,37 @@ class _ToolErrorEnvelopeServer:
 
 
 # Initialize FastMCP server
-mcp = cast(
-    _AppleMailMCP,
-    _ToolErrorEnvelopeServer(
-        FastMCP(
-            "Apple Mail MCP",
-            instructions=(
-                "Mail.app and Calendar.app automation is single-threaded. This server "
-                "serializes every AppleScript call behind one lock, so invoking "
-                "multiple Apple Mail or Apple Calendar tools at once does not run "
-                "them in parallel; the calls queue and can time out waiting their "
-                "turn. Call one tool at a time and wait for its result before "
-                "issuing the next. On large Exchange or Gmail mailboxes, prefer "
-                "small bounded calls (low max_emails, small recent_days, offset "
-                "paging) over large ones. Mode flags gate the two domains "
-                "differently: for mail tools, --read-only and --draft-safe block "
-                "only the send paths; for calendar tools, --read-only removes every "
-                "calendar write and --draft-safe additionally blocks calendar "
-                "deletes and attendee invitation sends."
-            ),
-        )
+_fastmcp_server = FastMCP(
+    "Apple Mail MCP",
+    instructions=(
+        "Mail.app and Calendar.app automation is single-threaded. This server "
+        "serializes every AppleScript call behind one lock, so invoking "
+        "multiple Apple Mail or Apple Calendar tools at once does not run "
+        "them in parallel; the calls queue and can time out waiting their "
+        "turn. Call one tool at a time and wait for its result before "
+        "issuing the next. On large Exchange or Gmail mailboxes, prefer "
+        "small bounded calls (low max_emails, small recent_days, offset "
+        "paging) over large ones. Mode flags gate the two domains "
+        "differently: for mail tools, --read-only and --draft-safe block "
+        "only the send paths; for calendar tools, --read-only removes every "
+        "calendar write and --draft-safe additionally blocks calendar "
+        "deletes and attendee invitation sends."
     ),
 )
+
+# Advertise THIS package's version in the MCP handshake's ``serverInfo``.
+#
+# ``FastMCP.__init__`` accepts no ``version`` and constructs the low-level
+# ``Server`` without one, so ``Server.create_initialization_options()`` falls
+# back to ``importlib.metadata.version("mcp")`` — the MCP SDK's version. Every
+# client therefore saw the SDK number (1.29.x) as this server's version, which
+# made an installed 3.11.6 and a working-tree 3.11.7 indistinguishable over the
+# protocol. ``_mcp_server`` is the only seam the SDK exposes for this;
+# ``tests/infra/test_server_version_parity.py`` asserts the handshake really
+# carries ``__version__`` so a silent SDK rename cannot restore the defect.
+_fastmcp_server._mcp_server.version = __version__
+
+mcp = cast(_AppleMailMCP, _ToolErrorEnvelopeServer(_fastmcp_server))
 
 # Shared MCP tool annotations (see tasks/reference/phase-3-annotation-matrix.md).
 READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(

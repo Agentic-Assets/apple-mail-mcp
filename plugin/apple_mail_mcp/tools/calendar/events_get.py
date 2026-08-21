@@ -55,7 +55,8 @@ async def get_events_by_id(
 
     Args:
         event_ids: 1..25 exact event ids.
-        calendar: Calendar hint (fuzzy-resolved); bounds the scan to one calendar.
+        calendar: Calendar selector that bounds the scan. Prefer calendar_id
+            from list_calendars; a display name must be exact and unique.
         start: Optional absolute lookup window start, ISO 8601 (requires end).
         end: Optional absolute lookup window end.
         days_back: Relative lookup window days back (default 30).
@@ -79,13 +80,13 @@ async def get_events_by_id(
             days_ahead=days_ahead,
             timezone_name=timezone,
         )
-        names, fan_out_capped = resolve_read_calendars(calendar, None, timeout=timeout)
+        scopes, fan_out_capped = resolve_read_calendars(calendar, None, timeout=timeout)
         engine = calendar_tools.get_engine()
         events, calendar_errors, budget_exhausted = await asyncio.to_thread(
             collect_window_events,
             engine=engine,
             window=window,
-            calendar_names=names,
+            calendar_ids=[str(scope["calendar_id"]) for scope in scopes],
             expand_recurring=False,
             include_detail=True,
             event_ids=ids,
@@ -103,7 +104,8 @@ async def get_events_by_id(
         "engine": engine.name,
         "resolved_timezone": window.timezone_name,
         "window": window_payload(window),
-        "calendars_scanned": names,
+        "calendars_scanned": [str(scope["name"]) for scope in scopes],
+        "calendar_ids_scanned": [str(scope["calendar_id"]) for scope in scopes],
         "fan_out_capped": fan_out_capped,
         "calendar_errors": calendar_errors,
         "budget_exhausted": budget_exhausted,

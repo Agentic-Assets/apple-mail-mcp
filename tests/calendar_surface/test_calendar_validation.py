@@ -1,11 +1,10 @@
 """validation.py: calendar resolution, event ids, RRULEs, alarms, attendees, slots."""
 
 import pytest
-
 from apple_mail_mcp.backend.base import ToolError
 from apple_mail_mcp.calendar_core.validation import (
     normalize_event_ids,
-    resolve_calendar_name,
+    resolve_calendar_selector,
     validate_alarms,
     validate_attendee_emails,
     validate_event_id,
@@ -13,43 +12,41 @@ from apple_mail_mcp.calendar_core.validation import (
     validate_slot_params,
 )
 
-NAMES = ["Work", "Home", "Work Travel", "family shared"]
+CALENDARS = [
+    {"calendar_id": "CAL-WORK", "name": "Work"},
+    {"calendar_id": "CAL-HOME", "name": "Home"},
+    {"calendar_id": "CAL-TRAVEL", "name": "Work Travel"},
+    {"calendar_id": "CAL-FAMILY", "name": "family shared"},
+]
 
 
-class TestResolveCalendarName:
-    def test_exact_match_wins(self):
-        assert resolve_calendar_name("Work", NAMES) == "Work"
+class TestResolveCalendarSelector:
+    def test_exact_calendar_identifier_wins(self):
+        assert resolve_calendar_selector("CAL-WORK", CALENDARS)["name"] == "Work"
 
-    def test_case_insensitive_exact(self):
-        assert resolve_calendar_name("home", NAMES) == "Home"
+    def test_unique_display_name_resolves_to_identifier(self):
+        selected = resolve_calendar_selector("Home", CALENDARS)
+        assert selected["calendar_id"] == "CAL-HOME"
 
-    def test_unique_substring(self):
-        assert resolve_calendar_name("family", NAMES) == "family shared"
-
-    def test_exact_beats_substring_ambiguity(self):
-        # "Work" is a substring of both Work and Work Travel; exact wins first.
-        assert resolve_calendar_name("Work", NAMES) == "Work"
-
-    def test_ambiguous_substring_refuses_with_candidates(self):
+    def test_duplicate_display_name_refuses_with_identifier_candidates(self):
+        duplicates = [
+            {"calendar_id": "CAL-ONE", "name": "Shared"},
+            {"calendar_id": "CAL-TWO", "name": "Shared"},
+        ]
         with pytest.raises(ToolError) as exc:
-            resolve_calendar_name("Trav", ["Work Travel", "Home Travel"])
+            resolve_calendar_selector("Shared", duplicates)
         assert exc.value.code == "AMBIGUOUS_CALENDAR_SELECTOR"
-        assert set(exc.value.remediation["candidates"]) == {"Work Travel", "Home Travel"}
+        assert {row["calendar_id"] for row in exc.value.remediation["candidates"]} == {"CAL-ONE", "CAL-TWO"}
 
-    def test_ambiguous_case_insensitive_exact_refuses(self):
+    def test_no_match_lists_identifier_candidates(self):
         with pytest.raises(ToolError) as exc:
-            resolve_calendar_name("work", ["Work", "WORK"])
-        assert exc.value.code == "AMBIGUOUS_CALENDAR_SELECTOR"
-
-    def test_no_match_lists_close_candidates(self):
-        with pytest.raises(ToolError) as exc:
-            resolve_calendar_name("Wrok", NAMES)
+            resolve_calendar_selector("Missing", CALENDARS)
         assert exc.value.code == "CALENDAR_NOT_FOUND"
-        assert "Work" in exc.value.remediation["candidates"]
+        assert exc.value.remediation["candidates"][0] == {"name": "Work", "calendar_id": "CAL-WORK"}
 
-    def test_empty_name_refuses(self):
+    def test_empty_selector_refuses(self):
         with pytest.raises(ToolError) as exc:
-            resolve_calendar_name("  ", NAMES)
+            resolve_calendar_selector("  ", CALENDARS)
         assert exc.value.code == "CALENDAR_NOT_FOUND"
 
 

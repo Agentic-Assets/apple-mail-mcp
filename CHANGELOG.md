@@ -2,6 +2,164 @@
 
 ## Unreleased
 
+## 3.11.8 - 2026-08-19
+
+Every entry below is one shape: a failure that reported success. The v3.11.7
+release closed that class in the three branches it merged; this release closes
+the ones the post-merge audit found still standing, plus four the audit's own
+tooling was too blind to see.
+
+- **`search_emails` answered "that is everything" from behind the scan wall.**
+  The scan clamps to 50 messages per mailbox while the default `limit` is 100,
+  and `has_more` is derived as `len(records) > limit` — so 50 records against a
+  limit of 100 returned `has_more: false`, an authoritative "there is no more"
+  produced after examining the newest 50 messages, beside a `recent_days_applied`
+  asserting a 90-day window had been searched. Paging could not escape it:
+  `offset=30, limit=20` re-clamped to 50 and reported `has_more: false` again.
+  `has_more` itself is unchanged, deliberately — as a pagination bit it was
+  already correct, and forcing it true whenever the ceiling fired would make it
+  true on every page forever, since the mailbox saturates the scan every time, so
+  a caller looping until it went false would never stop. What was missing was the
+  completeness fact. A saturated scan now reports `scan_ceiling_reached`, the
+  ceiling, and which mailboxes hit it, with a warning naming the remedy; text
+  mode leads with it. The signal fires on runtime saturation rather than on the
+  static clamp, so a small folder read in full stays silent. Verified live on two
+  accounts across four page shapes.
+
+- **`export_emails(scope="correspondent")` omitted messages under a success
+  banner.** Five bare AppleScript `try` blocks each wrapped an entire `repeat`
+  over a recipient list and fell through to `return false`, so a throw excluded
+  the message, never incremented the matched count, and never reached the
+  export-failure arm. Because the `try` wrapped the whole loop, one unresolvable
+  recipient hid every later recipient in that list, and `address of aRecipient`
+  is `missing value` for unresolved, distribution-list, and X.500 entries, where
+  `missing value contains "…"` raises −1700. Measured against the shipped
+  handler: a target recipient behind a `missing value` returned `false`. This is
+  the call `plugin/skills/email-archive-cleanup/SKILL.md` prescribes as the
+  evidence snapshot taken *before* an irreversible
+  `manage_trash(action="delete_permanent")`, so a silent under-export meant mail
+  was permanently deleted that was never written to disk. Each recipient read now
+  carries its own guard, `missing value` has its own branch, and a message whose
+  match could not be decided is counted and reported rather than dropped.
+
+- **`get_mailbox_unread_counts` could drop a mailbox, a subtree, or a whole
+  account.** Bare tries around the per-account block, the per-mailbox read, and
+  the child enumeration meant an offline or mid-resyncing account contributed
+  zero rows and no marker, and a per-mailbox throw took out that mailbox *and its
+  entire child subtree*. With the default `include_zero=False`, a dropped mailbox
+  was indistinguishable from a zero-unread one. The file's own `summary_only`
+  path already did this correctly twelve lines up; the nested path now follows it.
+
+- **`list_inbox_emails` rendered a short list as complete.** The per-message
+  `try` stayed bare after the script-level swallow was fixed, so rows dropped
+  silently — while text mode was already emitting `__COUNT__|||sentCount` beside
+  a header built from `messageCount` and *never comparing the two*. The data
+  needed to detect the drop was on the wire and being discarded. Sharpest under
+  `read_status="unread"`, which `unread_counts.py` designates as ground truth
+  when the cached count is suspect. A second invisible drop in the same file is
+  also closed: a bare `id of aMessage` probe fed rows that the parser silently
+  discards for a non-numeric id.
+
+- **`get_email_thread` printed `FOUND N` and rendered fewer than N**, and JSON
+  mode returned rows with no count at all, so a JSON caller got a truncated
+  thread with zero signal. Both loops are now armed: the render loop reports rows
+  lost against the matched count, and the candidate-collection loop reports reads
+  lost *before* `FOUND N` is computed — a distinct defect, because those losses
+  leave `matched` and `returned` consistently wrong together and invisible to the
+  render reconciliation. The two causes are distinguishable by error type,
+  payload key, and wording. The failure mode was a conversation summarized from
+  an incomplete thread.
+
+- **`search_emails` dropped messages that had already matched the filter.** A
+  bare `try` wrapped the record-emit loop and `collectLimit` decremented after the
+  append, so a throw skipped the row and the page came back full-shaped and short
+  by one, with no `PARTIAL:` line.
+
+- **`build_bounded_message_scan` bound an empty result on a stale-low count.**
+  The unguarded `messages 1 thru _mbCount of MB` fallback silently produced `{}`
+  when `count of messages` read low or zero on a non-empty mailbox, where the old
+  code enumerated the real contents — and Mail is documented in this repo to
+  report cached counts low. The builder is now slice-first: the full bounded
+  window is requested before the count is ever consulted, so a stale-low count
+  cannot narrow a scan that would otherwise succeed, and a count contradicted by
+  a probe past its end raises instead of binding empty. The anti-hang property is
+  preserved — no unbounded enumeration on any path — and `messages 1 thru 0`,
+  which returns the *first* message rather than none, is never emitted.
+
+- **`manage_drafts(action="delete")` could satisfy its own safety check by
+  failing to read.** An inner bare `try` silently dropped one recipient, blinding
+  the reverse "no unexpected actual recipient" test — the check that exists to
+  catch a drifted draft carrying an extra recipient, which is exactly what an
+  unresolvable extra recipient would be. The path now fails closed with
+  `DRAFT_DELETE_RECIPIENTS_UNREADABLE` before `delete foundDraft`.
+
+- **`serverInfo.version` advertised the `mcp` library's version.** FastMCP
+  accepts no version and the low-level SDK falls back to
+  `importlib.metadata.version("mcp")`, so every client saw `1.29.0` as this
+  plugin's version — and the package had no runtime version source of truth at
+  all. A client could not tell an installed 3.11.6 from a repo 3.11.7 through the
+  handshake, which is the drift hazard that forces live verification onto the
+  CLI. The handshake now reports the plugin's own version, resolved from
+  distribution metadata with a checkout fallback that is accepted only when the
+  `pyproject.toml` it reads names this project.
+
+- **The CLI exited 0 on every structured error**, so a shell caller could not
+  detect failure from `$?`, and `search --json` had three different error
+  envelopes across success, account errors, and mailbox errors. There is now one
+  envelope with a machine-readable code, matching the existing `ToolError` shape
+  rather than a third convention, and structured errors exit non-zero. Gate-facing
+  subcommands (`quick-check`, `smoke-test`, `perf-test`) keep their own exit
+  contracts, and partial results still exit 0.
+
+- **`get_statistics` returned a derived `read` / `read_percent` with no
+  provenance on the field itself**, while the same payload's note said not to
+  derive a read count from Mail's cached unread value — the value this repo has
+  measured at 3,236 against a true 10,016. The number is still emitted; it now
+  carries its own source, measured flag, and note, both at the envelope and
+  inline beside the value, because reading `statistics["read"]` directly is the
+  access pattern that made it dangerous. The genuinely measured `sender_stats`
+  scope is untouched.
+
+- **`get_inbox_overview` could hang on a caller-supplied argument.**
+  `max_recent` had no clamp anywhere in the package, so a large value made the
+  bounded guard false and enumerated an entire mailbox — 25,012 messages on a
+  live Exchange inbox, then five property reads each. That is the hang the
+  bounded-scan contract exists to prevent, reachable directly from a tool
+  parameter.
+
+- **Two of the gates meant to catch this class were themselves vacuous.** The
+  unbounded-`whose` lint was a line-by-line regex over raw file text, with four
+  evasions demonstrated end to end against its real test methods — including one
+  a `ruff format` reflow triggers by accident — and three of its five rules were
+  rooted below the package, leaving `core/`, `bounded_scan.py`, and
+  `calendar_core/` unscanned. It had already gone vacuous once, silently, through
+  the whole v3.11.6 subject-filter bug. It is rebuilt on the AST foundation its
+  bare-`try` sibling already proved, reconstructing each script from f-string and
+  concatenation parts so layout cannot hide a violation, and deriving slice
+  variable names from the source instead of a hardcoded list. Each evasion now
+  has a test that fails without the fix, and six mutations of the rebuilt lint
+  each fail loudly.
+
+  The AppleScript compile hook was the second. It exited 0 having compiled
+  nothing on five of the modules it was pointed at, because its loader
+  registered a half-built module under its package-qualified name *before*
+  executing it; every package here is a re-export facade, so the parent's
+  `from .script import ...` found the empty pre-registered entry and raised
+  `ImportError`, which the hook reported as a skip. The failure was
+  self-inflicted by the loader, not a real import cycle. Two further silent
+  skips sat behind it: union annotations read as `"Union"` on Python 3.14, so
+  `bool | None` parameters were never synthesized, and the full-script check
+  inspected only the first line of the emitted text while real scripts open
+  with handler definitions. Coverage went from 0 to 82 scripts across 36
+  modules. The hook now blocks on a compile failure, an import failure, and an
+  unreachable script in a module not on an in-source three-entry ledger of
+  known gaps — the ledger exists because a warning on exit 0 is invisible to
+  the wrapper, and it can only shrink, since a ledgered module that becomes
+  checkable is flagged stale. Proven not to drive Mail: with a logging
+  `osascript` shim on PATH, a full-package run produced zero invocations.
+  Negative control: deleting one `end try` from the module of the original
+  3.3.0 regression makes it exit 2 and name the handler.
+
 ## 3.11.7 - 2026-08-19
 
 - **The tracked plugin zip was not reproducible, so a release that changed

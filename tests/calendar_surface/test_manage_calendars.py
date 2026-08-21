@@ -67,7 +67,7 @@ class TestRename:
 
 class TestDeleteChain:
     def test_dry_run_default_reports_cascade_count(self, fake_engines):
-        _read, write = fake_engines(write=FakeWriteEngine(event_counts={"Work": 42}))
+        _read, write = fake_engines(write=FakeWriteEngine(event_counts={"UID-WORK": 42}))
         payload = _run(action="delete", name="Work")
         assert payload["dry_run"] is True
         assert payload["event_count"] == 42
@@ -82,14 +82,14 @@ class TestDeleteChain:
         assert write.calendar_ops == []
 
     def test_nonempty_needs_force(self, fake_engines):
-        _read, write = fake_engines(write=FakeWriteEngine(event_counts={"Work": 5}))
+        _read, write = fake_engines(write=FakeWriteEngine(event_counts={"UID-WORK": 5}))
         payload = _run(action="delete", name="Work", dry_run=False, confirm_delete_calendar=True)
         assert payload["code"] == "CALENDAR_CONFIRMATION_REQUIRED"
         assert "force_nonempty" in payload["message"]
         assert write.calendar_ops == []
 
     def test_full_chain_deletes(self, fake_engines):
-        _read, write = fake_engines(write=FakeWriteEngine(event_counts={"Work": 5}))
+        _read, write = fake_engines(write=FakeWriteEngine(event_counts={"UID-WORK": 5}))
         payload = _run(
             action="delete",
             name="Work",
@@ -98,7 +98,7 @@ class TestDeleteChain:
             force_nonempty=True,
         )
         assert payload["deleted"] is True
-        assert write.calendar_ops == [{"op": "delete", "name": "Work"}]
+        assert write.calendar_ops == [{"op": "delete", "calendar_id": "UID-WORK"}]
 
     def test_empty_calendar_needs_no_force(self, fake_engines):
         _read, write = fake_engines(write=FakeWriteEngine(event_counts={"Work": 0}))
@@ -131,7 +131,7 @@ class TestTextOutput:
         assert "created calendar" in result
 
     def test_delete_dry_run_text_is_not_json(self, fake_engines):
-        _read, _write = fake_engines(write=FakeWriteEngine(event_counts={"Work": 3}))
+        _read, _write = fake_engines(write=FakeWriteEngine(event_counts={"UID-WORK": 3}))
         result = manage_calendars(action="delete", name="Work", output_format="text")
         assert not result.lstrip().startswith("{")
         assert "3 event(s)" in result
