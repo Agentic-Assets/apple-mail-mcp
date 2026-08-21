@@ -182,6 +182,7 @@ SAMPLE_KWARGS: dict[str, object] = {
     "safe_format": "txt",
     "safe_save_dir": "/tmp/apple-mail-mcp-compile-check",
     # Calendar script builders (calendar_core/scripts_read.py, scripts_write.py)
+    "calendar_id": "TEST-CALENDAR-ID",
     "calendar_name": "Test Calendar",
     "timeout_seconds": 30,
     "start_block": (

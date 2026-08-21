@@ -14,6 +14,7 @@ def raw_event(
     uid: str,
     *,
     calendar: str = "Work",
+    calendar_id: str | None = None,
     title: str = "Event",
     start: datetime | None = None,
     end: datetime | None = None,
@@ -27,8 +28,14 @@ def raw_event(
     alarms: list[int] | None = None,
 ):
     start = start or datetime.now(HOST_TZ) + timedelta(days=1)
+    calendar_id = calendar_id or {
+        "Work": "UID-WORK",
+        "Home": "UID-HOME",
+        "MCP Test Calendar": "UID-TEST",
+    }.get(calendar, calendar)
     return {
         "event_id": uid,
+        "calendar_id": calendar_id,
         "calendar": calendar,
         "title": title,
         "start": start,
@@ -65,11 +72,23 @@ class FakeReadEngine:
             calendars
             if calendars is not None
             else [
-                {"calendar_id": "UID-WORK", "id_kind": "uid", "name": "Work", "writable": True, "description": None},
-                {"calendar_id": "UID-HOME", "id_kind": "uid", "name": "Home", "writable": True, "description": None},
+                {
+                    "calendar_id": "UID-WORK",
+                    "id_kind": "calendarIdentifier",
+                    "name": "Work",
+                    "writable": True,
+                    "description": None,
+                },
+                {
+                    "calendar_id": "UID-HOME",
+                    "id_kind": "calendarIdentifier",
+                    "name": "Home",
+                    "writable": True,
+                    "description": None,
+                },
                 {
                     "calendar_id": "UID-TEST",
-                    "id_kind": "uid",
+                    "id_kind": "calendarIdentifier",
                     "name": "MCP Test Calendar",
                     "writable": False,
                     "description": None,
@@ -90,10 +109,25 @@ class FakeReadEngine:
     def list_calendars(self, *, timeout=None):
         return [dict(c) for c in self.calendars], list(self.list_errors)
 
-    def fetch_window(self, window, calendar_name, *, scan_cap, include_detail=False, event_ids=None, timeout=None):
+    def _calendar_name(self, calendar_id: str) -> str:
+        """Return the display name for an opaque identifier used by the engine seam."""
+        for calendar in self.calendars:
+            if calendar["calendar_id"] == calendar_id:
+                return str(calendar["name"])
+        return calendar_id
+
+    def _calendar_id_for_name(self, calendar_name: str) -> str:
+        for calendar in self.calendars:
+            if calendar["name"] == calendar_name:
+                return str(calendar["calendar_id"])
+        return calendar_name
+
+    def fetch_window(self, window, calendar_id, *, scan_cap, include_detail=False, event_ids=None, timeout=None):
+        calendar_name = self._calendar_name(calendar_id)
         self.fetch_calls.append(
             {
                 "calendar": calendar_name,
+                "calendar_id": calendar_id,
                 "scan_cap": scan_cap,
                 "include_detail": include_detail,
                 "event_ids": list(event_ids) if event_ids else None,
@@ -101,7 +135,11 @@ class FakeReadEngine:
                 "timeout": timeout,
             }
         )
-        rows = [dict(e) for e in self.events if e.get("calendar") == calendar_name]
+        rows = [
+            dict(event)
+            for event in self.events
+            if event.get("calendar_id", self._calendar_id_for_name(str(event.get("calendar")))) == calendar_id
+        ]
         if event_ids is not None:
             wanted = set(event_ids)
             rows = [e for e in rows if e["event_id"] in wanted]
@@ -109,9 +147,16 @@ class FakeReadEngine:
             rows = [e for e in rows if window.start <= e["start"] <= window.end]
         return rows, list(self.row_errors)
 
-    def fetch_recurring_masters(self, window, calendar_name, *, include_detail=False, timeout=None):
-        self.master_calls.append({"calendar": calendar_name, "window": window, "include_detail": include_detail})
-        return [dict(m) for m in self.masters if m.get("calendar") == calendar_name], []
+    def fetch_recurring_masters(self, window, calendar_id, *, include_detail=False, timeout=None):
+        calendar_name = self._calendar_name(calendar_id)
+        self.master_calls.append(
+            {"calendar": calendar_name, "calendar_id": calendar_id, "window": window, "include_detail": include_detail}
+        )
+        return [
+            dict(master)
+            for master in self.masters
+            if master.get("calendar_id", self._calendar_id_for_name(str(master.get("calendar")))) == calendar_id
+        ], []
 
 
 class FakeWriteEngine:
@@ -134,24 +179,24 @@ class FakeWriteEngine:
         self.updated.append(kwargs)
         return kwargs["event_id"]
 
-    def delete_events(self, *, calendar_name, event_ids, window, timeout=None):
-        self.deleted.append({"calendar": calendar_name, "event_ids": list(event_ids), "window": window})
+    def delete_events(self, *, calendar_id, event_ids, window, timeout=None):
+        self.deleted.append({"calendar_id": calendar_id, "event_ids": list(event_ids), "window": window})
         return [{"event_id": eid, "title": f"title-{eid}"} for eid in event_ids], []
 
-    def count_events(self, calendar_name, *, timeout=None):
-        return self.event_counts.get(calendar_name, 0)
+    def count_events(self, calendar_id, *, timeout=None):
+        return self.event_counts.get(calendar_id, 0)
 
     def create_calendar(self, *, name, timeout=None):
         self.calendar_ops.append({"op": "create", "name": name})
         return name
 
-    def rename_calendar(self, *, name, new_name, timeout=None):
-        self.calendar_ops.append({"op": "rename", "name": name, "new_name": new_name})
+    def rename_calendar(self, *, calendar_id, new_name, timeout=None):
+        self.calendar_ops.append({"op": "rename", "calendar_id": calendar_id, "new_name": new_name})
         return new_name
 
-    def delete_calendar(self, *, name, timeout=None):
-        self.calendar_ops.append({"op": "delete", "name": name})
-        return name
+    def delete_calendar(self, *, calendar_id, timeout=None):
+        self.calendar_ops.append({"op": "delete", "calendar_id": calendar_id})
+        return calendar_id
 
 
 @pytest.fixture

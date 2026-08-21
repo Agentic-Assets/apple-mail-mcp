@@ -190,7 +190,7 @@ class TestEventKitEngine:
         assert calendars == [
             {
                 "calendar_id": "CAL-ID",
-                "id_kind": "uid",
+                "id_kind": "calendarIdentifier",
                 "name": "Work",
                 "writable": True,
                 "description": None,
@@ -209,7 +209,7 @@ class TestEventKitEngine:
             monkeypatch, events=[_EventStub("EK-1", "Standup", start_ts, end_ts, cal, recurring=True)]
         )
         window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
-        records, errors = engine.fetch_window(window, "Work", scan_cap=300)
+        records, errors = engine.fetch_window(window, "CAL-ID", scan_cap=300)
         assert errors == []
         record = records[0]
         # event_id is calendarItemIdentifier (round-trips with the AppleScript
@@ -218,7 +218,7 @@ class TestEventKitEngine:
         assert record["external_id"] == "ext-EK-1"
         assert record["recurring_flag"] is True
         assert record["start"] == datetime(2026, 7, 10, 9, tzinfo=UTC)
-        # The predicate was scoped to the named calendar.
+        # The predicate was scoped to the exact Calendar identifier.
         assert store.predicates[0][2] is not None
 
     def test_fetch_window_scan_cap(self, monkeypatch):

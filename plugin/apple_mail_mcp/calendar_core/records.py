@@ -9,7 +9,7 @@ instead of letting a shifted field ever map onto the wrong event id.
 Row shapes:
 
 - ``CAL|||uid|||name|||writable|||description``
-- ``EVT|||uid|||calendar|||title|||start|||end|||allday|||status|||location|||url|||recurrence|||notes``
+- ``EVT|||uid|||calendar_id|||calendar|||title|||start|||end|||allday|||status|||location|||url|||recurrence|||notes``
 - ``ATT|||uid|||name|||email|||status`` (detail fetches only)
 - ``ALM|||uid|||minutes`` (detail fetches only)
 - ``ERROR_EVENT|||message`` / ``ERROR_CALENDAR|||name|||message``
@@ -29,7 +29,7 @@ from apple_mail_mcp.constants import CALENDAR_BOUNDS
 
 DELIM = "|||"
 CAL_FIELDS = 5
-EVT_FIELDS = 12
+EVT_FIELDS = 13
 ATT_FIELDS = 5
 ALM_FIELDS = 3
 
@@ -78,7 +78,7 @@ def parse_calendar_rows(raw: str) -> tuple[list[dict[str, Any]], list[str]]:
         calendars.append(
             {
                 "calendar_id": calendar_id,
-                "id_kind": "uid" if calendar_id == uid else "name",
+                "id_kind": "calendarIdentifier" if calendar_id == uid else "name",
                 "name": name,
                 "writable": writable.strip().lower() == "true",
                 "description": description or None,
@@ -111,9 +111,21 @@ def parse_event_rows(raw: str, tz: tzinfo) -> tuple[list[dict[str, Any]], list[s
             if len(parts) != EVT_FIELDS:
                 errors.append(f"event row has {len(parts)} fields, expected {EVT_FIELDS}")
                 continue
-            (_, uid, calendar_name, title, start_text, end_text, allday, status, location, url, recurrence, notes) = (
-                parts
-            )
+            (
+                _,
+                uid,
+                calendar_id,
+                calendar_name,
+                title,
+                start_text,
+                end_text,
+                allday,
+                status,
+                location,
+                url,
+                recurrence,
+                notes,
+            ) = parts
             if not _uid_ok(uid):
                 errors.append("event row has a malformed uid; row skipped")
                 continue
@@ -122,8 +134,9 @@ def parse_event_rows(raw: str, tz: tzinfo) -> tuple[list[dict[str, Any]], list[s
                 errors.append(f"event {uid!r} has an unparseable start date; row skipped")
                 continue
             end = parse_numeric_datetime(end_text, tz)
-            record = {
+            record: dict[str, Any] = {
                 "event_id": uid,
+                "calendar_id": calendar_id or None,
                 "calendar": calendar_name,
                 "title": title,
                 "start": start,
@@ -198,6 +211,7 @@ def event_payload(
     preview_chars = int(CALENDAR_BOUNDS["NOTES_PREVIEW_CHARS"])
     payload: dict[str, Any] = {
         "event_id": raw["event_id"],
+        "calendar_id": raw.get("calendar_id"),
         "calendar": raw.get("calendar"),
         "title": raw.get("title") or "",
         "start": start.astimezone(tz).isoformat(),

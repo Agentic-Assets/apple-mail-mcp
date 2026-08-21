@@ -140,7 +140,7 @@ class EventKitCalendarEngine:
                 calendars.append(
                     {
                         "calendar_id": identifier or name,
-                        "id_kind": "uid" if identifier else "name",
+                        "id_kind": "calendarIdentifier" if identifier else "name",
                         "name": name,
                         "writable": bool(cal.allowsContentModifications()),
                         "description": None,
@@ -182,6 +182,7 @@ class EventKitCalendarEngine:
             "event_id": event_id,
             "external_id": external_id,
             "calendar": _text(event.calendar().title()) if event.calendar() is not None else None,
+            "calendar_id": (_text(event.calendar().calendarIdentifier()) if event.calendar() is not None else None),
             "title": _text(event.title()) or "",
             "start": datetime.fromtimestamp(start_ts, tz=timezone.utc),
             "end": datetime.fromtimestamp(end_ts, tz=timezone.utc) if end_ts is not None else None,
@@ -233,7 +234,7 @@ class EventKitCalendarEngine:
     def fetch_window(
         self,
         window: CalendarWindow,
-        calendar_name: str,
+        calendar_id: str,
         *,
         scan_cap: int,
         include_detail: bool = False,
@@ -246,7 +247,7 @@ class EventKitCalendarEngine:
         entity = getattr(self._ek, "EKEntityTypeEvent", 0)
         target = None
         for cal in store.calendarsForEntityType_(entity) or []:
-            if _text(cal.title()) == calendar_name:
+            if _text(cal.calendarIdentifier()) == calendar_id:
                 target = cal
                 break
         calendars_arg = [target] if target is not None else None
@@ -274,13 +275,13 @@ class EventKitCalendarEngine:
     def fetch_recurring_masters(
         self,
         window: CalendarWindow,
-        calendar_name: str,
+        calendar_id: str,
         *,
         include_detail: bool = False,
         timeout: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """EventKit predicates expand occurrences natively; no master pass."""
-        del window, calendar_name, include_detail, timeout
+        del window, calendar_id, include_detail, timeout
         return [], []
 
 

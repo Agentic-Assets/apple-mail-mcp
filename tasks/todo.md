@@ -11,6 +11,10 @@
 One shape throughout: **a failure that reported success**. v3.11.7 closed that class in the three branches it merged; this closes the ones still standing after it.
 
 **Wrong answers returned confidently:**
+- `list_calendars` could return duplicate Calendar.app display names with no
+  usable way to select the intended calendar. AGENTIC-2470 now preserves the
+  opaque `calendarIdentifier`; scoped calendar operations accept that ID and
+  reject an ambiguous display name.
 - `search_emails` answered `has_more: false` from behind the 50-message scan ceiling, next to a `recent_days_applied` claiming a 90-day window. Paging could not escape it — `offset=30, limit=20` re-clamped and reported `has_more: false` again. `has_more` is deliberately unchanged; a saturated scan now reports `scan_ceiling_reached` plus which mailboxes hit it. Fires on runtime saturation, not the static clamp, so a small folder read in full stays silent.
 - `export_emails(scope="correspondent")` omitted messages under a success banner. Five bare tries each wrapped a whole recipient `repeat`, so one unresolvable recipient hid every later one in that list. This is the call [`email-archive-cleanup`](../plugin/skills/email-archive-cleanup/SKILL.md) prescribes as the evidence snapshot taken *before* an irreversible `delete_permanent` — a silent under-export meant mail was permanently deleted that was never written to disk.
 - `get_email_thread` printed `FOUND N` and rendered fewer than N; JSON mode returned a truncated thread with no count at all.

@@ -25,6 +25,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 | [`active/central-marketplace-source-contract/`](active/central-marketplace-source-contract/) | Source payload, identity, signed-tag, and local-gate contract for the shared multi-plugin marketplace | PR #80 merged; shared Marketplace admission and client-registration remediation remain separately authorized external gates |
 | [`active/fast-search-index/`](active/fast-search-index/) | Index-backed fast path for metadata search: `Envelope Index` capability envelope, safe-read pattern, phased tool plan (AGENTIC-2345) | Research complete and measured; implementation not started. Phase 0 (AGENTIC-2344) shipped fixed in v3.11.7; its AGENTIC-2356 date-window follow-up is live-verified on a large Exchange mailbox |
 | [`active/post-3.11.7-defect-audit/`](active/post-3.11.7-defect-audit/) | Eight ranked post-3.11.7 defects and lower-priority audit items | Implemented on `fix/post-3.11.7-defect-audit`; unmerged and untagged, pending review, Cayman’s merge approval, and the v3.11.8 release tag |
+| [`active/calendar-identity-2470/`](active/calendar-identity-2470/) | Duplicate Calendar.app display-name safety (AGENTIC-2470) | Implemented locally on `fix/post-3.11.7-defect-audit`; unmerged, pending push, review, and Cayman’s merge approval |
 
 ## Reference
 

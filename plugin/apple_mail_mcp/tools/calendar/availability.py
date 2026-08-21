@@ -114,13 +114,13 @@ async def check_availability(
             max_window_days=int(CALENDAR_BOUNDS["AVAILABILITY_MAX_WINDOW_DAYS"]),
         )
         fetch_window = shifted_window(window, start_delta_days=-float(CALENDAR_BOUNDS["AVAILABILITY_FETCH_PAD_DAYS"]))
-        names, fan_out_capped = resolve_read_calendars(None, calendars, timeout=timeout)
+        scopes, fan_out_capped = resolve_read_calendars(None, calendars, timeout=timeout)
         engine = calendar_tools.get_engine()
         events, calendar_errors, budget_exhausted = await asyncio.to_thread(
             collect_window_events,
             engine=engine,
             window=fetch_window,
-            calendar_names=names,
+            calendar_ids=[str(scope["calendar_id"]) for scope in scopes],
             expand_recurring=True,
             timeout=timeout,
         )
@@ -152,6 +152,7 @@ async def check_availability(
                 "end": clipped[1].astimezone(tz).isoformat(),
                 "title": event.get("title"),
                 "calendar": event.get("calendar"),
+                "calendar_id": event.get("calendar_id"),
                 "event_id": event.get("event_id"),
             }
         )
@@ -182,7 +183,8 @@ async def check_availability(
         "engine": engine.name,
         "resolved_timezone": window.timezone_name,
         "window": window_payload(window),
-        "calendars_scanned": names,
+        "calendars_scanned": [str(scope["name"]) for scope in scopes],
+        "calendar_ids_scanned": [str(scope["calendar_id"]) for scope in scopes],
         "fan_out_capped": fan_out_capped,
         "calendar_errors": calendar_errors,
         "budget_exhausted": budget_exhausted,

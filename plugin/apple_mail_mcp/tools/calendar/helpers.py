@@ -29,7 +29,7 @@ from apple_mail_mcp.calendar_core import (
     event_payload,
     expand_occurrences,
     parse_rrule,
-    resolve_calendar_name,
+    resolve_calendar_selector,
     shifted_window,
     validate_attendee_emails,
 )
@@ -151,9 +151,13 @@ def list_calendar_names(timeout: int | None = None) -> list[str]:
     to their JSON error envelope. A genuinely empty calendar list with no
     errors still returns ``[]``.
     """
+    return [str(calendar["name"]) for calendar in list_calendar_records(timeout=timeout)]
+
+
+def list_calendar_records(timeout: int | None = None) -> list[dict[str, Any]]:
+    """Return live calendars, preserving the stable selector for each row."""
     calendars, errors = _calendar.get_engine().list_calendars(timeout=timeout)
-    names = [str(c["name"]) for c in calendars]
-    if errors and not names:
+    if errors and not calendars:
         raise ToolError(
             code="CALENDAR_ENUMERATION_FAILED",
             message="Calendar.app returned no readable calendars; enumeration itself failed.",
@@ -163,7 +167,7 @@ def list_calendar_names(timeout: int | None = None) -> list[str]:
                 "note": AUTOMATION_PANE_NOTE,
             },
         )
-    return names
+    return calendars
 
 
 def resolve_read_calendars(
@@ -171,8 +175,8 @@ def resolve_read_calendars(
     calendar_names: list[str] | None,
     *,
     timeout: int | None = None,
-) -> tuple[list[str], bool]:
-    """Resolve the calendar scope for a read; returns (names, fan_out_capped).
+) -> tuple[list[dict[str, Any]], bool]:
+    """Resolve the calendar scope for a read; returns (records, fan_out_capped).
 
     Unlike mail's account scoping (which errors without a configured
     default), an unscoped calendar read fans out across every calendar up to
@@ -184,34 +188,37 @@ def resolve_read_calendars(
             code="AMBIGUOUS_CALENDAR_SELECTOR",
             message="Pass calendar or calendars, not both.",
         )
-    known = _calendar.list_calendar_names(timeout=timeout)
+    known = list_calendar_records(timeout=timeout)
     if calendar_name is not None:
-        return [resolve_calendar_name(calendar_name, known)], False
+        return [resolve_calendar_selector(calendar_name, known)], False
     if calendar_names:
-        resolved: dict[str, None] = {}
+        resolved: dict[str, dict[str, Any]] = {}
         for name in calendar_names:
-            resolved.setdefault(resolve_calendar_name(name, known), None)
-        return list(resolved), False
+            selected = resolve_calendar_selector(name, known)
+            resolved.setdefault(str(selected["calendar_id"]), selected)
+        return list(resolved.values()), False
     cap = int(CALENDAR_BOUNDS["MAX_CALENDARS_PER_QUERY"])
     return known[:cap], len(known) > cap
 
 
-def resolve_create_target(calendar_name: str | None, *, timeout: int | None = None) -> str:
-    """Resolve the write target: explicit name, DEFAULT_CALENDAR, engine default."""
-    known = _calendar.list_calendar_names(timeout=timeout)
+def resolve_create_target(calendar_name: str | None, *, timeout: int | None = None) -> dict[str, Any]:
+    """Resolve the write target to its stable ID and display metadata."""
+    known = list_calendar_records(timeout=timeout)
     if calendar_name is not None:
-        return resolve_calendar_name(calendar_name, known)
+        return resolve_calendar_selector(calendar_name, known)
     if _server.DEFAULT_CALENDAR:
-        return resolve_calendar_name(_server.DEFAULT_CALENDAR, known)
+        return resolve_calendar_selector(_server.DEFAULT_CALENDAR, known)
     engine_default = _calendar.get_engine().default_calendar_name()
-    if engine_default and engine_default in known:
-        return engine_default
+    if engine_default:
+        return resolve_calendar_selector(engine_default, known)
     raise ToolError(
         code="CALENDAR_NOT_FOUND",
         message="No calendar specified and no DEFAULT_CALENDAR is configured.",
         remediation={
             "preferred": "Pass calendar=... or set the DEFAULT_CALENDAR environment variable.",
-            "candidates": known[:5],
+            "candidates": [
+                {"name": str(cal.get("name")), "calendar_id": str(cal.get("calendar_id"))} for cal in known[:5]
+            ],
         },
     )
 
@@ -277,7 +284,7 @@ def collect_window_events(
     *,
     engine: CalendarReadEngine,
     window: CalendarWindow,
-    calendar_names: list[str],
+    calendar_ids: list[str],
     expand_recurring: bool = True,
     include_detail: bool = False,
     event_ids: list[str] | None = None,
@@ -301,16 +308,16 @@ def collect_window_events(
     occurrence_ceiling = int(CALENDAR_BOUNDS["OCCURRENCE_SCAN_CEILING"])
     occurrence_count = 0
 
-    for index, name in enumerate(calendar_names):
+    for index, calendar_id in enumerate(calendar_ids):
         if budget.exhausted():
             budget_exhausted = True
-            for skipped in calendar_names[index:]:
+            for skipped in calendar_ids[index:]:
                 calendar_errors.append(f"{skipped}: skipped, call budget exhausted")
             break
         try:
             raw_events, row_errors = engine.fetch_window(
                 window,
-                name,
+                calendar_id,
                 scan_cap=int(CALENDAR_BOUNDS["EVENT_SCAN_CAP"]),
                 # This extra metadata is private to filtering: list responses
                 # remain summary-only unless their caller requested detail.
@@ -318,7 +325,7 @@ def collect_window_events(
                 event_ids=event_ids,
                 timeout=timeout,
             )
-            calendar_errors.extend(f"{name}: {err}" for err in row_errors)
+            calendar_errors.extend(f"{calendar_id}: {err}" for err in row_errors)
             recurring_masters: dict[str, dict[str, Any]] = {}
             for raw in raw_events:
                 if participant_query and not _matches_participant(raw, participant_query):
@@ -335,11 +342,11 @@ def collect_window_events(
             if expand_recurring and not engine.expands_occurrences and event_ids is None:
                 masters, master_errors = engine.fetch_recurring_masters(
                     window,
-                    name,
+                    calendar_id,
                     include_detail=include_detail or bool(participant_query),
                     timeout=timeout,
                 )
-                calendar_errors.extend(f"{name}: {err}" for err in master_errors)
+                calendar_errors.extend(f"{calendar_id}: {err}" for err in master_errors)
                 for raw in masters:
                     if participant_query and not _matches_participant(raw, participant_query):
                         continue
@@ -391,11 +398,11 @@ def collect_window_events(
                         )
                     )
         except AppleScriptTimeout:
-            calendar_errors.append(f"{name}: timed out. {AUTOMATION_PANE_NOTE}")
+            calendar_errors.append(f"{calendar_id}: timed out. {AUTOMATION_PANE_NOTE}")
         except ToolError as exc:
             if exc.code == "CALENDAR_WINDOW_TOO_DENSE":
                 raise
-            calendar_errors.append(f"{name}: [{exc.code}] {exc.message}")
+            calendar_errors.append(f"{calendar_id}: [{exc.code}] {exc.message}")
 
     if not include_all_day:
         payloads = [p for p in payloads if not p.get("all_day")]
@@ -407,7 +414,7 @@ def collect_window_events(
 
 def find_conflicts(
     *,
-    calendar_name: str,
+    calendar_id: str,
     start: datetime,
     end: datetime,
     timezone_name: str | None,
@@ -425,7 +432,7 @@ def find_conflicts(
     payloads, _errors, _exhausted = collect_window_events(
         engine=engine,
         window=window,
-        calendar_names=[calendar_name],
+        calendar_ids=[calendar_id],
         expand_recurring=True,
         timeout=timeout,
     )
@@ -453,7 +460,7 @@ def surviving_recurring_occurrences(
     *,
     engine: CalendarReadEngine,
     window: CalendarWindow,
-    calendar_names: list[str],
+    calendar_ids: list[str],
     recurring_ids: list[str],
     timeout: int | None = None,
 ) -> dict[str, list[str]]:
@@ -470,7 +477,7 @@ def surviving_recurring_occurrences(
     survivors, _errors, _exhausted = collect_window_events(
         engine=engine,
         window=window,
-        calendar_names=calendar_names,
+        calendar_ids=calendar_ids,
         expand_recurring=True,
         event_ids=recurring_ids,
         timeout=timeout,
@@ -556,6 +563,7 @@ __all__ = [
     "find_conflicts",
     "finish",
     "list_calendar_names",
+    "list_calendar_records",
     "output_format_error",
     "render_events_text",
     "resolve_create_target",

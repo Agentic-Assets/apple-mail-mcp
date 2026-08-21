@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-
 from apple_mail_mcp.calendar_core.scripts_read import (
     applescript_date_block,
     build_uid_condition,
@@ -125,7 +124,7 @@ class TestReadScripts:
     def test_fetch_window_script_shape(self):
         start_block, end_block = _blocks()
         script = fetch_window_events_script(
-            calendar_name='Wor"k',
+            calendar_id='CAL-Wor"k',
             start_block=start_block,
             end_block=end_block,
             scan_cap=300,
@@ -133,7 +132,7 @@ class TestReadScripts:
         )
         assert script.lstrip().startswith('tell application "Calendar"')
         assert "with timeout of 45 seconds" in script
-        assert 'calendar "Wor\\"k"' in script  # escaped quote
+        assert 'calendarIdentifier is "CAL-Wor\\"k"' in script  # escaped opaque identifier
         assert "items 1 thru 300" in script
         assert "text item delimiters" in script  # sanitizer present
         assert script.count("start date >= windowStart") == 1
@@ -141,7 +140,7 @@ class TestReadScripts:
     def test_fetch_window_uid_filter(self):
         start_block, end_block = _blocks()
         script = fetch_window_events_script(
-            calendar_name="Work",
+            calendar_id="CAL-WORK",
             start_block=start_block,
             end_block=end_block,
             scan_cap=300,
@@ -153,10 +152,10 @@ class TestReadScripts:
     def test_detail_rows_only_when_requested(self):
         start_block, end_block = _blocks()
         plain = fetch_window_events_script(
-            calendar_name="Work", start_block=start_block, end_block=end_block, scan_cap=10, timeout_seconds=30
+            calendar_id="CAL-WORK", start_block=start_block, end_block=end_block, scan_cap=10, timeout_seconds=30
         )
         detail = fetch_window_events_script(
-            calendar_name="Work",
+            calendar_id="CAL-WORK",
             start_block=start_block,
             end_block=end_block,
             scan_cap=10,
@@ -170,7 +169,7 @@ class TestReadScripts:
     def test_recurring_masters_filter_in_loop(self):
         start_block, end_block = _blocks()
         script = fetch_recurring_masters_script(
-            calendar_name="Work",
+            calendar_id="CAL-WORK",
             start_block=start_block,
             end_block=end_block,
             scan_cap=200,
@@ -182,6 +181,7 @@ class TestReadScripts:
     def test_list_calendars_sanitizes_names(self):
         script = list_calendars_script(timeout_seconds=30)
         assert "CAL|||" in script
+        assert "calendarIdentifier of aCal" in script
         assert "text item delimiters" in script
 
 
@@ -189,7 +189,7 @@ class TestWriteScripts:
     def test_create_event_escapes_title(self):
         start_block, end_block = _blocks()
         script = create_event_script(
-            calendar_name="Work",
+            calendar_id="CAL-WORK",
             title='Lunch "meeting"\nwith Bob',
             start_block=start_block,
             end_block=end_block,
@@ -218,7 +218,7 @@ class TestWriteScripts:
     def test_update_script_requires_uid_condition(self):
         start_block, end_block = _blocks()
         script = update_event_script(
-            calendar_name="Work",
+            calendar_id="CAL-WORK",
             uid_condition=build_uid_condition(["UID-1"]),
             start_block=start_block,
             end_block=end_block,
@@ -231,7 +231,7 @@ class TestWriteScripts:
     def test_delete_script_captures_before_delete(self):
         start_block, end_block = _blocks()
         script = delete_events_script(
-            calendar_name="Work",
+            calendar_id="CAL-WORK",
             uid_condition=build_uid_condition(["UID-1"]),
             start_block=start_block,
             end_block=end_block,
@@ -242,9 +242,54 @@ class TestWriteScripts:
 
     def test_calendar_crud_scripts_escape(self):
         assert '\\"X\\"' in create_calendar_script(calendar_name='Cal "X"', timeout_seconds=30)
-        assert "RENAMED_CAL" in rename_calendar_script(calendar_name="Old", new_name="New", timeout_seconds=30)
-        assert "DELETED_CAL" in delete_calendar_script(calendar_name="Gone", timeout_seconds=30)
-        assert "COUNT|||" in count_events_script(calendar_name="Work", timeout_seconds=30)
+        assert "RENAMED_CAL" in rename_calendar_script(calendar_id="CAL-OLD", new_name="New", timeout_seconds=30)
+        assert "DELETED_CAL" in delete_calendar_script(calendar_id="CAL-GONE", timeout_seconds=30)
+        assert "COUNT|||" in count_events_script(calendar_id="CAL-WORK", timeout_seconds=30)
+
+    def test_existing_calendar_scripts_target_calendar_identifier(self):
+        start_block, end_block = _blocks()
+        uid = build_uid_condition(["UID-1"])
+        scripts = [
+            fetch_window_events_script(
+                calendar_id="CAL-WORK",
+                start_block=start_block,
+                end_block=end_block,
+                scan_cap=10,
+                timeout_seconds=30,
+            ),
+            fetch_recurring_masters_script(
+                calendar_id="CAL-WORK",
+                start_block=start_block,
+                end_block=end_block,
+                scan_cap=10,
+                timeout_seconds=30,
+            ),
+            count_events_script(calendar_id="CAL-WORK", timeout_seconds=30),
+            create_event_script(
+                calendar_id="CAL-WORK",
+                title="T",
+                start_block=start_block,
+                end_block=end_block,
+                timeout_seconds=30,
+            ),
+            update_event_script(
+                calendar_id="CAL-WORK",
+                uid_condition=uid,
+                start_block=start_block,
+                end_block=end_block,
+                timeout_seconds=30,
+            ),
+            delete_events_script(
+                calendar_id="CAL-WORK",
+                uid_condition=uid,
+                start_block=start_block,
+                end_block=end_block,
+                timeout_seconds=30,
+            ),
+            rename_calendar_script(calendar_id="CAL-WORK", new_name="New", timeout_seconds=30),
+            delete_calendar_script(calendar_id="CAL-WORK", timeout_seconds=30),
+        ]
+        assert all('calendarIdentifier is "CAL-WORK"' in script for script in scripts)
 
 
 _OSACOMPILE = shutil.which("osacompile") is not None
@@ -281,7 +326,7 @@ class TestScriptsCompile:
         scripts = [
             list_calendars_script(timeout_seconds=30),
             fetch_window_events_script(
-                calendar_name="Work",
+                calendar_id="CAL-WORK",
                 start_block=start_block,
                 end_block=end_block,
                 scan_cap=10,
@@ -290,15 +335,15 @@ class TestScriptsCompile:
                 include_detail=True,
             ),
             fetch_recurring_masters_script(
-                calendar_name="Work",
+                calendar_id="CAL-WORK",
                 start_block=start_block,
                 end_block=end_block,
                 scan_cap=10,
                 timeout_seconds=30,
             ),
-            count_events_script(calendar_name="Work", timeout_seconds=30),
+            count_events_script(calendar_id="CAL-WORK", timeout_seconds=30),
             create_event_script(
-                calendar_name="Work",
+                calendar_id="CAL-WORK",
                 title="T",
                 start_block=start_block,
                 end_block=end_block,
@@ -306,7 +351,7 @@ class TestScriptsCompile:
                 timeout_seconds=30,
             ),
             update_event_script(
-                calendar_name="Work",
+                calendar_id="CAL-WORK",
                 uid_condition=uid,
                 start_block=start_block,
                 end_block=end_block,
@@ -314,15 +359,15 @@ class TestScriptsCompile:
                 timeout_seconds=30,
             ),
             delete_events_script(
-                calendar_name="Work",
+                calendar_id="CAL-WORK",
                 uid_condition=uid,
                 start_block=start_block,
                 end_block=end_block,
                 timeout_seconds=30,
             ),
             create_calendar_script(calendar_name="New Cal", timeout_seconds=30),
-            rename_calendar_script(calendar_name="Old", new_name="New", timeout_seconds=30),
-            delete_calendar_script(calendar_name="Gone", timeout_seconds=30),
+            rename_calendar_script(calendar_id="CAL-OLD", new_name="New", timeout_seconds=30),
+            delete_calendar_script(calendar_id="CAL-GONE", timeout_seconds=30),
         ]
         for script in scripts:
             self._compile(script)

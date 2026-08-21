@@ -58,7 +58,7 @@ class CalendarReadEngine(Protocol):
     def fetch_window(
         self,
         window: CalendarWindow,
-        calendar_name: str,
+        calendar_id: str,
         *,
         scan_cap: int,
         include_detail: bool = False,
@@ -69,7 +69,7 @@ class CalendarReadEngine(Protocol):
     def fetch_recurring_masters(
         self,
         window: CalendarWindow,
-        calendar_name: str,
+        calendar_id: str,
         *,
         include_detail: bool = False,
         timeout: int | None = None,
@@ -157,7 +157,7 @@ class AppleScriptCalendarEngine:
     def fetch_window(
         self,
         window: CalendarWindow,
-        calendar_name: str,
+        calendar_id: str,
         *,
         scan_cap: int,
         include_detail: bool = False,
@@ -167,7 +167,7 @@ class AppleScriptCalendarEngine:
         require_issued_window(window)
         seconds = _effective_timeout(timeout)
         script = fetch_window_events_script(
-            calendar_name=calendar_name,
+            calendar_id=calendar_id,
             start_block=applescript_date_block("windowStart", window.start),
             end_block=applescript_date_block("windowEnd", window.end),
             scan_cap=scan_cap,
@@ -181,7 +181,7 @@ class AppleScriptCalendarEngine:
     def fetch_recurring_masters(
         self,
         window: CalendarWindow,
-        calendar_name: str,
+        calendar_id: str,
         *,
         include_detail: bool = False,
         timeout: int | None = None,
@@ -195,7 +195,7 @@ class AppleScriptCalendarEngine:
             end_delta_days=-width_days,
         )
         script = fetch_recurring_masters_script(
-            calendar_name=calendar_name,
+            calendar_id=calendar_id,
             start_block=applescript_date_block("windowStart", lookback.start),
             end_block=applescript_date_block("windowEnd", lookback.end),
             scan_cap=int(CALENDAR_BOUNDS["RECURRING_MASTER_SCAN_CAP"]),
@@ -205,10 +205,10 @@ class AppleScriptCalendarEngine:
         raw = run_applescript(script, timeout=seconds)
         return parse_event_rows(raw, _host_tz())
 
-    def count_events(self, calendar_name: str, *, timeout: int | None = None) -> int:
+    def count_events(self, calendar_id: str, *, timeout: int | None = None) -> int:
         seconds = _effective_timeout(timeout)
         raw = run_applescript(
-            count_events_script(calendar_name=calendar_name, timeout_seconds=seconds), timeout=seconds
+            count_events_script(calendar_id=calendar_id, timeout_seconds=seconds), timeout=seconds
         ).strip()
         if raw.startswith("COUNT|||"):
             try:
@@ -223,7 +223,7 @@ class AppleScriptCalendarEngine:
     def create_event(
         self,
         *,
-        calendar_name: str,
+        calendar_id: str,
         title: str,
         start: datetime,
         end: datetime,
@@ -248,7 +248,7 @@ class AppleScriptCalendarEngine:
             add_attendees=attendees,
         )
         script = create_event_script(
-            calendar_name=calendar_name,
+            calendar_id=calendar_id,
             title=title,
             start_block=applescript_date_block("windowStart", start, all_day=all_day),
             end_block=applescript_date_block("windowEnd", end, all_day=all_day),
@@ -260,7 +260,7 @@ class AppleScriptCalendarEngine:
     def update_event(
         self,
         *,
-        calendar_name: str,
+        calendar_id: str,
         event_id: str,
         window: CalendarWindow,
         set_lines: str,
@@ -269,7 +269,7 @@ class AppleScriptCalendarEngine:
         require_issued_window(window)
         seconds = _effective_timeout(timeout)
         script = update_event_script(
-            calendar_name=calendar_name,
+            calendar_id=calendar_id,
             uid_condition=build_uid_condition([event_id]),
             start_block=applescript_date_block("windowStart", window.start),
             end_block=applescript_date_block("windowEnd", window.end),
@@ -281,7 +281,7 @@ class AppleScriptCalendarEngine:
     def delete_events(
         self,
         *,
-        calendar_name: str,
+        calendar_id: str,
         event_ids: list[str],
         window: CalendarWindow,
         timeout: int | None = None,
@@ -295,7 +295,7 @@ class AppleScriptCalendarEngine:
         for index in range(0, len(event_ids), chunk_size):
             chunk = event_ids[index : index + chunk_size]
             script = delete_events_script(
-                calendar_name=calendar_name,
+                calendar_id=calendar_id,
                 uid_condition=build_uid_condition(chunk),
                 start_block=applescript_date_block("windowStart", window.start),
                 end_block=applescript_date_block("windowEnd", window.end),
@@ -328,14 +328,14 @@ class AppleScriptCalendarEngine:
         script = create_calendar_script(calendar_name=name, timeout_seconds=seconds)
         return _single_line_write(script, timeout=seconds, ok_prefix="CREATED_CAL", label="create_calendar")
 
-    def rename_calendar(self, *, name: str, new_name: str, timeout: int | None = None) -> str:
+    def rename_calendar(self, *, calendar_id: str, new_name: str, timeout: int | None = None) -> str:
         seconds = _effective_timeout(timeout)
-        script = rename_calendar_script(calendar_name=name, new_name=new_name, timeout_seconds=seconds)
+        script = rename_calendar_script(calendar_id=calendar_id, new_name=new_name, timeout_seconds=seconds)
         return _single_line_write(script, timeout=seconds, ok_prefix="RENAMED_CAL", label="rename_calendar")
 
-    def delete_calendar(self, *, name: str, timeout: int | None = None) -> str:
+    def delete_calendar(self, *, calendar_id: str, timeout: int | None = None) -> str:
         seconds = _effective_timeout(timeout)
-        script = delete_calendar_script(calendar_name=name, timeout_seconds=seconds)
+        script = delete_calendar_script(calendar_id=calendar_id, timeout_seconds=seconds)
         return _single_line_write(script, timeout=seconds, ok_prefix="DELETED_CAL", label="delete_calendar")
 
 

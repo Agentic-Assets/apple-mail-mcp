@@ -128,8 +128,9 @@ def batch_create_events(
 
     Args:
         events: 1..25 item dicts (see above for keys).
-        calendar: One target calendar for the whole batch (fuzzy-resolved,
-            then DEFAULT_CALENDAR, then the engine default).
+        calendar: One target calendar for the whole batch. Prefer the opaque
+            calendar_id from list_calendars; a display name must be exact and
+            unique. If omitted, DEFAULT_CALENDAR then the engine default apply.
         timezone: Batch default IANA zone; items may override.
         on_conflict: "warn" (default), "block", or "allow".
         dry_run: Validate and conflict-preview everything, write nothing.
@@ -164,7 +165,7 @@ def batch_create_events(
         if on_conflict != "allow":
             for spec in specs:
                 spec["conflicts"] = find_conflicts(
-                    calendar_name=target,
+                    calendar_id=str(target["calendar_id"]),
                     start=spec["start"],
                     end=spec["end"],
                     timezone_name=timezone,
@@ -200,6 +201,8 @@ def batch_create_events(
             end_iso = spec["end"].isoformat()
         return {
             "index": spec["index"],
+            "calendar": target["name"],
+            "calendar_id": target["calendar_id"],
             "title": spec["title"],
             "start": start_iso,
             "end": end_iso,
@@ -210,7 +213,8 @@ def batch_create_events(
     if dry_run:
         payload = {
             "dry_run": True,
-            "calendar": target,
+            "calendar": target["name"],
+            "calendar_id": target["calendar_id"],
             "would_create": [_spec_payload(spec) for spec in specs],
             "on_conflict": on_conflict,
             "engine": "applescript",
@@ -223,7 +227,7 @@ def batch_create_events(
     for spec in specs:
         try:
             event_id = engine.create_event(
-                calendar_name=target,
+                calendar_id=str(target["calendar_id"]),
                 title=spec["title"],
                 start=spec["start"],
                 end=spec["end"],
@@ -246,7 +250,8 @@ def batch_create_events(
 
     payload = {
         "dry_run": False,
-        "calendar": target,
+        "calendar": target["name"],
+        "calendar_id": target["calendar_id"],
         "created": created,
         "failed": failed,
         "created_count": len(created),

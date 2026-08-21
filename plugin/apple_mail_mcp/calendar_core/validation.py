@@ -2,16 +2,16 @@
 
 Calendar UIDs are UUID-like strings, so none of the numeric Mail id
 primitives (``normalize_message_ids`` etc.) apply here. This module owns the
-string-shaped id doctrine plus the fuzzy calendar-name resolution algorithm
-specified in the final plan (F6): exact match, then unique case-insensitive
-exact match, then unique case-insensitive substring match; ambiguity and
-no-match both return structured errors with candidates.
+string-shaped id doctrine plus calendar selector resolution: the opaque
+``calendar_id`` returned by ``list_calendars`` is preferred; a display name is
+accepted only when it is an exact, unique match. Duplicate names and missing
+selectors return structured errors with candidates.
 """
 
 from __future__ import annotations
 
-import difflib
 import re
+from typing import Any
 
 from apple_mail_mcp.backend.base import ToolError
 from apple_mail_mcp.calendar_core.recurrence import parse_rrule
@@ -71,48 +71,51 @@ def normalize_event_ids(event_ids: list[str], *, max_ids: int, cap_code: str = "
     return ids
 
 
-def resolve_calendar_name(query: str, names: list[str]) -> str:
-    """Resolve a user-supplied calendar name against the live calendar list.
+def resolve_calendar_selector(query: str, calendars: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resolve an exact calendar ID, or an exact name when it is unique.
 
-    Algorithm (final plan, F6): exact match wins; else a unique
-    case-insensitive exact match; else a unique case-insensitive substring
-    match. Multiple candidates raise ``AMBIGUOUS_CALENDAR_SELECTOR``; zero
-    raise ``CALENDAR_NOT_FOUND`` with close candidates.
+    Calendar display names are not identifiers: Calendar.app permits duplicate
+    names across accounts.  The opaque ``calendar_id`` from ``list_calendars``
+    is therefore the preferred selector and is the only value passed below
+    this boundary.
     """
     wanted = (query or "").strip()
     if not wanted:
-        raise ToolError(code="CALENDAR_NOT_FOUND", message="Calendar name cannot be empty.")
+        raise ToolError(code="CALENDAR_NOT_FOUND", message="Calendar selector cannot be empty.")
 
-    if wanted in names:
-        return wanted
+    id_matches = [calendar for calendar in calendars if str(calendar.get("calendar_id")) == wanted]
+    if len(id_matches) == 1:
+        return id_matches[0]
 
-    lowered = wanted.lower()
-    ci_exact = [name for name in names if name.lower() == lowered]
-    if len(ci_exact) == 1:
-        return ci_exact[0]
-    if len(ci_exact) > 1:
+    name_matches = [calendar for calendar in calendars if str(calendar.get("name")) == wanted]
+    if len(name_matches) == 1:
+        return name_matches[0]
+    candidates = [
+        {"name": str(calendar.get("name")), "calendar_id": str(calendar.get("calendar_id"))}
+        for calendar in name_matches
+    ]
+    if len(name_matches) > 1:
         raise ToolError(
             code="AMBIGUOUS_CALENDAR_SELECTOR",
-            message=f"Calendar name {query!r} matches more than one calendar case-insensitively.",
-            remediation={"candidates": ci_exact, "preferred": "Pass the exact calendar name."},
+            message=f"Calendar name {query!r} identifies {len(name_matches)} calendars.",
+            remediation={"candidates": candidates, "preferred": "Pass calendar_id from list_calendars."},
         )
-
-    substr = [name for name in names if lowered in name.lower()]
-    if len(substr) == 1:
-        return substr[0]
-    if len(substr) > 1:
-        raise ToolError(
-            code="AMBIGUOUS_CALENDAR_SELECTOR",
-            message=f"Calendar name {query!r} matches {len(substr)} calendars.",
-            remediation={"candidates": substr, "preferred": "Pass the exact calendar name."},
-        )
-
-    close = difflib.get_close_matches(wanted, names, n=5, cutoff=0.5)
     raise ToolError(
         code="CALENDAR_NOT_FOUND",
         message=f"No calendar matches {query!r}.",
-        remediation={"candidates": close or names[:5], "preferred": "Call list_calendars first."},
+        remediation={
+            "candidates": [
+                {"name": str(calendar.get("name")), "calendar_id": str(calendar.get("calendar_id"))}
+                for calendar in calendars[:5]
+            ],
+            "preferred": "Call list_calendars first.",
+        },
     )
+
+
+def resolve_calendar_name(query: str, names: list[str]) -> str:
+    """Legacy exact-name helper; new tools use ``resolve_calendar_selector``."""
+    return str(resolve_calendar_selector(query, [{"calendar_id": name, "name": name} for name in names])["name"])
 
 
 def validate_rrule(rule: str) -> str:
@@ -205,6 +208,7 @@ def _parse_wall_minutes(value: str, param: str) -> int:
 __all__ = [
     "EVENT_ID_MAX_LEN",
     "normalize_event_ids",
+    "resolve_calendar_selector",
     "resolve_calendar_name",
     "validate_alarms",
     "validate_attendee_emails",

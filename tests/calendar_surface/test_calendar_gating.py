@@ -5,10 +5,9 @@ import json
 from contextlib import suppress
 from unittest.mock import MagicMock
 
-import pytest
-
 import apple_mail_mcp  # noqa: F401  (registers tools)
 import apple_mail_mcp.server as server
+import pytest
 from apple_mail_mcp.server import CALENDAR_DESTRUCTIVE_TOOLS, CALENDAR_WRITE_TOOLS, SEND_TOOLS, mcp
 from apple_mail_mcp.tools.calendar import respond_to_invitation
 
@@ -29,7 +28,7 @@ CALENDAR_TOOLS = {
 class TestRegistry:
     def test_all_calendar_tools_registered(self):
         names = {tool.name for tool in mcp._tool_manager.list_tools()}
-        assert CALENDAR_TOOLS <= names
+        assert names >= CALENDAR_TOOLS
 
     def test_write_and_destructive_tuples(self):
         assert set(CALENDAR_WRITE_TOOLS) == {
@@ -69,9 +68,14 @@ class TestModeMatrix:
     @pytest.mark.parametrize(
         ("call", "code"),
         [
-            (lambda: _tool("create_event")(title="T", start="2026-07-13", duration_minutes=30), "CALENDAR_WRITE_BLOCKED"),
             (
-                lambda: _tool("batch_create_events")(events=[{"title": "T", "start": "2026-07-13", "duration_minutes": 30}]),
+                lambda: _tool("create_event")(title="T", start="2026-07-13", duration_minutes=30),
+                "CALENDAR_WRITE_BLOCKED",
+            ),
+            (
+                lambda: _tool("batch_create_events")(
+                    events=[{"title": "T", "start": "2026-07-13", "duration_minutes": 30}]
+                ),
                 "CALENDAR_WRITE_BLOCKED",
             ),
             (lambda: _tool("update_event")(event_id="UID-1", title="X"), "CALENDAR_WRITE_BLOCKED"),
@@ -103,9 +107,7 @@ class TestModeMatrix:
     def test_reads_allowed_in_read_only(self, monkeypatch, fake_engines):
         monkeypatch.setattr(server, "READ_ONLY", True)
         monkeypatch.setattr(server, "DRAFT_SAFE", True)
-        monkeypatch.setattr(
-            "apple_mail_mcp.tools.calendar.eventkit_status", lambda: (False, "dependency_missing")
-        )
+        monkeypatch.setattr("apple_mail_mcp.tools.calendar.eventkit_status", lambda: (False, "dependency_missing"))
         fake_engines()
         from apple_mail_mcp.tools.calendar import list_calendars, list_events
 
