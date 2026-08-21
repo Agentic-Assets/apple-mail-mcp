@@ -23,7 +23,9 @@ from apple_mail_mcp.tools.analytics.statistics_parsing import (
     _statistics_scan_caps,
 )
 from apple_mail_mcp.tools.unread_provenance import (
+    READ_COUNT_NOTE_LINE,
     UNREAD_COUNT_NOTE_LINE,
+    derived_read_text_label,
     unread_count_text_label,
 )
 
@@ -31,6 +33,16 @@ from apple_mail_mcp.tools.unread_provenance import (
 #: report, which is assembled inside the script rather than in Python. Same line
 #: every other text surface prints.
 _MAILBOX_BREAKDOWN_NOTE = escape_applescript(UNREAD_COUNT_NOTE_LINE)
+
+#: Companion note for the `Read` line of the same report. The read figure is
+#: `totalMessages - unreadMessages`, i.e. the derivation the unread note above
+#: tells the reader not to perform, so it carries its own provenance rather
+#: than borrowing the cached-unread label.
+_MAILBOX_BREAKDOWN_READ_NOTE = escape_applescript(READ_COUNT_NOTE_LINE)
+
+#: Inline marker on the `Read` line itself, so a reader who skips the footer
+#: still cannot mistake the derived figure for a measured one.
+_MAILBOX_BREAKDOWN_READ_LABEL = escape_applescript(derived_read_text_label())
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
@@ -65,15 +77,24 @@ def get_statistics(
     ``mailbox_breakdown``.** ``count of messages`` is reliable, but ``unread
     count`` is a cached aggregate that drifts low: measured 2026-08-17 on a
     25,012-message Exchange Inbox, Mail reported 3,236 unread where per-message
-    truth was 10,016 (a 68% under-report). ``read`` is computed as
-    ``total - unread``, so it inherits that error with the sign flipped and is
-    over-reported by the same amount. Both scopes label the number
+    truth was 10,016 (a 68% under-report). Both scopes label the number
     ``unread_count_source="mail_cached_aggregate"`` with
     ``unread_count_measured=false``, and set ``unread_count_suspect`` when the
     cached count exceeds the message count. ``sender_stats`` is different: it
     counts per-message ``read status`` inside its bounded sample, so it reports
     ``unread_count_source="per_message_read_status"`` with
     ``unread_count_measured=true``.
+
+    **``read`` is not measured either.** It is ``total - unread``, so it
+    inherits the cache's error with the sign flipped and is over-reported by
+    the same amount: the 3,236 cached unread above implies 21,776 read against
+    a per-message truth of 14,996. It therefore carries provenance of its own
+    rather than borrowing the unread label —
+    ``read_count_source="derived_from_mail_cached_aggregate"`` with
+    ``read_count_measured=false`` and a ``read_count_note`` at the payload
+    envelope, plus ``statistics.read_derived_from_cached_unread=true`` inline
+    beside the value so the number cannot be read bare. Text mode marks the
+    ``Read:`` line ``[derived from Mail cached unread, not measured]``.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
@@ -491,8 +512,9 @@ def get_statistics(
 
                 set outputText to outputText & "Total messages: " & totalMessages & return
                 set outputText to outputText & "Unread: " & unreadMessages & unreadLabel & return
-                set outputText to outputText & "Read: " & (totalMessages - unreadMessages) & unreadLabel & return
+                set outputText to outputText & "Read: " & (totalMessages - unreadMessages) & "{_MAILBOX_BREAKDOWN_READ_LABEL}" & return
                 set outputText to outputText & "{_MAILBOX_BREAKDOWN_NOTE}" & return
+                set outputText to outputText & "{_MAILBOX_BREAKDOWN_READ_NOTE}" & return
 
             on error errMsg
                 return "Error: " & errMsg

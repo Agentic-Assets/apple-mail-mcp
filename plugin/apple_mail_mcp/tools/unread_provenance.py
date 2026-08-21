@@ -100,6 +100,36 @@ UNREAD_COUNT_NOTE = (
 #: report, which embeds it as an AppleScript string literal.
 UNREAD_COUNT_NOTE_LINE = f"ℹ️  {UNREAD_COUNT_NOTE}"
 
+#: Value of the ``read_count_source`` field: ``count of messages`` minus the
+#: cached ``unread count``. Not a measurement of anything — an arithmetic
+#: consequence of the number :data:`UNREAD_COUNT_NOTE` says not to derive from.
+READ_SOURCE_DERIVED = "derived_from_mail_cached_aggregate"
+
+#: Agent-facing note attached next to every derived read count.
+#:
+#: ``UNREAD_COUNT_NOTE`` already tells the reader "do not derive a read count
+#: from it", and ``get_statistics`` then shipped exactly such a derived count in
+#: the same payload with no marking of its own. A consumer reading only
+#: ``statistics.read`` saw a bare integer sitting beside genuinely measured
+#: fields like ``total_emails``. This note is that field's own provenance.
+READ_COUNT_NOTE = (
+    "Read totals are NOT measured. They are computed as `count of messages` minus Mail.app's cached "
+    "`unread count` aggregate, so they inherit that cache's error with the sign flipped: where the cache "
+    "under-reports unread, this over-reports read by the same amount. Measured 2026-08-17 on a "
+    "25,012-message Exchange Inbox, the cached unread of 3,236 implied 21,776 read where per-message "
+    "truth was 14,996 — a 6,780-message over-report. Do not present a read count as exact. To measure "
+    "read state for real, page bounded per-message reads with list_inbox_emails(read_status='read')."
+)
+
+#: Inline flag placed *inside* the ``statistics`` object next to ``read`` /
+#: ``read_percent``, so the derived value cannot be read without its caveat even
+#: by a consumer that never looks at the payload envelope. Mirrors the per-row
+#: boolean ``list_mailboxes`` already carries (see :func:`unread_count_is_suspect`).
+READ_DERIVED_FLAG_KEY = "read_derived_from_cached_unread"
+
+#: The read note as one text-mode line, matching ``UNREAD_COUNT_NOTE_LINE``.
+READ_COUNT_NOTE_LINE = f"ℹ️  {READ_COUNT_NOTE}"
+
 SUSPECT_OVER_TOTAL = "cached_unread_exceeds_message_count"
 SUSPECT_UNDER_SAMPLE = "sampled_unread_exceeds_cached_unread"
 
@@ -210,6 +240,39 @@ def measured_unread_disclosure() -> dict[str, Any]:
             "nothing about messages outside the sample."
         ),
     }
+
+
+def derived_read_disclosure(include_note: bool = True) -> dict[str, Any]:
+    """Provenance for a read count computed as ``total - cached unread``.
+
+    The third member of the family, alongside :func:`unread_count_disclosure`
+    (cached) and :func:`measured_unread_disclosure` (measured). Keys mirror
+    those two exactly — ``read_count_source`` / ``read_count_measured`` /
+    ``read_count_note`` — so a consumer that already knows how to read unread
+    provenance needs no new vocabulary.
+
+    No suspect checks: a derived read count is never independently verifiable
+    from data the tool already holds, and the cached unread it came from
+    carries its own ``unread_count_suspect*`` verdict in the same payload.
+    """
+    disclosure: dict[str, Any] = {
+        "read_count_source": READ_SOURCE_DERIVED,
+        "read_count_measured": False,
+    }
+    if include_note:
+        disclosure["read_count_note"] = READ_COUNT_NOTE
+    return disclosure
+
+
+def derived_read_text_label() -> str:
+    """Inline text-mode marker for a derived read number.
+
+    Distinct from :func:`unread_count_text_label`: the unread figure *is* the
+    cache, while the read figure is arithmetic performed on the cache, and a
+    reader who sees the same label on both lines learns nothing about which is
+    which.
+    """
+    return " [derived from Mail cached unread, not measured]"
 
 
 def unread_count_text_label(suspect: bool = False) -> str:

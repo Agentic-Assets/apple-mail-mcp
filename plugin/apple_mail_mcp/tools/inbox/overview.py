@@ -7,6 +7,8 @@ through the ``inbox`` facade so the existing test patch seams keep firing."""
 import asyncio
 from typing import Any
 
+from apple_mail_mcp.bounded_scan import build_bounded_message_scan
+from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import (
     AppleScriptTimeout,
     escape_applescript,
@@ -22,6 +24,40 @@ from apple_mail_mcp.tools.inbox.overview_formatting import (
     _overview_json_error,
 )
 from apple_mail_mcp.tools.reply_state_wiring import annotate_rows_with_reply_state, build_draft_scan_status
+
+# ``max_recent`` is a plain tool argument with no client-side validation, so a
+# caller can hand this tool any integer. That value used to go straight into
+# the recent-slice guard, and any value above the mailbox size took the
+# ``else`` arm that bound *every* message — on a 25K Exchange inbox that is a
+# hang, not an error. Clamp to the same per-account read ceiling the
+# rest of the inbox surface uses (``list_inbox_emails`` via
+# ``inbox/list_scripts.py``, ``inbox_dashboard``, ``get_statistics``), so no
+# argument value can widen the scan.
+RECENT_SCAN_CEILING: int = SCAN_BOUNDS["INBOX_HARD_CEILING"]
+
+
+def _clamp_max_recent(max_recent: int) -> int:
+    """Clamp a caller-supplied ``max_recent`` to ``RECENT_SCAN_CEILING``.
+
+    ``max_recent <= 0`` keeps its existing meaning — skip the recent block
+    entirely — and is returned unchanged. Flooring it to 1 instead would be a
+    different wrong answer: ``messages 1 thru 0`` does not bind an empty list,
+    it silently returns the *first* message (verified on all four backends),
+    so "read nothing" must never be rewritten into "read something".
+    """
+    if max_recent <= 0:
+        return max_recent
+    return min(max_recent, RECENT_SCAN_CEILING)
+
+
+def _max_recent_clamp_note(requested: int, effective: int) -> str:
+    """Agent-facing prose for a clamped ``max_recent`` request."""
+    return (
+        f"max_recent={requested} exceeds the per-account read ceiling of "
+        f"{effective} (SCAN_BOUNDS['INBOX_HARD_CEILING']); at most {effective} "
+        "recent message(s) were read per account. The recent list is truncated, "
+        "not complete — page with list_inbox_emails for more."
+    )
 
 
 def _build_overview_one_account_script(
@@ -46,23 +82,28 @@ def _build_overview_one_account_script(
     unconditionally in the same per-message pass (no new AppleScript round
     trip; see ``core.reply_state.was_replied_fragment``).
 
-    A1: caps recent-message enumeration to 10 via
-    `messages 1 thru 10 of inboxMailbox`.
+    A1: caps recent-message enumeration via ``build_bounded_message_scan``,
+    which emits ``messages 1 thru N of inboxMailbox`` and never falls back to
+    an unbounded spelling. ``max_recent`` is clamped here as well as in
+    ``get_inbox_overview`` because this builder, ``_run_overview_one``, and the
+    ``inbox`` facade are all reachable without going through the tool.
     A2: caps mailbox enumeration at max_mailboxes (default 100) to prevent
     Exchange deep-folder or Gmail many-labels timeouts.
     """
     escaped_account = escape_applescript(account)
+    max_recent = _clamp_max_recent(max_recent)
     recent_block = ""
     if include_recent and max_recent > 0:
         recent_block = f"""
-                -- Recent messages (cap at {max_recent})
-                if (count of messages of inboxMailbox) > {max_recent} then
-                    set recentMessages to messages 1 thru {max_recent} of inboxMailbox
-                else
-                    set recentMessages to messages of inboxMailbox
-                end if
+                -- Recent messages: bounded newest-first slice, capped at
+                -- {max_recent} (SCAN_BOUNDS["INBOX_HARD_CEILING"]). The helper
+                -- slices first and only consults the cached `count of messages`
+                -- in its recovery arm; it raises an ERROR_MAILBOX marker rather
+                -- than binding a false empty, and never emits a slice whose
+                -- upper bound could be 0.
+                {build_bounded_message_scan("inboxMailbox", max_recent)}
 
-                repeat with aMessage in recentMessages
+                repeat with aMessage in candidateMessages
                     try
                         set messageSubject to subject of aMessage
                         set messageSender to sender of aMessage
@@ -175,7 +216,11 @@ def _parse_overview_account(raw: str) -> dict[str, Any]:
         if tag == "HEADER" and len(parts) >= 4:
             result["account"] = parts[1]
             if parts[2] == "ERROR":
-                result["error"] = parts[3] if len(parts) > 3 else "unknown error"
+                # ``ERROR_MAILBOX|||<mailbox>|||<detail>`` markers raised by
+                # ``build_bounded_message_scan`` reach here already containing
+                # the delimiter, so rejoin the tail instead of truncating the
+                # diagnostic to its first field.
+                result["error"] = "|||".join(parts[3:]) if len(parts) > 3 else "unknown error"
             else:
                 try:
                     result["unread"] = int(parts[2])
@@ -261,7 +306,17 @@ async def get_inbox_overview(
         include_mailboxes: Include mailbox structure with unread counts (default: True).
         include_recent: Include recent-email preview section (default: True).
         include_suggestions: Include assistant action suggestions (default: True).
-        max_recent: Maximum recent emails to show across all accounts (default: 10).
+        max_recent: Maximum recent emails to show across all accounts
+            (default: 10). Hard-clamped to
+            ``SCAN_BOUNDS["INBOX_HARD_CEILING"]`` (50): the recent pass reads
+            five properties per message, so an unclamped value presents as a
+            hang rather than an error on a 25K-message Exchange inbox. ``0``
+            (or any non-positive value) keeps its meaning of "skip the recent
+            block" and is not floored to 1. When the clamp fires, JSON mode
+            gains ``max_recent_clamped=True``, ``max_recent_requested``, and
+            ``max_recent_clamp_note``, and text mode appends a
+            ``RECENT PREVIEW TRUNCATED`` warning, so a capped list is never
+            returned as if it were complete.
         max_mailboxes: Maximum top-level mailboxes to enumerate per account
             (default: 100). When the cap fires, the affected account's data will
             show ``mailboxes_truncated=True`` in JSON mode and a warning in the
@@ -298,18 +353,41 @@ async def get_inbox_overview(
     if output_format not in {"text", "compact", "json"}:
         return "Error: Invalid output_format. Use: text, compact, json"
 
+    # Clamp before anything else so every downstream consumer — script builder,
+    # formatters, and the early-return error payloads — sees one effective
+    # value, and the response reports the cap instead of silently shrinking the
+    # caller's request.
+    requested_max_recent = max_recent
+    max_recent = _clamp_max_recent(max_recent)
+    clamp_note = (
+        _max_recent_clamp_note(requested_max_recent, max_recent) if max_recent != requested_max_recent else None
+    )
+
+    def finish(payload: str | dict[str, Any]) -> str | dict[str, Any]:
+        """Attach the ``max_recent`` clamp disclosure to a finished response."""
+        if clamp_note is None:
+            return payload
+        if isinstance(payload, dict):
+            payload["max_recent_requested"] = requested_max_recent
+            payload["max_recent_clamped"] = True
+            payload["max_recent_clamp_note"] = clamp_note
+            return payload
+        return f"{payload}\n\n\u26a0 RECENT PREVIEW TRUNCATED — {clamp_note}"
+
     if account:
         validation_timeout = 30 if timeout is None else min(timeout, 30)
         account_err = inbox.validate_account_name(account, timeout=validation_timeout)
         if account_err:
             if output_format == "json":
-                return _overview_json_error(
-                    "account_not_found",
-                    account=account,
-                    include_mailboxes=include_mailboxes,
-                    include_recent=include_recent,
-                    include_suggestions=include_suggestions,
-                    max_recent=max_recent,
+                return finish(
+                    _overview_json_error(
+                        "account_not_found",
+                        account=account,
+                        include_mailboxes=include_mailboxes,
+                        include_recent=include_recent,
+                        include_suggestions=include_suggestions,
+                        max_recent=max_recent,
+                    )
                 )
             return account_err
         accounts_to_query = [account]
@@ -318,30 +396,34 @@ async def get_inbox_overview(
             accounts_to_query = await asyncio.to_thread(inbox._list_mail_accounts, timeout)
         except AppleScriptTimeout:
             if output_format == "json":
-                return _overview_json_error(
-                    "account_listing_timeout",
-                    account=account,
-                    include_mailboxes=include_mailboxes,
-                    include_recent=include_recent,
-                    include_suggestions=include_suggestions,
-                    max_recent=max_recent,
-                    message="Error: Mail account listing timed out",
-                    errors=["__account_listing__"],
+                return finish(
+                    _overview_json_error(
+                        "account_listing_timeout",
+                        account=account,
+                        include_mailboxes=include_mailboxes,
+                        include_recent=include_recent,
+                        include_suggestions=include_suggestions,
+                        max_recent=max_recent,
+                        message="Error: Mail account listing timed out",
+                        errors=["__account_listing__"],
+                    )
                 )
             return "Error: Mail account listing timed out"
 
     if not accounts_to_query:
         if output_format == "json":
-            return _format_overview_json(
-                [],
-                [],
-                account=account,
-                include_mailboxes=include_mailboxes,
-                include_recent=include_recent,
-                include_suggestions=include_suggestions,
-                max_recent=max_recent,
+            return finish(
+                _format_overview_json(
+                    [],
+                    [],
+                    account=account,
+                    include_mailboxes=include_mailboxes,
+                    include_recent=include_recent,
+                    include_suggestions=include_suggestions,
+                    max_recent=max_recent,
+                )
             )
-        return _format_overview([], [], compact=output_format == "compact")
+        return finish(_format_overview([], [], compact=output_format == "compact"))
 
     async def run_one(acct: str) -> tuple[str, str | AppleScriptTimeout]:
         try:
@@ -389,23 +471,27 @@ async def get_inbox_overview(
     draft_scan = build_draft_scan_status(snapshots)
 
     if output_format == "json":
-        return _format_overview_json(
+        return finish(
+            _format_overview_json(
+                parsed,
+                errors,
+                account=account,
+                include_mailboxes=include_mailboxes,
+                include_recent=include_recent,
+                include_suggestions=include_suggestions,
+                max_recent=max_recent,
+                draft_scan=draft_scan,
+            )
+        )
+
+    return finish(
+        _format_overview(
             parsed,
             errors,
-            account=account,
             include_mailboxes=include_mailboxes,
             include_recent=include_recent,
             include_suggestions=include_suggestions,
             max_recent=max_recent,
-            draft_scan=draft_scan,
+            compact=output_format == "compact",
         )
-
-    return _format_overview(
-        parsed,
-        errors,
-        include_mailboxes=include_mailboxes,
-        include_recent=include_recent,
-        include_suggestions=include_suggestions,
-        max_recent=max_recent,
-        compact=output_format == "compact",
     )

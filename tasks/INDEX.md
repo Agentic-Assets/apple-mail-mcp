@@ -17,7 +17,6 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 
 | Folder | Purpose | Status |
 |--------|---------|--------|
-| [`active/post-3.11.7-defect-audit/`](active/post-3.11.7-defect-audit/) | Ranked defects found by the post-merge audit and live read-only run that preceded the v3.11.7 tag: `search_emails` reporting `has_more: false` at the scan wall, `export_emails(scope="correspondent")` omitting messages under a success banner, dropped mailboxes in `get_mailbox_unread_counts`, and a partially vacuous `whose` lint | Findings only, nothing fixed. Deliberately excluded from v3.11.7: each is an AppleScript behavior change needing its own live verification. See [`findings-2026-08-19.md`](active/post-3.11.7-defect-audit/findings-2026-08-19.md) for the suggested order |
 | [`active/linear-backlog-2026-07-31/`](active/linear-backlog-2026-07-31/) | Bounded Linear backlog fixes: export, mailbox resolution, calendar participant discovery, and compose/draft safety | Shipped in PR #83, merged to `origin/main` at `ed9e1ee`; retained here pending archival housekeeping |
 | [`active/native-reply/`](active/native-reply/) | Native-format reply drafts, including attachment preservation and fail-closed verification | Attachment fix verified offline; disposable-fixture live matrix pending |
 | [`active/id-first-search-retirement/`](active/id-first-search-retirement/) | v4 fuzzy-selector retirement, metadata-index spike, `allow_filter_scan` decision | Decision brief awaiting sign-off; follow-up branches not started |
@@ -25,6 +24,7 @@ Navigation hub for cross-session planning. **Start at [`todo.md`](todo.md)** for
 | [`active/v3.11.6-cursor-adapter/`](active/v3.11.6-cursor-adapter/) | Explicit Cursor plugin-root launcher and host-specific validator | Shipped on `main` in v3.11.6; local 41-tool Cursor Agent acceptance passed; Marketplace/UI distribution evidence remains open |
 | [`active/central-marketplace-source-contract/`](active/central-marketplace-source-contract/) | Source payload, identity, signed-tag, and local-gate contract for the shared multi-plugin marketplace | PR #80 merged; shared Marketplace admission and client-registration remediation remain separately authorized external gates |
 | [`active/fast-search-index/`](active/fast-search-index/) | Index-backed fast path for metadata search: `Envelope Index` capability envelope, safe-read pattern, phased tool plan (AGENTIC-2345) | Research complete and measured; implementation not started. Phase 0 (AGENTIC-2344) shipped fixed in v3.11.7; its AGENTIC-2356 date-window follow-up is live-verified on a large Exchange mailbox |
+| [`active/post-3.11.7-defect-audit/`](active/post-3.11.7-defect-audit/) | Eight ranked post-3.11.7 defects and lower-priority audit items | Implemented on `fix/post-3.11.7-defect-audit`; unmerged and untagged, pending review, Cayman’s merge approval, and the v3.11.8 release tag |
 
 ## Reference
 

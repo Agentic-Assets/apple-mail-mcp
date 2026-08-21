@@ -62,7 +62,11 @@ from apple_mail_mcp.cli.draft_smoke import (
     _verify_smoke_candidates,
 )
 from apple_mail_mcp.cli.formatting import (
+    GENERIC_TOOL_ERROR_CODE,
+    TOOL_ERROR_EXIT_CODE,
     _await_if_coro,
+    _emit_tool_result,
+    _error_code_from_text,
     _is_expected_account_not_found,
     _parse_csv_arg,
     _parse_tool_result,
@@ -71,6 +75,7 @@ from apple_mail_mcp.cli.formatting import (
     _redact,
     _result_is_error,
     _run_tool,
+    _structured_error_envelope,
     _version,
 )
 from apple_mail_mcp.cli.parser import _add_account_flag, _add_json_flag, _build_parser
@@ -124,10 +129,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 __all__ = [
     "COMMANDS",
     "DEFAULT_PERF_PROFILE",
+    "GENERIC_TOOL_ERROR_CODE",
     "INVALID_ACCOUNT",
     "NO_HIT_SUBJECT",
     "PERF_PROFILES",
     "PERF_THRESHOLDS_MS",
+    "TOOL_ERROR_EXIT_CODE",
     "PerfCase",
     "_add_account_flag",
     "_add_json_flag",
@@ -162,6 +169,8 @@ __all__ = [
     "_create_smoke_draft",
     "_draft_cleanup_confirmed",
     "_draft_verification_passed",
+    "_emit_tool_result",
+    "_error_code_from_text",
     "_evaluate_perf_case",
     "_extract_draft_ids",
     "_is_expected_account_not_found",
@@ -177,6 +186,7 @@ __all__ = [
     "_resolve_test_account",
     "_result_is_error",
     "_run_tool",
+    "_structured_error_envelope",
     "_timed_call",
     "_verify_smoke_candidates",
     "_version",

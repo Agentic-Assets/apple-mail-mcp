@@ -337,7 +337,10 @@ class ExportEmailsRoadmapTests(unittest.TestCase):
         self.assertIn("Exported: 2", result)
         script = capture.last_script
         self.assertIn("messageHasCorrespondent", script)
-        self.assertIn("sender of aMessage contains emailNeedle", script)
+        # Sender and recipient reads are bound to a variable first, then compared:
+        # a bare `<property> contains …` cannot be guarded against `missing value`.
+        self.assertIn("set senderText to sender of aMessage", script)
+        self.assertIn("senderText contains emailNeedle", script)
         self.assertIn("recipients of aMessage", script)
         self.assertIn("to recipients of aMessage", script)
         self.assertIn("cc recipients of aMessage", script)

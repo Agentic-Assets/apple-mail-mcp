@@ -95,12 +95,20 @@ def _pos(script: str, needle: str) -> int:
     return index
 
 
-def _emitted_only_on_failure(script: str, needle: str) -> bool:
-    """True when every line emitting *needle* sits inside ``if exportFailureCount > 0``.
+# ``correspondent`` carries a second, independent failure counter: messages whose
+# sender/recipient reads threw or came back ``missing value``, so the match could
+# not be decided. It is deliberately not folded into ``exportFailureCount`` (which
+# means "matched, attempted, wrote nothing" and drives the halt/resume
+# bookkeeping), so its report line has its own guard.
+_FAILURE_GUARDS = ("if exportFailureCount > 0 then", "if unreadableRecipientMessages > 0 then")
 
-    Walks back from each emitting line to the nearest ``if exportFailureCount > 0
-    then`` and fails if an ``end if`` closes the guard first. This is what keeps a
-    clean export from growing a spurious failure report.
+
+def _emitted_only_on_failure(script: str, needle: str, guards: tuple[str, ...] = _FAILURE_GUARDS) -> bool:
+    """True when every line emitting *needle* sits inside one of *guards*.
+
+    Walks back from each emitting line to the nearest guard and fails if an
+    ``end if`` closes it first. This is what keeps a clean export from growing a
+    spurious failure report.
     """
     lines = script.splitlines()
     found = False
@@ -113,7 +121,7 @@ def _emitted_only_on_failure(script: str, needle: str) -> bool:
             stripped = previous.strip()
             if stripped == "end if":
                 break
-            if stripped.startswith("if exportFailureCount > 0 then"):
+            if stripped.startswith(guards):
                 guarded = True
                 break
         if not guarded:
@@ -250,7 +258,7 @@ def test_correspondent_halts_only_for_a_message_that_consumed_an_offset_slot(tmp
     reset_pos = _pos(script, "set exportAttempted to false")
     gate_pos = _pos(script, "if globalMatchedCount > 7 then")
     raised_pos = _pos(script, "set exportAttempted to true")
-    match_read_pos = _pos(script, "set shouldExport to my messageHasCorrespondent")
+    match_read_pos = _pos(script, "set correspondentMatch to my messageHasCorrespondent")
     assert reset_pos < match_read_pos < gate_pos < raised_pos
     assert _pos(script, "repeat with aMessage in mailboxMessages") < reset_pos
 

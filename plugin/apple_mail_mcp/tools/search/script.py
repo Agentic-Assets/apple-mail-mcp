@@ -4,6 +4,7 @@ Pure string building only (escape / mailbox refs / scan-bound math); no
 ``run_applescript`` call lives here, so no package-namespace routing is needed.
 """
 
+from apple_mail_mcp.applescript_snippets import iso_datetime_handlers, sanitize_field_handler
 from apple_mail_mcp.bounded_scan import compute_scan_upper_bound
 from apple_mail_mcp.constants import SCAN_BOUNDS
 from apple_mail_mcp.core import build_mailbox_ref, escape_applescript
@@ -33,6 +34,31 @@ _SCAN_FAILURE_REPORT = """
                                 set end of recordLines to "ERROR_MAILBOX|||" & mailboxName & "|||per-message scan failed for " & (scanReadFailures as string) & " of " & (count of candidateMessages) & " scanned message(s); results are incomplete"
                             end if
 """
+
+# The scan trio above covers the *filter* loop: a message that could not be
+# read is never considered. This second trio covers the *emit* loop, where a
+# message has already matched the filter and only its record line failed to
+# build. A bare `try` there drops the row while `collectLimit` — decremented
+# after the append — stays put, so the page comes back full-shaped and short by
+# one, with nothing to distinguish it from a genuinely smaller result. Same
+# in-band marker and same wording as `records._read_failure_row`, which is the
+# sanctioned shape for "matched but not emitted" (pattern P1).
+_EMIT_FAILURE_INIT = "set emitReadFailures to 0"
+
+_EMIT_FAILURE_ARM = """on error
+                                                    set emitReadFailures to emitReadFailures + 1"""
+
+_EMIT_FAILURE_REPORT = """
+                                            if emitReadFailures > 0 then
+                                                set end of recordLines to "ERROR_MAILBOX|||" & mailboxName & "|||read failed for " & (emitReadFailures as string) & " of " & (count of targetMessages) & " matched message(s); results are incomplete"
+                                            end if
+"""
+
+# Emitted once per mailbox whose candidate slice filled the hard ceiling, so a
+# caller can tell "the filter found nothing more" from "the scan stopped
+# looking". Parsed by `records._parse_search_records` into a `scan_ceiling`
+# entry, not a mailbox error: a saturated scan is a bound, not a failure.
+_SCAN_CEILING_MARKER = "SCAN_CEILING|||"
 
 
 def _build_search_script(
@@ -146,6 +172,17 @@ def _build_search_script(
     # still produce values above this floor when offset/limit are large.
     scan_cap = min(scan_cap, SCAN_BOUNDS["SEARCH_HARD_CEILING"])
 
+    # Whether any cap above cut the scan below what this page actually needs.
+    # `base_cap` is limit + 1 + offset, i.e. exactly the number of messages that
+    # would have to be inspected for `has_more` to be an honest statement about
+    # the mailbox. When the scan lands under it, `has_more: false` can only ever
+    # mean "no more inside the window we scanned" — and with the default
+    # limit=100 against a 50-message ceiling, that is every call. The flag alone
+    # would therefore fire constantly, including on a 12-message folder the scan
+    # read in full, so it only arms the marker; the marker itself fires from
+    # AppleScript when the slice actually saturates.
+    scan_ceiling_applied = scan_cap < base_cap
+
     # Track whether the mailbox-count cap is active (mailbox="All" path).
     # The AppleScript guard caps at MAX_MAILBOXES_PER_SEARCH; we surface this
     # to callers via a warnings field so they know results may be incomplete on
@@ -163,6 +200,16 @@ def _build_search_script(
     # leaving an empty candidate set that renders as an authoritative `FOUND: 0`.
     # A count of 0 stays silent: a true empty result is not a failure.
     # Full rationale and contract: tests/search/test_search_bounded_candidate_binding.py
+    ceiling_marker = (
+        f"""
+                            if (count of candidateMessages) is greater than or equal to scanUpperBound then
+                                set end of recordLines to "{_SCAN_CEILING_MARKER}" & mailboxName & "|||" & (scanUpperBound as string)
+                            end if
+"""
+        if scan_ceiling_applied
+        else ""
+    )
+
     bounded_candidate_script = f"""
                             set matchingMessages to {{}}
                             set candidateMessages to {{}}
@@ -182,6 +229,7 @@ def _build_search_script(
                                     set end of recordLines to "ERROR_MAILBOX|||" & mailboxName & "|||bounded candidate slice unavailable (" & candidateBindError & "); 0 of " & (scanUpperBound as string) & " requested message(s) scanned, so this mailbox contributed no results"
                                 end try
                             end try
+                            {ceiling_marker}
     """
 
     _max_mailboxes_per_search = (
@@ -308,9 +356,12 @@ def _build_search_script(
         #
         # `date received` is therefore read here too — but only when the caller
         # asked for a floor. `fromDate` is declared only for a truthy `date_from`
-        # (`_build_applescript_date` emits nothing otherwise) and `manage/` +
-        # `analytics/` callers pass `date_from=None`, so an unconditional read
-        # would reference an undeclared variable and throw on every message.
+        # (`_build_applescript_date` emits nothing otherwise), so an
+        # unconditional read would reference an undeclared variable and throw on
+        # every message. The guard is `date_from` truthiness, not caller
+        # identity: `manage/` and `analytics/` callers used to pass
+        # `date_from=None` always, but PR #91 gave `manage_trash` its own date
+        # window, so that premise is no longer true and must not be relied on.
         # `early_date_break` is non-empty under exactly the same condition (the
         # guard above guarantees `date_to` is falsy) and pays for the extra read
         # by ending the scan at the first message older than `fromDate`.
@@ -392,52 +443,9 @@ def _build_search_script(
     # keep the script meaningful on very tight timeouts.
     inner_timeout = max(30, (timeout if timeout is not None else 180) - 10)
 
-    script = f"""
-    on sanitize_field(value)
-        try
-            set valueText to value as string
-        on error
-            set valueText to ""
-        end try
+    script = f"""{sanitize_field_handler()}
 
-        set AppleScript's text item delimiters to {{return, linefeed, tab}}
-        set valueParts to text items of valueText
-        set AppleScript's text item delimiters to " "
-        set valueText to valueParts as string
-        set AppleScript's text item delimiters to "|||"
-        set valueParts to text items of valueText
-        set AppleScript's text item delimiters to " | "
-        set valueText to valueParts as string
-        set AppleScript's text item delimiters to ""
-        return valueText
-    end sanitize_field
-
-    on pad2(numberValue)
-        if numberValue < 10 then
-            return "0" & (numberValue as string)
-        end if
-        return numberValue as string
-    end pad2
-
-    on month_number(monthValue)
-        set monthValues to {{January, February, March, April, May, June, July, August, September, October, November, December}}
-        repeat with monthIndex from 1 to 12
-            if item monthIndex of monthValues is monthValue then
-                return monthIndex
-            end if
-        end repeat
-        return 0
-    end month_number
-
-    on iso_datetime(dateValue)
-        set yearValue to year of dateValue as integer
-        set monthValue to my month_number(month of dateValue)
-        set dayValue to day of dateValue as integer
-        set hourValue to hours of dateValue
-        set minuteValue to minutes of dateValue
-        set secondValue to seconds of dateValue
-        return (yearValue as string) & "-" & my pad2(monthValue) & "-" & my pad2(dayValue) & "T" & my pad2(hourValue) & ":" & my pad2(minuteValue) & ":" & my pad2(secondValue)
-    end iso_datetime
+    {iso_datetime_handlers()}
 
     tell application "Mail"
         with timeout of {inner_timeout} seconds
@@ -486,6 +494,7 @@ def _build_search_script(
 
                                         if endIndex >= startIndex then
                                             set targetMessages to items startIndex thru endIndex of matchingMessages
+                                            {_EMIT_FAILURE_INIT}
 
                                             repeat with aMessage in targetMessages
                                                 try
@@ -537,8 +546,10 @@ def _build_search_script(
                                                     set end of recordLines to recordLine
                                                     set collectLimit to collectLimit - 1
                                                     if collectLimit <= 0 then exit repeat
+                                                {_EMIT_FAILURE_ARM}
                                                 end try
                                             end repeat
+                                            {_EMIT_FAILURE_REPORT}
                                         end if
 
                                         set offsetRemaining to 0

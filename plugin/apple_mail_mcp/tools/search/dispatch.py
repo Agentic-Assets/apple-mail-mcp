@@ -214,7 +214,12 @@ async def _search_mail_records(
                 mailboxes,
             )
             mb_error_details = [
-                {"account": account, "mailbox": e["mailbox"], "type": "mailbox_error", "message": e["message"]}
+                {
+                    "account": account,
+                    "mailbox": e["mailbox"],
+                    "type": e.get("type", "mailbox_error"),
+                    "message": e["message"],
+                }
                 for e in mb_errors
             ]
             return records, [], mb_error_details, body_capped
@@ -281,7 +286,7 @@ async def _search_mail_records(
                     {
                         "account": acct,
                         "mailbox": e["mailbox"],
-                        "type": "mailbox_error",
+                        "type": e.get("type", "mailbox_error"),
                         "message": e["message"],
                     }
                 )

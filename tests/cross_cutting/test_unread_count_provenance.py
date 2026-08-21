@@ -25,10 +25,12 @@ from apple_mail_mcp.tools import analytics as analytics_tools
 from apple_mail_mcp.tools import inbox as inbox_tools
 from apple_mail_mcp.tools.inbox.unread_counts import PROVENANCE_KEY
 from apple_mail_mcp.tools.unread_provenance import (
+    READ_SOURCE_DERIVED,
     SUSPECT_OVER_TOTAL,
     SUSPECT_UNDER_SAMPLE,
     UNREAD_SOURCE_CACHED,
     UNREAD_SOURCE_MEASURED,
+    derived_read_text_label,
     measured_unread_disclosure,
     unread_count_disclosure,
 )
@@ -347,12 +349,18 @@ class GetStatisticsProvenanceTests(unittest.TestCase):
 
         script = captured["script"]
         self.assertIn('set outputText to outputText & "Unread: " & unreadMessages & unreadLabel', script)
+        # The read figure is arithmetic performed ON the cache, not the cache
+        # itself, so it carries its own marker instead of reusing `unreadLabel`
+        # — a reader seeing one label on both lines learns nothing about which
+        # number is which.
         self.assertIn(
-            'set outputText to outputText & "Read: " & (totalMessages - unreadMessages) & unreadLabel',
+            f'set outputText to outputText & "Read: " & (totalMessages - unreadMessages) & "{derived_read_text_label()}"',
             script,
         )
         self.assertIn("if unreadMessages > totalMessages then", script)
         self.assertEqual(payload["unread_count_source"], UNREAD_SOURCE_CACHED)
+        self.assertEqual(payload["read_count_source"], READ_SOURCE_DERIVED)
+        self.assertIs(payload["read_count_measured"], False)
 
     def test_inline_label_does_not_break_the_text_to_json_percent_reparse(self):
         """Regression guard: the label is appended after the percentage.
