@@ -127,6 +127,16 @@ class EventKitCalendarEngine:
             return None
         return _text(default.title())
 
+    def default_calendar_id(self) -> str | None:
+        """Return EventKit's stable default-calendar selector, when available."""
+        try:
+            default = self._event_store().defaultCalendarForNewEvents()
+        except Exception:
+            return None
+        if default is None:
+            return None
+        return _text(default.calendarIdentifier())
+
     def list_calendars(self, *, timeout: int | None = None) -> tuple[list[dict[str, Any]], list[str]]:
         del timeout  # in-process call; the osascript timeout does not apply
         store = self._event_store()
@@ -250,9 +260,10 @@ class EventKitCalendarEngine:
             if _text(cal.calendarIdentifier()) == calendar_id:
                 target = cal
                 break
-        calendars_arg = [target] if target is not None else None
+        if target is None:
+            return [], [f"calendar not found: {calendar_id}"]
         predicate = store.predicateForEventsWithStartDate_endDate_calendars_(
-            self._nsdate(window.start), self._nsdate(window.end), calendars_arg
+            self._nsdate(window.start), self._nsdate(window.end), [target]
         )
         events = list(store.eventsMatchingPredicate_(predicate) or [])
         errors: list[str] = []

@@ -85,3 +85,18 @@ class TestCalendarIdentifierSelection:
         assert payload["calendar"] == "Shared"
         assert payload["calendar_id"] == "CAL-TEAM"
         assert write.created[0]["calendar_id"] == "CAL-TEAM"
+
+    def test_eventkit_default_uses_opaque_id_when_display_names_collide(self, fake_engines, monkeypatch):
+        read = _duplicate_name_engine()
+        read.name = "eventkit"
+        read.default = "Shared"
+        read.default_id = "CAL-TEAM"
+        _read, write = fake_engines(read=read)
+        monkeypatch.setattr("apple_mail_mcp.server.DEFAULT_CALENDAR", None)
+
+        payload = _create_event(calendar=None)
+
+        assert payload["created"] is True
+        assert payload["calendar"] == "Shared"
+        assert payload["calendar_id"] == "CAL-TEAM"
+        assert write.created[0]["calendar_id"] == "CAL-TEAM"

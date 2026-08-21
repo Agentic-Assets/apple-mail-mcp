@@ -201,6 +201,26 @@ class TestEventKitEngine:
         engine, _store = _engine(monkeypatch, events=[])
         assert engine.default_calendar_name() == "Work"
 
+    def test_fetch_window_unknown_identifier_never_builds_unscoped_predicate(self, monkeypatch):
+        work = _CalStub("Work", "CAL-WORK")
+        home = _CalStub("Home", "CAL-HOME")
+        ts = datetime(2026, 7, 10, 9, tzinfo=UTC).timestamp()
+        engine, store = _engine(
+            monkeypatch,
+            events=[
+                _EventStub("EK-WORK", "Work event", ts, ts + 60, work),
+                _EventStub("EK-HOME", "Home event", ts, ts + 60, home),
+            ],
+            calendars=[work, home],
+        )
+        window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
+
+        records, errors = engine.fetch_window(window, "CAL-MISSING", scan_cap=300)
+
+        assert records == []
+        assert errors
+        assert store.predicates == []
+
     def test_fetch_window_maps_records(self, monkeypatch):
         cal = _CalStub("Work")
         start_ts = datetime(2026, 7, 10, 9, tzinfo=UTC).timestamp()
@@ -227,7 +247,7 @@ class TestEventKitEngine:
         events = [_EventStub(f"EK-{i}", "E", ts, ts + 60, cal) for i in range(5)]
         engine, _store = _engine(monkeypatch, events=events)
         window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
-        records, errors = engine.fetch_window(window, "Work", scan_cap=3)
+        records, errors = engine.fetch_window(window, "CAL-ID", scan_cap=3)
         assert len(records) == 3
         assert "scan cap" in errors[0]
 
@@ -237,7 +257,7 @@ class TestEventKitEngine:
         events = [_EventStub(f"EK-{i}", "E", ts, ts + 60, cal) for i in range(3)]
         engine, _store = _engine(monkeypatch, events=events)
         window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
-        records, _errors = engine.fetch_window(window, "Work", scan_cap=300, event_ids=["EK-1"])
+        records, _errors = engine.fetch_window(window, "CAL-ID", scan_cap=300, event_ids=["EK-1"])
         assert [r["event_id"] for r in records] == ["EK-1"]
 
     def test_detail_maps_organizer_for_participant_matching(self, monkeypatch):
@@ -256,12 +276,12 @@ class TestEventKitEngine:
         ts = datetime(2026, 7, 10, 9, tzinfo=UTC).timestamp()
         engine, _store = _engine(monkeypatch, events=[_OrganizedEvent("EK-1", "E", ts, ts + 60, cal)])
         window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
-        records, errors = engine.fetch_window(window, "Work", scan_cap=300, include_detail=True)
+        records, errors = engine.fetch_window(window, "CAL-ID", scan_cap=300, include_detail=True)
         assert errors == []
         assert records[0]["organizer"] == {"name": "Alex Example", "email": "alex@example.test"}
 
     def test_recurring_masters_pass_is_empty(self, monkeypatch):
         engine, _store = _engine(monkeypatch, events=[])
         window = bounded_calendar_window(start="2026-07-09", end="2026-07-17", timezone_name="UTC")
-        assert engine.fetch_recurring_masters(window, "Work") == ([], [])
+        assert engine.fetch_recurring_masters(window, "CAL-ID") == ([], [])
         assert engine.expands_occurrences is True

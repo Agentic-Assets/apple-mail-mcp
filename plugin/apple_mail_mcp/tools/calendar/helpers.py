@@ -208,7 +208,15 @@ def resolve_create_target(calendar_name: str | None, *, timeout: int | None = No
         return resolve_calendar_selector(calendar_name, known)
     if _server.DEFAULT_CALENDAR:
         return resolve_calendar_selector(_server.DEFAULT_CALENDAR, known)
-    engine_default = _calendar.get_engine().default_calendar_name()
+    engine = _calendar.get_engine()
+    # CalendarReadEngine provides the opaque ID.  The guarded fallback keeps
+    # third-party/test engines that predate that internal protocol extension
+    # compatible while they are upgraded.
+    default_id_getter = getattr(engine, "default_calendar_id", None)
+    engine_default = default_id_getter() if callable(default_id_getter) else None
+    if engine_default:
+        return resolve_calendar_selector(engine_default, known)
+    engine_default = engine.default_calendar_name()
     if engine_default:
         return resolve_calendar_selector(engine_default, known)
     raise ToolError(

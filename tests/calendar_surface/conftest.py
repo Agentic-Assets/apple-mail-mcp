@@ -63,6 +63,7 @@ class FakeReadEngine:
         events: list[dict] | None = None,
         masters: list[dict] | None = None,
         default: str | None = None,
+        default_id: str | None = None,
         list_errors: list[str] | None = None,
         row_errors: list[str] | None = None,
     ) -> None:
@@ -98,6 +99,7 @@ class FakeReadEngine:
         self.events = events or []
         self.masters = masters or []
         self.default = default
+        self.default_id = default_id
         self.list_errors = list_errors or []
         self.row_errors = row_errors or []
         self.fetch_calls: list[dict] = []
@@ -105,6 +107,9 @@ class FakeReadEngine:
 
     def default_calendar_name(self):
         return self.default
+
+    def default_calendar_id(self):
+        return self.default_id
 
     def list_calendars(self, *, timeout=None):
         return [dict(c) for c in self.calendars], list(self.list_errors)

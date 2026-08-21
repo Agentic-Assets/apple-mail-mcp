@@ -53,6 +53,8 @@ class CalendarReadEngine(Protocol):
 
     def default_calendar_name(self) -> str | None: ...
 
+    def default_calendar_id(self) -> str | None: ...
+
     def list_calendars(self, *, timeout: int | None = None) -> tuple[list[dict[str, Any]], list[str]]: ...
 
     def fetch_window(
@@ -145,6 +147,9 @@ class AppleScriptCalendarEngine:
     expands_occurrences = False
 
     def default_calendar_name(self) -> str | None:
+        return None
+
+    def default_calendar_id(self) -> str | None:
         return None
 
     # ------------------------------------------------------------------ reads
