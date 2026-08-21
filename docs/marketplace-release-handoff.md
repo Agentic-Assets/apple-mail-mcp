@@ -25,16 +25,18 @@ source identity.
 ## Short release sequence
 
 1. On a clean source `main` checkout, run `bash tools/gates/source-release-gate.sh`.
-2. Create and push the signed tag with `bash tools/gates/create-release-tag.sh --confirm-create`.
-3. Run the handoff command above. Do not copy a commit or source inventory hash
-   by hand, and let the Marketplace tool compute its candidate payload digest.
-4. In a clean `chore/*` branch of `Agentic-Assets-Marketplace`, run the command
+2. Create the signed tag with `bash tools/gates/create-release-tag.sh --confirm-create`.
+3. Push that tag with `git push origin vX.Y.Z`.
+4. Run `bash tools/gates/marketplace-handoff.sh vX.Y.Z`. Do not copy a commit
+   or source inventory hash by hand, and let the Marketplace tool compute its
+   candidate payload digest.
+5. In a clean `chore/*` branch of `Agentic-Assets-Marketplace`, run the command
    printed by the handoff, currently `prepare_plugin_update.py --plugin apple-mail --prepare --next-steps`.
-5. Complete only the Marketplace-owned stages: isolated evidence, admission,
+6. Complete only the Marketplace-owned stages: isolated evidence, admission,
    signed attestation, the Marketplace release gate, and a normal reviewed PR.
    Commit and push the candidate plus redacted proof files before admission so
    their immutable evidence URLs are reachable from `origin`.
-6. After that PR merges, run `bash tools/gates/refresh-central-marketplace.sh`
+7. After that PR merges, run `bash tools/gates/refresh-central-marketplace.sh`
    from this source checkout to update Claude Code and Codex on the release
    machine. Restart both clients.
 

@@ -16,6 +16,7 @@ without rediscovering the release process.
    ```bash
    bash tools/gates/source-release-gate.sh
    bash tools/gates/create-release-tag.sh --confirm-create
+   git push origin vX.Y.Z
    bash tools/gates/marketplace-handoff.sh vX.Y.Z
    ```
 

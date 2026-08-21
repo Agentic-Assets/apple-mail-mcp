@@ -175,6 +175,17 @@ def test_marketplace_handoff_rejects_identity_drift(release_repo: tuple[Path, Pa
         marketplace_handoff.handoff(root, tag)
 
 
+def test_marketplace_handoff_guidance_pushes_the_tag_before_remote_verification() -> None:
+    guide = (ROOT / "docs/marketplace-release-handoff.md").read_text(encoding="utf-8")
+    skill = (ROOT / ".agents/skills/marketplace-release-handoff/SKILL.md").read_text(encoding="utf-8")
+
+    tag_creation = "bash tools/gates/create-release-tag.sh --confirm-create"
+    tag_push = "git push origin vX.Y.Z"
+    handoff = "bash tools/gates/marketplace-handoff.sh vX.Y.Z"
+    assert guide.index(tag_creation) < guide.index(tag_push) < guide.rindex(handoff)
+    assert skill.index(tag_creation) < skill.index(tag_push) < skill.index(handoff)
+
+
 def test_source_tag_payload_binding_matches_promotion_contract(release_repo: tuple[Path, Path]) -> None:
     root, _ = release_repo
     policy = source_release.load_policy(root)
