@@ -40,6 +40,15 @@ central preflight, then omit `--check` to apply. The central helper verifies
 Claude Code and Codex registrations and runtime bootstrap. It is not proof of
 Cursor marketplace/UI admission.
 
+## Marketplace release handoff
+
+After a source release tag is pushed, run
+`bash tools/gates/marketplace-handoff.sh vX.Y.Z`. It verifies the remote signed
+tag and prints the bound commit, signed source inventory hash, target, selector, and exact
+Marketplace preparation command. It is read-only; admission, evidence, and
+attestation remain Marketplace-owned. See
+[`docs/marketplace-release-handoff.md`](../docs/marketplace-release-handoff.md).
+
 ## sync_skill_references
 
 | Script | Role |

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from marketplace_payload import build_inventory  # noqa: E402
-from release import pre_push, source_release  # noqa: E402
+from release import marketplace_handoff, pre_push, source_release  # noqa: E402
 
 
 def run(root: Path, *command: str) -> str:
@@ -65,6 +65,29 @@ def release_repo(tmp_path: Path) -> tuple[Path, Path]:
     (root / "distribution/marketplace-payload.json").write_text(
         json.dumps(payload_contract, indent=2) + "\n", encoding="utf-8"
     )
+    (root / "tools").mkdir()
+    marketplace_identity = {
+        "schema_version": 1,
+        "plugin": {
+            "id": "apple-mail",
+            "source_repository": str(remote),
+            "source_payload": "plugin",
+        },
+        "primary_marketplace": {
+            "repository": "https://github.com/example/marketplace",
+            "selector": "apple-mail@example",
+            "payload_destination": "plugins/apple-mail",
+        },
+        "promotion": {
+            "source_ref": "immutable-signed-tag",
+            "policy_owner": "marketplace",
+            "evidence_owner": "marketplace",
+            "attestation_owner": "marketplace",
+        },
+    }
+    (root / "tools/marketplace_identity.json").write_text(
+        json.dumps(marketplace_identity, indent=2) + "\n", encoding="utf-8"
+    )
     public_key = key.with_suffix(".pub").read_text(encoding="utf-8").split()[:2]
     (root / "provenance/source-release.allowed_signers").write_text(
         "release-test " + " ".join(public_key) + "\n", encoding="utf-8"
@@ -105,6 +128,51 @@ def test_signed_release_tag_verifies_all_bindings(release_repo: tuple[Path, Path
     assert tag == "v1.2.3"
     assert bindings.version == "1.2.3"
     assert bindings.commit == git(root, "rev-parse", "HEAD")
+
+
+def test_marketplace_handoff_uses_only_remote_verified_tag_bindings(
+    release_repo: tuple[Path, Path],
+) -> None:
+    root, _ = release_repo
+    tag = source_release.create_tag(root, "v1.2.3", confirm=True)
+    git(root, "push", "origin", tag)
+
+    record = marketplace_handoff.handoff(root, tag)
+
+    bindings = source_release.bindings_for(root, "HEAD", source_release.load_policy(root))
+    assert record["source"] == {
+        "tag": "v1.2.3",
+        "tag_object": git(root, "rev-parse", "refs/tags/v1.2.3^{tag}"),
+        "commit": git(root, "rev-parse", "HEAD"),
+        "version": "1.2.3",
+        "payload_inventory_sha256": bindings.payload_inventory_sha256,
+        "requirements_lock_sha256": bindings.requirements_lock_sha256,
+        "wheelhouse_sha256": bindings.wheelhouse_inventory_sha256,
+    }
+    assert record["marketplace"] == {
+        "plugin_id": "apple-mail",
+        "repository": "https://github.com/example/marketplace",
+        "selector": "apple-mail@example",
+        "payload_destination": "plugins/apple-mail",
+    }
+    assert "--plugin apple-mail --prepare --next-steps" in marketplace_handoff.render_handoff(record)
+    assert "commit and push the candidate plus redacted proof files" in marketplace_handoff.render_handoff(record)
+
+
+def test_marketplace_handoff_rejects_identity_drift(release_repo: tuple[Path, Path]) -> None:
+    root, _ = release_repo
+    identity_path = root / "tools/marketplace_identity.json"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    identity["promotion"]["source_ref"] = "branch"
+    identity_path.write_text(json.dumps(identity), encoding="utf-8")
+    git(root, "add", "tools/marketplace_identity.json")
+    git(root, "commit", "-m", "drift handoff identity")
+    git(root, "push", "origin", "main")
+    tag = source_release.create_tag(root, "v1.2.3", confirm=True)
+    git(root, "push", "origin", tag)
+
+    with pytest.raises(source_release.ReleaseError, match="immutable signed tags"):
+        marketplace_handoff.handoff(root, tag)
 
 
 def test_source_tag_payload_binding_matches_promotion_contract(release_repo: tuple[Path, Path]) -> None:

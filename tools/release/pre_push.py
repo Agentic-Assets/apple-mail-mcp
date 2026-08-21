@@ -34,6 +34,7 @@ IMMUTABLE_SENSITIVE_PREFIXES = (
     "tools/gates/create-release-tag.sh",
     "tools/gates/dev-check.sh",
     "tools/gates/install-git-hooks.sh",
+    "tools/gates/marketplace-handoff.sh",
     "tools/gates/refresh-central-marketplace.sh",
     "tools/gates/refresh-local-plugins.sh",
     "tools/gates/source-release-gate.sh",
