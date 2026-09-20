@@ -16,6 +16,10 @@ def _eventkit_status_stub(monkeypatch):
         "apple_mail_mcp.tools.calendar.eventkit_status",
         lambda: (False, "dependency_missing: pip install 'mcp-apple-mail[eventkit]'"),
     )
+    monkeypatch.setattr(
+        "apple_mail_mcp.tools.calendar.eventkit_next_step",
+        lambda reason: f"next step for {reason}",
+    )
 
 
 class TestListCalendars:
@@ -25,6 +29,7 @@ class TestListCalendars:
         assert [c["name"] for c in payload["calendars"]] == ["Work", "Home", "MCP Test Calendar"]
         assert payload["engine"] == "applescript"
         assert payload["eventkit_available"]["available"] is False
+        assert payload["eventkit_available"]["next_step"]
         assert payload["calendars"][2]["writable"] is False
 
     def test_default_calendar_env_wins(self, fake_engines, monkeypatch):

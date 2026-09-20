@@ -535,8 +535,8 @@ def recurring_lookback_disclosure(engine: CalendarReadEngine, expand_recurring: 
         "recurring_coverage_note": (
             f"Recurring series are matched from masters whose start date falls within the last "
             f"{days} days on the AppleScript engine; a standing series created earlier may be "
-            "missing from this window. Install the EventKit fast path "
-            "(pip install 'mcp-apple-mail[eventkit]') for native recurrence expansion."
+            "missing from this window. The EventKit fast path ships with the plugin and "
+            "expands natively once Calendars full access is granted ('apple-mail calendar-grant')."
         ),
     }
 

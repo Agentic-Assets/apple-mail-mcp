@@ -117,10 +117,16 @@ the same flags block only the send paths. Read the full matrix in
   names the exact pane.
 - **Slow reads**: Calendar.app AppleScript scans cost tracks total store size
   (community benchmarks: roughly 61 to 112 seconds on modest calendars). The EventKit
-  fast path is roughly 3000x faster and activates automatically when
-  `pip install 'mcp-apple-mail[eventkit]'` is installed and Calendars full access is
-  already granted; check `eventkit_available` in `list_calendars`. A human can grant it
-  once by running `apple-mail calendar-grant` from Terminal. Never attempt to trigger
+  fast path is roughly 3000x faster and activates automatically when Calendars
+  full access is already granted (the dependency ships with the plugin); check
+  `eventkit_available` (`reason` + `next_step`) in `list_calendars`, or run
+  `apple-mail calendar-doctor` for both gates at once. A human grants access
+  once by running `apple-mail calendar-grant` from Terminal
+  (plugin installs: `PYTHONPATH=<plugin dir> venv/bin/python3 -m apple_mail_mcp.cli calendar-grant`).
+  `not_determined` means it was never requested; `write_only` means the host has
+  write-only access and the grant must be re-run for Full Access; `denied` /
+  `restricted` need System Settings > Privacy & Security > Calendars (or
+  `tccutil reset Calendar`). Never attempt to trigger
   that consent prompt from a tool call.
 - **Calendar.app may launch** when AppleScript runs; this is normal.
 - Call one calendar tool at a time; calls serialize behind the same lock as the mail

@@ -380,6 +380,50 @@ def _cmd_calendar_grant(args: argparse.Namespace) -> int:
     return 3
 
 
+def _cmd_calendar_doctor(args: argparse.Namespace) -> int:
+    """Report both EventKit fast-path gates without ever prompting.
+
+    Reads the dependency state and the synchronous TCC authorization label,
+    names the active read engine, and prints the operator's next step. This
+    command never calls any ``request*`` EventKit API; consent stays
+    exclusively in the human-run ``calendar-grant`` command. Exit code is
+    always 0 (the payload carries the verdict, so scripts branch on JSON).
+    """
+    import os
+
+    from apple_mail_mcp.calendar_core.engine import _ENGINE_ENV
+    from apple_mail_mcp.calendar_core.eventkit import eventkit_status, load_frameworks
+    from apple_mail_mcp.calendar_core.guidance import eventkit_next_step
+    from apple_mail_mcp.constants import CALENDAR_BOUNDS
+
+    available, reason = eventkit_status()
+    override = os.environ.get(_ENGINE_ENV, "auto")
+    active_engine = "eventkit" if available and override.strip().lower() != "applescript" else "applescript"
+    payload: dict[str, Any] = {
+        "dependency_present": load_frameworks() is not None,
+        "eventkit_available": available,
+        "reason": reason,
+        "next_step": eventkit_next_step(reason),
+        "engine_override": override,
+        "active_engine": active_engine,
+        "applescript_recurring_lookback_days": int(CALENDAR_BOUNDS["RECURRING_LOOKBACK_DAYS"]),
+    }
+    if args.json:
+        _print_result(payload, json_mode=True)
+    else:
+        state = "active" if available else f"inactive ({reason})"
+        print(f"EventKit fast path: {state}")
+        print(f"Active read engine: {payload['active_engine']}")
+        if not available:
+            print(f"Next step: {payload['next_step']}")
+        print(
+            "AppleScript engine note: recurring series whose master started more than "
+            f"{payload['applescript_recurring_lookback_days']} days ago may be absent "
+            "from a read window."
+        )
+    return 0
+
+
 def _cmd_mcp_config(args: argparse.Namespace) -> int:
     start_script = Path(args.repo).expanduser() / "plugin" / "start_mcp.sh"
     tool_args = [str(start_script)]

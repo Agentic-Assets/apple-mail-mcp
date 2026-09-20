@@ -460,20 +460,21 @@ def get_engine() -> CalendarReadEngine:
     if mode == "applescript":
         return AppleScriptCalendarEngine()
     available, reason = _eventkit.eventkit_status()
-    if mode == "eventkit":
-        if not available:
-            raise ToolError(
-                code="CALENDAR_ACCESS_DENIED",
-                message=f"APPLE_MAIL_CALENDAR_ENGINE=eventkit but the EventKit fast path is unavailable: {reason}",
-                remediation={
-                    "pane": "System Settings > Privacy & Security > Calendars",
-                    "grant": "Run 'apple-mail calendar-grant' from a terminal to request full access once.",
-                    "fallback": "Unset APPLE_MAIL_CALENDAR_ENGINE to use the AppleScript engine.",
-                },
-            )
-        return _eventkit.EventKitCalendarEngine.create()
     if available:
         return _eventkit.EventKitCalendarEngine.create()
+    if mode == "eventkit":
+        from apple_mail_mcp.calendar_core.guidance import eventkit_next_step
+
+        raise ToolError(
+            code="CALENDAR_ACCESS_DENIED",
+            message=f"APPLE_MAIL_CALENDAR_ENGINE=eventkit but the EventKit fast path is unavailable: {reason}",
+            remediation={
+                "pane": "System Settings > Privacy & Security > Calendars",
+                "grant": "Run 'apple-mail calendar-grant' from a terminal to request full access once.",
+                "next_step": eventkit_next_step(reason),
+                "fallback": "Unset APPLE_MAIL_CALENDAR_ENGINE to use the AppleScript engine.",
+            },
+        )
     return AppleScriptCalendarEngine()
 
 

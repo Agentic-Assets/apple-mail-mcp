@@ -51,7 +51,7 @@ calendar surface is gated harder, under the same two flags:
 | `INVITE_SEND_BLOCKED` / `CALENDAR_DELETE_BLOCKED` / `CALENDAR_WRITE_BLOCKED` | Mode-blocked; do not work around it, report to the user |
 | `TOO_MANY_DELETES` / `BATCH_TOO_LARGE` | Split into smaller batches deliberately |
 | `CALENDAR_CONFIRMATION_REQUIRED` | Run the delete dry-run, review, then pass the confirm flags |
-| `CALENDAR_ACCESS_DENIED` | Follow the pane named in remediation (Automation for AppleScript, Calendars for EventKit) |
+| `CALENDAR_ACCESS_DENIED` | Follow the pane named in remediation (Automation for AppleScript, Calendars for EventKit); for EventKit also follow `next_step`, or run `apple-mail calendar-doctor` |
 | `CALENDAR_WRITE_FAILED` | Calendar.app rejected the write with an error; retry once, then make the change in Calendar.app if it persists |
 
 ## Platform limitations (verified against primary sources)
@@ -84,9 +84,17 @@ calendar surface is gated harder, under the same two flags:
   applied", never as an applied change.
 - **Performance:** community benchmarks put Calendar.app AppleScript `whose` scans at
   roughly 61 to 112 seconds on modest calendars, versus a near-instant EventKit path
-  (roughly 3000x faster per ical.sidv.dev). The EventKit fast path activates
-  automatically when installed (`pip install 'mcp-apple-mail[eventkit]'`) and already
-  granted; check `eventkit_available` in `list_calendars`.
+  (roughly 3000x faster per ical.sidv.dev). The EventKit fast path ships with the
+  plugin and activates automatically once Calendars full access is already granted;
+  check `eventkit_available` (`reason` + `next_step`) in `list_calendars`, or run
+  `apple-mail calendar-doctor`. `not_determined` means access was never requested,
+  `write_only` means the host holds write-only access (re-run the grant for Full
+  Access), and `denied` / `restricted` need System Settings > Privacy & Security >
+  Calendars. Force the engine with `APPLE_MAIL_CALENDAR_ENGINE=eventkit` (raises
+  `CALENDAR_ACCESS_DENIED` with the reason-specific next step when unavailable);
+  the default `auto` falls back silently to AppleScript. Inside Claude Desktop and
+  Codex Desktop the host app declares no Calendars usage string, so EventKit is
+  denied with no prompt there and AppleScript is the guaranteed baseline.
 - **First-use hang:** a pending Automation consent prompt presents as a silent hang,
   not an error. If the first calendar call times out, answer the prompt under System
   Settings > Privacy & Security > Automation and retry. Never try to trigger the

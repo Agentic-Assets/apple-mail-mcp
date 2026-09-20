@@ -5,6 +5,27 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.12.3 - 2026-09-20
+
+- **EventKit calendar fast path now ships in the plugin install (AGENTIC-2982).**
+  The offline payload (`requirements.lock` + `wheelhouse/`) bundles
+  `pyobjc-framework-EventKit`, so a fresh install no longer reports
+  `dependency_missing` — the self-healing venv rebuilds from the lockfile and
+  could never install the old opt-in extra. The TCC gate is unchanged: the
+  fast path still activates only when Calendars full access is already granted,
+  and `apple-mail calendar-grant` remains the only prompt-capable path.
+- **Every EventKit status now tells the operator what to do.**
+  `list_calendars` gains `eventkit_available.next_step` (per-reason guidance
+  for `not_determined`, `write_only`, `denied`, `restricted`, and failures),
+  the forced-engine `CALENDAR_ACCESS_DENIED` remediation carries the same
+  `next_step`, and the recurring-coverage note points at the bundled payload
+  instead of an uninstallable `pip install` extra.
+- **New `apple-mail calendar-doctor` command.** Reports both fast-path gates
+  (dependency present, authorization label + next step), the active read
+  engine, and the AppleScript 400-day recurring horizon in one non-interactive
+  call that never prompts. No change to AppleScript engine behavior or to the
+  400-day horizon disclosure.
+
 ## 3.12.2 - 2026-09-07
 
 - **`get_email_thread` no longer reports a truncated conversation as complete.**

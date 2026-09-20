@@ -20,6 +20,7 @@ from apple_mail_mcp.calendar_core.eventkit import (
     eventkit_status,
     load_frameworks,
 )
+from apple_mail_mcp.calendar_core.guidance import eventkit_next_step
 from apple_mail_mcp.calendar_core.records import (
     event_payload,
     parse_calendar_rows,
@@ -90,6 +91,7 @@ __all__ = [
     "delete_calendar_script",
     "delete_events_script",
     "event_payload",
+    "eventkit_next_step",
     "eventkit_status",
     "expand_occurrences",
     "expansion_supported",

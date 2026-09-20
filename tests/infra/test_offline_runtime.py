@@ -15,6 +15,21 @@ def test_offline_runtime_payload_is_present_and_hash_locked() -> None:
     assert wheels
 
 
+def test_offline_payload_bundles_eventkit_fast_path() -> None:
+    """AGENTIC-2982: the EventKit dependency must ship in the offline payload.
+
+    The plugin venv rebuilds from requirements.lock + wheelhouse/ with
+    --no-index, so anything absent here can never activate on install.
+    """
+    lock = (PLUGIN / "requirements.lock").read_text(encoding="utf-8")
+    wheel_names = [wheel.name.lower() for wheel in (PLUGIN / "wheelhouse").glob("*.whl")]
+
+    assert "pyobjc-framework-eventkit" in lock.replace("_", "-").lower()
+    assert any("pyobjc_core" in name for name in wheel_names)
+    assert any("pyobjc_framework_cocoa" in name for name in wheel_names)
+    assert any("pyobjc_framework_eventkit" in name for name in wheel_names)
+
+
 def test_launcher_has_no_network_install_path() -> None:
     launcher = (PLUGIN / "start_mcp.sh").read_text(encoding="utf-8")
 

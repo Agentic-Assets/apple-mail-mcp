@@ -2,3 +2,8 @@
 # Regenerate requirements.lock and wheelhouse with tools/gates/build-wheelhouse.sh.
 fastmcp==3.4.1
 mcp-ui-server==1.0.0
+# EventKit calendar read fast path, bundled by default. The offline plugin venv
+# rebuilds from requirements.lock + wheelhouse/ and cannot install extras, so the
+# concrete pin (not the `eventkit` extra) must be listed here; the darwin marker
+# keeps non-macOS resolves working (PyObjC ships macOS wheels only).
+pyobjc-framework-EventKit>=10,<13; sys_platform == "darwin"

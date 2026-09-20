@@ -18,6 +18,7 @@ from apple_mail_mcp import server as _server
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.calendar_core import (
     bounded_calendar_window,
+    eventkit_next_step,
     eventkit_status,
     get_engine,
     get_write_engine,
@@ -75,6 +76,7 @@ __all__ = [
     "create_event",
     "delete_events",
     "error_json",
+    "eventkit_next_step",
     "eventkit_status",
     "find_conflicts",
     "finish",

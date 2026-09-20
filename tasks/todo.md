@@ -2,7 +2,7 @@
 
 **Tasks layout:** Agents MUST follow [`tasks/CLAUDE.md`](CLAUDE.md) § Agent requirements (`active/` · `reference/` · `archive/` only; local gates enforce).
 
-**Current branch:** `fix/thread-member-completeness` from `origin/main` at `73a7532`; AGENTIC-2794 (thread member completeness) implementation, live acceptance, and the release gate are complete; PR #105 is open with founder merge approval and is being merged now, carrying a version bump to 3.12.2.
+**Current branch:** `cayman/agentic-2982-apple-mail-mcp-eventkit-extra-is-not-shipped-so-the-calendar` from `origin/main` at `64ea2b8`; AGENTIC-2982 (EventKit extra not shipped) implemented, live-verified, and release-gate green, carrying a version bump to 3.12.3. Awaiting PR + founder merge approval (merge needs Cayman's explicit approval; tag `v3.12.3` + GitHub Release + marketplace handoff follow the merge).
 
 **Main state:** `main` was at `73a7532` (tag `v3.12.1`) when this branch opened. PR #105 merges on top of it and the merge commit is then tagged `v3.12.2` and published as a GitHub Release. Installed-plugin promotion is a separate marketplace step and has not happened.
 
