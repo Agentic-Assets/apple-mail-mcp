@@ -30,6 +30,14 @@ def test_offline_payload_bundles_eventkit_fast_path() -> None:
     assert any("pyobjc_framework_eventkit" in name for name in wheel_names)
 
 
+def test_offline_eventkit_entry_is_darwin_scoped() -> None:
+    """AGENTIC-2982: the EventKit lock entry must carry the darwin marker."""
+    lock_lines = (PLUGIN / "requirements.lock").read_text(encoding="utf-8").splitlines()
+    eventkit_lines = [line for line in lock_lines if "pyobjc-framework-eventkit" in line.replace("_", "-").lower()]
+    assert eventkit_lines
+    assert any('sys_platform == "darwin"' in line for line in eventkit_lines)
+
+
 def test_launcher_has_no_network_install_path() -> None:
     launcher = (PLUGIN / "start_mcp.sh").read_text(encoding="utf-8")
 

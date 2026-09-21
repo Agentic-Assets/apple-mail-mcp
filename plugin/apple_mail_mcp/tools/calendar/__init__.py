@@ -18,12 +18,18 @@ from apple_mail_mcp import server as _server
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.calendar_core import (
     bounded_calendar_window,
+    eventkit_denied_remediation,
     eventkit_next_step,
     eventkit_status,
     get_engine,
     get_write_engine,
 )
 from apple_mail_mcp.calendar_core.engine import run_applescript
+from apple_mail_mcp.calendar_core.guidance import (
+    CALENDARS_PANE,
+    GRANT_COMMAND,
+    PLUGIN_GRANT_COMMAND,
+)
 from apple_mail_mcp.core import AppleScriptTimeout, inject_preferences
 from apple_mail_mcp.server import mcp
 from apple_mail_mcp.tools.calendar.availability import check_availability
@@ -63,7 +69,10 @@ from apple_mail_mcp.tools.calendar.rsvp import respond_to_invitation
 __all__ = [
     "AUTOMATION_PANE_NOTE",
     "AppleScriptTimeout",
+    "CALENDARS_PANE",
     "CallBudget",
+    "GRANT_COMMAND",
+    "PLUGIN_GRANT_COMMAND",
     "ToolError",
     "_server",
     "attendee_gate",
@@ -76,6 +85,7 @@ __all__ = [
     "create_event",
     "delete_events",
     "error_json",
+    "eventkit_denied_remediation",
     "eventkit_next_step",
     "eventkit_status",
     "find_conflicts",

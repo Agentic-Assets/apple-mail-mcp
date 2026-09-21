@@ -9,35 +9,41 @@ this module only describes what to run, never requesting access itself.
 
 from __future__ import annotations
 
-_GRANT_COMMAND = "apple-mail calendar-grant"
-_PLUGIN_GRANT_COMMAND = "PYTHONPATH=<plugin dir> venv/bin/python3 -m apple_mail_mcp.cli calendar-grant"
-_CALENDARS_PANE = "System Settings > Privacy & Security > Calendars"
+GRANT_COMMAND = "apple-mail calendar-grant"
+PLUGIN_GRANT_COMMAND = "PYTHONPATH=<plugin dir> venv/bin/python3 -m apple_mail_mcp.cli calendar-grant"
+CALENDARS_PANE = "System Settings > Privacy & Security > Calendars"
+
+_STATUS_CHECK_FAILED_STEP = (
+    "The EventKit authorization check itself failed. Confirm the plugin "
+    f"venv is healthy, then re-run '{GRANT_COMMAND}' from a terminal; "
+    "report the failure text if it persists."
+)
 
 _NEXT_STEPS: dict[str, str] = {
     "full_access": "The EventKit read fast path is active; no action needed.",
     "dependency_missing": (
         "The plugin install is missing the bundled EventKit dependency. "
         "Reinstall the current release; if it persists, run "
-        f"'{_GRANT_COMMAND}' once from a terminal to confirm."
+        f"'{GRANT_COMMAND}' once from a terminal to confirm."
     ),
     "not_determined": (
         "Calendars access has never been requested for this host. Run "
-        f"'{_GRANT_COMMAND}' once from a terminal and grant Full Access when "
-        f"macOS prompts. (Plugin installs: {_PLUGIN_GRANT_COMMAND}.)"
+        f"'{GRANT_COMMAND}' once from a terminal and grant Full Access when "
+        f"macOS prompts. (Plugin installs: {PLUGIN_GRANT_COMMAND}.)"
     ),
     "write_only": (
         "This host has write-only Calendars access, which cannot back the read "
-        f"fast path. Re-run '{_GRANT_COMMAND}' from a terminal and choose Full "
+        f"fast path. Re-run '{GRANT_COMMAND}' from a terminal and choose Full "
         "Access in the macOS prompt; if no prompt appears, open "
-        f"{_CALENDARS_PANE} and set the host app to Full Access."
+        f"{CALENDARS_PANE} and set the host app to Full Access."
     ),
     "denied": (
-        f"Calendars access is denied. Enable Full Access under {_CALENDARS_PANE} "
+        f"Calendars access is denied. Enable Full Access under {CALENDARS_PANE} "
         "for the app that launches the server, or run: tccutil reset Calendar "
-        f"and then '{_GRANT_COMMAND}' from a terminal."
+        f"and then '{GRANT_COMMAND}' from a terminal."
     ),
     "restricted": (
-        f"Calendars access is restricted by policy. {_CALENDARS_PANE} cannot "
+        f"Calendars access is restricted by policy. {CALENDARS_PANE} cannot "
         "override this; contact the device administrator."
     ),
 }
@@ -49,21 +55,32 @@ def eventkit_next_step(reason: str) -> str:
     Handles the ``dependency_missing: ...`` and ``status_check_failed: ...``
     prefixed forms plus bare labels and unknown future ``status_{N}`` values.
     """
-    if reason in _NEXT_STEPS:
-        return _NEXT_STEPS[reason]
-    if reason.startswith("dependency_missing"):
-        return _NEXT_STEPS["dependency_missing"]
-    if reason.startswith("status_check_failed"):
-        return (
-            "The EventKit authorization check itself failed. Confirm the plugin "
-            f"venv is healthy, then re-run '{_GRANT_COMMAND}' from a terminal; "
-            f"report the failure text if it persists. ({reason})"
-        )
+    base, _, _ = reason.partition(":")
+    if base in _NEXT_STEPS:
+        return _NEXT_STEPS[base]
+    if base == "status_check_failed":
+        return f"{_STATUS_CHECK_FAILED_STEP} ({reason})"
     return (
         "Unrecognized Calendars authorization state. Open "
-        f"{_CALENDARS_PANE} for the host app and re-run '{_GRANT_COMMAND}' "
+        f"{CALENDARS_PANE} for the host app and re-run '{GRANT_COMMAND}' "
         f"from a terminal. ({reason})"
     )
 
 
-__all__ = ["eventkit_next_step"]
+def eventkit_denied_remediation(reason: str) -> dict[str, str]:
+    """Return the forced-EventKit remediation dict for a denial ``reason``."""
+    return {
+        "pane": CALENDARS_PANE,
+        "grant": f"Run '{GRANT_COMMAND}' from a terminal to request full access once.",
+        "next_step": eventkit_next_step(reason),
+        "fallback": "Unset APPLE_MAIL_CALENDAR_ENGINE to use the AppleScript engine.",
+    }
+
+
+__all__ = [
+    "CALENDARS_PANE",
+    "GRANT_COMMAND",
+    "PLUGIN_GRANT_COMMAND",
+    "eventkit_denied_remediation",
+    "eventkit_next_step",
+]

@@ -55,7 +55,8 @@ def eventkit_status() -> tuple[bool, str]:
 
     Reads authorization status synchronously; never prompts. Reasons:
     ``full_access``, ``dependency_missing``, ``not_determined``, ``denied``,
-    ``restricted``, ``write_only``, or ``status_check_failed: ...``.
+    ``restricted``, ``write_only``, ``status_check_failed: ...``, or an
+    unknown-future ``status_{N}``.
     """
     frameworks = load_frameworks()
     if frameworks is None:

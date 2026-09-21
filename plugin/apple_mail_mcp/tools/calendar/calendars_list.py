@@ -38,9 +38,11 @@ def list_calendars(output_format: str = "json", timeout: int | None = None) -> s
     ``DEFAULT_CALENDAR`` environment variable, else the engine default when
     the EventKit fast path is active), ``engine`` (``applescript`` or
     ``eventkit``), and ``eventkit_available`` (fast-path diagnostic with
-    ``available``, a ``reason`` such as ``dependency_missing``,
-    ``not_determined``, ``write_only``, or ``denied``, and a ``next_step``
-    telling the operator what to do about that reason).
+    ``available``, a ``reason`` label (``full_access``,
+    ``dependency_missing``, ``not_determined``, ``write_only``, ``denied``,
+    ``restricted``, ``status_check_failed: ...``, or an unknown-future
+    ``status_{N}``), and a ``next_step`` telling the operator what to do
+    about that reason).
 
     Args:
         output_format: "json" (default) or "text".
@@ -60,8 +62,7 @@ def list_calendars(output_format: str = "json", timeout: int | None = None) -> s
     except ToolError as exc:
         return error_json(exc)
 
-    default_id_getter = getattr(engine, "default_calendar_id", None)
-    engine_default_id = default_id_getter() if callable(default_id_getter) else None
+    engine_default_id = engine.default_calendar_id()
     default_calendar = _server.DEFAULT_CALENDAR or engine.default_calendar_name()
     default_calendar_id = engine_default_id
     selector = _server.DEFAULT_CALENDAR or (default_calendar if not default_calendar_id else None)

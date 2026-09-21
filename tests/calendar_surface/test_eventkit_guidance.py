@@ -12,6 +12,11 @@ class TestEventkitNextStep:
         assert "Reinstall" in step
         assert "calendar-grant" in step
 
+    def test_bare_dependency_missing_names_reinstall(self):
+        step = eventkit_next_step("dependency_missing")
+        assert "Reinstall" in step
+        assert "calendar-grant" in step
+
     def test_not_determined_points_at_grant(self):
         step = eventkit_next_step("not_determined")
         assert "apple-mail calendar-grant" in step
@@ -35,6 +40,11 @@ class TestEventkitNextStep:
     def test_status_check_failure_echoes_reason(self):
         step = eventkit_next_step("status_check_failed: no tccd")
         assert "status_check_failed: no tccd" in step
+        assert "calendar-grant" in step
+
+    def test_bare_status_check_failure_echoes_reason(self):
+        step = eventkit_next_step("status_check_failed")
+        assert "status_check_failed" in step
         assert "calendar-grant" in step
 
     def test_unknown_future_status_falls_back_with_reason(self):

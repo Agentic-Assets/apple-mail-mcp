@@ -284,7 +284,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser(
         "calendar-doctor",
-        help="Report the EventKit fast-path gates (dependency + authorization) without prompting",
+        help="Report the EventKit fast-path gates (dependency + authorization) without prompting; scripts must use --json",
     )
     _add_json_flag(doctor)
 

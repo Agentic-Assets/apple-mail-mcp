@@ -20,6 +20,7 @@ from typing import Any, Protocol
 
 from apple_mail_mcp.backend.base import ToolError
 from apple_mail_mcp.calendar_core import eventkit as _eventkit
+from apple_mail_mcp.calendar_core.guidance import eventkit_denied_remediation
 from apple_mail_mcp.calendar_core.records import parse_calendar_reference_ids, parse_calendar_rows, parse_event_rows
 from apple_mail_mcp.calendar_core.scripts_read import (
     applescript_date_block,
@@ -44,6 +45,31 @@ from apple_mail_mcp.constants import CALENDAR_BOUNDS
 from apple_mail_mcp.core import run_applescript  # patch seam: calendar_core.engine.run_applescript
 
 _ENGINE_ENV = "APPLE_MAIL_CALENDAR_ENGINE"
+
+
+def _normalize_engine_override(override: str | None) -> str:
+    return (override or "auto").strip().lower() or "auto"
+
+
+def resolve_engine_selection(*, available: bool, override: str | None = None) -> tuple[str, str | None]:
+    """Name the active calendar read engine and flag an ineffective override.
+
+    Selection logic mirrors ``get_engine()`` without probing EventKit: a
+    forced-but-unavailable ``eventkit`` override still resolves to
+    ``applescript`` here (``get_engine()`` raises for that case) and reports
+    the override as ineffective so the doctor can warn instead of misreport.
+    The ``override`` defaults to the normalized
+    ``APPLE_MAIL_CALENDAR_ENGINE`` environment value.
+    """
+    normalized = _normalize_engine_override(override if override is not None else os.environ.get(_ENGINE_ENV, "auto"))
+    if available and normalized != "applescript":
+        return "eventkit", None
+    if normalized == "eventkit" and not available:
+        return (
+            "applescript",
+            "APPLE_MAIL_CALENDAR_ENGINE=eventkit is ineffective: the EventKit fast path is unavailable.",
+        )
+    return "applescript", None
 
 
 class CalendarReadEngine(Protocol):
@@ -456,24 +482,17 @@ def get_engine() -> CalendarReadEngine:
     other state falls back silently to AppleScript. Forcing ``eventkit`` when
     it is unavailable raises ``CALENDAR_ACCESS_DENIED`` with the reason.
     """
-    mode = os.environ.get(_ENGINE_ENV, "auto").strip().lower() or "auto"
+    mode = _normalize_engine_override(os.environ.get(_ENGINE_ENV, "auto"))
     if mode == "applescript":
         return AppleScriptCalendarEngine()
     available, reason = _eventkit.eventkit_status()
     if available:
         return _eventkit.EventKitCalendarEngine.create()
     if mode == "eventkit":
-        from apple_mail_mcp.calendar_core.guidance import eventkit_next_step
-
         raise ToolError(
             code="CALENDAR_ACCESS_DENIED",
             message=f"APPLE_MAIL_CALENDAR_ENGINE=eventkit but the EventKit fast path is unavailable: {reason}",
-            remediation={
-                "pane": "System Settings > Privacy & Security > Calendars",
-                "grant": "Run 'apple-mail calendar-grant' from a terminal to request full access once.",
-                "next_step": eventkit_next_step(reason),
-                "fallback": "Unset APPLE_MAIL_CALENDAR_ENGINE to use the AppleScript engine.",
-            },
+            remediation=eventkit_denied_remediation(reason),
         )
     return AppleScriptCalendarEngine()
 
@@ -488,5 +507,6 @@ __all__ = [
     "CalendarReadEngine",
     "get_engine",
     "get_write_engine",
+    "resolve_engine_selection",
     "run_applescript",
 ]

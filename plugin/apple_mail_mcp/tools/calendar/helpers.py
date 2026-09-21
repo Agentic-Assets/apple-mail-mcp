@@ -209,8 +209,7 @@ def resolve_create_target(calendar_name: str | None, *, timeout: int | None = No
     if _server.DEFAULT_CALENDAR:
         return resolve_calendar_selector(_server.DEFAULT_CALENDAR, known)
     engine = _calendar.get_engine()
-    default_id_getter = getattr(engine, "default_calendar_id", None)
-    engine_default = (default_id_getter() if callable(default_id_getter) else None) or engine.default_calendar_name()
+    engine_default = engine.default_calendar_id() or engine.default_calendar_name()
     if engine_default:
         return resolve_calendar_selector(engine_default, known)
     raise ToolError(

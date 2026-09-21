@@ -4,6 +4,7 @@ import json
 
 import apple_mail_mcp.server as server
 import pytest
+from apple_mail_mcp.calendar_core.guidance import eventkit_next_step as real_eventkit_next_step
 from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools.calendar import list_calendars
 
@@ -92,3 +93,24 @@ class TestListCalendars:
         result = list_calendars()
         assert "timed out" in result
         assert "Automation" in result
+
+    def test_next_step_matches_guidance_without_stub(self, fake_engines, monkeypatch):
+        """Sync contract: the tool's next_step must equal guidance's mapping.
+
+        Uses the unstubbed eventkit_next_step (all other tests keep the
+        autouse stub); guards the seam the stub would otherwise hide.
+        """
+        fake_engines()
+        monkeypatch.setattr(
+            "apple_mail_mcp.tools.calendar.eventkit_next_step",
+            real_eventkit_next_step,
+        )
+        reason = "dependency_missing: pip install 'mcp-apple-mail[eventkit]'"
+        monkeypatch.setattr(
+            "apple_mail_mcp.tools.calendar.eventkit_status",
+            lambda: (False, reason),
+        )
+        payload = json.loads(list_calendars())
+        assert payload["eventkit_available"]["available"] is False
+        assert payload["eventkit_available"]["reason"] == reason
+        assert payload["eventkit_available"]["next_step"] == real_eventkit_next_step(reason)
