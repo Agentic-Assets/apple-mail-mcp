@@ -28,7 +28,7 @@ Through AppleScript, the tools can read your configured Mail accounts and their 
 
 Through AppleScript, the tools can read your calendars and events (titles, times, locations, notes, attendees, and status) and can create and update events. Deleting events and sending attendee invitations are gated (section 6).
 
-If the optional `eventkit` extra is installed (adding `pyobjc-framework-EventKit`) and macOS already reports Full Access to Calendars for the host application, calendar reads can use Apple's EventKit framework instead of AppleScript. The software never triggers the EventKit consent prompt itself; that prompt belongs only to the human-invoked `apple-mail calendar-grant` command.
+If the bundled EventKit dependency is present (adding `pyobjc-framework-EventKit`) and macOS already reports Full Access to Calendars for the host application, calendar reads can use Apple's EventKit framework instead of AppleScript. The software never triggers the EventKit consent prompt itself; that prompt belongs only to the human-invoked `apple-mail calendar-grant` command. Run `apple-mail calendar-doctor` at any time to see which read engine is active and what to do when EventKit is unavailable.
 
 ### What it does not access
 

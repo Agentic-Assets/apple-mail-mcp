@@ -37,8 +37,12 @@ def list_calendars(output_format: str = "json", timeout: int | None = None) -> s
     description, is_default), ``default_calendar`` (from the
     ``DEFAULT_CALENDAR`` environment variable, else the engine default when
     the EventKit fast path is active), ``engine`` (``applescript`` or
-    ``eventkit``), and ``eventkit_available`` (fast-path diagnostic with a
-    reason such as ``dependency_missing`` or ``not_determined``).
+    ``eventkit``), and ``eventkit_available`` (fast-path diagnostic with
+    ``available``, a ``reason`` label (``full_access``,
+    ``dependency_missing``, ``not_determined``, ``write_only``, ``denied``,
+    ``restricted``, ``status_check_failed: ...``, or an unknown-future
+    ``status_{N}``), and a ``next_step`` telling the operator what to do
+    about that reason).
 
     Args:
         output_format: "json" (default) or "text".
@@ -58,18 +62,13 @@ def list_calendars(output_format: str = "json", timeout: int | None = None) -> s
     except ToolError as exc:
         return error_json(exc)
 
-    default_id_getter = getattr(engine, "default_calendar_id", None)
-    engine_default_id = default_id_getter() if callable(default_id_getter) else None
+    engine_default_id = engine.default_calendar_id()
     default_calendar = _server.DEFAULT_CALENDAR or engine.default_calendar_name()
     default_calendar_id = engine_default_id
-    if _server.DEFAULT_CALENDAR:
+    selector = _server.DEFAULT_CALENDAR or (default_calendar if not default_calendar_id else None)
+    if selector:
         try:
-            default_calendar_id = str(resolve_calendar_selector(_server.DEFAULT_CALENDAR, calendars)["calendar_id"])
-        except ToolError:
-            default_calendar_id = None
-    elif default_calendar and not default_calendar_id:
-        try:
-            default_calendar_id = str(resolve_calendar_selector(default_calendar, calendars)["calendar_id"])
+            default_calendar_id = str(resolve_calendar_selector(selector, calendars)["calendar_id"])
         except ToolError:
             default_calendar_id = None
     for cal in calendars:
@@ -79,7 +78,11 @@ def list_calendars(output_format: str = "json", timeout: int | None = None) -> s
         "calendars": calendars,
         "default_calendar": default_calendar,
         "engine": engine.name,
-        "eventkit_available": {"available": available, "reason": reason},
+        "eventkit_available": {
+            "available": available,
+            "reason": reason,
+            "next_step": calendar_tools.eventkit_next_step(reason),
+        },
         "calendar_errors": errors,
     }
     return finish(payload, output_format, _render_calendars_text)

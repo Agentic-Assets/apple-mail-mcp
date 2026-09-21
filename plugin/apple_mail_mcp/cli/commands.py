@@ -9,12 +9,16 @@ Tool imports stay lazy inside each handler (the tests' source-patch seams).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from apple_mail_mcp import cli
+from apple_mail_mcp.calendar_core import eventkit as _eventkit_mod
+from apple_mail_mcp.calendar_core.engine import resolve_engine_selection
+from apple_mail_mcp.calendar_core.guidance import CALENDARS_PANE, eventkit_next_step
 from apple_mail_mcp.cli.constants import DEFAULT_PERF_PROFILE, INVALID_ACCOUNT, NO_HIT_SUBJECT
 from apple_mail_mcp.cli.formatting import (
     _await_if_coro,
@@ -27,6 +31,7 @@ from apple_mail_mcp.cli.formatting import (
     _run_tool,
 )
 from apple_mail_mcp.cli.perf import _print_perf_report
+from apple_mail_mcp.constants import CALENDAR_BOUNDS
 
 
 def _cmd_accounts(args: argparse.Namespace) -> int:
@@ -320,9 +325,7 @@ def _cmd_calendar_grant(args: argparse.Namespace) -> int:
     """
     import time
 
-    from apple_mail_mcp.calendar_core.eventkit import eventkit_status, load_frameworks
-
-    available, reason = eventkit_status()
+    available, reason = _eventkit_mod.eventkit_status()
     if available:
         print("Calendars full access is already granted for this process ancestry.")
         return 0
@@ -331,13 +334,13 @@ def _cmd_calendar_grant(args: argparse.Namespace) -> int:
         return 3
     if reason in ("denied", "restricted"):
         print(
-            f"Calendars access is {reason}. Enable it under System Settings > Privacy & Security > "
-            "Calendars for the app that launches this process, or run: tccutil reset Calendar",
+            f"Calendars access is {reason}. Enable it under {CALENDARS_PANE} "
+            "for the app that launches this process, or run: tccutil reset Calendar",
             file=sys.stderr,
         )
         return 2
 
-    frameworks = load_frameworks()
+    frameworks = _eventkit_mod.load_frameworks()
     if frameworks is None:  # pragma: no cover - eventkit_status covered this
         print("EventKit frameworks are not importable.", file=sys.stderr)
         return 3
@@ -378,6 +381,49 @@ def _cmd_calendar_grant(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 3
+
+
+def _cmd_calendar_doctor(args: argparse.Namespace) -> int:
+    """Report both EventKit fast-path gates without ever prompting.
+
+    Reads the dependency state and the synchronous TCC authorization label,
+    names the active read engine, and prints the operator's next step. This
+    command never calls any ``request*`` EventKit API; consent stays
+    exclusively in the human-run ``calendar-grant`` command. Exit code is
+    always 0 (the payload carries the verdict, so scripts branch on JSON with
+    ``--json``).
+    """
+    available, reason = _eventkit_mod.eventkit_status()
+    raw_override = os.environ.get("APPLE_MAIL_CALENDAR_ENGINE", "auto")
+    normalized_override = raw_override.strip().lower() or "auto"
+    active_engine, override_warning = resolve_engine_selection(available=available)
+    payload: dict[str, Any] = {
+        "dependency_present": _eventkit_mod.load_frameworks() is not None,
+        "eventkit_available": available,
+        "reason": reason,
+        "next_step": eventkit_next_step(reason),
+        "engine_override": normalized_override,
+        "active_engine": active_engine,
+        "applescript_recurring_lookback_days": CALENDAR_BOUNDS["RECURRING_LOOKBACK_DAYS"],
+    }
+    if override_warning is not None:
+        payload["override_ineffective"] = True
+    if args.json:
+        _print_result(payload, json_mode=True)
+    else:
+        state = "active" if available else f"inactive ({reason})"
+        print(f"EventKit fast path: {state}")
+        print(f"Active read engine: {payload['active_engine']}")
+        if override_warning is not None:
+            print(f"Warning: {override_warning}")
+        if not available:
+            print(f"Next step: {payload['next_step']}")
+        print(
+            "AppleScript engine note: recurring series whose master started more than "
+            f"{payload['applescript_recurring_lookback_days']} days ago may be absent "
+            "from a read window."
+        )
+    return 0
 
 
 def _cmd_mcp_config(args: argparse.Namespace) -> int:

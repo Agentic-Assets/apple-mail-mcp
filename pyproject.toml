@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-apple-mail"
-version = "3.12.2"
+version = "3.12.3"
 description = "MCP server giving AI assistants full access to Apple Mail - read, search, compose, organize & analyze emails"
 readme = "README.md"
 license = "MIT"
@@ -38,6 +38,10 @@ classifiers = [
 dependencies = [
     "fastmcp==3.4.1",
     "mcp-ui-server==1.0.0",
+    # EventKit calendar read fast path, bundled by default in the plugin
+    # offline payload (plugin/requirements.in + wheelhouse/). The darwin
+    # marker keeps non-macOS installs working; PyObjC ships macOS wheels only.
+    "pyobjc-framework-EventKit>=10,<13; sys_platform == 'darwin'",
 ]
 
 [project.scripts]
@@ -64,7 +68,8 @@ include = ["plugin/apple_mail_mcp/**"]
 # ---------------------------------------------------------------------------
 [project.optional-dependencies]
 # Optional EventKit read fast path for the calendar tools (macOS only; the
-# AppleScript engine works without it). Install: pip install 'mcp-apple-mail[eventkit]'
+# AppleScript engine works without it). The plugin offline payload bundles this
+# by default; PyPI installs opt in with: pip install 'mcp-apple-mail[eventkit]'
 eventkit = [
     "pyobjc-framework-EventKit>=10,<13",
 ]

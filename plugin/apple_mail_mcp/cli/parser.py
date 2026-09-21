@@ -282,6 +282,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Seconds to pump the run loop waiting for the consent prompt (default 30)",
     )
 
+    doctor = subparsers.add_parser(
+        "calendar-doctor",
+        help="Report the EventKit fast-path gates (dependency + authorization) without prompting; scripts must use --json",
+    )
+    _add_json_flag(doctor)
+
     config = subparsers.add_parser("mcp-config", help="Print Claude/OpenClaw MCP config JSON")
     config.add_argument(
         "--repo",
