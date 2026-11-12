@@ -13,6 +13,7 @@ from apple_mail_mcp.tools.compose.constants import (
     TYPING_CHUNK_SIZE,
     TYPING_INTER_CHUNK_DELAY,
 )
+from apple_mail_mcp.tools.compose.reply_attachment_scripts import native_reply_attachment_scripts
 from apple_mail_mcp.tools.compose.reply_draft_resolver_scripts import (
     _native_reply_draft_resolver_handlers_applescript,
     _native_reply_draft_resolver_script,
@@ -180,7 +181,7 @@ def _build_reply_native_window_applescript(
     signature_script: str,
     cc_script: str,
     bcc_script: str,
-    attachment_script: str,
+    attachment_paths: list[str],
     mode: str,
     cleanup_script: str,
     safe_cc: str,
@@ -203,8 +204,8 @@ def _build_reply_native_window_applescript(
     clipboard, which clobbered the pasteboard and leaked bodies into the wrong
     thread in two prior live reverts.
 
-    UI scripting is isolated to the focus guard + keystroke and is unavoidable
-    here: the native rich format cannot be expressed through the Mail dictionary.
+    UI scripting handles body typing and attachment insertion, because Mail's
+    dictionary rewrites the native rich content when asked to add an attachment.
     After ``reply``, the guard may adopt Mail's live front-window title when its
     subject core matches the derived reply subject (Mail normalizes duplicate
     Re:/Fwd: prefixes). The keystroke itself still requires exact title equality
@@ -241,7 +242,9 @@ def _build_reply_native_window_applescript(
         inter_chunk_delay=TYPING_INTER_CHUNK_DELAY,
     )
     identity_tweaks_script = native_reply_identity_tweak_script(sender_script, signature_script, cleanup_script)
+    attachment_handlers, attachment_step = native_reply_attachment_scripts(attachment_paths, cleanup_script)
     return f'''
+{attachment_handlers}
 {subject_helpers}
 {window_handlers}
 {typing_handler}
@@ -552,12 +555,8 @@ try
     -- dropped the source-content half this pairing exists to supply.
     set quotedNeedle to sourceSender & " wrote:"
     delay 0.4
+    {attachment_step}
     tell application "Mail"
-        -- Adding attachments before body typing can make Mail rebuild the rich
-        -- reply content and discard the quoted original. Attach only after the
-        -- typed body has completed successfully.
-        {attachment_script}
-
         {post_action}
 
         -- Mail's outgoing-message ID is not a Drafts ID on every account.

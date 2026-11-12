@@ -48,6 +48,9 @@ from apple_mail_mcp.tools.compose.constants import (
 # not fidelity to the superseded 34.2s.
 _NATIVE_TYPING_FIXED_OVERHEAD_SECONDS = 35
 _NATIVE_TYPING_SLACK_SECONDS = 30
+# The native file picker has separate waits for the open sheet, path field,
+# selected file, and sheet dismissal. Budget each requested file separately.
+_NATIVE_ATTACHMENT_SECONDS = 20
 # Bodies whose projected typing time would exceed this are refused with a
 # structured error instead of silently under- or wildly over-provisioning the
 # AppleScript timeout. The cap applies whether or not the caller passed an
@@ -109,14 +112,15 @@ def _native_reply_projected_typing_seconds(body_length: int) -> float:
     return projected_seconds
 
 
-def _native_reply_effective_timeout(reply_body: str, timeout: int | None) -> tuple[int | None, str | None]:
+def _native_reply_effective_timeout(
+    reply_body: str, timeout: int | None, *, attachment_count: int = 0
+) -> tuple[int | None, str | None]:
     """Return ``(effective_timeout, error_json)`` for the native typed-reply script.
 
     The effective timeout scales with the projected typing duration (chunk
     posting plus editor drain) plus fixed overhead and slack, floored at the
-    standard 120s. Bodies whose projected typing time exceeds the documented
-    cap are refused with a structured error rather than handed a timeout that
-    ``AppleScriptTimeout`` could fire mid-typing.
+    standard 120s, with additional time for requested attachments. Bodies whose
+    projected typing time exceeds the documented cap are refused up front.
 
     An explicit ``timeout`` is FLOORED at that same projected value, not used
     as-is: it can raise the budget, never lower it. That is correctness, not
@@ -165,9 +169,12 @@ def _native_reply_effective_timeout(reply_body: str, timeout: int | None) -> tup
                 },
             )
         )
-    projected_timeout = max(
-        120,
-        int(projected_seconds + _NATIVE_TYPING_FIXED_OVERHEAD_SECONDS + _NATIVE_TYPING_SLACK_SECONDS),
+    projected_timeout = (
+        max(
+            120,
+            int(projected_seconds + _NATIVE_TYPING_FIXED_OVERHEAD_SECONDS + _NATIVE_TYPING_SLACK_SECONDS),
+        )
+        + attachment_count * _NATIVE_ATTACHMENT_SECONDS
     )
     if timeout is not None:
         return max(timeout, projected_timeout), None

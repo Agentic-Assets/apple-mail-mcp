@@ -112,7 +112,7 @@ def reply_to_email(
         bcc: Optional BCC recipients, comma-separated for multiple
         send: If True, send immediately; if False (default), save as draft. Ignored if mode is set.
         mode: Delivery mode — "draft" (default, save quietly to Drafts and close), "open" (save first, then leave compose window open for review), or "send" (send immediately). Overrides send parameter when set.
-        attachments: Optional file paths to attach, comma-separated for multiple (e.g., "/path/to/file1.png,/path/to/file2.pdf")
+        attachments: Optional comma-separated file paths. Native replies use Mail's Attach Files picker to preserve the editor contents, then verify each file after saving.
         body_html: Accepted for backwards compatibility but ignored. Replies use Mail's native reply composer and
             insert reply_body as plain text above Mail's native quoted thread.
         from_address: Optional sender address to use for this reply. Must be one of the account's configured email addresses. When omitted, Mail uses the account's default "Send new messages from" setting.
@@ -318,9 +318,8 @@ def reply_to_email(
 
     cc_script, bcc_script, _, _ = _build_recipient_loops(cc, bcc, message_var="replyMessage")
 
-    # Build attachment script if provided (object model: attach to replyMessage)
+    # Only the windowless path may edit Mail's dictionary content to attach files.
     attachment_script = ""
-    attachment_info = ""
     validated_paths: list[str] = []
     if attachments:
         validated_paths, error = compose._validate_attachment_paths(attachments)
@@ -328,6 +327,7 @@ def reply_to_email(
             with suppress(OSError):
                 Path(body_temp_path).unlink(missing_ok=True)
             return error
+    if not native_format:
         for path in validated_paths:
             safe_path = escape_applescript(path)
             attachment_script += f'''
@@ -337,7 +337,7 @@ def reply_to_email(
                 end tell
                 delay 1
             '''
-            attachment_info += f"  {path}\n"
+    attachment_info = "".join(f"  {path}\n" for path in validated_paths)
 
     safe_cc = escape_applescript(cc) if cc else ""
     safe_bcc = escape_applescript(bcc) if bcc else ""
@@ -375,7 +375,7 @@ def reply_to_email(
             signature_script=signature_script,
             cc_script=cc_script,
             bcc_script=bcc_script,
-            attachment_script=attachment_script,
+            attachment_paths=validated_paths,
             mode=effective_mode,
             cleanup_script=cleanup_script,
             safe_cc=safe_cc,
@@ -418,7 +418,9 @@ def reply_to_email(
 
     try:
         if native_format:
-            effective_timeout, timeout_error = _native_reply_effective_timeout(reply_body, timeout)
+            effective_timeout, timeout_error = _native_reply_effective_timeout(
+                reply_body, timeout, attachment_count=len(validated_paths)
+            )
             if timeout_error:
                 return timeout_error
         else:

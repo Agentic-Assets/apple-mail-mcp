@@ -6,9 +6,8 @@ the 600 LOC budget. The BODY-verification failure mapping (``body_missing`` /
 ``body_after_quote`` / ``not_found`` / timeouts) still lives in
 ``verification.py`` and is dispatched from ``reply.py``; only the pre-save ABORT
 sentinels (``REPLY_ACCESSIBILITY_UNAVAILABLE``, ``SENDER_OVERRIDE_FAILED``,
-``GUARD_ABORT*``, ``TYPING_INTERRUPTED``) are mapped here, since ``reply.py``
-calls the same dispatcher for both the first compose attempt and a retype
-attempt.
+``GUARD_ABORT*``, ``TYPING_INTERRUPTED``, ``ATTACHMENT_INSERT_FAILED``) are
+mapped here for the first compose attempt and any retype attempt.
 
 Everything here reads what a compose run came BACK with. The other half of the
 old module -- projecting how long that run may take and refusing bodies past the
@@ -233,7 +232,9 @@ def _native_reply_abort_response(
                 },
             )
         )
-    if not result.startswith(("TYPING_INTERRUPTED", NATIVE_REPLY_SENDER_OVERRIDE_ABORT, "GUARD_ABORT")):
+    if not result.startswith(
+        ("ATTACHMENT_INSERT_FAILED", "TYPING_INTERRUPTED", NATIVE_REPLY_SENDER_OVERRIDE_ABORT, "GUARD_ABORT")
+    ):
         return None
 
     # Every remaining sentinel opened a compose window, so all of them report
@@ -241,6 +242,20 @@ def _native_reply_abort_response(
     artifact_status, suspected, guard_reply_subject, derived_reply_subject = _probe_abort_artifact(
         result, account=account, reply_body=reply_body, timeout=timeout
     )
+    if result.startswith("ATTACHMENT_INSERT_FAILED"):
+        return serialize_tool_error(
+            ToolError(
+                code="REPLY_ATTACHMENT_INSERT_FAILED",
+                message="Mail could not safely attach every file in the native reply window. No email was sent.",
+                remediation={
+                    "preferred": (
+                        "Check Mail for an open file picker or unfinished reply before retrying. "
+                        "The tool did not save the reply or verify it as a finished draft."
+                    ),
+                    **_abort_artifact_remediation(artifact_status, suspected, result),
+                },
+            )
+        )
     if result.startswith("TYPING_INTERRUPTED"):
         return serialize_tool_error(
             ToolError(
