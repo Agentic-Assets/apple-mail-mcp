@@ -150,6 +150,7 @@ SAMPLE_KWARGS: dict[str, object] = {
     "signature_name": "Default",
     "resolved_signature_name": "Default",
     "body_temp_path": "/tmp/apple-mail-mcp-compile-check.txt",
+    "attachment_paths": ["/tmp/apple-mail-mcp-compile-check.txt"],
     "header_text": "Compile check header",
     "success_text": "OK",
     "not_found_message": "not found",

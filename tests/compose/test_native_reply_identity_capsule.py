@@ -62,7 +62,7 @@ def _build_native_reply_script(*, mode: str) -> str:
         signature_script="",
         cc_script="",
         bcc_script="",
-        attachment_script="",
+        attachment_paths=[],
         mode=mode,
         cleanup_script="",
         safe_cc="",

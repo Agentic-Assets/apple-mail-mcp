@@ -416,10 +416,12 @@ def test_native_reply_fails_closed_when_requested_attachment_is_not_verified(
     assert payload["remediation"]["draft_id"] == "84053"
 
 
-def test_native_reply_inserts_attachment_only_after_body_typing(home_temp_dir: Path) -> None:
-    """The native quote must settle through typing before Mail adds attachments."""
-    attachment = home_temp_dir / "support.pdf"
-    attachment.write_bytes(b"%PDF-test")
+def test_native_reply_attaches_in_the_composer_without_rewriting_content(home_temp_dir: Path) -> None:
+    """Adding files must preserve the typed body and the original native quote."""
+    pdf = home_temp_dir / "support.pdf"
+    pdf.write_bytes(b"%PDF-test")
+    notes = home_temp_dir / "fixture notes.txt"
+    notes.write_text("notes", encoding="utf-8")
     scripts: list[str] = []
 
     def fake_mail(script: str, timeout: int = 120) -> str:
@@ -427,7 +429,7 @@ def test_native_reply_inserts_attachment_only_after_body_typing(home_temp_dir: P
         if "reply foundMessage" in script:
             return _saved_native_reply_output()
         if 'set targetDraftIdText to "84053"' in script:
-            return "FOUND|84053|verified|not_requested|1|support.pdf::9;;"
+            return "FOUND|84053|verified|not_requested|2|support.pdf::9;;fixture notes.txt::5;;"
         return "ok"
 
     with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_mail):
@@ -435,21 +437,59 @@ def test_native_reply_inserts_attachment_only_after_body_typing(home_temp_dir: P
             account="Work",
             message_id="12345",
             reply_body="Reply body",
-            attachments=str(attachment),
+            attachments=f"{pdf},{notes}",
             include_signature=False,
             output_format="json",
         )
 
-    assert json.loads(result)["verification_status"] == "found"
+    payload = json.loads(result)
+    assert payload["verification_status"] == "found"
+    assert payload["attachment_status"] == "verified"
+    assert payload["attachment_count"] == 2
     script = _native_reply_script(scripts)
+    assert "make new attachment" not in script
+    assert "set content of replyMessage" not in script
     body_typed = script.index(
         "set typeChunksResult to my typeReplyBodyChunks(replyBodyText, replySubject, derivedReplySubject, "
         "replyWindowId, item 2 of editorFocusOutcome)"
     )
-    attachment_inserted = script.index(
-        "make new attachment with properties {file name:theFile} at after the last paragraph of content"
+    attachment_inserted = script.index(f'my attachFilesInNativeReply({{"{pdf}", "{notes}"}},')
+    assert body_typed < attachment_inserted < script.index("save replyMessage")
+
+    # The same basename in a different directory is insufficient proof. The
+    # picker must compare the full canonical file path and recheck it at click.
+    normalize = script[
+        script.index("on normalizedReplyAttachmentPath(") : script.index("end normalizedReplyAttachmentPath")
+    ]
+    assert "NSURL's URLWithString:(fileURL as text)" in normalize
+    assert "selectedURL's isFileURL()" in normalize
+    assert "selectedURL's URLByResolvingSymlinksInPath()'s |path|()" in normalize
+
+    confirm = script[
+        script.index("on confirmNativeReplyAttachment(") : script.index("end confirmNativeReplyAttachment")
+    ]
+    assert "repeat with pickerElement in entire contents of fileSheet" in confirm
+    assert '(value of attribute "AXIdentifier" of pickerElement) is "OKButton"' in confirm
+    assert 'requestedPath\'s hasPrefix:(selectedPath & "/")' in confirm
+    assert 'error "attachment picker selected a different file"' in confirm
+    assert 'if selectedFile is missing value then error "Mail did not select the requested file"' in confirm
+    active_sheet = confirm.index(
+        "set activeSheet to my replyAttachmentSheet(expectedTitle, derivedTitle, expectedWindowId)"
     )
-    assert body_typed < attachment_inserted
+    recheck = confirm.index('if (value of attribute "AXSelected" of selectedFile) is not true')
+    canonical_url = confirm.index('my normalizedReplyAttachmentPath(value of attribute "AXURL" of selectedFile)')
+    exact_path = confirm.index("if not ((requestedPath's isEqualToString:selectedPath) as boolean)")
+    press = confirm.index('perform action "AXPress" of chooseButton')
+    assert active_sheet < recheck < canonical_url < exact_path < press
+
+    chooser = script[script.index("on chooseNativeReplyAttachment(") : script.index("end chooseNativeReplyAttachment")]
+    path_sheet = chooser.index('(value of attribute "AXIdentifier" of pathSheet) is "GoToWindow"')
+    path_field = chooser.index('(value of attribute "AXIdentifier" of pathField) is "PathTextField"')
+    write_path = chooser.index('set value of attribute "AXValue" of pathField to filePath')
+    focused = chooser.index('if (value of attribute "AXFocusedUIElement") is not pathField')
+    accepted = chooser.index('if ((value of attribute "AXValue" of pathField) as string) is not filePath')
+    assert path_sheet < path_field < write_path < focused < accepted < chooser.index("key code 36")
+    assert chooser.index("if not pathSheetDismissed then error") < chooser.index("my confirmNativeReplyAttachment(")
 
 
 def test_native_reply_focuses_a_guarded_editor_before_typing() -> None:
@@ -617,31 +657,38 @@ def test_native_reply_resolves_the_editor_once_not_per_chunk() -> None:
     assert typing_loop.index("set blockedName to my chunkFocusBlockedName(") < typing_loop.index("keystroke chunkText")
 
 
-def test_native_reply_aborts_before_attachment_when_editor_focus_is_not_verified(home_temp_dir: Path) -> None:
-    """An attachment must not be created if the native reply body editor cannot be focused."""
+def test_native_reply_requires_focused_editor_and_attachment_success_before_save(home_temp_dir: Path) -> None:
+    """The native attachment step must fail closed even for an attachment-only reply."""
     attachment = home_temp_dir / "support.pdf"
     attachment.write_bytes(b"%PDF-test")
     scripts: list[str] = []
 
     def fake_mail(script: str, timeout: int = 120) -> str:
         scripts.append(script)
-        return "ok"
+        if "reply foundMessage" in script:
+            return "ATTACHMENT_INSERT_FAILED\nSubject: Re: Test\nDetail: file chooser lost focus"
+        return "NOT_FOUND"
 
     with patch("apple_mail_mcp.tools.compose.run_applescript", side_effect=fake_mail):
-        compose_tools.reply_to_email(
+        result = compose_tools.reply_to_email(
             account="Work",
             message_id="12345",
             reply_body="",
             attachments=str(attachment),
             include_signature=False,
+            output_format="json",
         )
 
+    payload = json.loads(result)
+    assert payload["code"] == "REPLY_ATTACHMENT_INSERT_FAILED"
+    assert payload["remediation"]["draft_artifact_status"] == "not_found"
     script = _native_reply_script(scripts)
     assert "set composeFocusVerified to false" in script
-    assert "if composeFocusVerified is false then" in script
-    assert script.index("if composeFocusVerified is false then") < script.index(
-        "make new attachment with properties {file name:theFile}"
-    )
+    guard = script.index("if composeFocusVerified is false then")
+    attach = script.index("my attachFilesInNativeReply(")
+    abort = script.index('return "ATTACHMENT_INSERT_FAILED"')
+    assert guard < attach < abort < script.index("save replyMessage")
+    assert "my closeNativeReplyWindowSafely(replyWindowId, replySubject, derivedReplySubject)" in script[attach:abort]
 
 
 def test_native_reply_cleanup_targets_only_the_opened_window() -> None:

@@ -283,7 +283,7 @@ class OsacompileAvailableTests(unittest.TestCase):
             signature_script="",
             cc_script="",
             bcc_script="",
-            attachment_script="",
+            attachment_paths=[],
             mode="draft",
             cleanup_script="",
             safe_cc="",
@@ -321,9 +321,8 @@ class OsacompileAvailableTests(unittest.TestCase):
         — never compiled by any gate, even though every native reply the tool
         sends takes one of them.
 
-        The optional fragments (``sender``, ``signature``, ``cc``, ``bcc``,
-        ``attachment``) are spliced in as text, so a syntax error inside one
-        surfaces whenever that fragment is present. Compiling each fragment in
+        The optional sender, signature, recipient and attachment branches
+        exercise distinct generated code. Compiling each branch in
         isolation, plus all-off and all-on, localizes a failure to a single
         fragment instead of reporting only that "the all-on script broke".
 
@@ -351,12 +350,11 @@ class OsacompileAvailableTests(unittest.TestCase):
             "signature": (helpers._reply_signature_script("Work", include_signature=True), "signature_script"),
             "cc": (cc_script, "cc_script"),
             "bcc": (bcc_script, "bcc_script"),
-            "attachment": (attachment_script, "attachment_script"),
         }
         # all-off, each fragment alone, all-on
         fragment_mixes: list[tuple[str, set[str]]] = [("none", set())]
         fragment_mixes += [(name, {name}) for name in optional_fragments]
-        fragment_mixes.append(("all", set(optional_fragments)))
+        fragment_mixes += [("attachment", {"attachment"}), ("all", set(optional_fragments) | {"attachment"})]
 
         base = {
             "header_text": "SAVING REPLY AS DRAFT",
@@ -392,6 +390,7 @@ class OsacompileAvailableTests(unittest.TestCase):
                         "native": m._build_reply_native_window_applescript(
                             mode=mode,
                             reply_options=native_options,
+                            attachment_paths=["/tmp/apple-mail-compile-check.pdf"] if flags["has_attachments"] else [],
                             **base,
                             **fragments,
                             **flags,
@@ -400,6 +399,7 @@ class OsacompileAvailableTests(unittest.TestCase):
                             reply_options=object_options,
                             reply_settle_delay=settle_delay,
                             post_action=mode_plan.post_action,
+                            attachment_script=attachment_script if flags["has_attachments"] else "",
                             **base,
                             **fragments,
                             **flags,
