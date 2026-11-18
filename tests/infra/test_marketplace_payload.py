@@ -74,6 +74,12 @@ class TestMarketplacePayload(unittest.TestCase):
         self.assertIn(".codex-plugin/plugin.json", paths)
         self.assertIn(".cursor-plugin/plugin.json", paths)
         self.assertIn("requirements.lock", paths)
+        archive_skill = "skills/apple-mail-archive-export"
+        self.assertIn(f"{archive_skill}/SKILL.md", paths)
+        scripts = (ROOT / "plugin" / archive_skill / "scripts").iterdir()
+        for script in scripts:
+            if script.suffix in {".py", ".sh"}:
+                self.assertIn(f"{archive_skill}/scripts/{script.name}", paths)
         self.assertNotIn("requirements.in", paths)
         self.assertNotIn("requirements.txt", paths)
         self.assertFalse(any(path.endswith("CLAUDE.md") for path in paths))

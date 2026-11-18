@@ -1,6 +1,7 @@
 """Exercise the real export writer and checkpoint reader without Mail.app."""
 
 import json
+import plistlib
 import shutil
 import subprocess
 import time
@@ -15,6 +16,16 @@ pytestmark = pytest.mark.skipif(shutil.which("osascript") is None, reason="requi
 _FIRST = "From: sender@example.com\nSubject: Same subject\n\nFirst body"
 _SECOND = "From: sender@example.com\nSubject: Same subject\n\nSecond body"
 _ROWS = [(2, 2147483647, _FIRST), (1, 202, _SECOND)]
+_MULTIPART = (
+    'From: sender@example.com\nContent-Type: multipart/mixed; boundary="native"\n\n'
+    "--native\nContent-Type: text/plain\n\nBody\n--native--\n"
+)
+_STALE_BOUNDARY = _MULTIPART.replace('boundary="native"', 'boundary="stale"')
+_CALENDAR = (
+    "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Example//Calendar//EN\n"
+    "BEGIN:VEVENT\nUID:fixture@example.com\n"
+    "DTSTAMP:20250301T000000Z\nDTSTART:20250302T000000Z\nEND:VEVENT\nEND:VCALENDAR\n"
+)
 
 
 def _synthetic_mailbox(script: str, rows: list[tuple[int, int, str]]) -> str:
@@ -45,9 +56,28 @@ def _synthetic_mailbox(script: str, rows: list[tuple[int, int, str]]) -> str:
 def export_page(monkeypatch, tmp_path):
     monkeypatch.setattr("apple_mail_mcp.tools.analytics.export.validate_save_path", lambda *_args: None)
 
-    def export(rows=_ROWS, *, max_emails=1, offset=0, interrupt=False):
+    def export(rows=_ROWS, *, max_emails=1, offset=0, interrupt=False, second_source=None, prior_companion=None):
         def run(script, timeout):
             harness = _synthetic_mailbox(script, rows)
+            if second_source is not None:
+                reader = f'''
+                property sourceReads : 0
+                on fixtureSourceRead(currentMessage)
+                    set sourceReads to sourceReads + 1
+                    if sourceReads is 1 then return fixtureSource of currentMessage
+                    if sourceReads is 2 then return "{escape_applescript(second_source)}"
+                    error "Export exceeded the source-read budget"
+                end fixtureSourceRead
+                '''
+                harness = reader + harness.replace("fixtureSource of aMessage", "my fixtureSourceRead(aMessage)")
+            if prior_companion:
+                inject = (
+                    'do shell script "/bin/cp " & metadataStage & " " & metadataPath'
+                    if prior_companion == "matching"
+                    else 'do shell script "/usr/bin/printf %s sentinel > " & metadataPath'
+                )
+                assert "set calendarCommand" in harness
+                harness = harness.replace("set calendarCommand", inject + "\nset calendarCommand", 1)
             if interrupt:
                 _interrupt_before_publication(harness, tmp_path)
             completed = subprocess.run(
@@ -124,6 +154,54 @@ def test_empty_message_source_reports_failure_and_leaves_no_final_file(export_pa
     assert "Exported: 0" in output
     assert "Error exporting message_id 202" in output
     assert not list(tmp_path.glob("INBOX_export/batch-*/*.eml"))
+
+
+def test_export_retries_a_stale_mime_header_before_publication(export_page, tmp_path):
+    output = export_page([(1, 202, _STALE_BOUNDARY)], second_source=_MULTIPART)
+
+    assert "Exported: 1" in output
+    (saved,) = tmp_path.glob("INBOX_export/batch-*/*.eml")
+    assert saved.read_bytes() == _MULTIPART.encode()
+
+
+def test_export_keeps_a_persistently_malformed_message_pending(export_page, tmp_path):
+    output = export_page([(1, 202, _STALE_BOUNDARY)], second_source=_STALE_BOUNDARY)
+
+    assert "Exported: 0" in output
+    assert "MIME" in output
+    assert not list(tmp_path.glob("INBOX_export/batch-*/*.eml"))
+
+
+def test_calendar_and_metadata_are_checkpointed_as_one_record(export_page, tmp_path):
+    metadata = plistlib.dumps({"flags": 1})
+    source = _CALENDAR + metadata.decode()
+    response = json.loads(export_page([(2, 303, source), (1, 202, _SECOND)], max_emails=2, interrupt=True))
+
+    progress = response["remediation"]
+    batch = tmp_path / "INBOX_export" / progress["batch"]
+    calendar = batch / "303_Same subject.ics"
+    assert progress["completed"] == [{"message_id": "303", "path": str(calendar)}]
+    assert progress["pending_message_ids"] == ["202"]
+    assert calendar.read_bytes() == _CALENDAR.encode()
+    assert calendar.with_suffix(".ics.plist").read_bytes() == metadata
+    assert not calendar.with_suffix(".eml").exists()
+
+
+@pytest.mark.parametrize("prior_companion", ["matching", "different"])
+def test_calendar_resume_preserves_an_existing_companion(export_page, tmp_path, prior_companion):
+    metadata = plistlib.dumps({"flags": 1})
+    response = export_page([(1, 303, _CALENDAR + metadata.decode())], prior_companion=prior_companion)
+    (companion,) = tmp_path.glob("INBOX_export/batch-*/*.ics.plist")
+    calendar = companion.with_suffix("")
+
+    if prior_companion == "matching":
+        assert "Exported: 1" in response
+        assert companion.read_bytes() == metadata
+        assert calendar.read_bytes() == _CALENDAR.encode()
+    else:
+        assert "Exported: 0" in response
+        assert companion.read_bytes() == b"sentinel"
+        assert not calendar.exists()
 
 
 @pytest.mark.parametrize("scope", ["single_email", "correspondent", "thread"])

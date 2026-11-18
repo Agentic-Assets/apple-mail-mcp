@@ -84,7 +84,9 @@ def export_emails(
         save_directory: Directory to save exports (default: "~/Desktop")
         format: Export format: "txt", "html", or raw RFC 822 "eml"
             (default: "txt"). EML preserves Mail's source headers and MIME
-            structure for import into other mail clients.
+            structure and retries once if the outer multipart boundary is
+            malformed. Native calendar sources are saved as `.ics`, with
+            any Mail metadata in a separate `.ics.plist` companion.
         max_emails: Maximum number of emails to export. Defaults to 5 for
             entire_mailbox and 25 for filtered, correspondent and thread;
             hard-capped at 50 for every scope (export runs in small bounded
@@ -272,7 +274,7 @@ def export_emails(
                     -- RFC 822 headers and MIME structure survive export.
                     {export_content_block(safe_format)}
 
-                    {atomic_export_write_script(shared_directory=True)}
+                    {atomic_export_write_script(safe_format, shared_directory=True)}
                     {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=_ATTACHMENT_MAX_BYTES, max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES)}
 
                     set outputText to outputText & "✓ Email exported successfully!" & return & return

@@ -9,6 +9,30 @@ Everything here is a judgement call, not a mandate. Where I have a
 recommendation I say so; where the tradeoff is genuinely open I say that instead.
 Nothing below is required for the documented workflow to be correct.
 
+## Recurring local archive and search
+
+The installed `index_manifest.py` builds a repeatable SQLite FTS5 index for
+verified EML and ICS exports. Keep the manifest, message files, and calendar
+metadata as the durable archive. Rebuild the derived index as needed.
+
+1. **Incremental ingestion.** Stage newly discovered records and verify their
+   content before publishing a new manifest. Track the source account and
+   local Mail store generation so an ID reused after a rebuild stays distinct.
+   Keep folder memberships and use hashes to detect identical content. Preserve
+   distinct messages that share an RFC Message-ID and keep earlier records when
+   they disappear from a later Mail snapshot. Compare each completed inventory
+   with its prior manifest and report omissions, additions, and repairs.
+2. **Private search.** Test interrupted indexing and repeat runs against
+   synthetic archives, and test body, sender, mailbox, date, and attachment
+   name queries on the resulting index. Return matching archive IDs and source
+   paths so an agent can retrieve just the requested results.
+3. **Optional local embeddings.** Embed decoded text chunks after evaluating
+   lexical search. Track each chunk's content hash, message ID, and model
+   version. Combine lexical and similarity results and retain the source
+   references. Keep mail text, attachments, and vectors in the local archive.
+
+Each step is independently useful. The current workflow runs on demand.
+
 ## Contents
 
 1. The one I would build first
@@ -155,7 +179,7 @@ addressing plus hard-linked views gives the same browsable tree for the smaller
 number, so dedup is not an optimization to add later; it decides the layout.
 
 The sketch also treated collision handling as "three lines". It is not, because a
-declared filename is attacker-controlled and can be encoded: `../../../escape.txt`
+declared filename is attacker-controlled and can encode parent-directory traversal. A traversal path
 survives inside an RFC 2047 base64 word or split across RFC 2231 continuations, so
 any sanitizer that runs before decoding waves it through. Decode first, sanitize
 second, and keep a test that asserts containment for the encoded forms rather than

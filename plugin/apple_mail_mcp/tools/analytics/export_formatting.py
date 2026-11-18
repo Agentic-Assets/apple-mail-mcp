@@ -144,7 +144,8 @@ def attachment_bundle_save_block(
     """Return a size- and total-capped Mail attachment extraction fragment."""
     if not include_attachments:
         return ""
-    return f"""set savedAttachmentCount to 0
+    return f"""if not isNativeCalendar then
+                set savedAttachmentCount to 0
                 set skippedAttachmentCount to 0
                 set messageAttachments to mail attachments of aMessage
                 set attachmentCount to count of messageAttachments
@@ -165,4 +166,5 @@ def attachment_bundle_save_block(
                         set skippedAttachmentCount to skippedAttachmentCount + 1
                     end try
                 end repeat
-                set outputText to outputText & "Attachments saved: " & savedAttachmentCount & "; skipped: " & skippedAttachmentCount & return"""
+                set outputText to outputText & "Attachments saved: " & savedAttachmentCount & "; skipped: " & skippedAttachmentCount & return
+                end if"""

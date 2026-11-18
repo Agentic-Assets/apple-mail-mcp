@@ -29,7 +29,7 @@ def _capture_tool_script(tmp_path, monkeypatch, **kwargs):
 def test_eml_export_reads_raw_source_without_rendered_body(tmp_path, monkeypatch, selection):
     script = _capture_tool_script(tmp_path, monkeypatch, format="eml", **selection)
 
-    assert _BODY_READ.findall(script) == ["source"]
+    assert set(_BODY_READ.findall(script)) == {"source"}
 
 
 def test_thread_eml_export_reads_raw_source_without_rendered_body():
@@ -41,7 +41,7 @@ def test_thread_eml_export_reads_raw_source_without_rendered_body():
         message_ids=["42"],
     )
 
-    assert _BODY_READ.findall(script) == ["source"]
+    assert set(_BODY_READ.findall(script)) == {"source"}
 
 
 @pytest.mark.parametrize("format", ["txt", "html"])

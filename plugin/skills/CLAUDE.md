@@ -1,6 +1,6 @@
 # plugin/skills/: Agent skills directory
 
-Skills are the **primary entry point** for email workflows in Claude Code. They teach the model when and how to call MCP tools; they do not implement tool logic.
+Skills are the **primary entry point** for email workflows in Claude Code. They guide MCP tool use, and the archive-export skill also bundles standalone local archive scripts.
 
 **Agent contract (read first):** [`references/agent-id-first-workflow.md`](references/agent-id-first-workflow.md)
 
@@ -19,6 +19,7 @@ New or edited skills: delegate drafting to subagents when available and permitte
 | `email-management/` | Umbrella sustained Inbox Zero habits and cross-cutting workflows |
 | `mailbox-taxonomy/` | Folder strategy, noise diagnosis, `create_mailbox` after approval |
 | `email-archive-cleanup/` | Staged archive / bulk move / trash with dry runs and exports |
+| `apple-mail-archive-export/` | Whole-account local recovery, attachment verification, and searchable archives |
 | `mail-rules-advisor/` | Mail filter / rule **proposals only** (no rule-creation MCP tool) |
 | `email-drafting/` | Compose, reply, forward, rich/HTML drafts (`body_html`, focused paste, subject restore); respects `--draft-safe` |
 | `email-style-profile/` | Learn writing voice from Sent mail + `USER_EMAIL_PREFERENCES` |
@@ -55,7 +56,8 @@ Already-replied safeguard: canonical rules in [`references/pre-draft-verificatio
 | Quick what's-new scan | `inbox-triage` |
 | Ongoing zero-inbox program | `email-management` |
 | Folder ontology / naming | `mailbox-taxonomy` |
-| Bulk moves / trash / export | `email-archive-cleanup` |
+| Bulk moves / trash / backup before cleanup | `email-archive-cleanup` |
+| Whole-account backup, offline recovery, or archive search | `apple-mail-archive-export` |
 | Filter text for Mail UI | `mail-rules-advisor` |
 | Draft mail | `email-drafting` |
 | Match my tone | `email-style-profile` → `email-drafting` |

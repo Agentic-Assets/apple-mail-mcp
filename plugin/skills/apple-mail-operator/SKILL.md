@@ -21,6 +21,13 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 For a positional slice, use `export_emails(scope="entire_mailbox", account=..., mailbox=..., max_emails=5, offset=0)`. Run one batch at a time and verify the IDs and files on disk before continuing. On a timeout or partial result, reconcile what was written and retry unresolved IDs in smaller batches before advancing the offset. If the page's IDs are unknown, verify or retry the same slice first. For a changing mailbox, offsets can shift as messages arrive or move. Reconcile against a fixed inventory before reporting a complete archive. Increase the batch size only after several verified batches. The hard ceiling is 50 per call.
 
+EML export validates the outer MIME boundary before publishing. Mail gets one
+source re-read per flagged message within the call budget. A persistent failure
+leaves that ID pending. Native calendar records appear as `.ics`, with any Mail
+XML metadata in a separate `.ics.plist` companion. Include both files to
+reconstruct the returned source. For local archiving, verification, and
+full-text search, use the bundled `apple-mail-archive-export` workflow.
+
 When inventorying folders with `list_mailboxes(output_format="json")`, check `errors` and `truncated` before treating the list as complete. A bounded search page can still have unexamined mail. Follow `next_offset` with the same filters and check scan-ceiling warnings before reporting coverage.
 
 ## Before drafting

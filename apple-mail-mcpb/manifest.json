@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "Apple Mail MCP",
-  "version": "3.12.4",
+  "version": "3.12.5",
   "description": "Natural language interface for Apple Mail and Apple Calendar with 41 tools: email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, draft verification, attachments, Mail rules advising, bounded export, security-hardened destructive operations, bounded calendar reads, conflict-checked event creation, availability search, and gated calendar management. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
@@ -179,7 +179,7 @@
     },
     {
       "name": "export_emails",
-      "description": "Export TXT, HTML, or raw RFC 822 EML in batches capped at 50. Prefer exact message_ids for reviewed batches. entire_mailbox exports a bounded newest-first page, defaulting to five. Mailbox pages and exact-ID batches record planned IDs in plan.ids and report confirmed files and pending IDs on EXPORT_BATCH_TIMEOUT. EML attachment bundles have 25 MiB per-file and 100 MiB per-batch caps."
+      "description": "Export TXT, HTML, or raw RFC 822 EML in batches capped at 50. Prefer exact message_ids for reviewed batches. entire_mailbox exports a bounded newest-first page, defaulting to five. Mailbox pages and exact-ID batches record planned IDs in plan.ids and report confirmed files and pending IDs on EXPORT_BATCH_TIMEOUT. EML validates outer multipart framing and retries malformed source once. Native calendar data is saved as .ics with optional Mail metadata beside it. EML attachment bundles have 25 MiB per-file and 100 MiB per-batch caps."
     },
     {
       "name": "full_inbox_export",

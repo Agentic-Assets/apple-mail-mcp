@@ -79,7 +79,7 @@ marketplace clients: `apple-mail@agentic-assets`.
 
 #### Claude Code
 
-One install: MCP server (41 tools) and **eleven** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
+One install: MCP server (41 tools) and **twelve** bundled workflow skills under `plugin/skills/` (see table below). Workflow entry points are skills-only; the old `/email-management` slash command was retired to avoid duplicate skill/command exposure.
 
 ```bash
 claude plugin marketplace add Agentic-Assets/Agentic-Assets-Marketplace --scope user
@@ -446,9 +446,20 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Disabled: returns a structured `UNBOUNDED_EXPORT_DISABLED` error instead of walking the mailbox. Stays registered for compatibility; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`) instead. |
 
+EML export re-reads Mail source once when the declared outer MIME boundary is
+malformed. A source that still fails validation remains pending. Native
+calendar records export as `.ics`. Mail XML metadata, when present, lands in
+a separate `.ics.plist` companion before the calendar file is published.
+Both byte ranges can be recombined to reconstruct Mail's source.
+
+The bundled `apple-mail-archive-export` skill includes the local archive
+assembler, verifier, manifest index builder, and SQLite search commands. Build its
+rebuildable index from a verified archive to search decoded text and retrieve
+the original message or calendar file on disk.
+
 Mailbox pages and exact-ID batches write to a unique subdirectory at the reported `Location`. Its `plan.ids` file records the selected IDs and its final message files identify the IDs that reached disk. If the response is `EXPORT_BATCH_TIMEOUT`, recheck the checkpoint and retry any still-pending IDs in the same account and mailbox using `message_ids`. A missing plan means selection did not finish. Retry the same offset before advancing. Check optional attachment bundles separately after a timeout. Use a reviewed inventory of IDs when exporting a mailbox that can change between calls.
 
-For whole-account recovery from the files already cached on the Mac, repository users can follow the [Apple Mail archive export workflow](.agents/skills/apple-mail-archive-export/SKILL.md). It snapshots the selected local account, reconstructs available detached payloads, and compares decoded attachments with the snapshot. Report any missing content and the verification coverage. Mail that was never cached requires a reachable source.
+For whole-account recovery from the files already cached on the Mac, repository users can follow the [Apple Mail archive export workflow](plugin/skills/apple-mail-archive-export/SKILL.md). It snapshots the selected local account, reconstructs available detached payloads, and compares decoded attachments with the snapshot. Report any missing content and the verification coverage. Mail that was never cached requires a reachable source.
 
 ### Apple Calendar
 | Tool | Description |
@@ -671,6 +682,7 @@ Workflow skills ship with the Claude Code and Codex plugin installs and load aut
 | [`inbox-triage`](plugin/skills/inbox-triage/) | 5–10 min read-first scan (needs-response, awaiting-reply) |
 | [`email-management`](plugin/skills/email-management/) | Sustained Inbox Zero habits and cross-cutting programs |
 | [`mailbox-taxonomy`](plugin/skills/mailbox-taxonomy/) | Folder strategy, noise diagnosis, structural `create_mailbox` |
+| [`apple-mail-archive-export`](plugin/skills/apple-mail-archive-export/) | Verified local mail archives, attachment recovery, and SQLite full-text search |
 | [`email-archive-cleanup`](plugin/skills/email-archive-cleanup/) | Staged archive / bulk move / trash with dry runs + exports |
 | [`mail-rules-advisor`](plugin/skills/mail-rules-advisor/) | Mail filter / rule proposals (manual apply in Mail.app) |
 | [`email-drafting`](plugin/skills/email-drafting/) | Compose, reply, forward, rich drafts (`--draft-safe` aware) |

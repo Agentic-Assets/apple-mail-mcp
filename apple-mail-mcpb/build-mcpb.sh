@@ -74,7 +74,7 @@ chmod +x "${BUILD_DIR}/start_mcp.sh"
 echo -e "\n${YELLOW}Step 5: Copying Claude Code workflow skills...${NC}"
 if [ -d "${SOURCE_DIR}/skills" ]; then
   mkdir -p "${BUILD_DIR}/skills"
-  cp -a "${SOURCE_DIR}/skills/." "${BUILD_DIR}/skills/"
+  rsync -a --exclude '__pycache__/' --exclude '*.pyc' "${SOURCE_DIR}/skills/" "${BUILD_DIR}/skills/"
   SKILL_MD_COUNT="$(find "${BUILD_DIR}/skills" -name "SKILL.md" | wc -l | tr -d ' ')"
   echo -e "  ${GREEN}✓${NC} skills/ mirrored (${SKILL_MD_COUNT} SKILL.md files)"
 else

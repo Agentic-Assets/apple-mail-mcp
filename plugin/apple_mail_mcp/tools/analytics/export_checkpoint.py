@@ -1,11 +1,13 @@
 """On-disk receipts for bounded mailbox and exact-id exports."""
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from shlex import quote
 from uuid import uuid4
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
-from apple_mail_mcp.core import normalize_message_ids
+from apple_mail_mcp.core import escape_applescript, normalize_message_ids
 
 # AppleScript renders large integers in scientific notation when coerced
 # to text. Keep plan and filename IDs in the same decimal form as selectors.
@@ -39,14 +41,17 @@ class ExportCheckpoint:
 
     def _completed(self, planned: list[str]) -> dict[str, Path]:
         completed: dict[str, Path] = {}
+        suffixes = (".eml", ".ics") if self.format == "eml" else (f".{self.format}",)
         try:
             for entry in self.path.iterdir():
                 message_id = entry.name.partition("_")[0]
                 if message_id not in planned:
                     continue
-                output = entry / "message.eml" if self.include_attachments else entry
-                if output.suffix == f".{self.format}" and output.is_file() and output.stat().st_size:
-                    completed[message_id] = output
+                outputs = (entry / f"message{suffix}" for suffix in suffixes) if self.include_attachments else (entry,)
+                for output in outputs:
+                    if output.suffix in suffixes and output.is_file() and output.stat().st_size:
+                        completed[message_id] = output
+                        break
         except OSError:
             pass  # Keep verified entries, leaving unreadable entries pending.
         return completed
@@ -109,18 +114,50 @@ def record_plan_script(ids_var: str) -> str:
                 do shell script "/usr/bin/printf %s " & quoted form of planText & " > " & quoted form of planStaging & " && /bin/mv -f " & quoted form of planStaging & " " & quoted form of planPath"""
 
 
-def atomic_export_write_script(*, shared_directory: bool = False) -> str:
+def atomic_export_write_script(safe_format: str, *, shared_directory: bool = False) -> str:
     staging_name = f".message-{uuid4().hex}.partial" if shared_directory else "message.partial"
     publish_command = '"/bin/mv -f "'
     if shared_directory:
         # A pre-existing directory at the published path must not absorb the
         # staging file and make mv report a successful message export.
         publish_command = '"/bin/test ! -d " & quoted form of filePath & " && /bin/mv -f "'
-    return f"""if exportContent is missing value or exportContent is "" then error "Mail returned no message source"
-                set stagingPath to exportDir & "/{staging_name}"
+    stage_source = """if exportContent is missing value or exportContent is "" then error "Mail returned no message source"
                 set fileRef to open for access POSIX file stagingPath with write permission
                 set eof of fileRef to 0
                 write exportContent to fileRef as «class utf8»
                 close access fileRef
-                set fileRef to missing value
-                do shell script {publish_command} & quoted form of stagingPath & " " & quoted form of filePath"""
+                set fileRef to missing value"""
+    stage = f'set stagingPath to exportDir & "/{staging_name}"\n                {stage_source}'
+    publish = f'do shell script {publish_command} & quoted form of stagingPath & " " & quoted form of filePath'
+    if safe_format != "eml":
+        return f"{stage}\n                {publish}"
+
+    validator = Path(__file__).with_name("export_source.py")
+    command = escape_applescript(f"{quote(sys.executable)} -S {quote(str(validator))} ")
+    inspect_source = f'do shell script "{command}" & quoted form of stagingPath'
+    return f"""set isNativeCalendar to false
+                {stage}
+                set sourceDisposition to {inspect_source}
+                if sourceDisposition is "retry" then
+                    set exportContent to source of aMessage
+                    {stage_source}
+                    set sourceDisposition to {inspect_source}
+                end if
+                if sourceDisposition is "calendar" or sourceDisposition is "calendar-with-metadata" then
+                    set isNativeCalendar to true
+                    set filePath to (text 1 thru -5 of filePath) & ".ics"
+                    set calendarPath to quoted form of filePath
+                    set metadataPath to quoted form of (filePath & ".plist")
+                    set metadataStage to quoted form of (stagingPath & ".plist")
+                    set calendarCommand to "/bin/test ! -e " & calendarPath & " && /bin/test ! -L " & calendarPath & " && /bin/test ! -L " & metadataPath
+                    if sourceDisposition is "calendar-with-metadata" then
+                        set calendarCommand to calendarCommand & " && /bin/test ! -d " & metadataPath & " && (/bin/ln -h " & metadataStage & " " & metadataPath & " 2>/dev/null || (/bin/test -f " & metadataPath & " && /usr/bin/cmp -s " & metadataStage & " " & metadataPath & "))"
+                    else
+                        set calendarCommand to calendarCommand & " && /bin/test ! -e " & metadataPath
+                    end if
+                    do shell script calendarCommand & " && /bin/ln -h " & quoted form of stagingPath & " " & calendarPath & " && /bin/rm -f " & quoted form of stagingPath & " " & metadataStage
+                else if sourceDisposition is "eml" then
+                    {publish}
+                else
+                    error "Mail returned malformed multipart MIME after one source retry"
+                end if"""

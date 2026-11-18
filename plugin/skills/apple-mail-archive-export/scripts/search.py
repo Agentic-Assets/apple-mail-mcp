@@ -3,9 +3,9 @@
 Search an exported mail archive.
 
   ./search.py --archive ARCHIVE/10-export --stats
-  ./search.py --archive ARCHIVE/10-export gilcrease
-  ./search.py --archive ARCHIVE/10-export "tenure AND review"
-  ./search.py --archive ARCHIVE/10-export --from meagan --mailbox "Sent Items"
+  ./search.py --archive ARCHIVE/10-export invoice
+  ./search.py --archive ARCHIVE/10-export "budget AND renewal"
+  ./search.py --archive ARCHIVE/10-export --from sender@example.com --mailbox "Sent Items"
   ./search.py --archive ARCHIVE/10-export --year 2024 --has-attachment tax
   ./search.py --archive ARCHIVE/10-export --open 3
 
@@ -42,6 +42,10 @@ def resolve_archive(arg: str | None) -> Path:
     raise SystemExit(2)
 
 
+def has_table(db: sqlite3.Connection, name: str) -> bool:
+    return db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)).fetchone() is not None
+
+
 def run_query(db: sqlite3.Connection, archive: Path, args) -> None:
     where, params = [], []
 
@@ -52,7 +56,10 @@ def run_query(db: sqlite3.Connection, archive: Path, args) -> None:
         where.append("m.from_addr LIKE ?")
         params.append(f"%{args.sender}%")
     if args.mailbox:
-        where.append("m.mailbox LIKE ?")
+        if has_table(db, "message_mailboxes"):
+            where.append("m.id IN (SELECT message_rowid FROM message_mailboxes WHERE mailbox LIKE ?)")
+        else:
+            where.append("m.mailbox LIKE ?")
         params.append(f"%{args.mailbox}%")
     if args.year:
         where.append("m.date_sent LIKE ?")
@@ -96,12 +103,19 @@ def show_stats(db: sqlite3.Connection) -> None:
     g = lambda s: db.execute(s).fetchone()[0]  # noqa: E731
     lo = g("SELECT min(date_sent) FROM messages WHERE date_epoch IS NOT NULL") or "?"
     hi = g("SELECT max(date_sent) FROM messages WHERE date_epoch IS NOT NULL") or "?"
+    mailbox_table = "message_mailboxes" if has_table(db, "message_mailboxes") else "messages"
+    if has_table(db, "archive_records"):
+        calendar = g("SELECT count(*) FROM archive_records WHERE source_format = 'ics'")
+        unknown = g("SELECT count(*) FROM messages WHERE read IS NULL")
+        record_label, detail = "records", f"\n  calendar records  {calendar:,}\n  read state unknown {unknown:,}"
+    else:
+        record_label, detail = "messages", ""
     print(f"""
   Mail archive
   ------------
-  messages          {g('SELECT count(*) FROM messages'):,}
+  {record_label:<18}{g('SELECT count(*) FROM messages'):,}{detail}
   unique message-id {g("SELECT count(DISTINCT message_id) FROM messages WHERE message_id!=''"):,}
-  mailboxes         {g('SELECT count(DISTINCT mailbox) FROM messages'):,}
+  mailboxes         {g(f'SELECT count(DISTINCT mailbox) FROM {mailbox_table}'):,}
   with attachments  {g('SELECT count(*) FROM messages WHERE n_attachments>0'):,}
   attachments       {g('SELECT COALESCE(sum(n_attachments),0) FROM messages'):,}
   date range        {lo[:10]} .. {hi[:10]}
@@ -109,7 +123,7 @@ def show_stats(db: sqlite3.Connection) -> None:
   flagged           {g('SELECT count(*) FROM messages WHERE flagged=1'):,}
 """)
     print("  top folders")
-    for mb, n in db.execute("SELECT mailbox, count(*) c FROM messages "
+    for mb, n in db.execute(f"SELECT mailbox, count(*) c FROM {mailbox_table} "
                             "GROUP BY mailbox ORDER BY c DESC LIMIT 10"):
         print(f"    {n:>7,}  {mb}")
     print("\n  top correspondents")
@@ -141,7 +155,7 @@ def main() -> int:
     if not db_path.exists():
         print(f"index not found: {db_path}", file=sys.stderr)
         return 2
-    db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    db = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
 
     if args.stats:
         show_stats(db)
