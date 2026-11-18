@@ -15,6 +15,7 @@ from apple_mail_mcp.core import (
     validate_save_path,
 )
 from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
+from apple_mail_mcp.tools.analytics.export_checkpoint import ExportCheckpoint
 
 _EXPORT_MAX_EMAILS_CAP = 50
 _ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
@@ -56,11 +57,13 @@ def export_emails(
     materialized. Page with ``offset`` or narrow with filters to export more
     than 50 messages.
 
-    **Exchange / Gmail cold-cache warning:** ``entire_mailbox`` reads
-    ``content of aMessage`` for every exported message. On an Exchange account
-    that has not recently synced, each body read can take 1-3 seconds. For
-    larger metadata-only walks, page with ``offset``/``max_emails`` across
-    several bounded calls instead of one large sweep.
+    On a cold Exchange or Gmail cache, EML source and rendered TXT/HTML reads
+    can require downloads. Run one batch at a time, starting at five messages.
+    Each mailbox or exact-id batch records its planned IDs in ``plan.ids``
+    and publishes files after they have been written and closed. On
+    ``EXPORT_BATCH_TIMEOUT``, use the completed paths and retry pending IDs
+    in the same mailbox before advancing. Pin a reviewed ID inventory for
+    export across a changing mailbox because offsets are positional.
 
     Args:
         account: Account name (e.g., "Gmail", "Work"). Falls back to
@@ -82,7 +85,8 @@ def export_emails(
         format: Export format: "txt", "html", or raw RFC 822 "eml"
             (default: "txt"). EML preserves Mail's source headers and MIME
             structure for import into other mail clients.
-        max_emails: Maximum number of emails to export. Defaults to 25;
+        max_emails: Maximum number of emails to export. Defaults to 5 for
+            entire_mailbox and 25 for filtered, correspondent and thread;
             hard-capped at 50 for every scope (export runs in small bounded
             batches by design). Page with ``offset`` or narrow with filters
             to export more; full-mailbox scans are disabled, so large
@@ -100,8 +104,8 @@ def export_emails(
         recent_days: Bounded discovery window for filtered and thread exports.
         include_sent: Include Sent in thread exports when true.
         include_attachments: For EML exports, also save each message's
-            attachments to ``{index}_{subject}/attachments/`` beside
-            ``message.eml``. Each attachment is capped at 25 MiB and the
+            attachments to ``{message_id}_{subject}/attachments/`` beside
+            ``message.eml``. Each attachment is capped at 25 MiB and
             each bounded Mail export batch at 100 MiB; larger files are
             skipped and reported.
             Attachment reads can be slow on cold Exchange/Gmail caches; use a
@@ -122,6 +126,7 @@ def export_emails(
         attachment_bundle_save_block,
         attachment_bundle_setup_block,
         export_content_block,
+        export_text_fields_block,
         mailbox_lookup_block,
         normalize_export_format,
         sanitize_delimiter_block,
@@ -171,11 +176,8 @@ def export_emails(
     if path_err:
         return path_err
 
-    # Every scope shares the same default and is hard-capped at
-    # _EXPORT_MAX_EMAILS_CAP (see validation above), so there is no longer a
-    # separate large-export performance-warning path.
     if max_emails is None:
-        max_emails = 25
+        max_emails = 5 if scope == "entire_mailbox" else 25
 
     save_dir = str(Path(save_directory).expanduser().resolve())
 
@@ -187,11 +189,14 @@ def export_emails(
     if message_ids is not None:
         if len(message_ids) > _EXPORT_MAX_EMAILS_CAP:
             return f"Error: message_ids is limited to {_EXPORT_MAX_EMAILS_CAP} per call; split into smaller batches."
+        if path_err := validate_save_path(str(Path(save_dir) / "message_id_export")):
+            return path_err
         return run_message_id_export(
             account=account,
             safe_account=safe_account,
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
+            save_dir=save_dir,
             ids_by_mailbox={mailbox: message_ids},
             include_attachments=include_attachments,
             max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
@@ -240,9 +245,7 @@ def export_emails(
                 if foundMessage is not missing value then
                     set aMessage to foundMessage
                     set messageSubject to subject of foundMessage
-                    set messageSender to sender of foundMessage
-                    set messageDate to date received of foundMessage
-                    set messageContent to content of foundMessage
+                    {export_text_fields_block(safe_format)}
 
                     -- Create safe filename
                     set safeSubject to messageSubject
@@ -325,19 +328,22 @@ def export_emails(
         if not records:
             return "No emails found for filtered export"
 
-        result = run_message_id_export(
+        if path_err := validate_save_path(str(Path(save_dir) / "message_id_export")):
+            return path_err
+        return run_message_id_export(
             account=account,
             safe_account=safe_account,
             safe_format=safe_format,
             safe_save_dir=safe_save_dir,
+            save_dir=save_dir,
             ids_by_mailbox=message_ids_by_mailbox(records, default_mailbox=mailbox),
             include_attachments=include_attachments,
             max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
             max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES,
             timeout=timeout,
             runner=analytics.run_applescript,
+            heading="FILTERED EXPORT\n\n",
         )
-        return "FILTERED EXPORT\n\n" + result
 
     elif scope == "correspondent":
         if not email_address:
@@ -485,6 +491,9 @@ def export_emails(
             date_filter += """
                             if messageDate > toDate then set shouldExport to false
             """
+        checkpoint = ExportCheckpoint(Path(save_dir) / f"{mailbox}_export", normalized_format, include_attachments)
+        if path_err := validate_save_path(str(checkpoint.directory)):
+            return path_err
         script = build_entire_mailbox_export_script(
             safe_account=safe_account,
             mailbox=mailbox,
@@ -495,10 +504,15 @@ def export_emails(
             sort=sort,
             date_setup=date_setup,
             date_filter=date_filter,
+            batch=checkpoint.batch,
             include_attachments=include_attachments,
             max_attachment_bytes=_ATTACHMENT_MAX_BYTES,
             max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES,
         )
+        try:
+            return analytics.run_applescript(script, timeout=timeout if timeout is not None else 120)
+        except AppleScriptTimeout:
+            return checkpoint.timeout_result(account=account, mailbox=mailbox, offset=offset)
 
     else:
         return f"Error: Invalid scope '{scope}'. Use: single_email, filtered, correspondent, thread, entire_mailbox"

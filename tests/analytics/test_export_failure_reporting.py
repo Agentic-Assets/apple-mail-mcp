@@ -148,11 +148,9 @@ def test_mailbox_export_reports_only_files_that_reached_disk(tmp_path):
     assert write_pos < counted_pos, "the honest count must be incremented after the write"
     assert close_pos < counted_pos, "the honest count must be incremented after the handle is closed"
 
-    # exportCount survives only as the filename index, which necessarily precedes
-    # the write because it names the file. It must not be what gets reported.
-    index_pos = _pos(script, "set exportCount to exportCount + 1")
-    assert index_pos < write_pos
-    assert 'set fileName to exportCount & "_" & messageSubject' in script
+    publish_pos = _pos(script, 'do shell script "/bin/mv -f " & quoted form of stagingPath')
+    assert close_pos < publish_pos < counted_pos
+    assert 'set fileName to (messageId as string) & "_" & messageSubject' in script
 
 
 @pytest.mark.parametrize("builder", [_exact_id_script, _multi_mailbox_script])
@@ -169,9 +167,7 @@ def test_correspondent_reports_written_count_not_attempted_count(tmp_path):
 
     assert 'set outputText to outputText & "Exported: " & writtenCount & return' in script
     assert '"Exported: " & totalExportCount' not in script
-    # totalExportCount still names the file and gates the page, so it still
-    # advances per attempt — it just is not what the caller is told.
-    assert 'set fileName to totalExportCount & "_" & mailboxName' in script
+    assert 'set fileName to (messageId as string) & "_" & mailboxName' in script
     assert "if totalExportCount >= 25 then exit repeat" in script
     # The per-mailbox line is a written count too, not an attempt count.
     assert _pos(script, "write exportContent to fileRef") < _pos(
@@ -187,7 +183,7 @@ def test_correspondent_reports_written_count_not_attempted_count(tmp_path):
 @pytest.mark.parametrize(
     "builder,id_expression",
     [
-        (_mailbox_script, "failedMessageId"),
+        (_mailbox_script, "messageId"),
         (_correspondent_script, "failedMessageId"),
         (_exact_id_script, "requestedIdText"),
         (_multi_mailbox_script, "requestedIdText"),

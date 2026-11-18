@@ -1,6 +1,6 @@
 ---
 name: apple-mail-operator
-description: This skill should be used when the user asks "how does this Mail MCP work", "which tool should I use", "why is Mail slow", "set up Mail for the assistant", "list my accounts/mailboxes", "find an email quickly", or needs safe read/search navigation in Apple Mail with the MCP. Uses list_accounts, list_mailboxes, get_inbox_overview, list_inbox_emails, search_emails, get_email_by_id, and get_email_thread. Do NOT use for sustained inbox-zero programs (see email-management), a 5–10 minute triage ritual (see inbox-triage), or drafting mail (see email-drafting).
+description: This skill should be used when the user asks "how does this Mail MCP work", "why is Mail slow", "set up Mail for the assistant", "list my accounts/mailboxes", "find an email quickly", or "export my mail in batches". Uses list_accounts, list_mailboxes, get_inbox_overview, search_emails, and export_emails. Do NOT use for sustained inbox-zero programs (see email-management), a 5–10 minute triage ritual (see inbox-triage), or drafting mail (see email-drafting).
 ---
 
 # Apple Mail Operator
@@ -15,9 +15,11 @@ See [`recent-first-triage.md`](references/recent-first-triage.md). When finding 
 
 See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical pre-flight checklist. On large **Exchange** accounts, also read [`exchange-account-patterns.md`](references/exchange-account-patterns.md).
 
-### `full_inbox_export` is disabled
+### Export in verified batches
 
-`full_inbox_export` returns a structured `UNBOUNDED_EXPORT_DISABLED` error and runs no AppleScript; it is never a usable full-inbox walk. For the rare full-inbox case (annual cleanup, full audit, compliance archive), page bounded calls instead: `export_emails(scope="entire_mailbox", mailbox=..., max_emails=50, offset=N)` advancing `offset` by 50 each call, or repeated `list_inbox_emails(max_emails=50)` / `search_emails(recent_days=..., limit=50, offset=N)` slices. For routine discovery, always pass a bounded `recent_days` / `max_emails` instead.
+`full_inbox_export` returns `UNBOUNDED_EXPORT_DISABLED`. For a live export, confirm the exact account and folder, choose a fresh local destination, and start with one batch of up to five messages. Prefer a saved list of reviewed `message_ids` from bounded discovery, grouped by mailbox. Use `format="eml"` to preserve the headers and MIME that Mail supplies.
+
+For a positional slice, use `export_emails(scope="entire_mailbox", account=..., mailbox=..., max_emails=5, offset=0)`. Run one batch at a time and verify the IDs and files on disk before continuing. On a timeout or partial result, reconcile what was written and retry unresolved IDs in smaller batches before advancing the offset. If the page's IDs are unknown, verify or retry the same slice first. For a changing mailbox, offsets can shift as messages arrive or move. Reconcile against a fixed inventory before reporting a complete archive. Increase the batch size only after several verified batches. The hard ceiling is 50 per call.
 
 ## Before drafting
 
@@ -31,6 +33,7 @@ If triage or search surfaced a `message_id` and the user wants a reply, load **`
 | "List accounts / aliases / folders" | Yes |
 | "How do I read or find a thread without moving mail?" | Yes |
 | Performance or timeout troubleshooting | Yes |
+| "Export my mail in batches" | Yes |
 | "Clean my inbox forever" / Inbox Zero program | No → `email-management` |
 | "Quick scan what needs reply today" | No → `inbox-triage` |
 | Draft or send a message | No → `email-drafting` |

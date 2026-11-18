@@ -442,9 +442,13 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows fan across 10 mailboxes, longer windows across 20, each capped at 50 messages |
-| `export_emails` | Export TXT, HTML, or raw RFC 822 EML by exact `message_ids`, single `message_id`, bounded sender/date filters, correspondent history, threads, or paged mailbox slices. Hard-capped at 50 emails per call (`max_emails` and `message_ids` length); page with `offset` or narrow with filters for more. Each entire-mailbox page is deterministically newest-first (received date, then numeric message id) and reports each exported `message_id` for safe follow-on reads or drafts. For `format="eml"`, `include_attachments=True` writes `{index}_{subject}/message.eml` plus `attachments/`; files over 25 MiB or above the 100 MiB bounded-batch cap are skipped. Attachment downloads can need a larger `timeout` on cold Exchange/Gmail caches. |
+| `export_emails` | Export TXT, HTML, or raw RFC 822 EML by exact IDs, bounded filters, correspondent, thread, or mailbox page. Mailbox pages default to five messages and sort by received date and Mail ID within each page. The hard cap is 50. Optional EML attachment bundles use `{message_id}_{subject}/message.eml` and `attachments/`, with a 25 MiB per-file cap and a 100 MiB per-batch cap. |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Disabled: returns a structured `UNBOUNDED_EXPORT_DISABLED` error instead of walking the mailbox. Stays registered for compatibility; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`) instead. |
+
+Mailbox pages and exact-ID batches write to a unique subdirectory at the reported `Location`. Its `plan.ids` file records the selected IDs and its final message files identify the IDs that reached disk. If the response is `EXPORT_BATCH_TIMEOUT`, recheck the checkpoint and retry any still-pending IDs in the same account and mailbox using `message_ids`. A missing plan means selection did not finish. Retry the same offset before advancing. Check optional attachment bundles separately after a timeout. Use a reviewed inventory of IDs when exporting a mailbox that can change between calls.
+
+For whole-account recovery from the files already cached on the Mac, repository users can follow the [Apple Mail archive export workflow](.agents/skills/apple-mail-archive-export/SKILL.md). It snapshots the selected local account, reconstructs available detached payloads, and compares decoded attachments with the snapshot. Report any missing content and the verification coverage. Mail that was never cached requires a reachable source.
 
 ### Apple Calendar
 | Tool | Description |
@@ -593,7 +597,7 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 | `move_email` | 50 | `max_moves` |
 | `update_email_status` | 10 | `max_updates` |
 | `manage_trash` | 5 | `max_deletes` |
-| `export_emails` | 25 default for every scope, including `entire_mailbox`; hard-capped at 50 (both `max_emails` and `message_ids` list length are rejected above 50) | `max_emails` (up to 50); page with `offset` or narrow with filters for more |
+| `export_emails` | 5 for `entire_mailbox`, 25 for filtered, correspondent and thread scopes, and a hard cap of 50 IDs per call | `max_emails` (up to 50), `offset` for positional pages, or reviewed `message_ids` |
 
 **Dry-run defaults:** `manage_trash` defaults to `dry_run=True` (safe preview — explicit override needed to act, especially for `action="delete_permanent"`). `move_email` and `update_email_status` default to `dry_run=False` (live) because their effects are reversible; pass `dry_run=True` to preview matches first.
 

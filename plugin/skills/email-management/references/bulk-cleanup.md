@@ -35,9 +35,11 @@ Raise these caps only after a confirming search shows the user exactly which mes
 
 ## Pre-Cleanup Backup
 
-Before deleting a large mailbox, export the relevant bounded slice: `export_emails(scope="entire_mailbox", mailbox="Archive/2023", max_emails=50, format="html")` (page with `offset` for more than one call's worth; `max_emails` is hard-capped at 50 per call). For a sender or person-specific cleanup, prefer `export_emails(scope="filtered", sender_domain="example.com", recent_days=30, max_emails=25)` or `export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)`. The user gets a local copy in case a permanent delete removes something important.
+Before deleting mail, export the exact IDs approved for deletion. Confirm the account, mailbox, and local destination, then call `export_emails(account="Work", mailbox="Archive/2023", message_ids=[...], format="eml")` with up to five reviewed IDs. Run each batch serially. Compare its reported IDs and files on disk with the target list before continuing. For a sender or correspondent cleanup, discover candidates with bounded searches, then pass their reviewed IDs to the same export path.
 
-For preservation or migration evidence, use reviewed exact ids (or one bounded page) with `format="eml"`; it preserves Mail's raw RFC 822 source headers and MIME. Add `include_attachments=True` only when the attachment bundle is needed: each file is capped at 25 MiB and each bounded export batch at 100 MiB, with skipped files reported. Attachment reads can be slow on cold Exchange or Gmail caches, so start with a small page and raise `timeout` from its 120-second default only when necessary.
+For a positional slice, start with `export_emails(scope="entire_mailbox", mailbox="Archive/2023", max_emails=5, offset=0, format="eml")`. After a timeout, use the checkpoint to reconcile files that landed and retry unresolved IDs in the same mailbox before advancing. If the tool could not capture the page IDs, verify or retry the same slice. A moving mailbox can shift offsets between calls, so retain and reconcile a fixed target list for a complete backup. Increase the batch size only after several verified batches, up to the 50-message ceiling.
+
+`format="eml"` preserves the RFC 822 source headers and MIME supplied by Mail. For a preservation export, first check a sample with a regular attachment, a calendar invite, or a forwarded email where available. Open the files and check the decoded payloads against known originals. Add `include_attachments=True` when separate attachment files are needed. Each file is capped at 25 MiB and each bounded export batch at 100 MiB, with skipped files reported. Attachment reads can be slow on cold Exchange or Gmail caches. Raise `timeout` from its 120-second default only when necessary.
 
 ## Common Cleanup Patterns
 
@@ -62,7 +64,7 @@ move_email(message_ids=[...], to_mailbox="Archive/2025")
 
 ### Empty a defunct project folder
 
-1. `export_emails(scope="entire_mailbox", mailbox="Projects/OldProject", max_emails=50, offset=0)` for the audit trail (page with `offset` if the mailbox holds more than 50 messages; `max_emails` is capped at 50 per call).
+1. Export the reviewed IDs in batches of up to five using `export_emails(mailbox="Projects/OldProject", message_ids=[...], format="eml")` and check each batch against the files on disk.
 2. `search_emails(mailbox="Projects/OldProject", ...)` → collect ids. (`list_inbox_emails` has no `mailbox` parameter; it only reads Inbox.)
 3. Preview with `manage_trash(action="move_to_trash", message_ids=[...], max_deletes=N)` in batches of ≤50, then repeat each call with `dry_run=False` to act. `max_deletes` defaults to **5**, so a batch larger than that needs an explicit cap or most of the ids are silently left behind.
 4. Verify, then preview with `manage_trash(action="empty_trash", confirm_empty=True)` and repeat with `dry_run=False` only after explicit user confirmation.

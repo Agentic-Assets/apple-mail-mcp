@@ -1,6 +1,7 @@
 """Shared helpers for bounded email export."""
 
 from collections.abc import Callable
+from pathlib import Path
 
 from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import iter_id_chunks
@@ -12,6 +13,13 @@ from apple_mail_mcp.tools.analytics.correspondent_matching import (
     correspondent_read_failure_count,
     correspondent_read_failure_init,
     correspondent_read_failure_report,
+)
+from apple_mail_mcp.tools.analytics.export_checkpoint import (
+    EXPORT_ID_TEXT_HANDLER,
+    ExportCheckpoint,
+    atomic_export_write_script,
+    checkpoint_script,
+    record_plan_script,
 )
 from apple_mail_mcp.tools.analytics.export_failure_reporting import (
     ID_EXPORT_RETRY_HINT,
@@ -28,6 +36,7 @@ from apple_mail_mcp.tools.analytics.export_formatting import (
     attachment_bundle_setup_block,
     deterministic_newest_first_block,
     export_content_block,
+    export_text_fields_block,
     mailbox_lookup_block,
     sanitize_delimiter_block,
 )
@@ -71,16 +80,18 @@ def build_exact_message_export_script(
     safe_format: str,
     safe_save_dir: str,
     message_ids: list[str],
+    batch: str = "batch",
     include_attachments: bool = False,
     max_attachment_bytes: int = 25 * 1024 * 1024,
     max_total_attachment_bytes: int = 100 * 1024 * 1024,
 ) -> str:
     requested_ids = ", ".join(message_ids)
+    planned_ids = "{" + ", ".join(f'"{message_id}"' for message_id in message_ids) + "}"
     return f'''
+            {EXPORT_ID_TEXT_HANDLER}
             tell application "Mail"
                 set outputText to "EXPORTING MESSAGES BY ID" & return & return
                 set requestedIds to {{{requested_ids}}}
-                set exportCount to 0
                 set exportAttachmentBytes to 0
                 {export_failure_init()}
 
@@ -90,9 +101,11 @@ def build_exact_message_export_script(
 
                     set exportDir to "{safe_save_dir}/message_id_export"
                     do shell script "mkdir -p " & quoted form of exportDir
+                    {checkpoint_script(batch)}
+                    {record_plan_script(planned_ids)}
 
                     repeat with requestedId in requestedIds
-                        set requestedIdText to requestedId as string
+                        set requestedIdText to my exportIdText(requestedId)
                         set matchedMessages to (every message of targetMailbox whose id is requestedId)
                         set foundMessage to missing value
                         if (count of matchedMessages) > 0 then
@@ -103,24 +116,18 @@ def build_exact_message_export_script(
                             try
                                 set aMessage to foundMessage
                                 set messageSubject to subject of foundMessage
-                                set messageSender to sender of foundMessage
-                                set messageDate to date received of foundMessage
-                                set messageContent to content of foundMessage
+                                {export_text_fields_block(safe_format)}
 
                                 set safeSubject to messageSubject
                                 {sanitize_delimiter_block("safeSubject")}
 
-                                set exportCount to exportCount + 1
-                                set fileName to exportCount & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
+                                set fileName to requestedIdText & "_" & safeSubject & ".{safe_format}"
                                 set filePath to exportDir & "/" & fileName
-                                {attachment_bundle_setup_block(include_attachments=include_attachments)}
+                                {attachment_bundle_setup_block(include_attachments=include_attachments, id_var="requestedIdText")}
 
                                 {export_content_block(safe_format)}
 
-                                set fileRef to open for access POSIX file filePath with write permission
-                                set eof of fileRef to 0
-                                write exportContent to fileRef as «class utf8»
-                                close access fileRef
+                                {atomic_export_write_script()}
                                 {export_write_recorded()}
                                 {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
@@ -155,6 +162,7 @@ def build_entire_mailbox_export_script(
     sort: str,
     date_setup: str,
     date_filter: str,
+    batch: str = "batch",
     include_attachments: bool = False,
     max_attachment_bytes: int = 25 * 1024 * 1024,
     max_total_attachment_bytes: int = 100 * 1024 * 1024,
@@ -173,6 +181,7 @@ def build_entire_mailbox_export_script(
     """
     safe_mailbox = escape_applescript(mailbox)
     return f'''
+    {EXPORT_ID_TEXT_HANDLER}
     tell application "Mail"
         set outputText to "EXPORTING MAILBOX" & return & return
         {date_setup}
@@ -186,14 +195,16 @@ def build_entire_mailbox_export_script(
             set pageStart to {offset} + 1
             set pageEnd to {offset} + {max_emails}
             if pageEnd > messageCount then set pageEnd to messageCount
-            set exportCount to 0
             set exportAttachmentBytes to 0
             {export_failure_init()}
 
             -- Create export directory
             set exportDir to "{safe_save_dir}/{safe_mailbox}_export"
             do shell script "mkdir -p " & quoted form of exportDir
+            {checkpoint_script(batch)}
 
+            set plannedMessages to {{}}
+            set plannedIds to {{}}
             if pageStart <= messageCount and pageStart <= pageEnd then
                 set pageMessages to messages pageStart thru pageEnd of targetMailbox
                 -- ``newest_first`` and compatibility alias ``date_desc`` are
@@ -203,42 +214,39 @@ def build_entire_mailbox_export_script(
                 end if
 
                 repeat with aMessage in pageMessages
-                    try
-                        set messageDate to date received of aMessage
-                        set shouldExport to true
-                        {date_filter}
-                        if shouldExport then
-                            set messageSubject to subject of aMessage
-                            set messageSender to sender of aMessage
-                            set messageContent to content of aMessage
-                            set messageId to id of aMessage
-
-                            -- Create safe filename with index
-                            set exportCount to exportCount + 1
-                            set fileName to exportCount & "_" & messageSubject & ".{safe_format}"
-
-                            -- Remove unsafe characters
-                            {sanitize_delimiter_block("fileName")}
-
-                            set filePath to exportDir & "/" & fileName
-                            {attachment_bundle_setup_block(include_attachments=include_attachments)}
-
-                            {export_content_block(safe_format)}
-
-                            -- Write to file
-                            set fileRef to open for access POSIX file filePath with write permission
-                            set eof of fileRef to 0
-                            write exportContent to fileRef as «class utf8»
-                            close access fileRef
-                            {export_write_recorded()}
-                            {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
-                            set outputText to outputText & "Exported message_id: " & (messageId as string) & return
-                        end if
-
-                    {export_failure_arm()}
-                    end try
+                    set messageDate to date received of aMessage
+                    set shouldExport to true
+                    {date_filter}
+                    if shouldExport then
+                        set messageId to my exportIdText(id of aMessage)
+                        set end of plannedIds to messageId
+                        set end of plannedMessages to {{contents of aMessage, messageId, messageDate}}
+                    end if
                 end repeat
             end if
+            {record_plan_script("plannedIds")}
+
+            repeat with plannedMessage in plannedMessages
+                set aMessage to item 1 of plannedMessage
+                set messageId to item 2 of plannedMessage
+                set messageDate to item 3 of plannedMessage
+                try
+                    set messageSubject to subject of aMessage
+                    {export_text_fields_block(safe_format, date_preloaded=True)}
+
+                    set fileName to (messageId as string) & "_" & messageSubject & ".{safe_format}"
+                    {sanitize_delimiter_block("fileName")}
+                    set filePath to exportDir & "/" & fileName
+                    {attachment_bundle_setup_block(include_attachments=include_attachments, id_var="messageId")}
+
+                    {export_content_block(safe_format)}
+                    {atomic_export_write_script()}
+                    {export_write_recorded()}
+                    {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
+                    set outputText to outputText & "Exported message_id: " & (messageId as string) & return
+                {export_failure_arm(id_var="messageId")}
+                end try
+            end repeat
 
             {export_result_banner(ok_text="✓ Mailbox exported successfully!", warn_text="⚠ Mailbox exported with errors")}
             set outputText to outputText & "Mailbox: {safe_mailbox}" & return
@@ -331,17 +339,15 @@ def build_multi_mailbox_id_export_script(
                     try
                         set aMessage to foundMessage
                         set messageSubject to subject of foundMessage
-                        set messageSender to sender of foundMessage
-                        set messageDate to date received of foundMessage
-                        set messageContent to content of foundMessage
+                        {export_text_fields_block(safe_format)}
 
                         set safeSubject to messageSubject
                         {sanitize_delimiter_block("safeSubject")}
 
                         set exportCount to exportCount + 1
-                        set fileName to exportCount & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
+                        set fileName to (exportCount as string) & "_" & requestedIdText & "_" & safeSubject & ".{safe_format}"
                         set filePath to exportDir & "/" & fileName
-                        {attachment_bundle_setup_block(include_attachments=include_attachments)}
+                        {attachment_bundle_setup_block(include_attachments=include_attachments, id_var="requestedIdText")}
 
                         {export_content_block(safe_format)}
 
@@ -485,14 +491,14 @@ def build_correspondent_export_script(
                                 if globalMatchedCount > {offset} then
                                     set exportAttempted to true
                                     set messageSubject to subject of aMessage
-                                    set messageSender to sender of aMessage
-                                    set messageContent to content of aMessage
+                                    {export_text_fields_block(safe_format, date_preloaded=True)}
 
                                     set totalExportCount to totalExportCount + 1
-                                    set fileName to totalExportCount & "_" & mailboxName & "_" & messageSubject & ".{safe_format}"
+                                    set messageId to id of aMessage
+                                    set fileName to (messageId as string) & "_" & mailboxName & "_" & messageSubject & ".{safe_format}"
                                     {sanitize_delimiter_block("fileName")}
                                     set filePath to exportDir & "/" & fileName
-                                    {attachment_bundle_setup_block(include_attachments=include_attachments)}
+                                    {attachment_bundle_setup_block(include_attachments=include_attachments, id_var="messageId")}
 
                                     {export_content_block(safe_format, include_mailbox=True)}
 
@@ -531,39 +537,47 @@ def run_message_id_export(
     safe_account: str,
     safe_format: str,
     safe_save_dir: str,
+    save_dir: str,
     ids_by_mailbox: dict[str, list[str]],
     include_attachments: bool,
     max_attachment_bytes: int,
     max_total_attachment_bytes: int,
     timeout: int | None,
     runner: Callable[[str, int | None], str] = run_applescript,
+    heading: str = "",
 ) -> str:
     chunk_results: list[str] = []
     invalid_ids: list[str] = []
+    batches: list[tuple[str, list[str]]] = []
     for mailbox_name, ids in ids_by_mailbox.items():
         raw_ids = [str(value).strip() for value in ids if str(value).strip()]
-        normalized_ids = normalize_message_ids(raw_ids)
+        normalized_ids = [str(int(value)) for value in normalize_message_ids(raw_ids)]
         invalid_ids.extend(value for value in raw_ids if not value.isdigit())
-        if not normalized_ids:
-            continue
-        for chunk in iter_id_chunks(normalized_ids):
-            script = build_exact_message_export_script(
-                safe_account=safe_account,
-                mailbox=mailbox_name,
-                safe_format=safe_format,
-                safe_save_dir=safe_save_dir,
-                message_ids=chunk,
-                include_attachments=include_attachments,
-                max_attachment_bytes=max_attachment_bytes,
-                max_total_attachment_bytes=max_total_attachment_bytes,
+        batches.extend((mailbox_name, chunk) for chunk in iter_id_chunks(normalized_ids))
+    for batch_index, (mailbox_name, chunk) in enumerate(batches):
+        checkpoint = ExportCheckpoint(
+            Path(save_dir) / "message_id_export", safe_format, include_attachments, requested_ids=chunk
+        )
+        script = build_exact_message_export_script(
+            safe_account=safe_account,
+            mailbox=mailbox_name,
+            safe_format=safe_format,
+            safe_save_dir=safe_save_dir,
+            message_ids=chunk,
+            batch=checkpoint.batch,
+            include_attachments=include_attachments,
+            max_attachment_bytes=max_attachment_bytes,
+            max_total_attachment_bytes=max_total_attachment_bytes,
+        )
+        try:
+            chunk_results.append(runner(script, timeout if timeout is not None else 120))
+        except AppleScriptTimeout:
+            return checkpoint.timeout_result(
+                account=account, mailbox=mailbox_name, prior_batches=chunk_results, unstarted=batches[batch_index + 1 :]
             )
-            try:
-                chunk_results.append(runner(script, timeout if timeout is not None else 120))
-            except AppleScriptTimeout:
-                return f"Error: AppleScript timed out while exporting message_ids for '{account}'"
 
     if invalid_ids and chunk_results:
         chunk_results.append(f"Ignored invalid message_ids: {', '.join(invalid_ids)}")
     if not chunk_results:
-        return "Error: 'message_ids' must contain one or more numeric Mail ids"
-    return "\n\n".join(chunk_results)
+        return heading + "Error: 'message_ids' must contain one or more numeric Mail ids"
+    return heading + "\n\n".join(chunk_results)

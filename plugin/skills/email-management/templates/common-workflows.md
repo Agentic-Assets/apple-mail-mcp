@@ -568,15 +568,14 @@ search_emails(
     max_results=50
 )
 
-# 2. Export important ones first (if needed; max_emails is capped at 50 per
-#    call, page with offset for a mailbox with more than 50 messages)
+# 2. If backup is needed, export the reviewed IDs in batches of up to five.
+#    Reconcile each batch against the saved files before moving on.
 export_emails(
     account="Work",
-    scope="entire_mailbox",
     mailbox="INBOX",
+    message_ids=["<reviewed-message-id-1>", "<reviewed-message-id-2>"],
     save_directory="~/Documents/Email-Backup",
-    format="txt",
-    max_emails=50,
+    format="eml",
 )
 
 # 3. Move reviewed ids to archive or delete
@@ -600,14 +599,14 @@ search_emails(
     max_results=20
 )
 
-# 2. Export if anything important (max_emails is capped at 50 per call; page
-#    with offset for more than 50 messages)
+# 2. Export important reviewed IDs in batches of up to five and verify each
+#    file before previewing the empty. Cover all messages that need a backup.
 export_emails(
     account="Work",
-    scope="entire_mailbox",
     mailbox="Trash",
+    message_ids=["<reviewed-trash-message-id>"],
     save_directory="~/Desktop/Trash-Backup",
-    max_emails=50,
+    format="eml",
 )
 
 # 3. Preview the empty (dry_run defaults to True, so nothing is deleted yet)
@@ -863,19 +862,19 @@ search_emails(
     max_results=20
 )
 
-# 2. Export a bounded mailbox page (max_emails is capped at 50 per call;
-#    page with offset for a mailbox with more than 50 messages)
+# 2. Export the first bounded mailbox page
 export_emails(
     account="Work",
     scope="entire_mailbox",
     mailbox="Important Project",
     save_directory="~/Documents/Email-Backups/Important-Project",
-    max_emails=50,
-    format="txt"
+    max_emails=5,
+    offset=0,
+    format="eml",
 )
 
-# 3. Verify export
-# (Check ~/Documents/Email-Backups/Important-Project directory)
+# 3. Verify the files and resolve any incomplete IDs before the next call.
+#    Keep a fixed list of target IDs if you need to prove complete coverage.
 ```
 
 ### Export Single Important Email
@@ -1025,7 +1024,7 @@ update_email_status(action="flag", message_ids=["<id>"], mailbox="INBOX", max_up
 # Cleanup operations
 manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10)  # previews
 manage_trash(action="move_to_trash", message_ids=["<id>"], mailbox="INBOX", max_deletes=10, dry_run=False)  # acts
-export_emails(scope="entire_mailbox", mailbox="...", max_emails=50, offset=N, ...)  # 50 is the per-call cap; page with offset
+export_emails(scope="entire_mailbox", mailbox="...", max_emails=5, offset=0, ...)  # Verify before advancing
 export_emails(scope="correspondent", email_address="person@example.com", include_sent=True, recent_days=30, max_emails=25)
 ```
 

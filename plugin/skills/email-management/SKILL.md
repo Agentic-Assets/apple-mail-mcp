@@ -17,7 +17,7 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 ### `full_inbox_export` is disabled
 
-`full_inbox_export` returns a structured `UNBOUNDED_EXPORT_DISABLED` error and runs no AppleScript. For the rare full-inbox case (annual cleanup, complete audit, compliance archive, or pre-migration snapshot), page bounded `export_emails(scope="entire_mailbox", mailbox=..., max_emails=50, offset=N)` slices instead. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
+`full_inbox_export` returns `UNBOUNDED_EXPORT_DISABLED`. For a live backup, work one mailbox at a time and start with up to five messages per call. Prefer reviewed exact IDs, or use `export_emails(scope="entire_mailbox", mailbox=..., max_emails=5, offset=0)` for a positional slice. Verify the files before running the next call. For timeout recovery and how to verify a cleanup backup, see [Bulk cleanup](references/bulk-cleanup.md).
 
 ## Before drafting
 

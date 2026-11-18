@@ -179,7 +179,7 @@
     },
     {
       "name": "export_emails",
-      "description": "Export emails to txt, html, or raw RFC 822 eml, hard-capped at 50 emails per call. Prefer exact message_ids for reviewed batches (a message_ids list over 50 is rejected before Mail.app runs). single_email requires message_id; filtered, correspondent, and thread scopes discover bounded message ids first; correspondent includes Sent by default for back-and-forth history. entire_mailbox exports a bounded, deterministically newest-first page (default 25) from a mailbox and reports each exported message_id. EML can include attachments, with 25 MiB per-file and 100 MiB per-batch caps. Unsupported formats, including pdf, fail before Mail.app runs."
+      "description": "Export TXT, HTML, or raw RFC 822 EML in batches capped at 50. Prefer exact message_ids for reviewed batches. entire_mailbox exports a bounded newest-first page, defaulting to five. Mailbox pages and exact-ID batches record planned IDs in plan.ids and report confirmed files and pending IDs on EXPORT_BATCH_TIMEOUT. EML attachment bundles have 25 MiB per-file and 100 MiB per-batch caps."
     },
     {
       "name": "full_inbox_export",

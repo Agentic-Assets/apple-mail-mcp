@@ -29,6 +29,16 @@ def normalize_export_format(format_value: str) -> str:
     return normalized
 
 
+def export_text_fields_block(safe_format: str, *, date_preloaded: bool = False) -> str:
+    """Read the extra Mail properties needed to render TXT or HTML."""
+    if safe_format == "eml":
+        return ""
+    date_read = "" if date_preloaded else "set messageDate to date received of aMessage"
+    return f"""set messageSender to sender of aMessage
+                    {date_read}
+                    set messageContent to content of aMessage"""
+
+
 def export_content_block(safe_format: str, *, include_mailbox: bool = False) -> str:
     """Return the format-specific content assignment for an export message.
 
@@ -36,29 +46,30 @@ def export_content_block(safe_format: str, *, include_mailbox: bool = False) -> 
     than synthesizing headers from a few visible fields. That preserves the
     RFC 822 header block and MIME structure for downstream mail clients.
     """
-    mailbox_text = 'set exportContent to exportContent & "Mailbox: " & mailboxName & return' if include_mailbox else ""
+    if safe_format == "eml":
+        return "set exportContent to source of aMessage"
+    if safe_format == "txt":
+        mailbox_text = (
+            'set exportContent to exportContent & "Mailbox: " & mailboxName & return' if include_mailbox else ""
+        )
+        return f"""set exportContent to "Subject: " & messageSubject & return
+                    set exportContent to exportContent & "From: " & messageSender & return
+                    {mailbox_text}
+                    set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
+                    set exportContent to exportContent & messageContent"""
+
     mailbox_html = (
         'set exportContent to exportContent & "<p><strong>Mailbox:</strong> " & mailboxName & "</p>"'
         if include_mailbox
         else ""
     )
-    return f'''if "{safe_format}" is "txt" then
-                    set exportContent to "Subject: " & messageSubject & return
-                    set exportContent to exportContent & "From: " & messageSender & return
-                    {mailbox_text}
-                    set exportContent to exportContent & "Date: " & (messageDate as string) & return & return
-                    set exportContent to exportContent & messageContent
-                else if "{safe_format}" is "html" then
-                    set exportContent to "<html><body>"
+    return f'''set exportContent to "<html><body>"
                     set exportContent to exportContent & "<h2>" & messageSubject & "</h2>"
                     set exportContent to exportContent & "<p><strong>From:</strong> " & messageSender & "</p>"
                     {mailbox_html}
                     set exportContent to exportContent & "<p><strong>Date:</strong> " & (messageDate as string) & "</p>"
                     set exportContent to exportContent & "<hr>" & messageContent
-                    set exportContent to exportContent & "</body></html>"
-                else if "{safe_format}" is "eml" then
-                    set exportContent to source of aMessage
-                end if'''
+                    set exportContent to exportContent & "</body></html>"'''
 
 
 def sanitize_delimiter_block(var_name: str) -> str:
@@ -75,43 +86,51 @@ def deterministic_newest_first_block() -> str:
 
     Mail's list ordering is not an API contract. The insertion sort operates
     only on the already-bounded page (at most 50 messages), avoiding a full
-    mailbox materialization while giving equal-date records a stable tie-break.
+    mailbox materialization. Cache each sort key once to keep comparisons local.
     """
     return """-- Deterministic newest-first order within the bounded page.
-                set orderedPageMessages to {}
+                set orderedPageEntries to {}
                 repeat with candidateMessage in pageMessages
                     set candidateDate to date received of candidateMessage
                     set candidateId to id of candidateMessage
-                    set insertionIndex to (count of orderedPageMessages) + 1
-                    if (count of orderedPageMessages) > 0 then
-                        repeat with sortedIndex from 1 to (count of orderedPageMessages)
-                            set existingMessage to item sortedIndex of orderedPageMessages
-                            set existingDate to date received of existingMessage
-                            set existingId to id of existingMessage
-                            if candidateDate > existingDate or (candidateDate = existingDate and candidateId > existingId) then
-                                set insertionIndex to sortedIndex
-                                exit repeat
-                            end if
-                        end repeat
-                    end if
-                    if insertionIndex > (count of orderedPageMessages) then
-                        set end of orderedPageMessages to candidateMessage
+                    set candidateEntry to {candidateDate, candidateId, contents of candidateMessage}
+                    set entryCount to count of orderedPageEntries
+                    set insertionIndex to entryCount + 1
+                    repeat with sortedIndex from 1 to entryCount
+                        set existingEntry to item sortedIndex of orderedPageEntries
+                        set existingDate to item 1 of existingEntry
+                        set existingId to item 2 of existingEntry
+                        if candidateDate > existingDate or (candidateDate = existingDate and candidateId > existingId) then
+                            set insertionIndex to sortedIndex
+                            exit repeat
+                        end if
+                    end repeat
+                    if insertionIndex > entryCount then
+                        set end of orderedPageEntries to candidateEntry
+                    else if insertionIndex is 1 then
+                        set orderedPageEntries to {candidateEntry} & orderedPageEntries
                     else
-                        set item insertionIndex of orderedPageMessages to candidateMessage
+                        set leadingEntries to items 1 thru (insertionIndex - 1) of orderedPageEntries
+                        set trailingEntries to items insertionIndex thru entryCount of orderedPageEntries
+                        set orderedPageEntries to leadingEntries & {candidateEntry} & trailingEntries
                     end if
+                end repeat
+                set orderedPageMessages to {}
+                repeat with sortedEntry in orderedPageEntries
+                    set end of orderedPageMessages to item 3 of sortedEntry
                 end repeat
                 set pageMessages to orderedPageMessages"""
 
 
-def attachment_bundle_setup_block(*, include_attachments: bool) -> str:
+def attachment_bundle_setup_block(*, include_attachments: bool, id_var: str = "exportIdText") -> str:
     """Return per-message EML bundle setup when attachment extraction is on.
 
     The caller has already validated that this is an EML export. The resulting
-    layout is ``{index}_{subject}/message.eml`` with an ``attachments`` folder.
+    layout is ``{message_id}_{subject}/message.eml`` with an ``attachments`` folder.
     """
     if not include_attachments:
         return ""
-    return f'''set bundleName to exportCount & "_" & messageSubject
+    return f'''set bundleName to ({id_var} as string) & "_" & messageSubject
                 {sanitize_delimiter_block("bundleName")}
                 set bundleDir to exportDir & "/" & bundleName
                 set attachmentDir to bundleDir & "/attachments"

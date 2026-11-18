@@ -97,11 +97,8 @@ def _run_write_block(script: str, *, subject: str) -> str:
     end = script.index("close access fileRef") + len("close access fileRef")
     block = script[start:end]
 
-    # Safety property: no `tell application` block means no application can be
-    # dispatched to, so nothing here can reach Mail.app. The format branches for
-    # html/eml are present but unreachable for a txt export; `aMessage` is bound
-    # to `missing value` so a future edit that reaches one errors out loudly
-    # instead of quietly acquiring a Mail reference.
+    # TXT formatting uses preloaded data. This block can run without a Mail
+    # reference or a `tell application` block.
     assert "tell application" not in block, f"write block must be Mail-free, got: {block!r}"
 
     harness = "\n".join(
@@ -110,7 +107,6 @@ def _run_write_block(script: str, *, subject: str) -> str:
             'set messageSender to "sender@example.com"',
             'set messageDate to "2026-01-01"',
             'set messageContent to "synthetic body"',
-            "set aMessage to missing value",
             block,
             "return filePath",
         ]

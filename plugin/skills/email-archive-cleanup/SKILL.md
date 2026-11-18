@@ -41,7 +41,7 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 ### `full_inbox_export` is disabled
 
-`full_inbox_export` returns a structured `UNBOUNDED_EXPORT_DISABLED` error and is never the evidence step. For annual cleanups, full audits, or pre-migration snapshots, page bounded `export_emails(scope="entire_mailbox", mailbox=..., max_emails=50, offset=N)` slices instead (advance `offset` by 50 each call) before any irreversible `manage_trash(action="delete_permanent")`. For staged campaigns, keep using bounded `search_emails` + `message_ids=[...]`, `export_emails(scope="filtered", ...)`, or `export_emails(scope="correspondent", email_address=..., include_sent=True, ...)` flows.
+`full_inbox_export` returns `UNBOUNDED_EXPORT_DISABLED`. For a cleanup backup, collect reviewed IDs with bounded `search_emails`, then call `export_emails(message_ids=[...])` with up to five IDs from one mailbox to start. Run each batch serially and reconcile the files against the IDs before continuing. For a positional mailbox slice, start with `export_emails(scope="entire_mailbox", mailbox=..., max_emails=5, offset=0)` and resolve any incomplete batch before advancing.
 
 ## ID-first flow (mandatory for bulk moves, status, and trash)
 
@@ -81,11 +81,7 @@ Sequence:
 2. Optional analytics: `get_statistics(scope="sender_stats", sender="...")` or `scope="mailbox_breakdown"` for volume proof.
 3. When deletion risk looms: `export_emails(...)` snapshots before **`manage_trash`**. For preservation or migration evidence, use reviewed ids (or one bounded page) with `format="eml"` to preserve raw RFC 822 source headers and MIME. Use `include_attachments=True` only when required: each attachment is capped at 25 MiB and each batch at 100 MiB, skipped files are reported, and cold Exchange/Gmail caches may need a small page plus a higher `timeout` than the 120-second default.
 
-**An export banner is not proof the export was complete, and neither is the absence of a `PARTIAL:` line.** Only `scope="thread"` reconciles requested ids against written ones: it prints `PARTIAL: exported N of M thread message(s). Searched mailboxes: ...` whenever fewer messages were written than the thread reported, when the mailbox list was capped, or when `get_email_thread` itself reported the conversation may be missing members. `export_emails(message_ids=[...])` and `scope="filtered"` print `⚠ No email found for message_id N` for an id that resolved in no mailbox and emit **no** `PARTIAL:` line for it; `scope="entire_mailbox"` reports no completeness signal at all.
-
-So gate an irreversible step on the ids, not the banner: count the `✓ Exported message_id` lines against the ids you submitted, treat every `⚠ No email found for message_id` and every `PARTIAL:` line as a gap, name the missing count to the user, re-run against the mailbox that holds the rest, and do not proceed to `manage_trash(action="delete_permanent")` until the counts match.
-
-For an `entire_mailbox` page, there is nothing to reconcile against: use reviewed `message_ids` when the export has to be evidence for a delete.
+**Verify the backup against the exact IDs approved for deletion.** Check each ID against the export result and its file on disk. Treat missing IDs, timeouts, and `PARTIAL:` results as unresolved until verified. Retry only unresolved IDs, using the mailbox that holds them. Proceed to `manage_trash(action="delete_permanent")` only after the files cover the reviewed ID list. A verified positional page covers its own selection, which can shift across calls as messages arrive or move.
 
 For archive campaigns, apply the **Human-Sender Screen** (above) to the preview results now: drop any human-looking or ambiguous sender from the candidate list before it becomes an id to move. Always quote expected totals after dry runs.
 
