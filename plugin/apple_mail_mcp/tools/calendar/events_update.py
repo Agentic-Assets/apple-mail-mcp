@@ -175,7 +175,8 @@ def update_event(
         span: Required for recurring targets; only 'all_occurrences'.
         attendees: Attendee emails; diffed against the stored set.
         send_invitations: Must be True when the attendee set changes.
-        on_conflict: "warn" (default), "block", or "allow".
+        on_conflict: "warn" (default), "block", or "allow". A requested
+            conflict check must complete before the write.
         dry_run: Preview the diff without writing.
         output_format: "json" (default) or "text".
         timeout: Optional AppleScript timeout in seconds.

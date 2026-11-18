@@ -77,8 +77,10 @@ def delete_events(
     (its ``delete`` removes only the targeted occurrence and rule-clearing is
     ignored), so the tool verifies the series after deleting and returns
     ``RECURRING_DELETE_INCOMPLETE`` (with the surviving occurrence dates) when the
-    series is not fully gone; delete a whole series in Calendar.app for a reliable
-    removal. The write-side lookup for recurring targets is widened back by the
+    series is not fully gone. A failed verification returns
+    ``RECURRING_DELETE_VERIFICATION_INCOMPLETE`` with any removal receipts.
+    Delete a whole series in Calendar.app for a reliable removal. The write-side
+    lookup for recurring targets is widened back by the
     recurring lookback horizon (400 days) to locate the master; a series whose
     master started earlier returns ``EVENT_NOT_FOUND``, so widen ``days_back`` past
     the series start. Under
@@ -186,7 +188,9 @@ def delete_events(
                     "Recurring delete is best-effort: Calendar.app scripting removes only individual "
                     "occurrences, so the whole series may not be deleted. The tool verifies after "
                     "deleting and returns RECURRING_DELETE_INCOMPLETE (with the surviving occurrence "
-                    "dates) if any remain. To reliably remove a whole series, delete it in Calendar.app."
+                    "dates) if any remain. A failed verification returns "
+                    "RECURRING_DELETE_VERIFICATION_INCOMPLETE with removal receipts. "
+                    "To reliably remove a whole series, delete it in Calendar.app."
                     if recurring_targets
                     else None
                 ),
@@ -216,25 +220,46 @@ def delete_events(
             for row in chunk_deleted:
                 row["calendar_id"] = calendar_id
             delete_errors.extend(f"{calendar_id}: {err}" for err in chunk_errors)
-        # Verify-after-delete for recurring targets: Calendar.app scripting removes
-        # only the targeted occurrence, so re-query the series and never claim a
-        # whole-series delete the write did not achieve.
-        recurring_survivors: dict[str, list[str]] = {}
-        if recurring_targets:
-            recurring_survivors = surviving_recurring_occurrences(
-                engine=read_engine,
-                window=write_window,
-                calendar_ids=[str(scope["calendar_id"]) for scope in scopes],
-                calendar_selector_kinds=selector_kinds,
-                recurring_ids=recurring_targets,
-                timeout=timeout,
-            )
     except AppleScriptTimeout:
         return timeout_error("delete_events", timeout)
     except ToolError as exc:
         return error_json(exc)
     except Exception as exc:
         return f"Error: {exc}"
+
+    recurring_survivors: dict[str, list[str]] = {}
+    if recurring_targets:
+        recurring_calendar_ids = list(
+            dict.fromkeys(str(by_id[event_id]["calendar_id"]) for event_id in recurring_targets)
+        )
+        budget_exhausted = False
+        try:
+            recurring_survivors, verification_errors, budget_exhausted = surviving_recurring_occurrences(
+                engine=read_engine,
+                window=write_window,
+                calendar_ids=recurring_calendar_ids,
+                calendar_selector_kinds=selector_kinds,
+                recurring_ids=recurring_targets,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            # The write has already happened. Keep its receipts if verification raises.
+            verification_errors = [str(exc)]
+        if verification_errors or budget_exhausted:
+            return serialize_tool_error(
+                ToolError(
+                    code="RECURRING_DELETE_VERIFICATION_INCOMPLETE",
+                    message="The post-delete calendar read could not verify whole-series removal.",
+                    remediation={
+                        "occurrences_removed": deleted,
+                        "surviving_occurrences": recurring_survivors,
+                        "verification_errors": verification_errors,
+                        "budget_exhausted": budget_exhausted,
+                        "delete_errors": delete_errors,
+                        "lookup_errors": lookup_errors,
+                    },
+                )
+            )
 
     if recurring_survivors:
         return serialize_tool_error(

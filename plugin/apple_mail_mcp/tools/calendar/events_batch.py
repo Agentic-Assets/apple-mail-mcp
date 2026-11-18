@@ -132,7 +132,8 @@ def batch_create_events(
             calendar_id from list_calendars; a display name must be exact and
             unique. If omitted, DEFAULT_CALENDAR then the engine default apply.
         timezone: Batch default IANA zone; items may override.
-        on_conflict: "warn" (default), "block", or "allow".
+        on_conflict: "warn" (default), "block", or "allow". A requested
+            conflict check must complete before the write.
         dry_run: Validate and conflict-preview everything, write nothing.
         output_format: "json" (default) or "text".
         timeout: Optional AppleScript timeout in seconds per engine call.

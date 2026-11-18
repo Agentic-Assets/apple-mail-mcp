@@ -4,6 +4,9 @@ import json
 from datetime import datetime, timedelta
 
 import apple_mail_mcp.server as server
+import pytest
+from apple_mail_mcp.backend.base import ToolError
+from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools.calendar import delete_events
 
 from .conftest import HOST_TZ, FakeReadEngine, raw_event
@@ -183,6 +186,38 @@ class TestRecurringVerify:
         payload = _run(event_ids=["UID-R"], span="all_occurrences", dry_run=False)
         assert payload["recurring_deleted_whole_series"] is True
         assert payload["deleted_count"] >= 1
+
+    @pytest.mark.parametrize(
+        ("verification_failure", "diagnostic"),
+        [
+            ("row", "Unreadable event row"),
+            ("timeout", "timed out"),
+            ("dense", "Too many occurrences"),
+        ],
+    )
+    def test_unverified_series_delete_retains_removal_receipts(self, fake_engines, verification_failure, diagnostic):
+        class FailingVerification(FakeReadEngine):
+            def fetch_window(self, *args, **kwargs):
+                rows, errors = super().fetch_window(*args, **kwargs)
+                if len(self.fetch_calls) == 1:
+                    return rows, errors
+                if verification_failure == "timeout":
+                    raise AppleScriptTimeout("Synthetic timeout")
+                if verification_failure == "dense":
+                    raise ToolError(code="CALENDAR_WINDOW_TOO_DENSE", message=diagnostic)
+                return [], [diagnostic]
+
+        fake_engines(read=FailingVerification(events=self._recurring_events()))
+
+        payload = _run(event_ids=["UID-R"], span="all_occurrences", dry_run=False)
+
+        assert payload["code"] == "RECURRING_DELETE_VERIFICATION_INCOMPLETE"
+        assert payload.get("recurring_deleted_whole_series") is not True
+        remediation = payload["remediation"]
+        assert remediation["occurrences_removed"] == [
+            {"event_id": "UID-R", "title": "title-UID-R", "calendar_id": "UID-WORK"}
+        ]
+        assert any(diagnostic in error for error in remediation["verification_errors"])
 
 
 class TestTextOutput:

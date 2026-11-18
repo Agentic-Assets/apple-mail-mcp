@@ -87,7 +87,7 @@
     },
     {
       "name": "list_mailboxes",
-      "description": "List mailboxes (folders) for one account or all accounts, with optional message counts."
+      "description": "List mailbox hierarchies with optional message counts, per-account caps, and explicit partial-read errors."
     },
     {
       "name": "move_email",
@@ -131,7 +131,7 @@
     },
     {
       "name": "search_emails",
-      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 without date_from is rejected with UNBOUNDED_SCAN_REQUIRED; pass recent_days=7 or date_from='YYYY-MM-DD' (full-mailbox sweeps are disabled). all_accounts=True overrides default account. body_text requires allow_body_scan=True or returns BODY_SCAN_DISABLED. A single call scans at most 50 messages (hard ceiling) regardless of window, so it stays fast on large inboxes."
+      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 without date_from is rejected with UNBOUNDED_SCAN_REQUIRED; pass recent_days=7 or date_from='YYYY-MM-DD' (full-mailbox sweeps are disabled). all_accounts=True overrides default account. body_text requires allow_body_scan=True or returns BODY_SCAN_DISABLED. Each mailbox has a 50-message scan ceiling. Matches from multiple accounts or folders are merged before pagination."
     },
     {
       "name": "get_email_by_id",
@@ -211,7 +211,7 @@
     },
     {
       "name": "batch_create_events",
-      "description": "Create up to 25 one-off events on one calendar with all-or-nothing validation"
+      "description": "Create up to 25 one-off events on one calendar after validation and any requested conflict checks complete."
     },
     {
       "name": "update_event",

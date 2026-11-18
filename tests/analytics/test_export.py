@@ -187,7 +187,7 @@ def test_single_email_creates_save_directory_before_write():
     assert 'do shell script "mkdir -p " & quoted form of exportDir' in script
     # The mkdir must run before the file write, not after.
     mkdir_pos = script.find("mkdir -p")
-    write_pos = script.find("open for access POSIX file filePath with write permission")
+    write_pos = script.find("open for access POSIX file stagingPath with write permission")
     assert mkdir_pos != -1
     assert write_pos != -1
     assert mkdir_pos < write_pos

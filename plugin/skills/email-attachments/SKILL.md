@@ -70,6 +70,7 @@ Rules:
 
 - Path must reside under **`$HOME`** per server validation.
 - Prefer `attachment_index` from JSON listing. `attachment_name` is compatible but ambiguous duplicate matches return a structured error.
+- Treat a resolution or save error as a failed operation. Check the destination for partial output before retrying, and confirm the file exists before reporting success.
 
 ### 4. Integrity Pass
 
@@ -87,7 +88,7 @@ When attachments are **paper briefs** (R&R specs, reviewer packets), save under 
 
 | Issue | Guidance |
 |-------|----------|
-| Ambiguous filenames | Prefer exact match substrings surfaced by `list_email_attachments` |
+| Ambiguous filenames | Choose the row in JSON from `list_email_attachments`, then pass its message ID and attachment index |
 | Password-protected zips | Note inability to introspect payload |
 | Extremely large corp attachments | Mention Mail may choke; consider chunked manual download |
 | Listing came back empty | Not proof of "no attachments". Check `complete` / `unresolved_message_ids` (JSON) or the `PARTIAL: ⚠` lines (text), then retry naming the mailbox that holds the id **and** with a `max_results` at least as large as the id batch |

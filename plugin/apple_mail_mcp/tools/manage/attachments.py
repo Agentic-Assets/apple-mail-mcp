@@ -21,6 +21,29 @@ from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import manage
 from apple_mail_mcp.tools.manage.helpers import _check_message_ids_cap
 
+_AMBIGUOUS_SAVE = "ATTACHMENT_SAVE_SELECTOR_AMBIGUOUS"
+
+
+def _attachment_name_ambiguity_error(attachment_name: str, match_count: int | None = None) -> str:
+    remediation: dict[str, str | int] = {
+        "preferred": (
+            "Call list_email_attachments(message_ids=[...], output_format='json') and retry with "
+            "attachment_index for the chosen row."
+        ),
+        "exact_selector": "message_ids + attachment_index",
+    }
+    matches = "multiple"
+    if match_count is not None:
+        matches = str(match_count)
+        remediation["matches"] = match_count
+    return serialize_tool_error(
+        ToolError(
+            code="AMBIGUOUS_ATTACHMENT_SELECTOR",
+            message=f"Attachment name '{attachment_name}' matched {matches} attachments.",
+            remediation=remediation,
+        )
+    )
+
 
 @mcp.tool(annotations=WRITE_TOOL_ANNOTATIONS, title="Save Attachment")
 @inject_preferences
@@ -204,22 +227,7 @@ def save_email_attachment(
         _attachment_match_count = 0
 
     if not use_attachment_index and _attachment_match_count > 1:
-        err = ToolError(
-            code="AMBIGUOUS_ATTACHMENT_SELECTOR",
-            message=(
-                f"Attachment name '{attachment_name}' matched {_attachment_match_count} attachments. "
-                "Filename substring selection is ambiguous."
-            ),
-            remediation={
-                "preferred": (
-                    "Call list_email_attachments(message_ids=[...], output_format='json') and retry with "
-                    "attachment_index for the chosen row."
-                ),
-                "exact_selector": "message_ids + attachment_index",
-                "matches": _attachment_match_count,
-            },
-        )
-        return serialize_tool_error(err)
+        return _attachment_name_ambiguity_error(attachment_name, _attachment_match_count)
 
     if _attachment_size >= 0:
         if _attachment_size > max_size_bytes:
@@ -275,50 +283,47 @@ def save_email_attachment(
             set targetAccount to account "{escaped_account}"
             {inbox_mailbox_script("inboxMailbox", "targetAccount")}
             {message_filter_script}
-            set foundAttachment to false
+            set foundAttachment to missing value
 
             repeat with aMessage in inboxMessages
-                try
-                    set messageSubject to subject of aMessage
-                    set msgAttachments to mail attachments of aMessage
+                set msgAttachments to mail attachments of aMessage
+                set attachmentCount to count of msgAttachments
+                repeat with attachmentLoopIndex from 1 to attachmentCount
+                    set anAttachment to item attachmentLoopIndex of msgAttachments
+                    set attachmentFileName to name of anAttachment
+                    set attachmentMatches to false
+                    if {attachment_index_value} > 0 then
+                        if attachmentLoopIndex is {attachment_index_value} then set attachmentMatches to true
+                    else if attachmentFileName contains "{escaped_attachment}" then
+                        set attachmentMatches to true
+                    end if
 
-                    set attachmentCount to count of msgAttachments
-                    repeat with attachmentLoopIndex from 1 to attachmentCount
-                        set anAttachment to item attachmentLoopIndex of msgAttachments
-                        set attachmentFileName to name of anAttachment
-                        set attachmentMatches to false
-                        if {attachment_index_value} > 0 then
-                            if attachmentLoopIndex is {attachment_index_value} then set attachmentMatches to true
-                        else if attachmentFileName contains "{escaped_attachment}" then
-                            set attachmentMatches to true
-                        end if
-
-                        if attachmentMatches then
-                            -- Save the attachment
-                            save anAttachment in POSIX file "{escaped_path}"
-
-                            set outputText to "✓ Attachment saved successfully!" & return & return
-                            set outputText to outputText & "Email: " & messageSubject & return
-                            set outputText to outputText & "Attachment: " & attachmentFileName & return
-                            set outputText to outputText & "Saved to: {escaped_path}" & return
-
-                            set foundAttachment to true
-                            exit repeat
-                        end if
-                    end repeat
-
-                    if foundAttachment then exit repeat
-                end try
+                    if attachmentMatches then
+                        if foundAttachment is not missing value then return "{_AMBIGUOUS_SAVE}"
+                        set foundAttachment to anAttachment
+                        set foundMessage to contents of aMessage
+                        set foundName to attachmentFileName
+                        if {attachment_index_value} > 0 then exit repeat
+                    end if
+                end repeat
             end repeat
 
-            if not foundAttachment then
+            if foundAttachment is missing value then
                 set outputText to "⚠ Attachment not found" & return
                 set outputText to outputText & "{not_found_detail}" & return
                 set outputText to outputText & "{attachment_selector_label}" & return
+            else
+                set messageSubject to subject of foundMessage
+                save foundAttachment in POSIX file "{escaped_path}"
+
+                set outputText to "✓ Attachment saved successfully!" & return & return
+                set outputText to outputText & "Email: " & messageSubject & return
+                set outputText to outputText & "Attachment: " & foundName & return
+                set outputText to outputText & "Saved to: {escaped_path}" & return
             end if
 
         on error errMsg
-            return "Error: " & errMsg
+            return "Error: Could not resolve or save attachment. " & errMsg
         end try
 
         return outputText
@@ -330,6 +335,8 @@ def save_email_attachment(
     except AppleScriptTimeout:
         return (
             f"Error: AppleScript timed out while saving attachment from account "
-            f"{account!r}. Try again or pass a larger `timeout`."
+            f"{account!r}. Inspect the destination before retrying or pass a larger `timeout`."
         )
+    if result == _AMBIGUOUS_SAVE:
+        return _attachment_name_ambiguity_error(attachment_name)
     return result

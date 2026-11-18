@@ -116,6 +116,21 @@ class TestConflicts:
         assert payload["code"] == "CALENDAR_WRITE_BLOCKED"
         assert write.created == []
 
+    def test_partial_later_conflict_scan_blocks_whole_batch(self, fake_engines):
+        class PartiallyReadableCalendar(FakeReadEngine):
+            def fetch_window(self, *args, **kwargs):
+                rows, errors = super().fetch_window(*args, **kwargs)
+                if len(self.fetch_calls) == 2:
+                    errors.append("Unreadable event row")
+                return rows, errors
+
+        _read, write = fake_engines(read=PartiallyReadableCalendar())
+
+        payload = json.loads(batch_create_events(events=_items(2), calendar="Work"))
+
+        assert payload["code"] == "CALENDAR_CONFLICT_CHECK_INCOMPLETE"
+        assert write.created == []
+
 
 class TestTextOutput:
     def test_dry_run_text_is_not_json(self, fake_engines):

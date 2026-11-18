@@ -135,7 +135,8 @@ def create_event(
         recurrence: Optional allowlisted RRULE string.
         attendees: Optional attendee email addresses (gated).
         send_invitations: Must be True whenever attendees are passed.
-        on_conflict: "warn" (default), "block", or "allow".
+        on_conflict: "warn" (default), "block", or "allow". A requested
+            conflict check must complete before the write.
         output_format: "json" (default) or "text".
         timeout: Optional AppleScript timeout in seconds.
 

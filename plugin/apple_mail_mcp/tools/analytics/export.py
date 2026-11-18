@@ -15,7 +15,7 @@ from apple_mail_mcp.core import (
     validate_save_path,
 )
 from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
-from apple_mail_mcp.tools.analytics.export_checkpoint import ExportCheckpoint
+from apple_mail_mcp.tools.analytics.export_checkpoint import ExportCheckpoint, atomic_export_write_script
 
 _EXPORT_MAX_EMAILS_CAP = 50
 _ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
@@ -229,6 +229,7 @@ def export_emails(
         script = f'''
         tell application "Mail"
             set outputText to "EXPORTING EMAIL" & return & return
+            set fileRef to missing value
 
             try
                 set targetAccount to account "{safe_account}"
@@ -271,11 +272,7 @@ def export_emails(
                     -- RFC 822 headers and MIME structure survive export.
                     {export_content_block(safe_format)}
 
-                    -- Write to file
-                    set fileRef to open for access POSIX file filePath with write permission
-                    set eof of fileRef to 0
-                    write exportContent to fileRef as «class utf8»
-                    close access fileRef
+                    {atomic_export_write_script(shared_directory=True)}
                     {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=_ATTACHMENT_MAX_BYTES, max_total_attachment_bytes=_ATTACHMENT_MAX_TOTAL_BYTES)}
 
                     set outputText to outputText & "✓ Email exported successfully!" & return & return
@@ -287,9 +284,11 @@ def export_emails(
                 end if
 
             on error errMsg
-                try
-                    close access file filePath
-                end try
+                if fileRef is not missing value then
+                    try
+                        close access fileRef
+                    end try
+                end if
                 return "Error: " & errMsg
             end try
 

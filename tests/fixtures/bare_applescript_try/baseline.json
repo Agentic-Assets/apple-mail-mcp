@@ -131,9 +131,6 @@
     "plugin/apple_mail_mcp/tools/inbox/list_scripts.py": {
       "bare": 3
     },
-    "plugin/apple_mail_mcp/tools/inbox/mailboxes.py": {
-      "bare": 5
-    },
     "plugin/apple_mail_mcp/tools/inbox/overview.py": {
       "bare": 4
     },
@@ -141,20 +138,13 @@
       "silent": 1
     },
     "plugin/apple_mail_mcp/tools/manage/attachments.py": {
-      "bare": 1,
       "silent": 2
     },
     "plugin/apple_mail_mcp/tools/manage/mailbox.py": {
       "silent": 2
     },
-    "plugin/apple_mail_mcp/tools/manage/move.py": {
-      "bare": 1
-    },
     "plugin/apple_mail_mcp/tools/manage/sync.py": {
       "silent": 1
-    },
-    "plugin/apple_mail_mcp/tools/manage/trash.py": {
-      "bare": 1
     },
     "plugin/apple_mail_mcp/tools/search/by_id.py": {
       "bare": 5

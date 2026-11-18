@@ -10,6 +10,22 @@ from apple_mail_mcp.backend.base import ToolError, serialize_tool_error
 from apple_mail_mcp.bounded_scan import MAX_WHOSE_IDS
 from apple_mail_mcp.tools import manage
 
+# A Mail action can fail on one message without aborting the rest of the batch.
+# Resolve the failed ID only on error to keep successful actions free of extra
+# Mail property reads.
+_EXACT_ACTION_FAILURE_ARM = """on error actionErr
+    set actionFailureCount to actionFailureCount + 1
+    try
+        set failedMessageId to (id of aMessage) as string
+    on error
+        set failedMessageId to "unavailable (ID read failed)"
+    end try
+    set outputText to outputText & "Error for message_id " & failedMessageId & ": " & actionErr & return"""
+
+_EXACT_ACTION_FAILURE_REPORT = """if actionFailureCount > 0 then
+    set outputText to outputText & "PARTIAL: " & actionFailureCount & " selected message result(s) could not be confirmed." & return
+end if"""
+
 
 def _check_message_ids_cap(normalized_ids: list[str], tool_name: str) -> str | None:
     """Return a structured error string if *normalized_ids* exceeds the whose-id cap.

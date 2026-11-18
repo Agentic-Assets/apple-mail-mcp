@@ -295,6 +295,8 @@ def update_email_status(
             return _with_filter_scan_warning(
                 f"Error: update_email_status timed out after {effective_timeout}s on account '{account}'."
             )
+        except ValueError as exc:
+            return _with_filter_scan_warning(f"Error: {exc}")
         if not resolved_ids:
             return _with_filter_scan_warning(f"No matching emails found in {mailbox} for account '{account}'.")
         return _with_filter_scan_warning(

@@ -770,8 +770,8 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
         self.assertTrue(data["truncated"])
         self.assertEqual(data["returned"], cap)
 
-    def test_exact_cap_rows_still_truncated_flag(self):
-        """When AppleScript returns exactly max_mailboxes rows, truncated=True."""
+    def test_exact_cap_rows_without_omission_are_complete(self):
+        """Exactly max_mailboxes rows fit without truncation."""
         cap = 2
         lines = "\n".join(f"Work|||Box{i}|||Box{i}|||0|||0" for i in range(cap))
 
@@ -789,7 +789,7 @@ class FixFListMailboxesCapFencepostTests(unittest.TestCase):
 
         data = _json.loads(raw)
         self.assertEqual(len(data["mailboxes"]), cap)
-        self.assertTrue(data["truncated"])
+        self.assertFalse(data["truncated"])
 
 
 class FilterScanGateTests(unittest.TestCase):

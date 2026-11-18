@@ -109,12 +109,18 @@ def record_plan_script(ids_var: str) -> str:
                 do shell script "/usr/bin/printf %s " & quoted form of planText & " > " & quoted form of planStaging & " && /bin/mv -f " & quoted form of planStaging & " " & quoted form of planPath"""
 
 
-def atomic_export_write_script() -> str:
-    return """if exportContent is missing value or exportContent is "" then error "Mail returned no message source"
-                set stagingPath to exportDir & "/message.partial"
+def atomic_export_write_script(*, shared_directory: bool = False) -> str:
+    staging_name = f".message-{uuid4().hex}.partial" if shared_directory else "message.partial"
+    publish_command = '"/bin/mv -f "'
+    if shared_directory:
+        # A pre-existing directory at the published path must not absorb the
+        # staging file and make mv report a successful message export.
+        publish_command = '"/bin/test ! -d " & quoted form of filePath & " && /bin/mv -f "'
+    return f"""if exportContent is missing value or exportContent is "" then error "Mail returned no message source"
+                set stagingPath to exportDir & "/{staging_name}"
                 set fileRef to open for access POSIX file stagingPath with write permission
                 set eof of fileRef to 0
                 write exportContent to fileRef as «class utf8»
                 close access fileRef
                 set fileRef to missing value
-                do shell script "/bin/mv -f " & quoted form of stagingPath & " " & quoted form of filePath"""
+                do shell script {publish_command} & quoted form of stagingPath & " " & quoted form of filePath"""

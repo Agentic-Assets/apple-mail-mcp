@@ -19,6 +19,8 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.server import DESTRUCTIVE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import manage
 from apple_mail_mcp.tools.manage.helpers import (
+    _EXACT_ACTION_FAILURE_ARM,
+    _EXACT_ACTION_FAILURE_REPORT,
     _check_message_ids_cap,
     _date_from_for_recent_days,
     _date_to_for_older_than,
@@ -316,6 +318,7 @@ def manage_trash(
             with timeout of {effective_timeout} seconds
                 set outputText to "{mode_label}" & return & return
                 set deleteCount to 0
+                set actionFailureCount to 0
 
                 try
                     set targetAccount to account "{safe_account}"
@@ -334,17 +337,19 @@ def manage_trash(
                             set messageDate to date received of aMessage
 
                             {move_script}
+                            set deleteCount to deleteCount + 1
 
                             set outputText to outputText & "{result_verb}: " & messageSubject & return
                             set outputText to outputText & "   From: " & messageSender & return
                             set outputText to outputText & "   Date: " & (messageDate as string) & return & return
-                            set deleteCount to deleteCount + 1
+                        {_EXACT_ACTION_FAILURE_ARM}
                         end try
                     end repeat
 
                     set outputText to outputText & "========================================" & return
                     set outputText to outputText & "REQUESTED IDS: {len(normalized_ids)}" & return
                     set outputText to outputText & "TOTAL: " & deleteCount & " email(s) {result_verb.lower()}" & return
+                    {_EXACT_ACTION_FAILURE_REPORT}
                     set outputText to outputText & "========================================" & return
 
                 on error errMsg
@@ -387,7 +392,7 @@ def manage_trash(
         # above regardless of dry_run.
         mode_label = "DRY RUN - PREVIEW EMPTY TRASH" if dry_run else "EMPTYING TRASH"
         delete_script = "" if dry_run else "delete aMessage"
-        result_verb = "Would empty trash for account" if dry_run else "Emptied trash for account"
+        result_verb = "Trash preview for account" if dry_run else "Trash deletion batch for account"
         count_verb = "Would delete" if dry_run else "Deleted"
         dry_run_footer = (
             """
@@ -409,6 +414,7 @@ def manage_trash(
         tell application "Mail"
             with timeout of {effective_timeout} seconds
                 set outputText to "{mode_label}" & return & return
+                set actionFailureCount to 0
 
                 try
                     set targetAccount to account "{safe_account}"
@@ -423,13 +429,21 @@ def manage_trash(
                     end if
 
                     repeat with aMessage in trashMessages
-                        {delete_script}
-                        set deleteCount to deleteCount + 1
+                        try
+                            {delete_script}
+                            set deleteCount to deleteCount + 1
+                        {_EXACT_ACTION_FAILURE_ARM}
+                            exit repeat
+                        end try
                     end repeat
 
-                    set outputText to outputText & "✓ {result_verb}: {safe_account}" & return
+                    if actionFailureCount is 0 then
+                        set outputText to outputText & "✓ {result_verb}: {safe_account}" & return
+                    else
+                        set outputText to outputText & "PARTIAL: stopped at the first deletion failure." & return
+                    end if
                     set outputText to outputText & "   {count_verb} " & deleteCount & " of " & messageCount & " message(s)" & return
-                    if deleteCount < messageCount then
+                    if messageCount > {max_deletes} then
                         set outputText to outputText & "   (limited by max_deletes=" & {max_deletes} & ")" & return
                     end if{clamp_footer}{dry_run_footer}
 
@@ -496,6 +510,8 @@ def manage_trash(
                     f"Error: manage_trash dry-run timed out on account '{account}'. "
                     "Prefer message_ids=[...] or a larger timeout."
                 )
+            except ValueError as exc:
+                return _with_filter_scan_warning(f"Error: {exc}")
             return _with_filter_scan_warning(
                 _format_dry_run_records(
                     "DRY RUN - PREVIEW TRASH",
@@ -538,6 +554,8 @@ def manage_trash(
         )
     except AppleScriptTimeout:
         return _with_filter_scan_warning(_timed_out_error(account, effective_timeout))
+    except ValueError as exc:
+        return _with_filter_scan_warning(f"Error: {exc}")
     if not resolved_ids:
         return _with_filter_scan_warning(f"No matching emails found in {scan_mailbox} for account '{account}'.")
     return _with_filter_scan_warning(

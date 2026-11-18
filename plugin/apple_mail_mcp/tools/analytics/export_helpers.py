@@ -351,10 +351,7 @@ def build_multi_mailbox_id_export_script(
 
                         {export_content_block(safe_format)}
 
-                        set fileRef to open for access POSIX file filePath with write permission
-                        set eof of fileRef to 0
-                        write exportContent to fileRef as «class utf8»
-                        close access fileRef
+                        {atomic_export_write_script(shared_directory=True)}
                         {export_write_recorded()}
                         {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
@@ -502,10 +499,7 @@ def build_correspondent_export_script(
 
                                     {export_content_block(safe_format, include_mailbox=True)}
 
-                                    set fileRef to open for access POSIX file filePath with write permission
-                                    set eof of fileRef to 0
-                                    write exportContent to fileRef as «class utf8»
-                                    close access fileRef
+                                    {atomic_export_write_script(shared_directory=True)}
                                     {export_write_recorded()}
                                     set mailboxExportCount to mailboxExportCount + 1
                                     {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}

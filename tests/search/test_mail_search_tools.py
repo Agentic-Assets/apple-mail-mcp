@@ -696,7 +696,7 @@ class SearchToolTests(unittest.TestCase):
         self.assertEqual(response["errors"], ["TU"])
         self.assertEqual(
             response["error_details"],
-            [{"account": "TU", "type": "timeout", "message": "TU"}],
+            [{"account": "TU", "type": "timeout", "message": "TU timed out"}],
         )
         self.assertEqual(len(response["items"]), 1)
         self.assertEqual(response["items"][0]["account"], "Work")
