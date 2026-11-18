@@ -339,6 +339,7 @@ def _build_search_response(
     body_text_hint: bool = False,
     draft_scan: dict[str, Any] | None = None,
     sent_reply_scan: dict[str, Any] | None = None,
+    apply_offset_after_sort: bool = False,
 ) -> str:
     """Return either JSON or text for search results.
 
@@ -350,6 +351,8 @@ def _build_search_response(
     ``[HAS DRAFT]`` row prefixes already applied by ``_format_search_records_text``.
     """
     sorted_records = _sort_search_records(records, sort)
+    if apply_offset_after_sort:
+        sorted_records = sorted_records[offset:]
     has_more = len(sorted_records) > limit
     items = sorted_records[:limit]
     next_offset = offset + len(items) if has_more else None

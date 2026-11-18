@@ -20,7 +20,12 @@ from typing import Any
 
 from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import search
-from apple_mail_mcp.tools.search.records import _parse_search_records, _search_error_detail
+from apple_mail_mcp.tools.search.records import (
+    _non_ceiling_errors,
+    _parse_search_records,
+    _search_error_detail,
+    _sort_search_records,
+)
 from apple_mail_mcp.tools.search.script import _build_search_script, _list_accounts_script
 
 _VALID_SORTS = frozenset({"date_desc", "date_asc"})
@@ -103,6 +108,9 @@ def _search_one_account(
     recent_days: float = 0.0,
     date_from_explicit: bool = False,
     mailboxes: list[str] | None = None,
+    *,
+    merge_mailbox_pages: bool = False,
+    collect_full_window: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]], bool, bool]:
     """Run the search AppleScript for a single account synchronously.
 
@@ -137,6 +145,8 @@ def _search_one_account(
         timeout=timeout,
         date_from_explicit=date_from_explicit,
         mailboxes=mailboxes,
+        merge_mailbox_pages=merge_mailbox_pages,
+        collect_full_window=collect_full_window,
     )
     result = search.run_applescript(script, timeout=timeout if timeout is not None else 180)
     if result.startswith("ERROR|||"):
@@ -167,6 +177,7 @@ async def _search_mail_records(
     recent_days: float = 0.0,
     date_from_explicit: bool = False,
     mailboxes: list[str] | None = None,
+    filter_before_paging: bool = False,
 ) -> "tuple[list[dict[str, Any]], list[str], list[dict[str, str]], bool]":
     """Return (records, error_account_names, error_details, body_search_capped) from Apple Mail.
 
@@ -186,58 +197,33 @@ async def _search_mail_records(
     empty tuple here, which read as an authoritative zero.
     """
     _validate_dispatch_args(offset=offset, limit=limit, sort=sort, read_status=read_status)
+    merge_mailbox_pages = len(mailboxes) > 1 if mailboxes else mailbox == "All"
+    collect_full_window = sort == "date_asc" or filter_before_paging
+    merge_results = not account or merge_mailbox_pages or collect_full_window
+    upstream_offset = 0 if merge_results else offset
+    upstream_limit = offset + limit if merge_results else limit
 
-    # Single-account: short-circuit, no gather overhead.
-    if account:
-        try:
-            records, mb_errors, body_capped, mb_count_capped = await asyncio.to_thread(
-                _search_one_account,
-                account,
-                mailbox,
-                subject_terms,
-                sender,
-                sender_exact,
-                sender_domain,
-                internet_message_id,
-                has_attachments,
-                read_status,
-                date_from,
-                date_to,
-                include_content,
-                content_length,
-                offset,
-                limit,
-                body_text,
-                timeout,
-                recent_days,
-                date_from_explicit,
-                mailboxes,
-            )
-            mb_error_details = [
-                {
-                    "account": account,
-                    "mailbox": e["mailbox"],
-                    "type": e.get("type", "mailbox_error"),
-                    "message": e["message"],
-                }
-                for e in mb_errors
-            ]
-            return records, [], mb_error_details, body_capped
-        except AppleScriptTimeout as exc:
-            return [], [account], [_search_error_detail(account, exc)], False
+    def merged_page(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        distinct: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for record in records:
+            key = (record["account"], record["mailbox"], record["message_id"])
+            distinct.setdefault(key, record)
+        if filter_before_paging:
+            return list(distinct.values())
+        return _sort_search_records(list(distinct.values()), sort)[offset : offset + limit + 1]
 
-    # Multi-account: fetch account list cheaply, then dispatch in parallel.
     try:
-        accounts = await asyncio.to_thread(_list_mail_accounts, timeout)
+        accounts = [account] if account else await asyncio.to_thread(_list_mail_accounts, timeout)
     except AppleScriptTimeout as exc:
         raise ValueError("Mail account listing timed out") from exc
 
-    if not accounts:
-        return [], [], [], False
-
-    async def run_one(acct: str) -> tuple[str, Any]:
+    combined: list[dict[str, Any]] = []
+    errors: list[str] = []
+    error_details: list[dict[str, str]] = []
+    any_body_capped = False
+    for acct in accounts:
         try:
-            recs, mb_errs, body_capped, mb_count_capped = await asyncio.to_thread(
+            records, mailbox_errors, body_capped, _mailbox_count_capped = await asyncio.to_thread(
                 _search_one_account,
                 acct,
                 mailbox,
@@ -252,46 +238,30 @@ async def _search_mail_records(
                 date_to,
                 include_content,
                 content_length,
-                offset,
-                limit,
+                upstream_offset,
+                upstream_limit,
                 body_text,
                 timeout,
                 recent_days,
                 date_from_explicit,
                 mailboxes,
+                merge_mailbox_pages=merge_mailbox_pages,
+                collect_full_window=collect_full_window,
             )
-            return acct, (recs, mb_errs, body_capped, mb_count_capped)
-        except AppleScriptTimeout:
-            return acct, AppleScriptTimeout(acct)
         except Exception as exc:
-            return acct, exc
-
-    results = await asyncio.gather(*(run_one(acct) for acct in accounts))
-
-    combined: list[dict[str, Any]] = []
-    errors: list[str] = []
-    error_details: list[dict[str, str]] = []
-    any_body_capped = False
-    for acct, outcome in results:
-        if isinstance(outcome, Exception):
+            if account and not isinstance(exc, AppleScriptTimeout):
+                raise
             errors.append(acct)
-            error_details.append(_search_error_detail(acct, outcome))
-        else:
-            recs, mb_errs, body_capped, _mb_count_capped = outcome
-            combined.extend(recs)
-            if body_capped:
-                any_body_capped = True
-            for e in mb_errs:
-                error_details.append(
-                    {
-                        "account": acct,
-                        "mailbox": e["mailbox"],
-                        "type": e.get("type", "mailbox_error"),
-                        "message": e["message"],
-                    }
-                )
+            error_details.append(_search_error_detail(acct, exc))
+            continue
 
-    return combined, errors, error_details, any_body_capped
+        combined.extend(records)
+        any_body_capped |= body_capped
+        error_details.extend(
+            {**error, "account": acct, "type": error.get("type", "mailbox_error")} for error in mailbox_errors
+        )
+
+    return merged_page(combined) if merge_results else combined, errors, error_details, any_body_capped
 
 
 def _search_mail_records_sync(**kwargs: Any) -> list[dict[str, Any]]:
@@ -299,12 +269,10 @@ def _search_mail_records_sync(**kwargs: Any) -> list[dict[str, Any]]:
 
     Callers are ``move_email`` and ``manage_trash`` (through the ``manage``
     facade alias ``_search_mail_records``) and ``export_emails``' filtered scope
-    (direct import). Returns just the record list. When a per-account
-    ``AppleScriptTimeout`` was caught inside the async helper, re-raise it here
-    so sync callers can surface a structured "timed out" error rather than
-    silently treating it as "no matches". Sync callers should pass an explicit
-    ``account`` so this stays a single-account dispatch and avoids the
-    multi-account gather path.
+    (direct import). Real search failures invalidate selection even if other
+    mailboxes returned matches. An ordinary scan-ceiling marker describes the
+    bounded window and leaves the selected records usable. Sync callers
+    should pass an explicit ``account`` to avoid a multi-account scan.
 
     Bounds are validated here rather than only inside ``_search_mail_records``:
     the ``account`` branch below calls ``_search_one_account`` directly and so
@@ -326,7 +294,7 @@ def _search_mail_records_sync(**kwargs: Any) -> list[dict[str, Any]]:
     account = kwargs.get("account")
     if account:
         # A per-account AppleScriptTimeout propagates unchanged to the caller.
-        records, _mb_errors, _body_capped, _mb_count_capped = _search_one_account(
+        records, error_details, _body_capped, _mb_count_capped = _search_one_account(
             account=account,
             mailbox=kwargs.get("mailbox", "INBOX"),
             subject_terms=kwargs.get("subject_terms"),
@@ -348,13 +316,20 @@ def _search_mail_records_sync(**kwargs: Any) -> list[dict[str, Any]]:
             date_from_explicit=kwargs.get("date_from_explicit", False),
             mailboxes=kwargs.get("mailboxes"),
         )
-        return records
+    else:
+        records, _, error_details, _body_capped = asyncio.run(_search_mail_records(**kwargs))
 
-    records, errors, error_details, _body_capped = asyncio.run(_search_mail_records(**kwargs))
-    if errors and not records:
-        non_timeout = [item for item in error_details if item.get("type") != "timeout"]
-        if non_timeout:
-            detail = "; ".join(f"{item['account']}: {item['type']}: {item['message']}" for item in non_timeout)
-            raise RuntimeError(f"AppleScript failed for account(s): {detail}")
-        raise AppleScriptTimeout(f"AppleScript timed out for account(s): {', '.join(errors)}")
-    return records
+    failures = _non_ceiling_errors(error_details)
+    if not failures:
+        return records[:limit]
+    if all(error.get("type") == "timeout" for error in failures):
+        accounts = ", ".join(error["account"] for error in failures)
+        raise AppleScriptTimeout(f"AppleScript timed out for account(s): {accounts}")
+
+    details = []
+    for error in failures:
+        scope = " / ".join(part for part in (error.get("account") or account, error.get("mailbox")) if part)
+        details.append(f"{scope}: {error['message']}")
+    raise ValueError(
+        f"Mail search could not complete: {'; '.join(details)}. Review search results before retrying with message_ids."
+    )

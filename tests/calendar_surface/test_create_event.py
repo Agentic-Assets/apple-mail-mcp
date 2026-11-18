@@ -166,6 +166,16 @@ class TestConflicts:
         assert payload["code"] == "CALENDAR_READ_FAILED"
         assert write.created == []
 
+    @pytest.mark.parametrize("on_conflict", ["warn", "block"])
+    def test_partial_conflict_scan_refuses_create(self, fake_engines, on_conflict):
+        _read, write = fake_engines(read=FakeReadEngine(row_errors=["Unreadable event row"]))
+
+        payload = _run(on_conflict=on_conflict)
+
+        assert payload["code"] == "CALENDAR_CONFLICT_CHECK_INCOMPLETE"
+        assert payload["remediation"]["calendar_errors"] == ["UID-WORK: Unreadable event row"]
+        assert write.created == []
+
     def test_recurring_conflict_scan_failure_blocks_create(self, fake_engines):
         class _FailingRecurringEngine(FakeReadEngine):
             def fetch_recurring_masters(self, *args, **kwargs):

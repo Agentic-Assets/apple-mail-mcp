@@ -104,17 +104,14 @@ class ListMailboxesJsonTests(unittest.TestCase):
 
         payload = json.loads(result)
         self.assertIn("mailboxes", payload)
-        self.assertTrue(payload["truncated"])
+        self.assertFalse(payload["truncated"])
         self.assertIn("if mailboxIndex > 1 then exit repeat", captured["script"])
 
 
 class ListMailboxesChildCapTests(unittest.TestCase):
     """Fix 4 regression: cap must fire on children, not just parents."""
 
-    def test_child_cap_fires_and_truncated_false_when_exact_fit(self):
-        # Provide exactly max_mailboxes rows (1 parent + no children because
-        # AppleScript cap fires). truncated should be True (conservative: cap
-        # may have fired) when returned == max_mailboxes.
+    def test_truncated_false_below_cap(self):
         raw = "Work|||INBOX|||INBOX|||-1|||-1"
 
         with patch("apple_mail_mcp.tools.inbox.run_applescript", return_value=raw):

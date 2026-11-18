@@ -5,6 +5,19 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.12.4 - 2026-11-18
+
+- Mailbox exports use smaller pages, publish complete files atomically, and
+  return confirmed paths and pending message IDs when a batch times out.
+  EML exports skip the rendered-body read on the explicit batch path.
+- Search and filtered selection paginate across accounts and mailboxes after
+  merging results. Mailbox inventory, attachment saves, and move and trash
+  operations report partial results and failed items.
+- Calendar writes stop when a requested conflict check is incomplete.
+  Recurring deletes preserve removal receipts if follow-up verification fails.
+- Installed plugin archives advertise their release version in the MCP
+  handshake, including when the runtime starts entirely offline.
+
 ## 3.12.3 - 2026-09-20
 
 - **EventKit calendar fast path now ships in the plugin install (AGENTIC-2982).**

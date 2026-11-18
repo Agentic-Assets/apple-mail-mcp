@@ -17,7 +17,7 @@ See [`large-inbox-rules.md`](references/large-inbox-rules.md) for the canonical 
 
 ### `full_inbox_export` is disabled
 
-`full_inbox_export` returns a structured `UNBOUNDED_EXPORT_DISABLED` error and runs no AppleScript. For the rare full-inbox case (annual cleanup, complete audit, compliance archive, or pre-migration snapshot), page bounded `export_emails(scope="entire_mailbox", mailbox=..., max_emails=50, offset=N)` slices instead. For everything else, pass a bounded `recent_days` / `max_emails` and let the structured `UNBOUNDED_SCAN_REQUIRED` error guide a narrower query.
+`full_inbox_export` returns `UNBOUNDED_EXPORT_DISABLED`. For a live backup, work one mailbox at a time and start with up to five messages per call. Prefer reviewed exact IDs, or use `export_emails(scope="entire_mailbox", mailbox=..., max_emails=5, offset=0)` for a positional slice. Verify the files before running the next call. For timeout recovery and how to verify a cleanup backup, see [Bulk cleanup](references/bulk-cleanup.md).
 
 ## Before drafting
 
@@ -43,7 +43,7 @@ For finding a single specific email, call `search_emails()` directly without inv
 
 Internalize these before constructing any tool call. The defaults exist to keep AppleScript queries fast on large Exchange inboxes.
 
-- `search_emails` defaults to the last 48 hours on the configured default account and scans at most 50 messages per call regardless of `limit` or window size. Pass `recent_days=7` or `recent_days=30` to widen. `recent_days=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; for more than one call's worth, page with `offset` rather than reaching for `full_inbox_export`, which is disabled (`UNBOUNDED_EXPORT_DISABLED`).
+- `search_emails` defaults to the last 48 hours on the configured account and inspects at most 50 messages per mailbox. Follow `next_offset` for more matches within the scanned window. If the response reports a scan ceiling, narrow the mailbox or dates. A wider date filter still uses the same ceiling. `recent_days=0` without an explicit start date returns `UNBOUNDED_SCAN_REQUIRED`.
 - `list_inbox_emails` defaults to the 50 most-recent emails, and 50 is also the hard per-call ceiling regardless of `max_emails`. For **triage and drafting**, pass `max_emails=5` (up to 8) per batch; see [`recent-first-triage.md`](references/recent-first-triage.md). `max_emails=0` is refused with `code: UNBOUNDED_SCAN_REQUIRED`; `full_inbox_export` is disabled, so use a bounded `max_emails` and page with repeated calls for the rare full walk.
 - Cross-account scans cost time on large Exchange inboxes. Pass `all_accounts=True` only when truly needed; otherwise let the `DEFAULT_MAIL_ACCOUNT` environment variable keep things scoped.
 
@@ -78,6 +78,8 @@ The MCP server enforces conservative defaults. Confirm with the user before rais
 | `update_email_status` | 10 messages | Any bulk update (`max_updates` > 10). This tool has **no `dry_run`**, so show the collected ids and get confirmation before the call |
 
 Pattern: identify candidates with `search_emails()`, preview the count and sample, confirm the user's intent, then run the destructive call with an explicit cap.
+
+If a move or trash batch reports `PARTIAL`, use its confirmed total and failed IDs. Refresh those IDs and their current folder before retrying. A capped Trash deletion can leave messages behind even when every selected deletion succeeds.
 
 Every `manage_trash` action defaults to `dry_run=True` and previews without touching mail, `empty_trash` included. Read the preview back to the user, then repeat the same call with `dry_run=False` to act. A preview that reports what would go is not proof that anything was deleted.
 

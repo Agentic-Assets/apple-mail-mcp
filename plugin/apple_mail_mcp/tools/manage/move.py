@@ -18,6 +18,8 @@ from apple_mail_mcp.core import (
 from apple_mail_mcp.server import WRITE_TOOL_ANNOTATIONS, mcp
 from apple_mail_mcp.tools import manage
 from apple_mail_mcp.tools.manage.helpers import (
+    _EXACT_ACTION_FAILURE_ARM,
+    _EXACT_ACTION_FAILURE_REPORT,
     _check_message_ids_cap,
     _date_from_for_recent_days,
     _date_to_for_older_than,
@@ -155,6 +157,7 @@ def _move_email_by_message_ids(
         with timeout of {timeout} seconds
             set outputText to "{mode_label}" & return & return
             set moveCount to 0
+            set actionFailureCount to 0
 
             try
                 set targetAccount to account "{safe_account}"
@@ -173,18 +176,20 @@ def _move_email_by_message_ids(
                         set messageDate to date received of aMessage
 
                         {move_action}
+                        set moveCount to moveCount + 1
 
                         set outputText to outputText & "{result_prefix}: " & messageSubject & return
                         set outputText to outputText & "   From: " & messageSender & return
                         set outputText to outputText & "   Date: " & (messageDate as string) & return & return
 
-                        set moveCount to moveCount + 1
+                    {_EXACT_ACTION_FAILURE_ARM}
                     end try
                 end repeat
 
                 set outputText to outputText & "========================================" & return
                 set outputText to outputText & "REQUESTED IDS: {len(normalized_ids)}" & return
                 set outputText to outputText & "TOTAL: " & moveCount & " email(s) {result_prefix.lower()}" & return
+                {_EXACT_ACTION_FAILURE_REPORT}
                 if moveCount >= {max_moves} then
                     set outputText to outputText & "(max_moves limit reached)" & return
                 end if{clamp_footer}
@@ -401,6 +406,8 @@ def move_email(
                 f"Error: move_email dry-run timed out on account '{account}'. "
                 "Retry with message_ids=[...] or a larger timeout."
             )
+        except ValueError as exc:
+            return _with_filter_scan_warning(f"Error: {exc}")
         preview = _format_dry_run_records(
             f"DRY RUN - PREVIEW MOVE: {from_mailbox} -> {to_mailbox}",
             records,
@@ -435,6 +442,8 @@ def move_email(
             f"Error: move_email timed out on account '{account}'. "
             "Prefer message_ids=[...] or retry with a larger timeout."
         )
+    except ValueError as exc:
+        return _with_filter_scan_warning(f"Error: {exc}")
 
     if not resolved_ids:
         return _with_filter_scan_warning(f"No matching emails found in {from_mailbox} for account '{account}'.")

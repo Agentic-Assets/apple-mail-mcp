@@ -178,7 +178,7 @@ Inbox (empty)
 ### "I'm afraid to delete emails"
 **Solution**:
 1. Remember: Delete isn't permanent immediately (goes to Trash)
-2. Export important mailboxes first: `export_emails(scope="entire_mailbox", mailbox="Important", max_emails=50)` (page with `offset` if the mailbox holds more than 50 messages)
+2. Export important mailboxes one at a time. Start with `export_emails(scope="entire_mailbox", mailbox="Important", max_emails=5, offset=0)` and verify each batch before advancing. Use reviewed exact IDs when the backup needs to cover a fixed target list.
 3. Archive instead of delete if uncertain
 4. Trust that you can search for 99% of emails you might need
 

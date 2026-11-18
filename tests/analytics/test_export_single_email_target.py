@@ -9,10 +9,10 @@ prefix (``message_id_export/``, ``thread_export/``, ``correspondent_export/``,
 ``save_directory="~/Desktop"``, exporting a message titled "Quarterly Report"
 destroyed an existing ``~/Desktop/Quarterly Report.txt``.
 
-The fix matches the siblings: ``<save_directory>/single_email_export/`` with an
-``{index}_{message_id}_{subject}`` filename. The subdirectory is created by the
-tool, so a name collision can only ever overwrite this tool's own prior export,
-never a file the user put there.
+The export writes ``<save_directory>/single_email_export/`` with an
+``{index}_{message_id}_{subject}`` filename. It publishes a completed file
+from a separate staging path, preserving files at the old bare destination
+and preserving previous exports if a write is interrupted.
 
 These tests mock ``run_applescript``. The truncation and traversal tests execute
 the generated script's *write block* (Mail-free string and file operations only,
@@ -91,17 +91,14 @@ def _run_write_block(script: str, *, subject: str) -> str:
     The block is sliced verbatim between two markers in the generated script, so
     it exercises the real ``sanitize_delimiter_block`` fragment, the real
     filename/directory arithmetic, and the real
-    ``open for access`` / ``set eof to 0`` / ``write`` idiom.
+    staged write and publication.
     """
     start = script.index("set safeSubject to messageSubject")
-    end = script.index("close access fileRef") + len("close access fileRef")
+    end = script.index("\n", script.index("/bin/mv -f ", start))
     block = script[start:end]
 
-    # Safety property: no `tell application` block means no application can be
-    # dispatched to, so nothing here can reach Mail.app. The format branches for
-    # html/eml are present but unreachable for a txt export; `aMessage` is bound
-    # to `missing value` so a future edit that reaches one errors out loudly
-    # instead of quietly acquiring a Mail reference.
+    # TXT formatting uses preloaded data. This block can run without a Mail
+    # reference or a `tell application` block.
     assert "tell application" not in block, f"write block must be Mail-free, got: {block!r}"
 
     harness = "\n".join(
@@ -110,7 +107,6 @@ def _run_write_block(script: str, *, subject: str) -> str:
             'set messageSender to "sender@example.com"',
             'set messageDate to "2026-01-01"',
             'set messageContent to "synthetic body"',
-            "set aMessage to missing value",
             block,
             "return filePath",
         ]
@@ -150,7 +146,7 @@ def test_single_email_creates_the_export_subdirectory_before_writing(tmp_path):
     script = _single_email_script(tmp_path / "exports")
 
     mkdir_pos = script.find('do shell script "mkdir -p " & quoted form of exportDir')
-    write_pos = script.find("open for access POSIX file filePath with write permission")
+    write_pos = script.find("open for access POSIX file stagingPath with write permission")
     assert mkdir_pos != -1, "export subdirectory must be created"
     assert write_pos != -1
     assert mkdir_pos < write_pos
@@ -216,3 +212,17 @@ def test_single_email_subject_with_slashes_cannot_escape_the_export_directory(tm
     assert written.parent == save_dir / "single_email_export"
     assert written.name == f"1_{_MESSAGE_ID}_..-..-outside-passwd.txt"
     assert decoy.read_bytes() == _SENTINEL
+
+
+@requires_osascript
+def test_single_email_export_cannot_report_a_directory_as_the_written_file(tmp_path):
+    save_dir = tmp_path / "exports"
+    subject = "Quarterly Report"
+    directory = save_dir / "single_email_export" / f"1_{_MESSAGE_ID}_{subject}.txt"
+    directory.mkdir(parents=True)
+    script = _single_email_script(save_dir)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_write_block(script, subject=subject)
+
+    assert not list(directory.iterdir())

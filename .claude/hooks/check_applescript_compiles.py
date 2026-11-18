@@ -168,6 +168,8 @@ SAMPLE_KWARGS: dict[str, object] = {
     "in_reply_to_var": "inReplyTo",
     "references_var": "refsValue",
     "list_var": "markedDrafts",
+    "batch": "batch-compile-check",
+    "ids_var": "plannedIds",
     "safe_marker": "__apple_mail_mcp_compile_check__",
     "subject_expr": '"Compile check subject"',
     "action_label": "marked",

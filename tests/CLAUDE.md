@@ -19,6 +19,11 @@ Autouse fixture `_pass_through_known_test_accounts` patches `validate_account_na
 
 ## Mock patterns
 
+Apply the [test-audit skill](../.agents/skills/test-audit/SKILL.md) when adding
+or changing tests. For paging, partial results, and file publication, exercise
+the real owner and assert IDs, completion state, or file bytes. Keep Mail.app
+and live account data out of those fixtures.
+
 - **AppleScript capture** — patch `subprocess.run` with `side_effect` reading script from `kwargs["input"]`. Templates: `cross_cutting/test_modernization_3_1_5.py` (`_ScriptCapture`), `search/test_mail_search_tools.py`, `compose/test_compose_tools.py`.
 - **Pure helpers** — `core/test_bulk_helpers.py`: `escape_applescript`, filters, mailbox refs (no subprocess mock).
 - **Registry / CLI** — `core/test_read_only_registry.py`, `cli/test_cli.py`, `cli/test_cli_perf.py` (perf thresholds, `--include-analysis`, profiles; no live Mail).

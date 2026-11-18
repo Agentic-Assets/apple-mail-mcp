@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "Apple Mail MCP",
-  "version": "3.12.3",
+  "version": "3.12.4",
   "description": "Natural language interface for Apple Mail and Apple Calendar with 41 tools: email search, composition, bulk operations, smart inbox analytics, folder management, taxonomy, archiving, drafting, draft verification, attachments, Mail rules advising, bounded export, security-hardened destructive operations, bounded calendar reads, conflict-checked event creation, availability search, and gated calendar management. Bundled Claude Code workflow skills plus Interactive UI Dashboard.",
   "author": {
     "name": "Agentic Assets"
@@ -87,7 +87,7 @@
     },
     {
       "name": "list_mailboxes",
-      "description": "List mailboxes (folders) for one account or all accounts, with optional message counts."
+      "description": "List mailbox hierarchies with optional message counts, per-account caps, and explicit partial-read errors."
     },
     {
       "name": "move_email",
@@ -131,7 +131,7 @@
     },
     {
       "name": "search_emails",
-      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 without date_from is rejected with UNBOUNDED_SCAN_REQUIRED; pass recent_days=7 or date_from='YYYY-MM-DD' (full-mailbox sweeps are disabled). all_accounts=True overrides default account. body_text requires allow_body_scan=True or returns BODY_SCAN_DISABLED. A single call scans at most 50 messages (hard ceiling) regardless of window, so it stays fast on large inboxes."
+      "description": "Unified email search across 16 filter parameters: subject, body, sender, date range, attachments, flagged, newsletter detection, threads. Defaults to last 48 hours and the default account (DEFAULT_MAIL_ACCOUNT). recent_days=0 without date_from is rejected with UNBOUNDED_SCAN_REQUIRED; pass recent_days=7 or date_from='YYYY-MM-DD' (full-mailbox sweeps are disabled). all_accounts=True overrides default account. body_text requires allow_body_scan=True or returns BODY_SCAN_DISABLED. Each mailbox has a 50-message scan ceiling. Matches from multiple accounts or folders are merged before pagination."
     },
     {
       "name": "get_email_by_id",
@@ -179,7 +179,7 @@
     },
     {
       "name": "export_emails",
-      "description": "Export emails to txt, html, or raw RFC 822 eml, hard-capped at 50 emails per call. Prefer exact message_ids for reviewed batches (a message_ids list over 50 is rejected before Mail.app runs). single_email requires message_id; filtered, correspondent, and thread scopes discover bounded message ids first; correspondent includes Sent by default for back-and-forth history. entire_mailbox exports a bounded, deterministically newest-first page (default 25) from a mailbox and reports each exported message_id. EML can include attachments, with 25 MiB per-file and 100 MiB per-batch caps. Unsupported formats, including pdf, fail before Mail.app runs."
+      "description": "Export TXT, HTML, or raw RFC 822 EML in batches capped at 50. Prefer exact message_ids for reviewed batches. entire_mailbox exports a bounded newest-first page, defaulting to five. Mailbox pages and exact-ID batches record planned IDs in plan.ids and report confirmed files and pending IDs on EXPORT_BATCH_TIMEOUT. EML attachment bundles have 25 MiB per-file and 100 MiB per-batch caps."
     },
     {
       "name": "full_inbox_export",
@@ -211,7 +211,7 @@
     },
     {
       "name": "batch_create_events",
-      "description": "Create up to 25 one-off events on one calendar with all-or-nothing validation"
+      "description": "Create up to 25 one-off events on one calendar after validation and any requested conflict checks complete."
     },
     {
       "name": "update_event",

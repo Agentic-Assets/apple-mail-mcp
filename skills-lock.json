@@ -42,6 +42,13 @@
       "sourceType": "github",
       "skillPath": "cursor-team-kit/skills/thermo-nuclear-code-quality-review/SKILL.md",
       "computedHash": "9052b01b46b1d8dbf94c45f9313ec1983443f9a460e83d49cdc7fe0f640ca476"
+    },
+    "test-audit": {
+      "source": "openclaw/openclaw",
+      "commit": "2b58c8e5224ee0d2d9826467b5e1370e4091b1e9",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/test-audit/SKILL.md",
+      "computedHash": "eddf859d77bc36219cfffb49ffb7f36fd7edc98a07f8c00530671bee9b8e0625"
     }
   }
 }

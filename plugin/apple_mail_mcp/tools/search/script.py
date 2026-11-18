@@ -82,6 +82,8 @@ def _build_search_script(
     timeout: int | None = None,
     date_from_explicit: bool = False,
     mailboxes: list[str] | None = None,
+    merge_mailbox_pages: bool = False,
+    collect_full_window: bool = False,
 ) -> tuple[str, bool, bool]:
     """Build the AppleScript for a single account's search.
 
@@ -140,6 +142,10 @@ def _build_search_script(
 
     collect_limit = limit + 1  # +1 for has_more probe; offset is decremented separately
     base_cap = collect_limit + offset
+    if collect_full_window:
+        # Ascending sort and post-scan exclusions need a fixed candidate set
+        # across pages. Widening on each offset can change earlier pages.
+        base_cap = max(base_cap, SCAN_BOUNDS["SEARCH_HARD_CEILING"])
     # All scan-bound arithmetic (window widening, body cap, hard ceiling, and
     # the truncation flag) lives in ``scan_cap`` — see that module for why
     # ``date_from`` widens the slice and why the flag compares against the
@@ -151,6 +157,13 @@ def _build_search_script(
         subject_only_header_search=subject_only_header_search,
         use_body_search=use_body_search,
         date_from_explicit=date_from_explicit,
+    )
+    if collect_full_window:
+        collect_limit = scan_cap
+    elif merge_mailbox_pages:
+        collect_limit = min(collect_limit, scan_cap)
+    mailbox_page_guard = (
+        f"set collectLimit to {collect_limit}" if merge_mailbox_pages else "if collectLimit <= 0 then exit repeat"
     )
 
     # Track whether the mailbox-count cap is active (mailbox="All" path).
@@ -176,7 +189,7 @@ def _build_search_script(
                                 set end of recordLines to "{_SCAN_CEILING_MARKER}" & mailboxName & "|||" & (scanUpperBound as string)
                             end if
 """
-        if scan_ceiling_applied
+        if scan_ceiling_applied or collect_full_window
         else ""
     )
 
@@ -217,7 +230,7 @@ def _build_search_script(
                 on error
                     set end of recordLines to "ERROR_MAILBOX|||{escape_applescript(mb)}|||mailbox not found"
                 end try"""
-            for index, mb in enumerate(mailboxes)
+            for index, mb in enumerate(dict.fromkeys(mailboxes))
         )
         mailbox_script = f"""
                 set searchMailboxes to {{}}
@@ -432,7 +445,7 @@ def _build_search_script(
                     {mailbox_script}
 
                     repeat with currentMailbox in searchMailboxes
-                        if collectLimit <= 0 then exit repeat
+                        {mailbox_page_guard}
 
                         -- NB: do NOT wrap this per-mailbox scan in `with timeout`.
                         -- Materializing `messages 1 thru N` on a 24K+ Exchange

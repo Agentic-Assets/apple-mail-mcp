@@ -77,6 +77,8 @@ correct absolute instant regardless of the Mac's own zone.
   as `FREQ=WEEKLY;BYDAY=MO,WE,FR`.
 - Conflict detection is on by default (`on_conflict="warn"` reports `conflicts`;
   `"block"` refuses with `EVENT_CONFLICT`; `"allow"` skips).
+  If a requested conflict check returns `CALENDAR_CONFLICT_CHECK_INCOMPLETE`, repair
+  the reported Calendar read problem and retry the check before writing.
 - **Search then mutate by id**: `update_event` and `delete_events` take exact
   `event_id`s from a prior `list_events`/`get_events_by_id` call. There are no fuzzy
   destructive selectors, by design. Pass `calendar` as a lookup hint to avoid fan-out.
@@ -86,7 +88,9 @@ correct absolute instant regardless of the Mac's own zone.
   change to the whole series; `delete_events` cannot remove a whole series
   (Calendar.app scripting deletes only individual occurrences), so it verifies
   after deleting and returns `RECURRING_DELETE_INCOMPLETE` with the surviving dates
-  when the series is not fully gone. `this_occurrence`/`future_occurrences` return
+  when the series is not fully gone. If the follow-up read fails, preserve the
+  confirmed removal receipts in `RECURRING_DELETE_VERIFICATION_INCOMPLETE` and
+  reconcile the calendar before retrying. `this_occurrence`/`future_occurrences` return
   `RECURRING_SPAN_UNSUPPORTED`.
 - `batch_create_events` creates up to 25 one-off blocking events in one call
   (no attendees, no recurrence in items); use `dry_run=True` first for bulk plans.

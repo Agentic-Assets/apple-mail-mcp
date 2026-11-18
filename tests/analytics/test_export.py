@@ -139,7 +139,7 @@ def test_eml_export_uses_raw_mail_source_to_preserve_headers():
 
     script = capture.last_script
     assert "set exportContent to source of aMessage" in script
-    assert 'set fileName to exportCount & "_" & messageSubject & ".eml"' in script
+    assert 'set fileName to (messageId as string) & "_" & messageSubject & ".eml"' in script
 
 
 def test_attachment_bundling_requires_eml_before_applescript():
@@ -187,7 +187,7 @@ def test_single_email_creates_save_directory_before_write():
     assert 'do shell script "mkdir -p " & quoted form of exportDir' in script
     # The mkdir must run before the file write, not after.
     mkdir_pos = script.find("mkdir -p")
-    write_pos = script.find("open for access POSIX file filePath with write permission")
+    write_pos = script.find("open for access POSIX file stagingPath with write permission")
     assert mkdir_pos != -1
     assert write_pos != -1
     assert mkdir_pos < write_pos
@@ -249,11 +249,11 @@ def test_export_resolves_parent_child_mailbox_path_without_double_escaping():
         assert '\\\\"Team\\\\"' not in capture.last_script
 
 
-def test_entire_mailbox_default_max_emails_is_25_not_100():
+def test_entire_mailbox_defaults_to_a_five_message_page():
     _result, capture = _export(scope="entire_mailbox")
 
     script = capture.last_script
-    assert "set pageEnd to 0 + 25" in script
+    assert "set pageEnd to 0 + 5" in script
 
 
 def test_entire_mailbox_sorts_bounded_page_and_returns_exported_message_ids():

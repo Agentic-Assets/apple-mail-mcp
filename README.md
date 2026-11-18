@@ -399,7 +399,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `get_mailbox_unread_counts` | Unread counts per mailbox or per-account summary |
 | `list_accounts` | List all configured Mail accounts |
 | `list_account_addresses` | List sender aliases configured for a Mail account |
-| `search_emails` | Unified search: subject, sender, body, dates, attachments. Defaults to last 48h and the default account; scans at most 50 messages per call |
+| `search_emails` | Search by subject, sender, body, dates, or attachments. Defaults to the last 48 hours and the default account. Scans at most 50 messages per mailbox and merges matches before paging across accounts or folders. |
 | `get_email_by_id` | Fetch one exact email by the Apple Mail message id returned from search results |
 | `get_email_by_ids` | Fetch multiple exact emails by reviewed Apple Mail message ids, chunked internally |
 | `get_email_thread` | Conversation thread view across Inbox + Sent; prefer `message_id` from search/list results. Check `thread_incomplete` before treating the result as the whole conversation; `max_messages` bounds what is returned, `scan_messages` bounds what is examined |
@@ -407,7 +407,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 ### Organization
 | Tool | Description |
 |------|-------------|
-| `list_mailboxes` | Folder hierarchy with optional message counts |
+| `list_mailboxes` | Folder hierarchy with optional message counts, per-account caps, and explicit reporting of unreadable folders |
 | `create_mailbox` | Create new mailboxes (supports nested paths) |
 | `move_email` | Move by `message_ids` (required for targeting). `allow_filter_scan=True` + `older_than_days` only for date/bulk moves; `subject_keyword`/`sender` return `TARGET_SELECTOR_DEPRECATED`. Default max 50 |
 | `update_email_status` | Mark read/unread, flag/unflag by `message_ids` (preferred). `allow_filter_scan=True` + date/bulk filters only; `subject_keyword`/`sender` return `TARGET_SELECTOR_DEPRECATED`. Default max 10 |
@@ -429,7 +429,7 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `list_email_attachments` | List attachments by `message_ids` (required — discover via `search_emails` or `list_inbox_emails`); `subject_keyword` returns `TARGET_SELECTOR_DEPRECATED`. Capped at 50 by default. Searches the account inbox unless you pass `mailbox` / `mailboxes` (`"All"` rejected); ids held elsewhere come back in `unresolved_message_ids`, so check `complete` before reporting "no attachments" |
-| `save_email_attachment` | Save a specific attachment to disk. Requires `message_ids` from prior `search_emails`, `list_inbox_emails`, or `list_email_attachments`; use `list_email_attachments` to pick `attachment_index`. Validates target path |
+| `save_email_attachment` | Save a specific attachment to a validated path. Use `list_email_attachments` to pick the message ID and attachment index. Reports ambiguous matches and save errors separately. |
 
 ### Smart Inbox
 | Tool | Description |
@@ -442,9 +442,13 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | Tool | Description |
 |------|-------------|
 | `get_statistics` | Account overview, sender stats, or mailbox breakdown; short windows fan across 10 mailboxes, longer windows across 20, each capped at 50 messages |
-| `export_emails` | Export TXT, HTML, or raw RFC 822 EML by exact `message_ids`, single `message_id`, bounded sender/date filters, correspondent history, threads, or paged mailbox slices. Hard-capped at 50 emails per call (`max_emails` and `message_ids` length); page with `offset` or narrow with filters for more. Each entire-mailbox page is deterministically newest-first (received date, then numeric message id) and reports each exported `message_id` for safe follow-on reads or drafts. For `format="eml"`, `include_attachments=True` writes `{index}_{subject}/message.eml` plus `attachments/`; files over 25 MiB or above the 100 MiB bounded-batch cap are skipped. Attachment downloads can need a larger `timeout` on cold Exchange/Gmail caches. |
+| `export_emails` | Export TXT, HTML, or raw RFC 822 EML by exact IDs, bounded filters, correspondent, thread, or mailbox page. Mailbox pages default to five messages and sort by received date and Mail ID within each page. The hard cap is 50. Optional EML attachment bundles use `{message_id}_{subject}/message.eml` and `attachments/`, with a 25 MiB per-file cap and a 100 MiB per-batch cap. |
 | `inbox_dashboard` | Interactive UI dashboard (requires `mcp-ui-server`) |
 | `full_inbox_export` | Disabled: returns a structured `UNBOUNDED_EXPORT_DISABLED` error instead of walking the mailbox. Stays registered for compatibility; narrow the window (`recent_days` / `date_from`) or page through bounded calls (`export_emails`, `list_inbox_emails`, `search_emails`) instead. |
+
+Mailbox pages and exact-ID batches write to a unique subdirectory at the reported `Location`. Its `plan.ids` file records the selected IDs and its final message files identify the IDs that reached disk. If the response is `EXPORT_BATCH_TIMEOUT`, recheck the checkpoint and retry any still-pending IDs in the same account and mailbox using `message_ids`. A missing plan means selection did not finish. Retry the same offset before advancing. Check optional attachment bundles separately after a timeout. Use a reviewed inventory of IDs when exporting a mailbox that can change between calls.
+
+For whole-account recovery from the files already cached on the Mac, repository users can follow the [Apple Mail archive export workflow](.agents/skills/apple-mail-archive-export/SKILL.md). It snapshots the selected local account, reconstructs available detached payloads, and compares decoded attachments with the snapshot. Report any missing content and the verification coverage. Mail that was never cached requires a reachable source.
 
 ### Apple Calendar
 | Tool | Description |
@@ -454,9 +458,9 @@ claude mcp add apple-mail -- /bin/bash $(pwd)/start_mcp.sh
 | `get_events_by_id` | Full detail (notes, alarms, attendees) for exact event ids; always window-bounded |
 | `check_availability` | Busy blocks and free slots inside working hours over a bounded window (max 62 days) |
 | `create_event` | Timezone-correct event creation with alarms, allowlisted recurrence, and conflict detection on by default |
-| `batch_create_events` | Up to 25 one-off events on one calendar; all items validate before any write |
+| `batch_create_events` | Create up to 25 one-off events on one calendar. Validation and requested conflict checks must complete before any write. |
 | `update_event` | ID-first PATCH update; recurring targets require `span='all_occurrences'`; attendee sets are diffed |
-| `delete_events` | Exact-id bulk delete, dry-run default, capped and chunked; one unresolved id aborts everything |
+| `delete_events` | Capped exact-ID deletion with dry-run by default. All IDs must resolve before writes. If recurring deletion cannot be verified, the result preserves confirmed removal receipts and verification errors. |
 | `manage_calendars` | Create/rename/delete calendars; delete is triple-gated with a cascade event-count preview |
 | `respond_to_invitation` | Documented refusal (`CALENDAR_RSVP_UNSUPPORTED`): no public macOS API can RSVP |
 
@@ -570,7 +574,7 @@ To stay fast on large mailboxes (24K+ messages), the server applies conservative
 |---------|-------|----------|
 | Last 48 hours | `search_emails`, `get_awaiting_reply`, `get_needs_response`, `get_top_senders` | Pass `recent_days=N` (e.g. `7` for a week); routine tools reject unbounded scans |
 | 50 emails max | `list_email_attachments` | Pass `max_results` |
-| **50-message hard scan ceiling** | `search_emails`, `list_inbox_emails` | None: every call scans at most 50 messages regardless of `limit` / `max_emails` / `recent_days` / window. Page across multiple calls or narrow the window (`recent_days`, `date_from`) to see more. When a mailbox fills that slice the response says so (`scan_ceiling_reached` in JSON, a `PARTIAL:` line in text) |
+| **50-message hard scan ceiling per mailbox** | `search_emails`, `list_inbox_emails` | Page within the scanned results or narrow the window with `recent_days` or `date_from`. The response flags a reached scan ceiling. |
 | **400-message thread scan ceiling** | `get_email_thread` | `scan_messages` (up to 400). Deliberately larger than the 50-message ceiling above because a conversation's earlier members routinely sit past a busy mailbox's newest 50; the default is derived from `recent_days`. A scan that stopped early sets `thread_incomplete` |
 | Single account | All scoped tools when `DEFAULT_MAIL_ACCOUNT` is set | Pass `account=<name>` or `all_accounts=True` |
 | Per-call timeout | All long-running tools | Pass `timeout=<seconds>`. Exception: on `reply_to_email(native_format=True)` an explicit `timeout` is floored at the budget the typing script projects from `reply_body` length — it can raise the budget, never lower it, because a value below the projection fires `AppleScriptTimeout` mid-drain and strands a typed, unsaved compose window. Over-long bodies are refused with `REPLY_BODY_TYPING_BUDGET_EXCEEDED` rather than handed a bigger timeout |
@@ -593,7 +597,7 @@ Batch operations cap by default to prevent accidental bulk actions. Override via
 | `move_email` | 50 | `max_moves` |
 | `update_email_status` | 10 | `max_updates` |
 | `manage_trash` | 5 | `max_deletes` |
-| `export_emails` | 25 default for every scope, including `entire_mailbox`; hard-capped at 50 (both `max_emails` and `message_ids` list length are rejected above 50) | `max_emails` (up to 50); page with `offset` or narrow with filters for more |
+| `export_emails` | 5 for `entire_mailbox`, 25 for filtered, correspondent and thread scopes, and a hard cap of 50 IDs per call | `max_emails` (up to 50), `offset` for positional pages, or reviewed `message_ids` |
 
 **Dry-run defaults:** `manage_trash` defaults to `dry_run=True` (safe preview — explicit override needed to act, especially for `action="delete_permanent"`). `move_email` and `update_email_status` default to `dry_run=False` (live) because their effects are reversible; pass `dry_run=True` to preview matches first.
 

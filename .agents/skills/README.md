@@ -24,7 +24,7 @@ Written for this repo, no upstream. Edit freely.
 
 ## Vendored, and locally corrected
 
-Copied in from elsewhere. Six are pinned in [`skills-lock.json`](../../skills-lock.json);
+Copied in from elsewhere. Pins and provenance are in [`skills-lock.json`](../../skills-lock.json);
 four carry **no provenance record at all** — no lock entry and no frontmatter
 naming an upstream — so they cannot be re-synced or audited against a source.
 **All but one have been edited locally** because their generic guidance was
@@ -45,6 +45,7 @@ not use.
 | `python-performance-optimization` | **unrecorded** | Profilers it requires are not installed, and the cost center here is `run_applescript()` IPC, not CPython |
 | `reviewing-code` | **unrecorded** | Required `uv.lock` / `uv sync` / `prek`, none of which exist here |
 | `testing-python` | **unrecorded** | Asserted `asyncio_mode = "auto"`; async tests here use `unittest.IsolatedAsyncioTestCase`, so a bare `async def test_` would silently skip |
+| `test-audit` | `openclaw/openclaw` | Uses pytest, native synthetic AppleScript, and the local release gates for regression and audit proof |
 
 **Re-syncing a vendored skill from upstream will discard these corrections.**
 `computedHash` in `skills-lock.json` records the upstream source at pin time, not

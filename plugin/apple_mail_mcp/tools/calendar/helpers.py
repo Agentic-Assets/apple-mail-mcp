@@ -441,16 +441,15 @@ def find_conflicts(
     timeout: int | None = None,
     exclude_event_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Bounded overlap check over the new event's own span (one fetch)."""
+    """Check for overlaps over the new event's span using a complete bounded read."""
     pad = timedelta(days=float(CALENDAR_BOUNDS["AVAILABILITY_FETCH_PAD_DAYS"]))
     window = bounded_calendar_window(
         start=(start - pad).isoformat(),
         end=end.isoformat(),
         timezone_name=timezone_name,
     )
-    engine = _calendar.get_engine()
-    payloads, _errors, _exhausted = collect_window_events(
-        engine=engine,
+    payloads, errors, budget_exhausted = collect_window_events(
+        engine=_calendar.get_engine(),
         window=window,
         calendar_ids=[calendar_id],
         calendar_selector_kinds={calendar_id: selector_kind},
@@ -458,6 +457,12 @@ def find_conflicts(
         timeout=timeout,
         fail_on_total_failure=True,
     )
+    if errors or budget_exhausted:
+        raise ToolError(
+            code="CALENDAR_CONFLICT_CHECK_INCOMPLETE",
+            message="The calendar read was incomplete. Resolve the read issue and retry the conflict check.",
+            remediation={"calendar_errors": errors, "budget_exhausted": budget_exhausted},
+        )
     conflicts: list[dict[str, Any]] = []
     for payload in payloads:
         if exclude_event_id and payload.get("event_id") == exclude_event_id:
@@ -466,15 +471,7 @@ def find_conflicts(
         other_end_text = payload.get("end_utc")
         other_end = datetime.fromisoformat(str(other_end_text)) if other_end_text else other_start
         if other_start < end.astimezone(timezone.utc) and other_end > start.astimezone(timezone.utc):
-            conflicts.append(
-                {
-                    "event_id": payload.get("event_id"),
-                    "title": payload.get("title"),
-                    "start": payload.get("start"),
-                    "end": payload.get("end"),
-                    "calendar": payload.get("calendar"),
-                }
-            )
+            conflicts.append({key: payload.get(key) for key in ("event_id", "title", "start", "end", "calendar")})
     return conflicts
 
 
@@ -486,8 +483,8 @@ def surviving_recurring_occurrences(
     calendar_selector_kinds: dict[str, str] | None,
     recurring_ids: list[str],
     timeout: int | None = None,
-) -> dict[str, list[str]]:
-    """Re-query recurring uids after a delete; return ``{uid: [surviving dates]}``.
+) -> tuple[dict[str, list[str]], list[str], bool]:
+    """Re-query surviving dates, read errors, and budget exhaustion after delete.
 
     Calendar.app AppleScript ``delete`` removes only the targeted occurrence of a
     recurring series (verified live: no scripting form deletes a whole series, and
@@ -497,7 +494,7 @@ def surviving_recurring_occurrences(
     errs on the safe side (report incomplete rather than a false success).
     """
     wanted = set(recurring_ids)
-    survivors, _errors, _exhausted = collect_window_events(
+    survivors, errors, budget_exhausted = collect_window_events(
         engine=engine,
         window=window,
         calendar_ids=calendar_ids,
@@ -513,7 +510,7 @@ def surviving_recurring_occurrences(
             continue
         date_label = payload.get("occurrence_date") or str(payload.get("start") or "")[:10]
         by_uid.setdefault(uid, []).append(str(date_label))
-    return {uid: sorted(set(dates)) for uid, dates in by_uid.items()}
+    return {uid: sorted(set(dates)) for uid, dates in by_uid.items()}, errors, budget_exhausted
 
 
 def recurring_lookback_disclosure(engine: CalendarReadEngine, expand_recurring: bool) -> dict[str, Any] | None:

@@ -63,6 +63,10 @@ async def search_emails(
 
     Unified search tool with JSON output, pagination, and real date filtering.
 
+    Results from multiple accounts or mailboxes are merged before applying
+    the page offset. Ascending sort and reply/draft exclusions page over the
+    bounded search window, with exclusions applied before pagination.
+
     Consolidates subject search, sender search, exact sender/domain discovery,
     body content search, exact Internet Message-ID lookup, and cross-account
     search into a single tool.
@@ -315,6 +319,7 @@ async def search_emails(
         _date_from_explicit = True
 
     subject_terms = normalize_search_terms(subject_keyword, subject_keywords)
+    filter_before_paging = exclude_replied or exclude_drafted
 
     try:
         records, errors, error_details, body_search_capped = await _search_mail_records(
@@ -339,6 +344,7 @@ async def search_emails(
             recent_days=effective_recent_days,
             date_from_explicit=_date_from_explicit,
             mailboxes=mailboxes if mailboxes else None,
+            filter_before_paging=filter_before_paging,
         )
 
         # Draft-state annotation: one bounded Drafts snapshot per account
@@ -390,6 +396,7 @@ async def search_emails(
             body_text_hint=bool(body_text),
             draft_scan=draft_scan,
             sent_reply_scan=sent_reply_scan,
+            apply_offset_after_sort=filter_before_paging,
         )
     except ValueError as exc:
         return f"Error: {exc}"

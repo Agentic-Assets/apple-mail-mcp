@@ -1,7 +1,7 @@
 """Regression tests for the analytics.py batch-export file-handle leak (Bug 1).
 
 The entire_mailbox export path in export_emails opens each file with
-``open for access POSIX file filePath``.  Before the fix the ``on error``
+``open for access POSIX file stagingPath``.  Before the fix the ``on error``
 handler at the per-message level skipped ``close access fileRef``, leaking
 a kernel file descriptor on any write failure.
 
@@ -71,8 +71,8 @@ class EntireMailboxScriptResourceSafetyTests(unittest.TestCase):
         # Strategy: find the first "on error" that follows "open for access" in
         # the repeat loop section, and assert close access fileRef appears
         # between that "on error" and the matching "end try".
-        open_pos = self.script.find("open for access POSIX file filePath with write permission")
-        self.assertGreater(open_pos, -1, "Expected 'open for access POSIX file filePath' in script")
+        open_pos = self.script.find("open for access POSIX file stagingPath with write permission")
+        self.assertGreater(open_pos, -1, "Expected 'open for access POSIX file stagingPath' in script")
 
         # Find the "on error" that follows the open inside the repeat block.
         on_error_pos = self.script.find("on error", open_pos)
@@ -113,7 +113,7 @@ class EntireMailboxScriptResourceSafetyTests(unittest.TestCase):
         This prevents a secondary error (e.g. fileRef not yet defined if open
         failed) from masking the original error.
         """
-        open_pos = self.script.find("open for access POSIX file filePath with write permission")
+        open_pos = self.script.find("open for access POSIX file stagingPath with write permission")
         on_error_pos = self.script.find("on error", open_pos)
         end_try_pos = self.script.find("end try", on_error_pos)
         error_block = self.script[on_error_pos:end_try_pos]
@@ -181,7 +181,7 @@ class ListEmailAttachmentsDictionaryTests(unittest.TestCase):
 
 
 class ExportEmailsBoundedDefaultsTests(unittest.TestCase):
-    """v3.9.3: entire_mailbox pages a bounded slice (default 25); hard cap at 50, no walk."""
+    """Mailbox export reads a bounded slice, five by default and at most 50."""
 
     def _export(self, **kwargs):
         """Drive export_emails and return (result_text, captured_script)."""
@@ -198,10 +198,10 @@ class ExportEmailsBoundedDefaultsTests(unittest.TestCase):
             result = analytics_tools.export_emails(**defaults)
         return result, capture.last_script
 
-    def test_entire_mailbox_default_page_is_25(self):
-        """When max_emails is omitted, entire_mailbox pages 25 (pageEnd = offset + 25)."""
+    def test_entire_mailbox_default_page_is_5(self):
+        """When max_emails is omitted, entire_mailbox pages five messages."""
         _result, script = self._export()
-        self.assertIn("set pageEnd to 0 + 25", script)
+        self.assertIn("set pageEnd to 0 + 5", script)
 
     def test_entire_mailbox_never_binds_full_message_list(self):
         """The bounded page slice must never materialize the whole mailbox."""
