@@ -13,7 +13,6 @@ import anyio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-
 DEFAULT_REQUIRED_TOOLS = (
     "reply_to_email",
     "compose_email",
@@ -93,13 +92,13 @@ def _server_params(args: argparse.Namespace) -> StdioServerParameters:
     return StdioServerParameters(command=command, args=server_args, cwd=cwd, env=env)
 
 
-async def _list_tools(params: StdioServerParameters, timeout: float) -> list[str]:
+async def _discover(params: StdioServerParameters, timeout: float) -> tuple[str, list[str]]:
     with anyio.fail_after(timeout):
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
-                await session.initialize()
+                hello = await session.initialize()
                 result = await session.list_tools()
-                return sorted(tool.name for tool in result.tools)
+                return hello.serverInfo.version, sorted(tool.name for tool in result.tools)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -110,6 +109,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--cwd", help="Working directory for direct smoke tests")
     parser.add_argument("--timeout", type=float, default=90.0, help="Handshake timeout in seconds")
     parser.add_argument("--expect-count", type=int, help="Exact expected tool count")
+    parser.add_argument("--expect-version", help="Expected serverInfo.version from the MCP handshake")
     parser.add_argument(
         "--required-tool",
         action="append",
@@ -135,11 +135,14 @@ def main() -> None:
     params = _server_params(args)
 
     try:
-        tool_names = anyio.run(_list_tools, params, args.timeout)
+        version, tool_names = anyio.run(_discover, params, args.timeout)
     except TimeoutError:
         _fail(f"timed out after {args.timeout:g}s waiting for MCP tools")
     except Exception as exc:  # pragma: no cover - exact MCP transport errors vary by host.
         _fail(f"MCP handshake failed: {exc}")
+
+    if args.expect_version is not None and version != args.expect_version:
+        _fail(f"MCP server advertised {version!r}, expected {args.expect_version!r}")
 
     missing = sorted(set(required) - set(tool_names))
     if missing:
@@ -149,10 +152,8 @@ def main() -> None:
 
     if args.print_tools:
         print("\n".join(tool_names))
-    print(
-        "mcp_tool_smoke: OK "
-        f"({len(tool_names)} tools; required: {', '.join(required)})"
-    )
+    version_note = f"; version: {version}" if args.expect_version is not None else ""
+    print(f"mcp_tool_smoke: OK ({len(tool_names)} tools; required: {', '.join(required)}{version_note})")
 
 
 if __name__ == "__main__":

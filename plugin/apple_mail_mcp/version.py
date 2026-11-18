@@ -15,14 +15,15 @@ low-level server so the handshake reports this package.
 
 Resolution order
 ----------------
-1. ``importlib.metadata.version("mcp-apple-mail")`` — the installed
-   distribution's own metadata, which is what a *shipped* plugin runs against
-   and is generated from ``pyproject.toml`` at build time.
+1. ``importlib.metadata.version("mcp-apple-mail")`` for a wheel or editable
+   install.
 2. ``pyproject.toml``'s ``[project].version`` when the package is being run
    straight out of a repo checkout with no distribution installed. Accepted
    only when that file also declares ``name = "mcp-apple-mail"``, so an
    unrelated ``pyproject.toml`` further up the tree can never be read as ours.
-3. :data:`FALLBACK_VERSION` — a self-evidently unusable string, chosen so a
+3. The colocated plugin or MCPB manifest for an offline payload, where the
+   runtime installs dependencies from the wheelhouse and runs its own source.
+4. :data:`FALLBACK_VERSION` — a self-evidently unusable string, chosen so a
    client sees "this build could not identify itself" rather than a plausible
    wrong number.
 
@@ -35,6 +36,7 @@ or if the advertised handshake version drifts from either.
 
 from __future__ import annotations
 
+import json
 import re
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
@@ -80,17 +82,30 @@ def _version_from_pyproject(pyproject: Path) -> str | None:
     return found.group(1) if found else None
 
 
+def _version_from_manifest(manifest: Path, expected_name: str) -> str | None:
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("name") != expected_name:
+        return None
+    version = payload.get("version")
+    return version if isinstance(version, str) and version else None
+
+
 def resolve_version() -> str:
     """Resolve this package's version. See the module docstring for the order."""
     try:
         return _distribution_version(DISTRIBUTION_NAME)
     except PackageNotFoundError:
         pass
-    # ``plugin/apple_mail_mcp/version.py`` -> repo root. An installed wheel puts
-    # this module in ``site-packages/apple_mail_mcp/``, where the same walk-up
-    # lands on a library directory that holds no ``pyproject.toml`` at all.
-    checkout_version = _version_from_pyproject(Path(__file__).resolve().parents[2] / "pyproject.toml")
-    return checkout_version or FALLBACK_VERSION
+    plugin_root = Path(__file__).resolve().parents[1]
+    return (
+        _version_from_pyproject(plugin_root.parent / "pyproject.toml")
+        or _version_from_manifest(plugin_root / ".claude-plugin/plugin.json", "apple-mail")
+        or _version_from_manifest(plugin_root / "manifest.json", "Apple Mail MCP")
+        or FALLBACK_VERSION
+    )
 
 
 #: This package's version, as advertised in the MCP handshake's ``serverInfo``.

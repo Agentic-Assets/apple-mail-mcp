@@ -22,13 +22,17 @@ instead of silently restoring the defect.
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
+from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 import apple_mail_mcp
+import pytest
 from apple_mail_mcp import server
+from apple_mail_mcp import version as version_module
 from apple_mail_mcp.version import (
     DISTRIBUTION_NAME,
     FALLBACK_VERSION,
@@ -82,6 +86,53 @@ class PackageVersionSourceTests(unittest.TestCase):
         name = re.search(r'^name\s*=\s*"([^"]+)"', PYPROJECT.read_text(encoding="utf-8"), re.MULTILINE)
         assert name is not None
         self.assertEqual(DISTRIBUTION_NAME, name.group(1))
+
+
+@pytest.fixture
+def metadata_free_payload(tmp_path, monkeypatch):
+    payload = tmp_path / "payload"
+
+    def missing_metadata(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(version_module, "_distribution_version", missing_metadata)
+    monkeypatch.setattr(version_module, "__file__", str(payload / "apple_mail_mcp/version.py"))
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("manifest_path", "name"),
+    [
+        (".claude-plugin/plugin.json", "apple-mail"),
+        ("manifest.json", "Apple Mail MCP"),
+    ],
+    ids=("offline-plugin", "desktop-bundle"),
+)
+def test_metadata_free_payload_reports_its_manifest_version(metadata_free_payload, manifest_path, name):
+    manifest = metadata_free_payload / manifest_path
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"name": name, "version": "3.98.7"}), encoding="utf-8")
+
+    assert resolve_version() == "3.98.7"
+
+
+def test_metadata_free_payload_ignores_foreign_manifest(metadata_free_payload):
+    metadata_free_payload.mkdir()
+    manifest = metadata_free_payload / "manifest.json"
+    manifest.write_text(json.dumps({"name": "foreign", "version": "3.98.7"}), encoding="utf-8")
+
+    assert resolve_version() == FALLBACK_VERSION
+
+
+def test_checkout_pyproject_precedes_payload_manifest(metadata_free_payload):
+    manifest = metadata_free_payload / ".claude-plugin/plugin.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"name": "apple-mail", "version": "3.98.7"}), encoding="utf-8")
+
+    pyproject = metadata_free_payload.parent / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "mcp-apple-mail"\nversion = "3.98.8"\n', encoding="utf-8")
+
+    assert resolve_version() == "3.98.8"
 
 
 class HandshakeVersionTests(unittest.TestCase):

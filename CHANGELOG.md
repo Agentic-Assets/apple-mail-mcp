@@ -15,6 +15,8 @@ here. The plugin/MCPB/marketplace versions track this file.
   operations report partial results and failed items.
 - Calendar writes stop when a requested conflict check is incomplete.
   Recurring deletes preserve removal receipts if follow-up verification fails.
+- Installed plugin archives advertise their release version in the MCP
+  handshake, including when the runtime starts entirely offline.
 
 ## 3.12.3 - 2026-09-20
 

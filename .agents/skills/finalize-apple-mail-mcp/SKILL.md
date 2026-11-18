@@ -197,7 +197,7 @@ That tier runs, in this order:
 5. **`validate_tasks_layout.py`** and **`validate_repo_root.py`** (a single stray untracked file at the repo root fails this).
 6. **pytest** + the **test-count gate** against `tools/expected_test_count.txt` (fails on drift and prints the new number).
 7. **Wrapper-surface check** (`check_wrapper_surface.py`).
-8. **`tools/gates/verify-offline-runtime.sh`** against **both** `apple-mail-plugin.zip` and `apple-mail-mcp-v{VERSION}.mcpb`.
+8. **`tools/gates/verify-offline-runtime.sh`** against **both** `apple-mail-plugin.zip` and `apple-mail-mcp-v{VERSION}.mcpb`. The gate boots the unpacked draft-safe server offline and checks its advertised MCP version against the bundled manifest.
 
 Step 4 (`build-artifacts.sh`) is what actually regenerates the three artifacts:
 
