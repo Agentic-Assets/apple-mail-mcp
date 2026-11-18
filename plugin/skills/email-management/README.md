@@ -26,7 +26,7 @@ claude plugin marketplace update agentic-assets
 claude plugin install apple-mail@agentic-assets --scope user
 ```
 
-All eleven skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
+All twelve skills under `plugin/skills/` load automatically. Legacy slash commands are retired; use the `email-management` skill by natural-language trigger.
 
 ## Install (Codex Desktop / CLI plugin)
 

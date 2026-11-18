@@ -51,7 +51,7 @@ Fresh-install test: run `bash tools/gates/verify-offline-runtime.sh plugin` or u
 ## Subfolders
 
 - **`apple_mail_mcp/`**: Python package (source of truth for all 41 MCP tools)
-- **`skills/`**: Procedural workflows (eleven shipped workflow skills; see `skills/CLAUDE.md`)
+- **`skills/`**: Twelve shipped workflow skills, including local archive scripts. See `skills/CLAUDE.md`.
 - **`ui/`** — Inbox dashboard HTML via `mcp-ui-server` (`dashboard.py`, `templates/`)
 
 ## Related distribution shapes

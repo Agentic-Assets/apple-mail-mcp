@@ -1,30 +1,24 @@
 ---
 name: apple-mail-archive-export
 description: >-
-  Bulk-export or recover an entire Apple Mail account from its local on-disk
-  store to verified .eml, .mbox, and a searchable SQLite index, reassembling
-  detached attachments - without launching Mail.app, AppleScript, or the Apple
-  Mail MCP. Use this whenever someone wants to archive, back up, export, bulk
-  download, migrate, or rescue a mailbox, especially when they are leaving a job
-  or school and losing access to a work or university email account, or when the
-  server is already unreachable but the mail still appears in Mail.app. Also use
-  it for questions about .emlx or .partial.emlx files, ~/Library/Mail internals,
-  extracting attachments in bulk, converting Apple Mail to mbox or Thunderbird,
-  or making an old mailbox searchable offline. Reach for this even when the
-  request sounds small ("can I get my old emails out of Mail?", "export my
-  inbox", "save all my attachments") - the naive approaches silently lose about
-  half the attachments on a typical Exchange account, so the careful path matters
-  even at small scale.
+  Use when the user asks to "back up an Apple Mail account", "recover my
+  partial.emlx attachments", "search an offline mail archive", or "convert
+  my mail for Thunderbird". Runs local scripts to snapshot the Mail cache,
+  rebuild detached MIME payloads, verify the output, and create a SQLite
+  search index. Also indexes verified EML and ICS plugin exports with a
+  manifest. Route staged moves or trash to email-archive-cleanup.
 ---
 
 # Apple Mail archive export
 
-Recover a complete, verified, searchable local archive of an Apple Mail account
-by reading its `.emlx` store directly off disk.
+Recover a verified, searchable archive of the mail and attachment data cached
+on this Mac. The workflow reads from a filesystem snapshot, so it also works
+after the account or server becomes unreachable. Report unavailable content and
+the earliest cached date. Mail that never reached the cache requires a reachable
+source or a server-side export.
 
-This works when the mail server is dead, the credentials are expired, or the
-account was never fully synced, because everything needed is already on the Mac.
-It never launches Mail.app and never touches the live store.
+For a verified export that already contains `manifest.json` and `messages/`,
+[build a search index in place](#make-an-existing-plugin-export-searchable).
 
 ## Why this exists instead of the obvious approaches
 
@@ -43,21 +37,18 @@ The obvious paths silently lose data, and each failure looks like success:
 Direct filesystem extraction did a 39,269-message / 15 GB account in **188
 seconds** with byte-level proof. Details and citations: `references/pitfalls.md`.
 
-One honest exception, worth knowing so you can offer it: on a **small, still-live**
-account, reading each message through Mail's AppleScript `source` property is
-lossless *and* can fetch parts the local cache never stored. Some detached
-messages have no payload on disk at all - 2,316 of 25,412 in a reference store -
-and no filesystem method can recover those. It is the wrong default because it
-needs a live server, does not scale, and makes Mail rewrite its own cache while
-serving reads, but it is the right repair for the specific messages
-`export_emlx.py` reports as `missing_parts`.
+For a reachable account, bounded `export_emails` calls can fetch data missing
+from the local cache. Use this for targeted `missing_parts` repairs or for a
+small independently inventoried batch. Mail can return malformed multipart
+framing or append calendar metadata. Check the plugin's receipt and verify the
+result. Incomplete exports require a retry or a clear coverage report.
 
 ## The one idea that matters most
 
 **`.partial.emlx` does not mean "not downloaded."** It means Mail moved the
 attachment part *bodies* into a sibling `Attachments/` directory and left the
-full MIME skeleton behind with `X-Apple-Content-Length` stubs. The bodies are
-local. A correct export splices them back in.
+full MIME skeleton behind with `X-Apple-Content-Length` stubs. Reassemble the
+payloads present on disk and report any missing parts.
 
 Get this wrong and you produce a large, plausible archive missing half its
 attachments. This is the single most common way these exports fail.
@@ -231,7 +222,7 @@ occurrences stored as 8.62 GB, and `du` on the tree agrees, so the saving is rea
 inodes rather than an accounting claim.
 
 Two things in it are worth understanding before you edit it. **Decode before you
-sanitize, never after.** A filename can hide `../../../escape.txt` inside an RFC
+sanitize, never after.** A filename can hide parent-directory traversal inside an RFC
 2047 base64 word or split it across RFC 2231 continuations, so a sanitizer that
 runs first sees something harmless and passes it through; the bundled test asserts
 containment for both encodings and for Windows reserved names, absolute UNC paths,
@@ -257,7 +248,7 @@ searching it does not depend on this skill still being installed:
 
 ```bash
 mkdir -p "$ARCHIVE/20-tools"
-cp "$SKILL/scripts/"{search.py,verify_export.py,check_mbox.py,export_emlx.py} \
+cp "$SKILL/scripts/"{assemble_batches.py,search.py,index_manifest.py,verify_export.py,check_mbox.py,export_emlx.py} \
    "$ARCHIVE/20-tools/"
 ```
 
@@ -287,6 +278,69 @@ and the search commands. State limitations plainly:
   row (messages Mail deleted but never unlinked) are included, because the
   exporter walks the filesystem.
 
+## Make an existing plugin export searchable
+
+Use the installed skill's scripts with Python 3.10+ and SQLite FTS5. Set `SKILL`
+to the directory containing this guide and `ARCHIVE` to a local archive path.
+
+### Assemble a manifest from plugin batches
+
+For live exports, capture an independent account and folder inventory first.
+Run bounded `export_emails` calls with `format="eml"` and
+`include_attachments=False` under one local `EXPORT_ROOT`. The EML carries the
+MIME parts supplied by Mail. Use each result's batch path and verify its
+checkpoint. Retry pending IDs before assembly.
+
+Save a local plan with the independently discovered IDs and paths to the batch
+directories, relative to `EXPORT_ROOT`. Use decimal strings for IDs. This
+illustrative plan covers a completed Inbox batch and one folder alias.
+
+```json
+{
+  "snapshot_folders": {"Inbox": ["1001", "1002"], "Archive": ["1001"]},
+  "batches": [
+    {"mailbox": "Inbox", "path": "INBOX_export/batch-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+  ]
+}
+```
+
+```bash
+python3 "$SKILL/scripts/assemble_batches.py" \
+  --export-root "$EXPORT_ROOT" --plan "$PLAN" --archive "$ARCHIVE"
+```
+
+Use a fresh archive directory. The assembler reconciles `plan.ids` and the
+completed EML or ICS for every record in the independent inventory. A pending
+ID can be supplied by a listed retry batch. The assembler rejects duplicate
+completed records, missing IDs, and unexpected files. It copies each selected
+file, checks its bytes and SHA-256, and preserves any matching ICS plist.
+
+### Index the verified archive
+
+Use the archive created above or any existing verified archive with
+`manifest.json` and `messages/`.
+
+```bash
+python3 "$SKILL/scripts/index_manifest.py" --archive "$ARCHIVE"
+python3 "$SKILL/scripts/search.py" --archive "$ARCHIVE" --stats
+python3 "$SKILL/scripts/search.py" --archive "$ARCHIVE" --mailbox "Inbox" --paths 'invoice AND renewal'
+```
+
+The indexer checks every recorded file against its size and SHA-256, validates
+folder membership, and verifies the calendar payload and metadata together.
+It atomically publishes the derived `index.sqlite` after a successful build.
+Repeat the command when you have a new verified manifest.
+
+The index keeps one row per local Mail ID and filters by all recorded folder
+aliases. It searches decoded message text and attachment names. Calendar rows
+search the summary, description, and location, and can be filtered by event
+year when a start date is available. Calendar trailers stay in their separate
+plist files. Search shows the primary folder, and `--open N` opens the selected
+local file. Missing read and flag state stays unknown.
+
+Use the snapshot workflow above for mbox conversion or comparison against
+original detached attachment files.
+
 ## Never do these to a dead account
 
 `Mailbox > Rebuild` in Mail is the most dangerous menu item available: its model
@@ -312,7 +366,7 @@ If you are editing this skill rather than running it, you are working in
 a real export are fine to commit and are what make these docs trustworthy. The
 mail behind them is not: keep real addresses, subjects, account UUIDs, and
 absolute `/Users/...` paths out of `SKILL.md`, the `references/`, the scripts,
-and their tests. See root [`AGENTS.md`](../../../AGENTS.md) § This repo is PUBLIC.
+and their tests.
 
 ## Bundled scripts
 
@@ -327,6 +381,8 @@ and their tests. See root [`AGENTS.md`](../../../AGENTS.md) § This repo is PUBL
 | `scripts/split_mbox.py` | Per-year split of any mbox over `--max-bytes` (default 4 GiB) into `mbox-by-year/`; verbatim record bytes, proves the ascending concatenation still equals the source SHA-256; exits non-zero on any broken invariant |
 | `scripts/extract_attachments.py` | Every attachment into `20-attachments/`, deduplicated by SHA-256 into `blobs/` with hard-linked `by-folder` / `by-sender` / `by-type` views and a JSONL manifest; decodes RFC 2047/2231 filenames before sanitizing them; `--self-test` runs the containment suite |
 | `scripts/test_extract_attachments.py` | Containment and classification gate for the extractor: filename traversal, encoded traversal, reserved names, case collisions, sandbox escape, 91 cases |
+| `scripts/assemble_batches.py` | Reconcile flat plugin batches with an independent inventory and write a verified local archive manifest |
+| `scripts/index_manifest.py` | Verify a plugin export's manifest and build or refresh its SQLite FTS5 sidecar |
 | `scripts/search.py` | Full-text + filtered search CLI over the archive |
 
 All are standard-library Python 3 or bash. No dependencies to install.

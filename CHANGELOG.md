@@ -5,6 +5,16 @@ here. The plugin/MCPB/marketplace versions track this file.
 
 ## Unreleased
 
+## 3.12.5 - 2026-11-18
+
+- Retry malformed outer MIME framing once before publishing an EML. Keep a
+  message pending if Mail still returns malformed source.
+- Save native iCalendar source as `.ics` and preserve its optional Mail
+  property list separately. Checkpoints recognize the published calendar file.
+- Bundle the archive-export workflow with its verification, attachment
+  recovery, and local search scripts. Build a SQLite full-text index from a
+  verified archive manifest, with links back to the original files.
+
 ## 3.12.4 - 2026-11-18
 
 - Mailbox exports use smaller pages, publish complete files atomically, and

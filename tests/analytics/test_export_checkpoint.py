@@ -5,6 +5,7 @@ import re
 
 from apple_mail_mcp.core import AppleScriptTimeout
 from apple_mail_mcp.tools import analytics
+from apple_mail_mcp.tools.analytics.export_checkpoint import ExportCheckpoint
 
 
 def test_mailbox_timeout_reports_only_committed_files(monkeypatch, tmp_path):
@@ -42,6 +43,22 @@ def test_mailbox_timeout_before_selection_does_not_invent_a_resume_point(monkeyp
     assert recovery["planned_message_ids"] is None
     assert recovery["pending_message_ids"] is None
     assert recovery["completed"] == []
+
+
+def test_calendar_bundle_timeout_ignores_a_companion_without_its_calendar(tmp_path):
+    checkpoint = ExportCheckpoint(tmp_path, "eml", True, requested_ids=["101", "202"])
+    published = checkpoint.path / "101_Published"
+    pending = checkpoint.path / "202_Pending"
+    published.mkdir(parents=True)
+    pending.mkdir()
+    (published / "message.ics").write_bytes(b"BEGIN:VCALENDAR\nEND:VCALENDAR\n")
+    for folder in (published, pending):
+        (folder / "message.ics.plist").write_text("<plist><dict/></plist>")
+
+    recovery = json.loads(checkpoint.timeout_result(account="Work", mailbox="INBOX"))["remediation"]
+
+    assert recovery["completed"] == [{"message_id": "101", "path": str(published / "message.ics")}]
+    assert recovery["pending_message_ids"] == ["202"]
 
 
 def test_exact_id_timeout_before_mail_lookup_keeps_requested_ids(monkeypatch, tmp_path):

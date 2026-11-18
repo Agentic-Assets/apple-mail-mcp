@@ -51,6 +51,34 @@ def link_escapes_skill(skill_dir: Path, target: str) -> bool:
 
 
 class PackagedSkillPathTests(unittest.TestCase):
+    def test_archive_export_and_workflow_scripts_ship_from_one_source(self):
+        archive = SKILLS_ROOT / "apple-mail-archive-export"
+        local_alias = ROOT / ".agents/skills/apple-mail-archive-export"
+        expected = {
+            "assemble_batches.py",
+            "check_mbox.py",
+            "discover_accounts.py",
+            "export_emlx.py",
+            "extract_attachments.py",
+            "index_manifest.py",
+            "make_mbox.py",
+            "search.py",
+            "snapshot_account.sh",
+            "split_mbox.py",
+            "test_extract_attachments.py",
+            "verify_export.py",
+        }
+
+        self.assertIn(archive, packaged_skill_dirs())
+        self.assertTrue(local_alias.is_symlink())
+        self.assertEqual(local_alias.resolve(), archive)
+        self.assertEqual((ROOT / ".claude/skills/apple-mail-archive-export").resolve(), archive)
+        for name in expected:
+            with self.subTest(name=name):
+                script = archive / "scripts" / name
+                self.assertTrue(script.is_file())
+                self.assertFalse(script.is_symlink())
+
     def test_packaged_skills_do_not_link_outside_skill_directory(self):
         violations: list[str] = []
         for skill_dir in packaged_skill_dirs():

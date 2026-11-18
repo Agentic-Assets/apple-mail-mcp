@@ -29,7 +29,7 @@ Every plugin manifest in this directory launches the server with `--draft-safe`.
 
 Reads are bounded: searches and listings scan at most 50 messages per call and page with an offset. Move, flag, and trash actions target exact message ids by default.
 
-## Bundled skills (11)
+## Bundled skills (12)
 
 Workflow skills load with the plugin and route requests to the right tools with safe defaults.
 
@@ -40,6 +40,7 @@ Workflow skills load with the plugin and route requests to the right tools with 
 | `email-management` | Sustained inbox zero programs across mailboxes |
 | `mailbox-taxonomy` | Folder strategy and noise diagnosis before organizing |
 | `email-archive-cleanup` | Staged archive, bulk move, and trash with dry runs |
+| `apple-mail-archive-export` | Local account recovery, verified attachments, and offline SQLite search |
 | `mail-rules-advisor` | Mail rule and filter proposals (the plugin does not create rules) |
 | `email-drafting` | Compose, reply, forward, rich HTML drafts, and draft verification |
 | `email-style-profile` | Learn writing voice and signature habits from Sent mail |

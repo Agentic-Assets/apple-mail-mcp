@@ -1,8 +1,8 @@
 # Repo agent skills
 
-Development and maintenance skills for working **on** this codebase. Not shipped
-to users — the 11 user-facing workflow skills live in
-[`plugin/skills/`](../../plugin/skills/) and go out in the plugin bundle.
+Development and maintenance skills for working **on** this codebase. The
+twelve user-facing workflow skills live in [`plugin/skills/`](../../plugin/skills/)
+and ship in the plugin bundle.
 
 `.agents/skills/<name>/SKILL.md` is the single canonical copy. Each skill is
 exposed to Claude Code through a relative symlink at
@@ -10,13 +10,16 @@ exposed to Claude Code through a relative symlink at
 copy per tool. Adding a skill means all three steps: the directory here, the
 symlink, and a commit.
 
+The local `apple-mail-archive-export` link points to the canonical
+[shipped archive skill](../../plugin/skills/apple-mail-archive-export/SKILL.md).
+Its existing Claude Code link follows the same path.
+
 ## Locally authored
 
 Written for this repo, no upstream. Edit freely.
 
 | Skill | Purpose |
 |-------|---------|
-| `apple-mail-archive-export` | Bulk export/archive workflows against Mail.app |
 | `context-guidance-audit` | Audit the repo's own `CLAUDE.md` / `AGENTS.md` guidance for drift |
 | `finalize-apple-mail-mcp` | Ship sequence: validators, gates, doc sync, artifact rebuild, commit |
 | `mail-scripting-dictionary` | Mail.app AppleScript dictionary reference for plugin maintainers |

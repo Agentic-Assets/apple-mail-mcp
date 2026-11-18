@@ -127,7 +127,7 @@ def build_exact_message_export_script(
 
                                 {export_content_block(safe_format)}
 
-                                {atomic_export_write_script()}
+                                {atomic_export_write_script(safe_format)}
                                 {export_write_recorded()}
                                 {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
@@ -240,7 +240,7 @@ def build_entire_mailbox_export_script(
                     {attachment_bundle_setup_block(include_attachments=include_attachments, id_var="messageId")}
 
                     {export_content_block(safe_format)}
-                    {atomic_export_write_script()}
+                    {atomic_export_write_script(safe_format)}
                     {export_write_recorded()}
                     {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
                     set outputText to outputText & "Exported message_id: " & (messageId as string) & return
@@ -351,7 +351,7 @@ def build_multi_mailbox_id_export_script(
 
                         {export_content_block(safe_format)}
 
-                        {atomic_export_write_script(shared_directory=True)}
+                        {atomic_export_write_script(safe_format, shared_directory=True)}
                         {export_write_recorded()}
                         {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
 
@@ -499,7 +499,7 @@ def build_correspondent_export_script(
 
                                     {export_content_block(safe_format, include_mailbox=True)}
 
-                                    {atomic_export_write_script(shared_directory=True)}
+                                    {atomic_export_write_script(safe_format, shared_directory=True)}
                                     {export_write_recorded()}
                                     set mailboxExportCount to mailboxExportCount + 1
                                     {attachment_bundle_save_block(include_attachments=include_attachments, max_attachment_bytes=max_attachment_bytes, max_total_attachment_bytes=max_total_attachment_bytes)}
